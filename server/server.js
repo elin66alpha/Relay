@@ -17,9 +17,14 @@ const {
   runAgent,
   clearSession,
 } = require('./lib/agents');
-const { getWorkdir } = require('./lib/workdir');
+const {
+  WorkdirError,
+  getWorkdir,
+  inspectWorkdir,
+  setWorkdir,
+} = require('./lib/workdir');
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
-const { formatAllUsage, formatUsageForAgent } = require('./lib/usage');
+const { buildUsageReport, formatAllUsage, formatUsageForAgent } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
@@ -73,6 +78,17 @@ function clearWorkdir() {
     count += 1;
   }
   return { dir, count };
+}
+
+function sendWorkdirError(res, err) {
+  if (err instanceof WorkdirError) {
+    return res.status(err.status || 400).json({
+      error: err.message,
+      code: err.code,
+      dir: err.dir,
+    });
+  }
+  return res.status(500).json({ error: err.message });
 }
 
 function sendEvent(type, payload) {
@@ -133,6 +149,47 @@ app.get('/api/status', (_req, res) => {
     quotaWatch: ENABLE_QUOTA_WATCH,
     publicBaseUrl: PUBLIC_BASE_URL,
   });
+});
+
+app.get('/api/workdir', (_req, res) => {
+  try {
+    return res.json({
+      dir: getWorkdir(),
+      busy: activeRequests.size > 0 || runningScopes.size > 0,
+    });
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+});
+
+app.post('/api/workdir/check', (req, res) => {
+  try {
+    const info = inspectWorkdir(req.body && req.body.path);
+    return res.json(info);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+});
+
+app.post('/api/workdir', (req, res) => {
+  if (activeRequests.size > 0 || runningScopes.size > 0) {
+    return res.status(409).json({
+      error: 'agent task is running',
+      code: 'WORKDIR_BUSY',
+    });
+  }
+  try {
+    const result = setWorkdir(req.body && req.body.path, {
+      create: req.body && req.body.create === true,
+    });
+    return res.json({
+      ok: true,
+      dir: result.dir,
+      created: result.created,
+    });
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
 });
 
 app.post('/api/chat', async (req, res) => {
@@ -291,8 +348,8 @@ app.post('/api/chat/cancel', (req, res) => {
 
 app.get('/api/usage', async (_req, res) => {
   try {
-    const text = await formatAllUsage();
-    return res.json({ text, createdAt: new Date().toISOString() });
+    const report = await buildUsageReport();
+    return res.json(report);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

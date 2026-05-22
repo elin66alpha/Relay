@@ -8,6 +8,7 @@ import '../chat/bot_chat_controller.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
+import '../workdir/work_directory_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -102,6 +103,20 @@ class CliAgentsDrawer extends StatelessWidget {
               ),
             ),
             const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.folder_open_outlined),
+              title: Text(context.l10n.workDirectory),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => WorkDirectoryScreen(
+                      chatController: chatController,
+                    ),
+                  ),
+                );
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: Text(context.l10n.settings),

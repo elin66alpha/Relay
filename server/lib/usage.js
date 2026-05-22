@@ -132,6 +132,11 @@ function httpHeadersOnly(url, headers, bodyStr) {
   });
 }
 
+function firstHeader(headers, key) {
+  const value = headers[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function readCodexModel() {
   try {
     const match = /^\s*model\s*=\s*"([^"]+)"/m.exec(
@@ -187,26 +192,41 @@ async function getCodexUsage() {
   if (status === 401) {
     throw new Error('Codex token 已过期，请在终端给 codex 发一条消息后重试。');
   }
-  if (status !== 200) {
+  const hasQuotaHeaders = Boolean(
+    firstHeader(headers, 'x-codex-primary-used-percent') ||
+      firstHeader(headers, 'x-codex-secondary-used-percent') ||
+      firstHeader(headers, 'x-codex-primary-reset-at') ||
+      firstHeader(headers, 'x-codex-secondary-reset-at'),
+  );
+  if (status !== 200 && status !== 429 && !hasQuotaHeaders) {
     throw new Error(`Codex 额度查询失败（HTTP ${status}）。`);
   }
 
   const num = (key) => {
-    const value = headers[key];
+    const value = firstHeader(headers, key);
     return value == null || value === '' ? null : Number(value);
   };
   const iso = (key) => {
     const value = num(key);
     return value ? new Date(value * 1000).toISOString() : null;
   };
+  const activeLimit = String(firstHeader(headers, 'x-codex-active-limit') || '');
+  const primaryUsed = num('x-codex-primary-used-percent');
+  const secondaryUsed = num('x-codex-secondary-used-percent');
   const value = {
-    plan: headers['x-codex-plan-type'] || headers['x-codex-active-limit'] || '未知',
+    plan: firstHeader(headers, 'x-codex-plan-type') || activeLimit || '未知',
     five_hour: {
-      utilization: num('x-codex-primary-used-percent'),
+      utilization:
+        primaryUsed == null && status === 429 && (!activeLimit || activeLimit.includes('primary'))
+          ? 100
+          : primaryUsed,
       resets_at: iso('x-codex-primary-reset-at'),
     },
     seven_day: {
-      utilization: num('x-codex-secondary-used-percent'),
+      utilization:
+        secondaryUsed == null && status === 429 && activeLimit.includes('secondary')
+          ? 100
+          : secondaryUsed,
       resets_at: iso('x-codex-secondary-reset-at'),
     },
   };
@@ -246,6 +266,83 @@ function line(label, block) {
   if (!block || block.utilization == null) return null;
   const percent = block.utilization;
   return `${label}: ${bar(percent)} ${percent.toFixed(0)}% 已用\n刷新: ${formatReset(block.resets_at)}`;
+}
+
+function clampPercent(value) {
+  if (value == null || !Number.isFinite(Number(value))) return null;
+  return Math.max(0, Math.min(100, Number(value)));
+}
+
+function quotaItem(key, label, block) {
+  const usedPercent = clampPercent(block && block.utilization);
+  return {
+    key,
+    label,
+    usedPercent,
+    remainingPercent: usedPercent == null ? null : Math.max(0, 100 - usedPercent),
+    resetsAt: (block && block.resets_at) || null,
+  };
+}
+
+async function buildUsageReport() {
+  const agents = [];
+  try {
+    const { data, subscriptionType } = await getClaudeUsage();
+    agents.push({
+      key: 'claude',
+      label: 'Claude Code',
+      available: true,
+      detail: subscriptionType || '',
+      quotas: [
+        quotaItem('five_hour', '5 hour quota', data.five_hour),
+        quotaItem('seven_day', 'Weekly quota', data.seven_day),
+      ],
+    });
+  } catch (err) {
+    agents.push({
+      key: 'claude',
+      label: 'Claude Code',
+      available: true,
+      error: err.message,
+      quotas: [],
+    });
+  }
+
+  try {
+    const usage = await getCodexUsage();
+    agents.push({
+      key: 'codex',
+      label: 'Codex',
+      available: true,
+      detail: usage.plan || '',
+      quotas: [
+        quotaItem('five_hour', '5 hour quota', usage.five_hour),
+        quotaItem('seven_day', 'Weekly quota', usage.seven_day),
+      ],
+    });
+  } catch (err) {
+    agents.push({
+      key: 'codex',
+      label: 'Codex',
+      available: true,
+      error: err.message,
+      quotas: [],
+    });
+  }
+
+  agents.push({
+    key: 'agy',
+    label: 'Antigravity',
+    available: false,
+    unavailableReason: 'not_available_yet',
+    quotas: [],
+  });
+
+  return {
+    createdAt: new Date().toISOString(),
+    mode: 'remaining',
+    agents,
+  };
 }
 
 async function formatClaudeUsage() {
@@ -305,6 +402,7 @@ module.exports = {
   getClaudeUsage,
   getAccountUsage: getClaudeUsage,
   getCodexUsage,
+  buildUsageReport,
   formatClaudeUsage,
   formatCodexUsage,
   formatAllUsage,

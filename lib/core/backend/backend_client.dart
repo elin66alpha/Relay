@@ -85,6 +85,118 @@ class WorkdirResetResult {
   final int count;
 }
 
+class WorkdirInfo {
+  const WorkdirInfo({
+    required this.dir,
+    this.exists = true,
+    this.isDirectory = true,
+    this.busy = false,
+    this.created = false,
+  });
+
+  factory WorkdirInfo.fromJson(Map<String, Object?> json) {
+    return WorkdirInfo(
+      dir: json['dir'] as String? ?? '',
+      exists: json['exists'] as bool? ?? true,
+      isDirectory: json['isDirectory'] as bool? ?? true,
+      busy: json['busy'] as bool? ?? false,
+      created: json['created'] as bool? ?? false,
+    );
+  }
+
+  final String dir;
+  final bool exists;
+  final bool isDirectory;
+  final bool busy;
+  final bool created;
+}
+
+class UsageQuota {
+  const UsageQuota({
+    required this.key,
+    required this.label,
+    required this.remainingPercent,
+    required this.resetsAt,
+  });
+
+  factory UsageQuota.fromJson(Map<String, Object?> json) {
+    return UsageQuota(
+      key: json['key'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
+      resetsAt: json['resetsAt'] as String?,
+    );
+  }
+
+  final String key;
+  final String label;
+  final double? remainingPercent;
+  final String? resetsAt;
+}
+
+class UsageAgent {
+  const UsageAgent({
+    required this.key,
+    required this.label,
+    required this.available,
+    required this.quotas,
+    this.detail = '',
+    this.error,
+    this.unavailableReason,
+  });
+
+  factory UsageAgent.fromJson(Map<String, Object?> json) {
+    final List<Object?> rawQuotas = json['quotas'] is List
+        ? (json['quotas'] as List).cast<Object?>()
+        : const <Object?>[];
+    return UsageAgent(
+      key: json['key'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      available: json['available'] as bool? ?? false,
+      detail: json['detail'] as String? ?? '',
+      error: json['error'] as String?,
+      unavailableReason: json['unavailableReason'] as String?,
+      quotas: rawQuotas
+          .whereType<Map>()
+          .map((Map q) => UsageQuota.fromJson(q.cast<String, Object?>()))
+          .toList(growable: false),
+    );
+  }
+
+  final String key;
+  final String label;
+  final bool available;
+  final String detail;
+  final String? error;
+  final String? unavailableReason;
+  final List<UsageQuota> quotas;
+}
+
+class UsageReport {
+  const UsageReport({
+    required this.createdAt,
+    required this.agents,
+  });
+
+  factory UsageReport.fromJson(Map<String, Object?> json) {
+    final List<Object?> rawAgents = json['agents'] is List
+        ? (json['agents'] as List).cast<Object?>()
+        : const <Object?>[];
+    return UsageReport(
+      createdAt: json['createdAt'] as String? ?? '',
+      agents: rawAgents
+          .whereType<Map>()
+          .map(
+            (Map agent) => UsageAgent.fromJson(agent.cast<String, Object?>()),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  final String createdAt;
+  final List<UsageAgent> agents;
+}
+
 class BackendEvent {
   const BackendEvent({
     required this.type,
@@ -188,6 +300,18 @@ class BackendClient {
     return decoded['text'] as String? ?? '';
   }
 
+  Future<UsageReport> usageReport() async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/usage',
+      timeout: const Duration(seconds: 45),
+    );
+    if (decoded is! Map) {
+      throw BackendException('额度响应格式不正确。');
+    }
+    return UsageReport.fromJson(decoded.cast<String, Object?>());
+  }
+
   /// 清掉后端某个 agent 的持久会话，让下一条消息开新会话。
   /// 与本地“清空对话”配套：否则后端仍会 resume 已删除的上下文。
   Future<void> clearSession(String agentKey) async {
@@ -207,6 +331,38 @@ class BackendClient {
       dir: decoded['dir'] as String? ?? '',
       count: decoded['count'] as int? ?? 0,
     );
+  }
+
+  Future<WorkdirInfo> workdir() async {
+    final Object? decoded = await _requestJson('GET', '/api/workdir');
+    if (decoded is! Map) {
+      throw BackendException('工作路径响应格式不正确。');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<WorkdirInfo> checkWorkdir(String path) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/workdir/check',
+      body: <String, Object?>{'path': path},
+    );
+    if (decoded is! Map) {
+      throw BackendException('工作路径检查响应格式不正确。');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/workdir',
+      body: <String, Object?>{'path': path, 'create': create},
+    );
+    if (decoded is! Map) {
+      throw BackendException('工作路径设置响应格式不正确。');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
 
   Stream<BackendEvent> streamEvents() async* {

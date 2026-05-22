@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -117,6 +118,53 @@ class _BotChatScreenState extends State<BotChatScreen> {
     }
   }
 
+  Future<void> _showUsageDialog() async {
+    final Future<UsageReport> usageFuture = widget.chatController.usageReport();
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.usageTitle),
+          content: SizedBox(
+            width: 420,
+            child: FutureBuilder<UsageReport>(
+              future: usageFuture,
+              builder:
+                  (BuildContext context, AsyncSnapshot<UsageReport> snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return Text(context.l10n.loadingUsage);
+                }
+                if (snapshot.hasError) {
+                  return Text(
+                    snapshot.error.toString(),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
+                  );
+                }
+                final UsageReport report = snapshot.data!;
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      for (final UsageAgent agent in report.agents)
+                        _UsageAgentPanel(agent: agent),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.close),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,9 +250,8 @@ class _BotChatScreenState extends State<BotChatScreen> {
               return IconButton(
                 icon: const Icon(Icons.query_stats_outlined),
                 tooltip: context.l10n.usage,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : widget.chatController.appendUsage,
+                onPressed:
+                    widget.chatController.isThinking ? null : _showUsageDialog,
               );
             },
           ),
@@ -284,6 +331,118 @@ class _EmptyChatPlaceholder extends StatelessWidget {
       ),
     );
   }
+}
+
+class _UsageAgentPanel extends StatelessWidget {
+  const _UsageAgentPanel({required this.agent});
+
+  final UsageAgent agent;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  agent.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (agent.detail.isNotEmpty)
+                Text(
+                  agent.detail,
+                  style: TextStyle(color: colors.outline, fontSize: 12),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (!agent.available)
+            Text(
+              context.l10n.unavailable,
+              style: TextStyle(color: colors.outline),
+            )
+          else if (agent.error != null)
+            Text(
+              agent.error!,
+              style: TextStyle(color: colors.error),
+            )
+          else
+            for (final UsageQuota quota in agent.quotas)
+              _UsageQuotaRow(quota: quota),
+        ],
+      ),
+    );
+  }
+}
+
+class _UsageQuotaRow extends StatelessWidget {
+  const _UsageQuotaRow({required this.quota});
+
+  final UsageQuota quota;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String label = switch (quota.key) {
+      'five_hour' => context.l10n.fiveHourQuota,
+      'seven_day' => context.l10n.weeklyQuota,
+      _ => quota.label,
+    };
+    final String percent = quota.remainingPercent == null
+        ? context.l10n.unknown
+        : '${quota.remainingPercent!.round()}%';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('$percent ${context.l10n.remaining}'),
+                const SizedBox(height: 2),
+                Text(
+                  '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
+                  style: TextStyle(color: colors.outline, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatUsageTime(BuildContext context, String? iso) {
+  if (iso == null || iso.isEmpty) return context.l10n.unknown;
+  final DateTime? parsed = DateTime.tryParse(iso);
+  if (parsed == null) return context.l10n.unknown;
+  final DateTime local = parsed.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }
 
 class _InputBar extends StatelessWidget {

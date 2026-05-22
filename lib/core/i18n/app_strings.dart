@@ -35,8 +35,33 @@ class AppStrings {
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get usage => isZh ? '额度' : 'Usage';
+  String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
+  String get loadingUsage => isZh ? '正在查询额度...' : 'Loading quota...';
+  String get fiveHourQuota => isZh ? '5 小时' : '5 hours';
+  String get weeklyQuota => isZh ? '本周' : 'This week';
+  String get remaining => isZh ? '剩余' : 'remaining';
+  String get refreshAt => isZh ? '刷新' : 'Refresh';
+  String get unavailable => isZh ? '暂未开放' : 'Not available yet';
+  String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
   String get resetWorkdir => isZh ? '清空工作目录' : 'Reset workdir';
+  String get workDirectory => isZh ? '工作路径' : 'Work directory';
+  String get loadingWorkDirectory =>
+      isZh ? '正在读取工作路径...' : 'Loading work directory...';
+  String get workDirectoryHint =>
+      isZh ? '输入后端机器上的绝对路径' : 'Enter an absolute path on the backend machine';
+  String get save => isZh ? '保存' : 'Save';
+  String get create => isZh ? '创建' : 'Create';
+  String get pathMissingTitle => isZh ? '创建工作路径？' : 'Create work directory?';
+  String pathMissingBody(String path) => isZh
+      ? '后端机器上不存在：\n$path\n\n要创建这个目录并切换过去吗？'
+      : 'This directory does not exist on the backend machine:\n$path\n\nCreate it and switch to it?';
+  String get workdirUpdated => isZh ? '工作路径已更新。' : 'Work directory updated.';
+  String get workdirMustBeAbsolute =>
+      isZh ? '请输入绝对路径。' : 'Enter an absolute path.';
+  String get workdirBusy => isZh
+      ? '当前有 agent 正在运行，请结束后再修改工作路径。'
+      : 'An agent task is running. Change the work directory after it finishes.';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
   String get scanQr => isZh ? '扫描二维码' : 'Scan QR code';
   String get menu => isZh ? '菜单' : 'Menu';

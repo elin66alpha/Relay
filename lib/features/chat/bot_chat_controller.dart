@@ -156,6 +156,16 @@ class BotChatController extends ChangeNotifier {
     return status.toDisplayText();
   }
 
+  Future<UsageReport> usageReport() => _backendClient.usageReport();
+
+  Future<WorkdirInfo> workdir() => _backendClient.workdir();
+
+  Future<WorkdirInfo> checkWorkdir(String path) =>
+      _backendClient.checkWorkdir(path);
+
+  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) =>
+      _backendClient.setWorkdir(path, create: create);
+
   Future<void> appendUsage() async {
     if (_isThinking) return;
     _isThinking = true;
