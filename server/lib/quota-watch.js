@@ -11,6 +11,7 @@ const SOURCES = [
   {
     key: 'claude',
     label: 'Claude Code',
+    labelZh: 'Claude Code',
     async read() {
       const { data } = await getClaudeUsage();
       const block = data.five_hour || {};
@@ -20,6 +21,7 @@ const SOURCES = [
   {
     key: 'codex',
     label: 'Codex',
+    labelZh: 'Codex',
     async read() {
       const data = await getCodexUsage();
       const block = data.five_hour || {};
@@ -63,18 +65,24 @@ function startQuotaWatch({ name = 'app', onReset, intervalMs }) {
         prev - current.utilization >= MIN_DROP
       ) {
         let message =
-          `${source.label} 的 5 小时额度已清零` +
+          `${source.label} 5-hour quota was reset ` +
+          `(${Math.round(prev)}% -> ${Math.round(current.utilization)}%).`;
+        let messageZh =
+          `${source.labelZh} 的 5 小时额度已清零` +
           `（${Math.round(prev)}% -> ${Math.round(current.utilization)}%）。`;
         if (!current.resetsAt) {
-          message += '\n发一条消息后才会开始新的 5 小时计时。';
+          message += '\nThe next 5-hour window starts after sending a message.';
+          messageZh += '\n发一条消息后才会开始新的 5 小时计时。';
         }
         try {
           await onReset(message, {
             key: source.key,
             label: source.label,
+            labelZh: source.labelZh,
             prev,
             current: current.utilization,
             resetsAt: current.resetsAt,
+            messageZh,
           });
           console.log(
             `[quota:${source.key}] reset notification sent ` +

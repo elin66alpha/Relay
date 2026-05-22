@@ -18,6 +18,7 @@ class AppSettingsScreen extends StatelessWidget {
       builder: (BuildContext context, Widget? _) {
         final AppLanguage currentLanguage = settingsController.language;
         final ThemeMode currentThemeMode = settingsController.themeMode;
+        final SttLanguage currentSttLanguage = settingsController.sttLanguage;
 
         return Scaffold(
           appBar: AppBar(
@@ -96,6 +97,53 @@ class AppSettingsScreen extends StatelessWidget {
                         selected: <AppLanguage>{currentLanguage},
                         onSelectionChanged: (Set<AppLanguage> selected) {
                           settingsController.setLanguage(selected.first);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              _buildSectionTitle(context, context.l10n.speechInput),
+              Card(
+                elevation: 0,
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                margin: const EdgeInsets.only(bottom: 24),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        context.l10n.speechLanguage,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.outline,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SegmentedButton<SttLanguage>(
+                        segments: <ButtonSegment<SttLanguage>>[
+                          ButtonSegment<SttLanguage>(
+                            value: SttLanguage.auto,
+                            label: Text(context.l10n.autoDetect),
+                          ),
+                          ButtonSegment<SttLanguage>(
+                            value: SttLanguage.zh,
+                            label: Text(context.l10n.chineseSpeech),
+                          ),
+                          ButtonSegment<SttLanguage>(
+                            value: SttLanguage.en,
+                            label: Text(context.l10n.englishSpeech),
+                          ),
+                        ],
+                        selected: <SttLanguage>{currentSttLanguage},
+                        onSelectionChanged: (Set<SttLanguage> selected) {
+                          settingsController.setSttLanguage(selected.first);
                         },
                       ),
                     ],

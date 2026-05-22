@@ -4,8 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// 三个 agent 共用的工作目录。实际的 CLI 调用逻辑都在 lib/agents.js，
-// 这里只负责确保目录存在并返回路径。
+// Shared work directory for every CLI agent. Agent execution lives in
+// lib/agents.js; this module validates, persists, and creates the path.
 const ENV_PATH = path.join(__dirname, '..', '.env');
 
 class WorkdirError extends Error {

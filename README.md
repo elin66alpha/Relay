@@ -19,6 +19,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
+- Protected backend APIs stay closed until at least one credential token has been generated.
+- Voice input records audio in the app, sends it to the backend for OpenAI speech-to-text transcription, and inserts the text into the message box without auto-sending.
 
 ## Repository Layout
 
@@ -26,7 +28,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 AgentDeck/
 ├── lib/                  Flutter client
 │   ├── core/backend/     backend HTTP/SSE client
-│   ├── core/models/      chat, agent, and machine models
+│   ├── core/models/      chat, CLI agent, and machine models
 │   ├── core/storage/     secure storage and local history
 │   └── features/         chat, drawer, credentials, settings, work directory
 └── server/               local Node backend
@@ -46,9 +48,9 @@ in the app:
 
 It asks one question — **do you need a tunnel?**
 
-- **Yes** (default): exposes `localhost:8787` through a cloudflared quick tunnel
-  (the maintainer's own setup). The public URL is detected automatically and
-  baked into the QR. Requires `cloudflared`.
+- **Yes** (default): exposes `localhost:8787` through a cloudflared quick tunnel.
+  The public URL is detected automatically and baked into the QR. Requires
+  `cloudflared`.
 - **No**: direct mode for a VPS or any host with a reachable public IP/domain.
   You enter the address the app should connect to (e.g. `https://agent.example.com`
   or `http://1.2.3.4:8787`); the server binds to `0.0.0.0` and the QR points at
@@ -85,9 +87,16 @@ BOTS_SESSION_DIR=
 AGENT_TIMEOUT_MS=3600000
 ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
+OPENAI_API_KEY=
+STT_MODEL=gpt-4o-mini-transcribe
+STT_MAX_AUDIO_BYTES=12582912
 ```
 
 Leave `BOTS_SESSION_DIR` empty to use `~/agent_deck`. The app can later change this directory through the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
+
+Voice input uses the backend's `OPENAI_API_KEY`. `STT_MODEL` defaults to
+`gpt-4o-mini-transcribe`. The app can hint the transcription language as Auto,
+Chinese, or English from Settings; Auto is the default.
 
 ## Credential QR
 
@@ -101,8 +110,8 @@ pm2 start ecosystem.config.js
 npm run credential
 ```
 
-### Option B: Instant One-Liner (Recommended - Skip Double Password Typing)
-To bypass interactive typing and password confirmation, you can supply the passphrase directly as an argument:
+### Option B: Instant One-Liner (Automation Only)
+For automation, you can supply the passphrase directly as an argument. This is less private than the interactive prompt because shell history or process lists may expose the password:
 ```bash
 npm run credential -- --passphrase "your-password"
 ```
@@ -154,6 +163,7 @@ release keystore before any public/Play Store distribution.
 - `GET /api/status`
 - `GET /api/agents`
 - `GET /api/usage`
+- `POST /api/stt`
 - `GET /api/workdir`
 - `POST /api/workdir/check`
 - `POST /api/workdir`
@@ -163,4 +173,4 @@ release keystore before any public/Play Store distribution.
 - `POST /api/session/clear`
 - `GET /api/events`
 
-All `/api/*` routes require `Authorization: Bearer <token>` once credentials have been generated.
+All `/api/*` routes require `Authorization: Bearer <token>`. If the backend has not generated any token yet, protected API routes return `TOKEN_NOT_CONFIGURED` instead of running unauthenticated.

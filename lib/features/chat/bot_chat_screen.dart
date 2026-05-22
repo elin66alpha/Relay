@@ -1,6 +1,11 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
@@ -41,6 +46,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
     widget.chatController.addListener(_scrollToBottomSoon);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
+    widget.settingsController.addListener(_onSettingsChanged);
     _syncContext();
   }
 
@@ -49,6 +55,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
     widget.chatController.removeListener(_scrollToBottomSoon);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
+    widget.settingsController.removeListener(_onSettingsChanged);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -58,7 +65,12 @@ class _BotChatScreenState extends State<BotChatScreen> {
     _syncContext();
   }
 
+  void _onSettingsChanged() {
+    widget.chatController.setLanguage(widget.settingsController.language);
+  }
+
   void _syncContext() {
+    widget.chatController.setLanguage(widget.settingsController.language);
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) return;
@@ -82,6 +94,13 @@ class _BotChatScreenState extends State<BotChatScreen> {
 
   Future<void> _sendCompact() async {
     await widget.chatController.sendUserText('/compact');
+  }
+
+  Future<String> _transcribeRecording(String path) {
+    return widget.chatController.transcribeAudioFile(
+      path: path,
+      language: widget.settingsController.sttLanguage.apiValue,
+    );
   }
 
   void _scrollToBottomSoon() {
@@ -304,6 +323,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
                   isCancelling: widget.chatController.isCancelling,
                   onSend: _send,
                   onCancel: widget.chatController.cancelActiveTurn,
+                  onTranscribeRecording: _transcribeRecording,
                 ),
               ],
             );
@@ -445,13 +465,14 @@ String _formatUsageTime(BuildContext context, String? iso) {
   return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }
 
-class _InputBar extends StatelessWidget {
+class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
     required this.isThinking,
     required this.isCancelling,
     required this.onSend,
     required this.onCancel,
+    required this.onTranscribeRecording,
   });
 
   final TextEditingController controller;
@@ -459,11 +480,117 @@ class _InputBar extends StatelessWidget {
   final bool isCancelling;
   final VoidCallback onSend;
   final VoidCallback onCancel;
+  final Future<String> Function(String path) onTranscribeRecording;
+
+  @override
+  State<_InputBar> createState() => _InputBarState();
+}
+
+class _InputBarState extends State<_InputBar> {
+  final AudioRecorder _recorder = AudioRecorder();
+  bool _isRecording = false;
+  bool _isTranscribing = false;
+  Timer? _recordingTimer;
+  String? _recordingPath;
+
+  @override
+  void dispose() {
+    _recordingTimer?.cancel();
+    _recorder.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopAndTranscribe();
+      return;
+    }
+    if (_isTranscribing || widget.isThinking) return;
+
+    final bool allowed = await _recorder.hasPermission();
+    if (!allowed) {
+      _showError(context.l10n.microphonePermissionDenied);
+      return;
+    }
+
+    final Directory tempDir = await getTemporaryDirectory();
+    final String path =
+        '${tempDir.path}/agentdeck-voice-${DateTime.now().microsecondsSinceEpoch}.m4a';
+    await _recorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: 64000,
+        sampleRate: 16000,
+      ),
+      path: path,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isRecording = true;
+      _recordingPath = path;
+    });
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer(const Duration(seconds: 60), () {
+      if (mounted && _isRecording) unawaited(_stopAndTranscribe());
+    });
+  }
+
+  Future<void> _stopAndTranscribe() async {
+    _recordingTimer?.cancel();
+    final String? path = await _recorder.stop() ?? _recordingPath;
+    if (!mounted) return;
+    setState(() {
+      _isRecording = false;
+      _isTranscribing = true;
+      _recordingPath = null;
+    });
+
+    try {
+      if (path == null || path.isEmpty) return;
+      final String text = await widget.onTranscribeRecording(path);
+      if (!mounted || text.trim().isEmpty) return;
+      _appendInput(text.trim());
+    } catch (err) {
+      if (mounted) _showError(context.l10n.transcriptionFailed(err));
+    } finally {
+      if (path != null && path.isNotEmpty) {
+        unawaited(_deleteRecording(path));
+      }
+      if (mounted) setState(() => _isTranscribing = false);
+    }
+  }
+
+  Future<void> _deleteRecording(String path) async {
+    try {
+      await File(path).delete();
+    } catch (_) {
+      // Best effort cleanup.
+    }
+  }
+
+  void _appendInput(String text) {
+    final String current = widget.controller.text.trim();
+    final String next = current.isEmpty ? text : '$current\n$text';
+    widget.controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: next.length),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bool canSend = !isThinking;
-    final bool canCancel = isThinking && !isCancelling;
+    final bool canSend = !widget.isThinking && !_isTranscribing;
+    final bool canCancel = widget.isThinking && !widget.isCancelling;
+    final bool canRecord = !widget.isThinking && !_isTranscribing;
     final ColorScheme colors = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -477,7 +604,7 @@ class _InputBar extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: TextField(
-                controller: controller,
+                controller: widget.controller,
                 enabled: canSend,
                 minLines: 1,
                 maxLines: 6,
@@ -492,16 +619,41 @@ class _InputBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: canRecord || _isRecording ? _toggleRecording : null,
+              icon: _isTranscribing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      _isRecording
+                          ? Icons.stop_circle_outlined
+                          : Icons.mic_none_rounded,
+                    ),
+              tooltip: _isTranscribing
+                  ? context.l10n.transcribing
+                  : _isRecording
+                      ? context.l10n.stopRecording
+                      : context.l10n.startRecording,
+            ),
+            const SizedBox(width: 8),
             IconButton.filled(
-              onPressed: isThinking
+              onPressed: widget.isThinking
                   ? canCancel
-                      ? onCancel
+                      ? widget.onCancel
                       : null
-                  : onSend,
+                  : canSend
+                      ? widget.onSend
+                      : null,
               icon: Icon(
-                isThinking ? Icons.stop_rounded : Icons.arrow_upward_rounded,
+                widget.isThinking
+                    ? Icons.stop_rounded
+                    : Icons.arrow_upward_rounded,
               ),
-              tooltip: isThinking ? context.l10n.stop : context.l10n.send,
+              tooltip:
+                  widget.isThinking ? context.l10n.stop : context.l10n.send,
             ),
           ],
         ),

@@ -10,7 +10,7 @@
 #
 # Two modes:
 #   - Tunnel mode (default): exposes localhost:8787 via a cloudflared quick
-#     tunnel. This mirrors the maintainer's own setup (PM2 + cloudflared).
+#     tunnel using PM2 + cloudflared.
 #   - Direct mode: for a VPS / box with a reachable public IP or domain. Binds
 #     the server to 0.0.0.0 and uses the address you provide; no tunnel.
 #
@@ -98,7 +98,7 @@ case "$USE_TUNNEL" in
     npm run credential -- --url "$PUBLIC_URL"
     ;;
   *)
-    # ---------- Tunnel mode (cloudflared quick tunnel; maintainer's setup) ----------
+    # ---------- Tunnel mode (cloudflared quick tunnel) ----------
     need cloudflared || {
       c_err "cloudflared is required for tunnel mode."
       c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"

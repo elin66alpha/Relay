@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../i18n/app_strings.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
@@ -46,16 +48,16 @@ class BackendStatus {
   final bool quotaWatch;
   final String publicBaseUrl;
 
-  String toDisplayText() {
+  String toDisplayText(AppStrings strings) {
     final int timeoutMinutes = (agentTimeoutMs / 60000).round();
     final List<String> lines = <String>[
-      '后端在线',
-      '工作目录：$workdir',
-      '系统运行：$systemUptime',
-      '进程运行：$processUptime',
-      if (publicBaseUrl.isNotEmpty) '公网地址：$publicBaseUrl',
-      if (timeoutMinutes > 0) '任务超时：$timeoutMinutes 分钟',
-      '额度监听：${quotaWatch ? '开启' : '关闭'}',
+      strings.backendOnline,
+      strings.workDirectoryLine(workdir),
+      strings.systemUptimeLine(systemUptime),
+      strings.processUptimeLine(processUptime),
+      if (publicBaseUrl.isNotEmpty) strings.publicBaseUrlLine(publicBaseUrl),
+      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
+      strings.quotaWatchLine(quotaWatch),
     ];
     return lines.join('\n');
   }
@@ -197,6 +199,23 @@ class UsageReport {
   final List<UsageAgent> agents;
 }
 
+class SttResult {
+  const SttResult({
+    required this.text,
+    required this.model,
+  });
+
+  factory SttResult.fromJson(Map<String, Object?> json) {
+    return SttResult(
+      text: json['text'] as String? ?? '',
+      model: json['model'] as String? ?? '',
+    );
+  }
+
+  final String text;
+  final String model;
+}
+
 class BackendEvent {
   const BackendEvent({
     required this.type,
@@ -241,7 +260,7 @@ class BackendClient {
   Future<BackendStatus> status() async {
     final Object? decoded = await _requestJson('GET', '/api/status');
     if (decoded is! Map) {
-      throw BackendException('后端状态响应格式不正确。');
+      throw BackendException('Invalid backend status response.');
     }
     return BackendStatus.fromJson(decoded.cast<String, Object?>());
   }
@@ -262,7 +281,7 @@ class BackendClient {
       timeout: const Duration(minutes: 65),
     );
     if (decoded is! Map) {
-      throw BackendException('后端聊天响应格式不正确。');
+      throw BackendException('Invalid backend chat response.');
     }
     final Map<String, Object?> json = decoded.cast<String, Object?>();
     final Map<String, Object?> agent =
@@ -288,18 +307,6 @@ class BackendClient {
     );
   }
 
-  Future<String> usage(String agentKey) async {
-    final Object? decoded = await _requestJson(
-      'GET',
-      '/api/usage/$agentKey',
-      timeout: const Duration(seconds: 45),
-    );
-    if (decoded is! Map) {
-      throw BackendException('额度响应格式不正确。');
-    }
-    return decoded['text'] as String? ?? '';
-  }
-
   Future<UsageReport> usageReport() async {
     final Object? decoded = await _requestJson(
       'GET',
@@ -307,13 +314,34 @@ class BackendClient {
       timeout: const Duration(seconds: 45),
     );
     if (decoded is! Map) {
-      throw BackendException('额度响应格式不正确。');
+      throw BackendException('Invalid usage response.');
     }
     return UsageReport.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// 清掉后端某个 agent 的持久会话，让下一条消息开新会话。
-  /// 与本地“清空对话”配套：否则后端仍会 resume 已删除的上下文。
+  Future<SttResult> transcribeAudio({
+    required Uint8List bytes,
+    required String mimeType,
+    required String language,
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/stt',
+      body: <String, Object?>{
+        'audioBase64': base64Encode(bytes),
+        'mimeType': mimeType,
+        'language': language,
+      },
+      timeout: const Duration(minutes: 2),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid speech transcription response.');
+    }
+    return SttResult.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Clears the backend-side session for one agent so the next message starts
+  /// a new machine-side conversation after local history is cleared.
   Future<void> clearSession(String agentKey) async {
     await _requestJson(
       'POST',
@@ -325,7 +353,7 @@ class BackendClient {
   Future<WorkdirResetResult> resetWorkdir() async {
     final Object? decoded = await _requestJson('POST', '/api/workdir/reset');
     if (decoded is! Map) {
-      throw BackendException('重置工作目录响应格式不正确。');
+      throw BackendException('Invalid work directory reset response.');
     }
     return WorkdirResetResult(
       dir: decoded['dir'] as String? ?? '',
@@ -336,7 +364,7 @@ class BackendClient {
   Future<WorkdirInfo> workdir() async {
     final Object? decoded = await _requestJson('GET', '/api/workdir');
     if (decoded is! Map) {
-      throw BackendException('工作路径响应格式不正确。');
+      throw BackendException('Invalid work directory response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
@@ -348,7 +376,7 @@ class BackendClient {
       body: <String, Object?>{'path': path},
     );
     if (decoded is! Map) {
-      throw BackendException('工作路径检查响应格式不正确。');
+      throw BackendException('Invalid work directory check response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
@@ -360,7 +388,7 @@ class BackendClient {
       body: <String, Object?>{'path': path, 'create': create},
     );
     if (decoded is! Map) {
-      throw BackendException('工作路径设置响应格式不正确。');
+      throw BackendException('Invalid work directory update response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
@@ -446,14 +474,14 @@ class BackendClient {
     try {
       return jsonDecode(response.body);
     } on FormatException {
-      throw BackendException('后端返回了非 JSON 内容。');
+      throw BackendException('Backend returned non-JSON content.');
     }
   }
 
   Future<MachineCredential> _requireCredential() async {
     final MachineCredential? credential = await _credentialsStore.readActive();
     if (credential == null) {
-      throw BackendException('请先导入这台机器提供的凭证文件。');
+      throw BackendException('Import a machine credential first.');
     }
     return credential;
   }

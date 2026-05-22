@@ -391,7 +391,7 @@ class _MachineTile extends StatelessWidget {
       ),
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline),
-        tooltip: '删除',
+        tooltip: context.l10n.delete,
         onPressed: onDelete,
       ),
       selected: active,

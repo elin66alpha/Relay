@@ -164,6 +164,7 @@ class ActiveMachineStatusTile extends StatefulWidget {
 
 class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
   bool _isLoading = false;
+  bool _isOnline = false;
   String? _statusText;
 
   @override
@@ -185,6 +186,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       if (mounted) {
         setState(() {
           _statusText = null;
+          _isOnline = false;
           _isLoading = false;
         });
       }
@@ -199,17 +201,19 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
     }
 
     try {
-      final String text = await widget.chatController.statusText();
+      final String text = await widget.chatController.statusText(context.l10n);
       if (mounted) {
         setState(() {
           _statusText = text;
+          _isOnline = true;
           _isLoading = false;
         });
       }
     } catch (err) {
       if (mounted) {
         setState(() {
-          _statusText = '连接失败: $err';
+          _statusText = context.l10n.statusLoadFailed(err);
+          _isOnline = false;
           _isLoading = false;
         });
       }
@@ -224,9 +228,6 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setStateDialog) {
-            final bool isOnline = _statusText != null &&
-                !_statusText!.contains('失败') &&
-                !_statusText!.contains('failed');
             return AlertDialog(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -237,7 +238,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                     Icons.lens,
                     color: _isLoading
                         ? Colors.grey
-                        : (isOnline
+                        : (_isOnline
                             ? const Color(0xFF10B981)
                             : const Color(0xFFEF4444)),
                     size: 14,
@@ -263,7 +264,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                           ),
                         )
                       : SelectableText(
-                          _statusText ?? '未获取到状态',
+                          _statusText ?? context.l10n.noStatus,
                           style: const TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 13,
@@ -284,7 +285,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                             setStateDialog(() {});
                           }
                         },
-                  child: const Text('刷新'),
+                  child: Text(context.l10n.refresh),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
@@ -305,13 +306,9 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       return ListTile(
         leading: const Icon(Icons.lens, color: Colors.grey, size: 14),
         title: Text(context.l10n.notConnected),
-        subtitle: const Text('请导入或选择一台机器'),
+        subtitle: Text(context.l10n.importOrChooseMachine),
       );
     }
-
-    final bool isOnline = _statusText != null &&
-        !_statusText!.contains('失败') &&
-        !_statusText!.contains('failed');
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -329,7 +326,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
               )
             : Icon(
                 Icons.lens,
-                color: isOnline
+                color: _isOnline
                     ? const Color(0xFF10B981)
                     : const Color(0xFFEF4444),
                 size: 14,
@@ -340,12 +337,12 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
         ),
         subtitle: Text(
           _isLoading
-              ? '正在获取状态...'
-              : (isOnline ? context.l10n.online : context.l10n.offline),
+              ? context.l10n.loadingStatus
+              : (_isOnline ? context.l10n.online : context.l10n.offline),
           style: TextStyle(
             color: _isLoading
                 ? Theme.of(context).colorScheme.outline
-                : (isOnline
+                : (_isOnline
                     ? const Color(0xFF10B981)
                     : const Color(0xFFEF4444)),
             fontSize: 12,

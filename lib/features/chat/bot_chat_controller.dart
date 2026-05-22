@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/notifications/notification_service.dart';
+import '../../core/settings/app_settings_controller.dart';
 import '../../core/storage/chat_history_store.dart';
 
 class BotChatController extends ChangeNotifier {
@@ -35,6 +38,7 @@ class BotChatController extends ChangeNotifier {
   bool _isCancelling = false;
   String? _lastError;
   String? _activeRequestId;
+  AppLanguage _language = AppLanguage.en;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _eventReconnectTimer;
   bool _wantsEvents = false;
@@ -45,6 +49,11 @@ class BotChatController extends ChangeNotifier {
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
+  AppStrings get _strings => AppStrings(_language);
+
+  void setLanguage(AppLanguage language) {
+    _language = language;
+  }
 
   bool isRetryable(ChatMessage message) =>
       message.isUser && message.metadata[_deliveryFailedKey] == true;
@@ -103,12 +112,12 @@ class BotChatController extends ChangeNotifier {
       await _historyStore.clear(_historyKey(agent, machine));
     }
     notifyListeners();
-    // 同时重置后端会话，否则下一条消息会 resume 已删除的上下文。
-    // 尽力而为：后端不可达时仍保留本地清空结果，只提示一句。
+    // Also reset the machine-side session; otherwise the next prompt may
+    // resume context that the user just cleared locally.
     try {
       await _backendClient.clearSession(agent.key);
     } catch (err) {
-      _appendSystemMessage('已清空本地对话，但重置机器会话失败：$err');
+      _appendSystemMessage(_strings.localChatSessionResetFailed(err));
     }
   }
 
@@ -132,8 +141,8 @@ class BotChatController extends ChangeNotifier {
       await _backendClient.cancelMessage(requestId);
     } catch (err) {
       if (err is BackendException && err.code == 'REQUEST_NOT_FOUND') {
-        // 请求已结束（成功或已取消）。不强行标记取消——交给 _runTurn 的正常
-        // 收尾按真实结果处理（成功则 finalize，已取消则走 AGENT_CANCELLED）。
+        // The request already finished. Let _runTurn finish with the real
+        // outcome instead of forcing a cancelled state here.
         return;
       }
       _lastError = err.toString();
@@ -152,12 +161,25 @@ class BotChatController extends ChangeNotifier {
     await _runTurn(_agent, _messages[index]);
   }
 
-  Future<String> statusText() async {
+  Future<String> statusText(AppStrings strings) async {
     final BackendStatus status = await _backendClient.status();
-    return status.toDisplayText();
+    return status.toDisplayText(strings);
   }
 
   Future<UsageReport> usageReport() => _backendClient.usageReport();
+
+  Future<String> transcribeAudioFile({
+    required String path,
+    required String language,
+  }) async {
+    final Uint8List bytes = await File(path).readAsBytes();
+    final SttResult result = await _backendClient.transcribeAudio(
+      bytes: bytes,
+      mimeType: _mimeTypeFor(path),
+      language: language,
+    );
+    return result.text.trim();
+  }
 
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
 
@@ -167,26 +189,6 @@ class BotChatController extends ChangeNotifier {
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) =>
       _backendClient.setWorkdir(path, create: create);
 
-  Future<void> appendUsage() async {
-    if (_isThinking) return;
-    _isThinking = true;
-    _lastError = null;
-    notifyListeners();
-    final int assistantIndex = _insertAwaitingAssistant(system: true);
-    try {
-      final String usage = await _backendClient.usage(_agent.key);
-      _finalizeAssistant(assistantIndex, usage, system: true);
-      await _persist();
-    } catch (err) {
-      _discardAssistant(assistantIndex);
-      _lastError = err.toString();
-      _appendSystemMessage('额度查询失败：$err');
-    } finally {
-      _isThinking = false;
-      notifyListeners();
-    }
-  }
-
   Future<void> resetWorkdir() async {
     if (_isThinking) return;
     _isThinking = true;
@@ -194,11 +196,13 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
     try {
       final WorkdirResetResult result = await _backendClient.resetWorkdir();
-      _appendSystemMessage('已清空工作目录（删除 ${result.count} 项）：${result.dir}');
+      _appendSystemMessage(
+        _strings.workdirResetSuccess(result.count, result.dir),
+      );
       await _persist();
     } catch (err) {
       _lastError = err.toString();
-      _appendSystemMessage('清空工作目录失败：$err');
+      _appendSystemMessage(_strings.workdirResetFailed(err));
     } finally {
       _isThinking = false;
       notifyListeners();
@@ -258,7 +262,7 @@ class BotChatController extends ChangeNotifier {
         _discardAssistantByRequestId(requestId);
         final String detail =
             err is BackendException && err.code == 'AGENT_BUSY'
-                ? '该 agent 正在处理上一条消息，请稍后重试。'
+                ? _strings.agentBusyRetryLater
                 : err.toString();
         _markUserDeliveryFailed(userMessage.id, detail);
         _lastError = detail;
@@ -366,9 +370,8 @@ class BotChatController extends ChangeNotifier {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
     final ChatMessage current = _messages[index];
-    // 只在消息仍处于 streaming 时追加。POST 最终结果到达后会 _finalizeAssistant
-    // 把 streaming 置 false；此后迟到的 SSE delta 必须丢弃，否则会把碎片追加到
-    // 权威答案末尾、并把气泡永久翻回 streaming 状态。
+    // Append only while the bubble is still streaming. Once the POST response
+    // finalizes the authoritative answer, late SSE deltas must be ignored.
     if (isCancelled(current) || current.metadata[_streamingKey] != true) return;
 
     _updateStreamingAssistant(
@@ -439,6 +442,14 @@ class BotChatController extends ChangeNotifier {
     return '${agent.key}.$micros';
   }
 
+  String _mimeTypeFor(String path) {
+    final String lower = path.toLowerCase();
+    if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.webm')) return 'audio/webm';
+    return 'application/octet-stream';
+  }
+
   void _connectEventsNow() {
     if (!_wantsEvents || _eventsSub != null) return;
     _eventsSub = _backendClient.streamEvents().listen(
@@ -486,13 +497,17 @@ class BotChatController extends ChangeNotifier {
       if (requestId.isNotEmpty && error.isNotEmpty) {
         _appendProgress(<String, Object?>{
           'requestId': requestId,
-          'line': '出错：$error',
+          'line': _strings.agentErrorLine(error),
         });
       }
       return;
     }
     if (event.type != 'quota_reset') return;
-    final String message = event.data['message'] as String? ?? '';
+    final String message = _strings.isZh
+        ? event.data['messageZh'] as String? ??
+            event.data['message'] as String? ??
+            ''
+        : event.data['message'] as String? ?? '';
     if (message.isEmpty) return;
     // Quota alerts go to the OS notification tray, not the chat bubble stream.
     // Fire-and-forget: a denied/unsupported notification must not break events.

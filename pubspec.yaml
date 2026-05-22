@@ -17,6 +17,8 @@ dependencies:
   cryptography: ^2.7.0
   mobile_scanner: ^7.2.0
   flutter_local_notifications: ^21.0.0
+  record: ^6.2.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

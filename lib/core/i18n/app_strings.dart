@@ -44,6 +44,20 @@ class AppStrings {
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
+  String get backendOnline => isZh ? '后端在线' : 'Backend online';
+  String workDirectoryLine(String path) =>
+      isZh ? '工作目录：$path' : 'Work directory: $path';
+  String systemUptimeLine(String value) =>
+      isZh ? '系统运行：$value' : 'System uptime: $value';
+  String processUptimeLine(String value) =>
+      isZh ? '进程运行：$value' : 'Process uptime: $value';
+  String publicBaseUrlLine(String value) =>
+      isZh ? '公网地址：$value' : 'Public URL: $value';
+  String taskTimeoutLine(int minutes) =>
+      isZh ? '任务超时：$minutes 分钟' : 'Task timeout: $minutes minutes';
+  String quotaWatchLine(bool enabled) => isZh
+      ? '额度监听：${enabled ? '开启' : '关闭'}'
+      : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
   String get resetWorkdir => isZh ? '清空工作目录' : 'Reset workdir';
   String get workDirectory => isZh ? '工作路径' : 'Work directory';
   String get loadingWorkDirectory =>
@@ -62,6 +76,18 @@ class AppStrings {
   String get workdirBusy => isZh
       ? '当前有 agent 正在运行，请结束后再修改工作路径。'
       : 'An agent task is running. Change the work directory after it finishes.';
+  String localChatSessionResetFailed(Object err) => isZh
+      ? '已清空本地对话，但重置机器会话失败：$err'
+      : 'Local chat was cleared, but resetting the machine session failed: $err';
+  String workdirResetSuccess(int count, String dir) => isZh
+      ? '已清空工作目录（删除 $count 项）：$dir'
+      : 'Work directory cleared ($count item(s) removed): $dir';
+  String workdirResetFailed(Object err) =>
+      isZh ? '清空工作目录失败：$err' : 'Failed to reset work directory: $err';
+  String get agentBusyRetryLater => isZh
+      ? '该 agent 正在处理上一条消息，请稍后重试。'
+      : 'This agent is still handling the previous message. Try again later.';
+  String agentErrorLine(String error) => isZh ? '出错：$error' : 'Error: $error';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
   String get scanQr => isZh ? '扫描二维码' : 'Scan QR code';
   String get menu => isZh ? '菜单' : 'Menu';
@@ -80,6 +106,13 @@ class AppStrings {
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
+  String get importOrChooseMachine =>
+      isZh ? '请导入或选择一台机器' : 'Import or choose a machine';
+  String get loadingStatus => isZh ? '正在获取状态...' : 'Loading status...';
+  String statusLoadFailed(Object err) =>
+      isZh ? '连接失败：$err' : 'Connection failed: $err';
+  String get noStatus => isZh ? '未获取到状态' : 'No status received';
+  String get refresh => isZh ? '刷新' : 'Refresh';
   String get chooseCredential => isZh ? '选择凭证' : 'Choose credential';
   String get importMachineCredential =>
       isZh ? '导入机器凭证' : 'Import machine credential';
@@ -103,6 +136,18 @@ class AppStrings {
       : 'Private control surface for local Claude Code, Codex, and Antigravity CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
+  String get speechInput => isZh ? '语音输入' : 'Voice input';
+  String get speechLanguage => isZh ? '语音语言' : 'Speech language';
+  String get autoDetect => isZh ? '自动' : 'Auto';
+  String get chineseSpeech => isZh ? '中文' : 'Chinese';
+  String get englishSpeech => isZh ? '英文' : 'English';
+  String get startRecording => isZh ? '开始录音' : 'Start recording';
+  String get stopRecording => isZh ? '停止录音' : 'Stop recording';
+  String get transcribing => isZh ? '正在转文字' : 'Transcribing';
+  String transcriptionFailed(Object err) =>
+      isZh ? '语音识别失败：$err' : 'Speech transcription failed: $err';
+  String get microphonePermissionDenied =>
+      isZh ? '没有麦克风权限。' : 'Microphone permission was denied.';
   String get online => isZh ? '在线' : 'Online';
   String get offline => isZh ? '未在线' : 'Not online';
   String get compress => isZh ? '压缩对话' : 'Compress';

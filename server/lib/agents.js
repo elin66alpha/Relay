@@ -13,9 +13,10 @@ const TIMEOUT_MS = parseInt(
   10,
 );
 
-// ---------- 持久会话：每个 session key 各保持一条连续会话，跨消息保留上下文 ----------
-// HTTP 后端是单机单用户入口，但会话按 deviceId:agentKey 区分。clearSession 让 app 的
-// “新会话/清空对话”能把后端上下文也一并重置，否则清完本地历史后端仍会 resume 旧会话。
+// Persistent sessions: each session key keeps one continuous conversation.
+// The backend is still single-machine, but sessions are isolated by
+// deviceId:agentKey. clearSession lets the app start a fresh machine-side
+// conversation after local history is cleared.
 const SESSION_FILE = path.join(__dirname, '..', 'agent-sessions.json');
 
 class AgentCancelledError extends Error {
@@ -137,9 +138,9 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
       cleanup();
       proc.kill('SIGKILL');
       resolve(
-        `处理超时（超过 ${Math.round(
+        `Timed out after ${Math.round(
           TIMEOUT_MS / 60000,
-        )} 分钟），已终止。请拆分任务或简化指令。`,
+        )} minutes and was stopped. Split the task or simplify the prompt.`,
       );
     }, TIMEOUT_MS);
 
@@ -172,7 +173,7 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
       if (finished) return;
       finished = true;
       cleanup();
-      resolve(`无法启动 ${label}: ${err.message}`);
+      resolve(`Unable to start ${label}: ${err.message}`);
     });
 
     proc.on('close', (code) => {
@@ -189,7 +190,7 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
       try {
         resolve(finalize({ code, stdout, stderr }));
       } catch (err) {
-        resolve(`${label} 输出解析失败: ${err.message}`);
+        resolve(`${label} output parsing failed: ${err.message}`);
       }
     });
   });
@@ -222,7 +223,8 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
   const cwd = getWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
-  // resume 复用原会话 ID；新会话用我们生成的 UUID 作为 --session-id
+  // Resume reuses the saved session ID; new conversations use our UUID as
+  // --session-id until the CLI reports the canonical ID.
   let sessionId = resuming ? prior.id : crypto.randomUUID();
   let finalText = '';
   let isError = false;
@@ -252,7 +254,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
       } catch (_err) {
         return;
       }
-      if (event.session_id) sessionId = event.session_id; // 以 CLI 实际会话 ID 为准
+      if (event.session_id) sessionId = event.session_id;
       if (
         event.type === 'assistant' &&
         event.message &&
@@ -275,9 +277,9 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
       const error = String(stderr).trim();
       if (finalText.trim()) {
         if (!isError) setSession(sessionKey, { id: sessionId });
-        return `${isError ? 'Claude 返回错误:\n' : ''}${finalText.trim()}`;
+        return `${isError ? 'Claude returned an error:\n' : ''}${finalText.trim()}`;
       }
-      // resume 失败（旧会话已被清理）：丢弃会话，标记重试
+      // Resume can fail if the CLI removed an old session. Drop it and retry.
       if (
         resuming &&
         /no conversation|session.*(not found|does not exist)|no such session|could not find/i.test(
@@ -287,11 +289,11 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
         clearSession(sessionKey);
         return { __retry: true };
       }
-      return error || '(claude 无输出)';
+      return error || '(claude produced no output)';
     },
   }).then((result) => {
     if (result && result.__retry) {
-      emit(onEvent, '旧会话已失效，开新会话重试...');
+      emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
       return runClaude(prompt, onEvent, sessionKey, signal);
     }
     return result;
@@ -335,7 +337,8 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
     '-o',
     lastMsg,
   ];
-  // resume 子命令不支持 -C，靠 spawn 的 cwd 定位；新建则显式 -C
+  // The resume subcommand does not support -C, so spawn cwd selects the repo;
+  // new sessions still pass -C explicitly.
   const args = resuming
     ? ['exec', 'resume', ...common, prior.id, String(prompt)]
     : ['exec', ...common, '-C', cwd, String(prompt)];
@@ -400,15 +403,16 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
     },
   }).then((result) => {
     if (result && result.__retry) {
-      emit(onEvent, '旧会话已失效，开新会话重试...');
+      emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
       return runCodex(prompt, onEvent, sessionKey, signal);
     }
     return result;
   });
 }
 
-// agy 无法指定会话 ID，但每个 cwd 的最近会话 ID 记在 last_conversations.json，
-// 跑完读出来存起来，下次用 --conversation <id> 续接。
+// agy cannot take an explicit new session ID. It records the latest
+// conversation per cwd in last_conversations.json, which we read after a run
+// and reuse with --conversation next time.
 const AGY_LAST_CONV = path.join(
   os.homedir(),
   '.gemini',
@@ -420,7 +424,7 @@ const AGY_LAST_CONV = path.join(
 function runAgy(prompt, onEvent, sessionKey, signal) {
   const cwd = getWorkdir();
   const prior = getSession(sessionKey);
-  emit(onEvent, 'Antigravity 处理中...');
+  emit(onEvent, 'Antigravity is working...');
   const args = [
     '--print',
     String(prompt),
@@ -438,7 +442,7 @@ function runAgy(prompt, onEvent, sessionKey, signal) {
     signal,
     finalize: ({ code, stdout, stderr }) => {
       const text = String(stdout).trim();
-      // 捕获本次会话 ID（按 cwd 记录），存给下次续接
+      // Capture this conversation ID by cwd for the next turn.
       let convId = null;
       try {
         const map = JSON.parse(fs.readFileSync(AGY_LAST_CONV, 'utf-8'));
@@ -447,12 +451,11 @@ function runAgy(prompt, onEvent, sessionKey, signal) {
           setSession(sessionKey, { id: convId });
         }
       } catch (_err) {
-        // 读不到就下次重新建会话
+        // If it is unavailable, the next turn starts a new conversation.
       }
 
-      // agy --print 续接时会把整段会话（含历次回复）一起打到 stdout，导致每次回复
-      // 黏连之前所有回复。改为从本次会话的 transcript 里取最后一条 MODEL 的
-      // PLANNER_RESPONSE，只返回这一轮的最终回答。
+      // agy --print can emit the entire resumed conversation to stdout. Read
+      // the transcript and return only the last MODEL PLANNER_RESPONSE.
       if (convId) {
         try {
           const logDir = path.join(
@@ -484,12 +487,12 @@ function runAgy(prompt, onEvent, sessionKey, signal) {
                   return obj.content.trim();
                 }
               } catch (_err) {
-                // 跳过无法解析的行
+                // Skip malformed transcript lines.
               }
             }
           }
         } catch (_err) {
-          // transcript 解析失败则回退到 stdout
+          // Fall back to stdout if transcript parsing fails.
         }
       }
 

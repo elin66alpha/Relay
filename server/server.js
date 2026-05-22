@@ -24,8 +24,9 @@ const {
   setWorkdir,
 } = require('./lib/workdir');
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
-const { buildUsageReport, formatAllUsage, formatUsageForAgent } = require('./lib/usage');
+const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
+const { SttError, transcribeAudio } = require('./lib/stt');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -38,7 +39,7 @@ const eventClients = new Set();
 const activeRequests = new Map();
 const runningScopes = new Set();
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '16mb' }));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
@@ -51,7 +52,12 @@ app.use((req, res, next) => {
 });
 
 function requireAuth(req, res, next) {
-  if (!hasConfiguredToken()) return next();
+  if (!hasConfiguredToken()) {
+    return res.status(503).json({
+      error: 'no app token is configured',
+      code: 'TOKEN_NOT_CONFIGURED',
+    });
+  }
   const header = String(req.get('authorization') || '');
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!isTokenAllowed(token)) {
@@ -91,13 +97,22 @@ function sendWorkdirError(res, err) {
   return res.status(500).json({ error: err.message });
 }
 
+function sendSttError(res, err) {
+  if (err instanceof SttError) {
+    return res.status(err.status || 400).json({
+      error: err.message,
+      code: err.code,
+    });
+  }
+  return res.status(500).json({ error: err.message });
+}
+
 function sendEvent(type, payload) {
   const packet = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
   const targetDeviceId = normalizeDeviceId(payload && payload.deviceId);
   for (const client of eventClients) {
-    // 定向事件（带 deviceId，如 agent_*）只发给 deviceId 完全匹配的客户端；
-    // 未带 deviceId 的客户端不再收到他人事件。无 deviceId 的广播事件
-    //（如 quota_reset）仍发给所有客户端。
+    // Targeted events carry a deviceId and are only delivered to that device.
+    // Broadcast events without a deviceId, such as quota_reset, reach everyone.
     if (targetDeviceId && client.deviceId !== targetDeviceId) {
       continue;
     }
@@ -214,7 +229,7 @@ app.post('/api/chat', async (req, res) => {
   const scopeKey = sessionKeyFor(agent.key, deviceId);
   if (runningScopes.has(scopeKey)) {
     return res.status(409).json({
-      error: '该 agent 正在处理上一条消息',
+      error: 'agent is already handling a message',
       code: 'AGENT_BUSY',
     });
   }
@@ -355,21 +370,33 @@ app.get('/api/usage', async (_req, res) => {
   }
 });
 
-app.get('/api/usage/:agent', async (req, res) => {
-  const agentKey = String(req.params.agent || DEFAULT_AGENT).trim();
-  if (!getAgent(agentKey)) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
+app.post('/api/stt', async (req, res) => {
   try {
-    const text = await formatUsageForAgent(agentKey);
-    return res.json({ agent: agentKey, text, createdAt: new Date().toISOString() });
+    const audioBase64 = String((req.body && req.body.audioBase64) || '').trim();
+    if (!audioBase64) {
+      throw new SttError('audioBase64 is required', {
+        code: 'STT_AUDIO_REQUIRED',
+      });
+    }
+    const result = await transcribeAudio({
+      buffer: Buffer.from(audioBase64, 'base64'),
+      mimeType: String((req.body && req.body.mimeType) || 'audio/mp4'),
+      language: String((req.body && req.body.language) || 'auto'),
+    });
+    return res.json({
+      text: result.text,
+      model: result.model,
+      language: result.language,
+      createdAt: new Date().toISOString(),
+    });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return sendSttError(res, err);
   }
 });
 
-// 清掉某个 agent 的持久会话，下一条消息开新会话（对应 app 的“清空对话/新会话”）。
-// 不传 agent 则清掉全部 agent 的会话。不动工作目录（那是 /api/workdir/reset）。
+// Clear one agent's persistent session so the next message starts a new
+// machine-side conversation. Without an agent, clear every agent for the
+// current device. This does not touch files in the work directory.
 app.post('/api/session/clear', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
@@ -448,6 +475,7 @@ app.listen(PORT, HOST, () => {
       onReset: async (message, info) => {
         sendEvent('quota_reset', {
           message,
+          messageZh: info && info.messageZh,
           info,
           createdAt: new Date().toISOString(),
         });

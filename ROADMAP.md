@@ -11,10 +11,13 @@
 - Long-task cancellation.
 - Single active task per `deviceId:agentKey`.
 - Theme and language switching.
+- English-first active app flow with Chinese toggle.
 - Drawer cleanup, machine status, and About dialog.
 - Quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
 - Work directory management from the app, persisted to backend `.env`.
+- Protected APIs reject requests when no token has been generated yet.
+- Voice input with backend OpenAI speech-to-text transcription and Auto / Chinese / English language hints.
 
 ## Planned
 
@@ -35,7 +38,6 @@ Reuse boundaries:
 
 ### Later Improvements
 
-- **User Voice Input**: Support recording voice inputs in the chat screen and transcribing them (via Whisper API or similar) to allow hands-free developer agent interactions.
 - Stable tunnel/domain setup guide.
 - Desktop credential import through QR image or pasted payload.
 - More detailed backend diagnostics.

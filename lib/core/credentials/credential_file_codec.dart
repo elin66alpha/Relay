@@ -15,24 +15,30 @@ class CredentialFileCodec {
     required String passphrase,
   }) async {
     if (passphrase.trim().isEmpty) {
-      throw const MachineCredentialException('请输入凭证文件密码。');
+      throw const MachineCredentialException('Enter the credential password.');
     }
 
     final Map<String, Object?> envelope = _decodeJsonObject(bytes);
     if (envelope['format'] != format) {
-      throw const MachineCredentialException('这不是 AgentDeck 的加密凭证。');
+      throw const MachineCredentialException(
+        'This is not an encrypted AgentDeck credential.',
+      );
     }
 
     final Map<String, Object?> kdf = _readObject(envelope['kdf'], 'kdf');
     final Map<String, Object?> cipher =
         _readObject(envelope['cipher'], 'cipher');
     if (kdf['name'] != kdfName || cipher['name'] != cipherName) {
-      throw const MachineCredentialException('凭证文件使用了不支持的加密格式。');
+      throw const MachineCredentialException(
+        'The credential uses an unsupported encryption format.',
+      );
     }
 
     final int iterations = _readInt(kdf['iterations'], 'iterations');
     if (iterations < 10000 || iterations > 2000000) {
-      throw const MachineCredentialException('凭证文件 KDF 参数不在安全范围内。');
+      throw const MachineCredentialException(
+        'The credential KDF parameters are outside the supported safety range.',
+      );
     }
 
     final List<int> salt = _readBase64(kdf['salt'], 'salt');
@@ -69,7 +75,9 @@ class CredentialFileCodec {
     } on MachineCredentialException {
       rethrow;
     } catch (_) {
-      throw const MachineCredentialException('凭证解密失败，请检查文件和密码。');
+      throw const MachineCredentialException(
+        'Credential decryption failed. Check the QR code and password.',
+      );
     }
   }
 
@@ -78,30 +86,36 @@ class CredentialFileCodec {
       final Object? decoded = jsonDecode(utf8.decode(bytes));
       if (decoded is Map) return decoded.cast<String, Object?>();
     } on FormatException {
-      throw const MachineCredentialException('凭证文件不是有效 JSON。');
+      throw const MachineCredentialException(
+        'The credential is not valid JSON.',
+      );
     }
-    throw const MachineCredentialException('凭证文件 JSON 结构不正确。');
+    throw const MachineCredentialException(
+      'The credential JSON structure is invalid.',
+    );
   }
 
   Map<String, Object?> _readObject(Object? value, String field) {
     if (value is Map) return value.cast<String, Object?>();
-    throw MachineCredentialException('凭证文件缺少 $field。');
+    throw MachineCredentialException('The credential is missing $field.');
   }
 
   int _readInt(Object? value, String field) {
     if (value is int) return value;
     if (value is num) return value.toInt();
-    throw MachineCredentialException('凭证文件 $field 参数不正确。');
+    throw MachineCredentialException('The credential $field value is invalid.');
   }
 
   List<int> _readBase64(Object? value, String field) {
     if (value is! String || value.trim().isEmpty) {
-      throw MachineCredentialException('凭证文件缺少 $field。');
+      throw MachineCredentialException('The credential is missing $field.');
     }
     try {
       return base64Decode(value);
     } on FormatException {
-      throw MachineCredentialException('凭证文件 $field 不是有效 base64。');
+      throw MachineCredentialException(
+        'The credential $field value is not valid base64.',
+      );
     }
   }
 }
