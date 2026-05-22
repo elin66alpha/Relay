@@ -6,6 +6,7 @@ import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
+import '../../core/notifications/notification_service.dart';
 import '../../core/storage/chat_history_store.dart';
 
 class BotChatController extends ChangeNotifier {
@@ -493,8 +494,11 @@ class BotChatController extends ChangeNotifier {
     if (event.type != 'quota_reset') return;
     final String message = event.data['message'] as String? ?? '';
     if (message.isEmpty) return;
-    _appendSystemMessage('额度刷新通知\n$message');
-    _persist();
+    // Quota alerts go to the OS notification tray, not the chat bubble stream.
+    // Fire-and-forget: a denied/unsupported notification must not break events.
+    unawaited(
+      NotificationService.instance.show(title: 'AgentDeck', body: message),
+    );
   }
 
   void _appendProgress(Map<String, Object?> data) {

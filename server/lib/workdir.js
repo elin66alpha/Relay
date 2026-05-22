@@ -20,7 +20,7 @@ class WorkdirError extends Error {
 
 function expandWorkdir(value) {
   const raw = String(value || '').trim();
-  if (!raw) return path.join(os.homedir(), 'bots_session');
+  if (!raw) return path.join(os.homedir(), 'agent_deck');
   if (raw === '~') return os.homedir();
   if (raw.startsWith('~/')) return path.join(os.homedir(), raw.slice(2));
   return raw;

@@ -13,6 +13,7 @@
 - Theme and language switching.
 - Drawer cleanup, machine status, and About dialog.
 - Quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
+- Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
 - Work directory management from the app, persisted to backend `.env`.
 
 ## Planned
@@ -22,7 +23,7 @@
 Target shape:
 
 1. Android / iOS clients connect to Linux / macOS / Windows backends.
-2. Linux / macOS / Windows desktop clients connect to Linux / macOS / Windows backends.
+2. A single responsive Web frontend is the desktop client for every platform. The Windows / macOS / Linux desktop apps are thin wrappers (a webview shell) around that Web frontend rather than separately built native desktop UIs, so there is one codebase to maintain across all three.
 3. Each backend platform supports service installation, tunnel setup, CLI agent detection, and diagnostics.
 
 Reuse boundaries:
@@ -34,6 +35,7 @@ Reuse boundaries:
 
 ### Later Improvements
 
+- **User Voice Input**: Support recording voice inputs in the chat screen and transcribing them (via Whisper API or similar) to allow hands-free developer agent interactions.
 - Stable tunnel/domain setup guide.
 - Desktop credential import through QR image or pasted payload.
 - More detailed backend diagnostics.

@@ -17,6 +17,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Claude Code and Codex stream assistant text over SSE.
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
+- Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
 
 ## Repository Layout
@@ -56,32 +57,39 @@ ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
 ```
 
-Leave `BOTS_SESSION_DIR` empty to use `~/bots_session`. The app can later change this directory through the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
+Leave `BOTS_SESSION_DIR` empty to use `~/agent_deck`. The app can later change this directory through the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
 
 ## Credential QR
 
 Start the backend and tunnel first. With the included PM2 config, the tunnel process is named `agentdeck-tunnel`.
 
+### Option A: Standard Interactive (Auto-Detect Tunnel URL)
+This is the most common method. The script automatically parses the PM2 log to find your Cloudflare quick tunnel URL and guides you through setting a password:
 ```bash
 cd /path/to/AgentDeck/server
 pm2 start ecosystem.config.js
 npm run credential
 ```
 
-The credential script:
-
-- Detects the public tunnel URL from `agentdeck-tunnel` PM2 logs.
-- Prompts for a credential password with confirmation.
-- Creates `MACHINE_ID` when missing and updates `.env`.
-- Creates one revocable token in `server/tokens.json`.
-- Prints a QR code in the terminal and saves it as `server/credentials/<machine>.agentdeck.png`.
-
-For non-interactive use:
-
+### Option B: Instant One-Liner (Recommended - Skip Double Password Typing)
+To bypass interactive typing and password confirmation, you can supply the passphrase directly as an argument:
 ```bash
-AGENTDECK_CREDENTIAL_PASSPHRASE='your-password' npm run credential
-npm run credential -- --url https://your-stable-domain.example
+npm run credential -- --passphrase "your-password"
 ```
+
+### Option C: Manual URL & Passphrase (No PM2 / Custom Stable Domains)
+If you are running the backend without PM2 or have configured a custom stable domain, run this unified one-liner to generate your QR instantly:
+```bash
+npm run credential -- --passphrase "your-password" --url "https://your-stable-domain.example"
+```
+
+### What happens under the hood:
+- Automatically detects the tunnel URL from `agentdeck-tunnel` PM2 logs (unless overridden via `--url`).
+- Creates `MACHINE_ID` when missing and updates `.env`.
+- Creates a revocable, device-specific token in `server/tokens.json`.
+- Prints a QR code directly in the terminal and saves it as `server/credentials/<machine>.agentdeck.png`.
+
+The QR payload contains an encrypted credential envelope using PBKDF2-SHA256 and AES-256-GCM. Your plain text password is never written to disk.
 
 Token management:
 
@@ -89,8 +97,6 @@ Token management:
 npm run credential -- --list-tokens
 npm run credential -- --revoke <token-id>
 ```
-
-The QR payload is an encrypted credential envelope using PBKDF2-SHA256 and AES-256-GCM. The password is never written to disk.
 
 ## Flutter Client
 
@@ -101,6 +107,16 @@ flutter run
 ```
 
 On first launch, scan the backend QR code and enter the credential password. More machines can be added later from the credential screen.
+
+### APK signing (dev stage)
+
+There is no release keystore yet. The Android `release` build type reuses the
+debug signing config, so **every APK we build — `flutter build apk` (release) or
+`--debug` — is debug-signed**. This keeps the dev flow simple, but means an APK
+built on one machine cannot update an install signed by a different machine's
+`debug.keystore`; in that case uninstall the old app first
+(`adb uninstall dev.agentdeck.app`), which clears its local data. Set up a proper
+release keystore before any public/Play Store distribution.
 
 ## API Overview
 

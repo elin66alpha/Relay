@@ -41,37 +41,56 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log(`用法:
-  npm run credential                 # 自动探测隧道地址，提示设置密码，输出凭证二维码
+  console.log(`Usage:
+  npm run credential                 # Auto-detect tunnel URL, prompt for a password, print the credential QR
 
-可选参数:
-  --url <url>          手动指定公网地址（默认自动从 cloudflared 隧道日志探测）
-  --name <name>        app 里显示的机器名（默认主机名）
-  --label <label>      token 标签（默认机器名）
-  --qr-out <path>      二维码 PNG 输出路径
-  --passphrase <text>  凭证密码（至少 6 位；省略则交互输入）
-  --list-tokens        列出所有 token 及吊销状态
-  --revoke <id|token>  吊销一个 token
+Options:
+  --url <url>          Public URL (default: auto-detected from the cloudflared tunnel log)
+  --name <name>        Machine name shown in the app (default: hostname)
+  --label <label>      Token label (default: machine name)
+  --qr-out <path>      Output path for the QR PNG
+  --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
+  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: tries agentdeck-tunnel and bot-app-tunnel)
+  --list-tokens        List all tokens and their revocation state
+  --revoke <id|token>  Revoke a token
 `);
 }
 
-// 自动探测 cloudflared quick tunnel 的公网地址：cloudflared 把 URL 打到 stderr，
-// 由 PM2 落在 agentdeck-tunnel 的日志里。取最后一次出现的（即当前隧道）。
-const TUNNEL_LOG_FILES = [
-  path.join(os.homedir(), '.pm2', 'logs', 'agentdeck-tunnel-error.log'),
-  path.join(os.homedir(), '.pm2', 'logs', 'agentdeck-tunnel-out.log'),
-];
+// Auto-detect the cloudflared quick-tunnel public URL. cloudflared prints the
+// URL to stderr, which PM2 captures in its per-process log. Quick-tunnel URLs
+// rotate on every restart, so we take the most recent occurrence. The PM2
+// process name has varied across deployments (agentdeck-tunnel / bot-app-tunnel),
+// so we probe the known names (plus any --tunnel-name / TUNNEL_PM2_NAME override)
+// and prefer the log file written most recently.
+const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
+const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 
-function detectTunnelUrl() {
-  const re = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
-  for (const file of TUNNEL_LOG_FILES) {
+function detectTunnelUrl(args) {
+  const names = [];
+  const override = String(
+    args['tunnel-name'] || process.env.TUNNEL_PM2_NAME || '',
+  ).trim();
+  if (override) names.push(override);
+  names.push('agentdeck-tunnel', 'bot-app-tunnel');
+
+  const files = [];
+  for (const name of names) {
+    files.push(path.join(PM2_LOG_DIR, `${name}-error.log`));
+    files.push(path.join(PM2_LOG_DIR, `${name}-out.log`));
+  }
+  // Newest log first, so a freshly rotated tunnel wins.
+  const existing = files
+    .filter((file) => fs.existsSync(file))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+  for (const file of existing) {
     let text;
     try {
       text = fs.readFileSync(file, 'utf8');
     } catch (_err) {
       continue;
     }
-    const matches = text.match(re);
+    const matches = text.match(TRYCLOUDFLARE_RE);
     if (matches && matches.length) return matches[matches.length - 1];
   }
   return '';
@@ -79,13 +98,15 @@ function detectTunnelUrl() {
 
 function resolvePublicBaseUrl(args) {
   const explicit = String(args.url || '').trim();
-  if (explicit) return explicit;
-  const detected = detectTunnelUrl();
-  if (detected) return detected;
+  if (explicit) return { url: explicit, source: 'command line (--url)' };
+  const detected = detectTunnelUrl(args);
+  if (detected) return { url: detected, source: 'cloudflared tunnel log' };
   const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
-  if (envUrl) return envUrl;
+  if (envUrl) {
+    return { url: envUrl, source: '.env PUBLIC_BASE_URL (may be stale)' };
+  }
   throw new Error(
-    '无法自动探测公网隧道地址。请确认 agentdeck-tunnel 正在运行（pm2 status），或用 --url 手动指定。',
+    'Could not determine the public URL. Make sure the cloudflared tunnel is running (pm2 status), or pass --url explicitly.',
   );
 }
 
@@ -93,7 +114,7 @@ const MIN_PASSPHRASE_LEN = 6;
 
 function validatePassphrase(pass) {
   if (String(pass).length < MIN_PASSPHRASE_LEN) {
-    throw new Error(`密码至少 ${MIN_PASSPHRASE_LEN} 位。`);
+    throw new Error(`Password must be at least ${MIN_PASSPHRASE_LEN} characters.`);
   }
   return String(pass);
 }
@@ -136,14 +157,16 @@ async function readPassphrase(args) {
   });
   try {
     for (;;) {
-      const first = await rl.question(`设置凭证密码（至少 ${MIN_PASSPHRASE_LEN} 位）: `);
+      const first = await rl.question(
+        `Set a credential password (min ${MIN_PASSPHRASE_LEN} chars): `,
+      );
       if (String(first).length < MIN_PASSPHRASE_LEN) {
-        console.log(`密码至少 ${MIN_PASSPHRASE_LEN} 位，请重试。`);
+        console.log(`Password must be at least ${MIN_PASSPHRASE_LEN} characters. Try again.`);
         continue;
       }
-      const second = await rl.question('再次输入确认: ');
+      const second = await rl.question('Confirm password: ');
       if (first !== second) {
-        console.log('两次输入不一致，请重试。');
+        console.log('Passwords do not match. Try again.');
         continue;
       }
       return first;
@@ -201,7 +224,8 @@ async function main() {
     return;
   }
 
-  const baseUrl = resolvePublicBaseUrl(args).replace(/\/+$/, '');
+  const resolved = resolvePublicBaseUrl(args);
+  const baseUrl = resolved.url.replace(/\/+$/, '');
   const parsedUrl = new URL(baseUrl);
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
     throw new Error('public URL must start with http:// or https://');
@@ -237,8 +261,9 @@ async function main() {
     createdAt: now,
   };
   const envelope = encryptCredential(credential, passphrase);
-  // 二维码就是凭证本体（加密信封）。用紧凑 JSON 减小二维码尺寸，方便从终端/SSH 扫。
-  // 不再产出明文凭证文件——导入完全走扫码。
+  // The QR code IS the credential (an encrypted envelope). Compact JSON keeps the
+  // QR small enough to scan from a terminal/SSH. No plaintext credential file is
+  // written - import happens entirely by scanning.
   const qrPayload = JSON.stringify(envelope);
   const qrPath = path.resolve(
     SERVER_DIR,
@@ -252,16 +277,16 @@ async function main() {
     width: 1024,
   });
 
-  console.log(`二维码已保存: ${qrPath}`);
-  console.log(`机器: ${machineName}`);
-  console.log(`公网地址: ${credential.baseUrl}（自动探测）`);
+  console.log(`QR saved: ${qrPath}`);
+  console.log(`Machine: ${machineName}`);
+  console.log(`Public URL: ${credential.baseUrl} (source: ${resolved.source})`);
   console.log(`Token id: ${tokenRecord.id}`);
   if (revoked.length > 0) {
-    console.log(`已吊销 ${label} 的旧 token: ${revoked.length} 个`);
+    console.log(`Revoked ${revoked.length} old token(s) for "${label}"`);
   }
-  console.log('\n在 app 里点「扫描二维码」对准下面的二维码，然后输入刚设置的密码:\n');
+  console.log('\nIn the app, tap "Scan QR", point it at the QR below, then enter the password you just set:\n');
   qrcodeTerminal.generate(qrPayload, { small: true });
-  console.log('\ntoken 已追加到 server/tokens.json；机器 id 与公网地址已写入 server/.env。');
+  console.log('\nToken appended to server/tokens.json; machine id and public URL written to server/.env.');
 }
 
 main().catch((err) => {

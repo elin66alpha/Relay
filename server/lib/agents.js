@@ -439,12 +439,60 @@ function runAgy(prompt, onEvent, sessionKey, signal) {
     finalize: ({ code, stdout, stderr }) => {
       const text = String(stdout).trim();
       // 捕获本次会话 ID（按 cwd 记录），存给下次续接
+      let convId = null;
       try {
         const map = JSON.parse(fs.readFileSync(AGY_LAST_CONV, 'utf-8'));
-        if (map[cwd]) setSession(sessionKey, { id: map[cwd] });
+        if (map[cwd]) {
+          convId = map[cwd];
+          setSession(sessionKey, { id: convId });
+        }
       } catch (_err) {
         // 读不到就下次重新建会话
       }
+
+      // agy --print 续接时会把整段会话（含历次回复）一起打到 stdout，导致每次回复
+      // 黏连之前所有回复。改为从本次会话的 transcript 里取最后一条 MODEL 的
+      // PLANNER_RESPONSE，只返回这一轮的最终回答。
+      if (convId) {
+        try {
+          const logDir = path.join(
+            os.homedir(),
+            '.gemini',
+            'antigravity-cli',
+            'brain',
+            convId,
+            '.system_generated',
+            'logs',
+          );
+          const fullPath = path.join(logDir, 'transcript_full.jsonl');
+          const normalPath = path.join(logDir, 'transcript.jsonl');
+          const targetPath = fs.existsSync(fullPath) ? fullPath : normalPath;
+          if (fs.existsSync(targetPath)) {
+            const lines = fs
+              .readFileSync(targetPath, 'utf-8')
+              .trim()
+              .split('\n');
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (!lines[i].trim()) continue;
+              try {
+                const obj = JSON.parse(lines[i]);
+                if (
+                  obj.source === 'MODEL' &&
+                  obj.type === 'PLANNER_RESPONSE' &&
+                  obj.content
+                ) {
+                  return obj.content.trim();
+                }
+              } catch (_err) {
+                // 跳过无法解析的行
+              }
+            }
+          }
+        } catch (_err) {
+          // transcript 解析失败则回退到 stdout
+        }
+      }
+
       return text || fallback(stdout, stderr, code, 'agy');
     },
   });
