@@ -34,7 +34,37 @@ AgentDeck/
     └── lib/              agents, tokens, workdir, usage, quota-watch, credentials
 ```
 
-## Backend Setup
+## Quick Start
+
+The fastest path is the interactive `setup.sh` in the repo root. It starts the
+backend with PM2, optionally opens a tunnel, and prints the credential QR to scan
+in the app:
+
+```bash
+./setup.sh
+```
+
+It asks one question — **do you need a tunnel?**
+
+- **Yes** (default): exposes `localhost:8787` through a cloudflared quick tunnel
+  (the maintainer's own setup). The public URL is detected automatically and
+  baked into the QR. Requires `cloudflared`.
+- **No**: direct mode for a VPS or any host with a reachable public IP/domain.
+  You enter the address the app should connect to (e.g. `https://agent.example.com`
+  or `http://1.2.3.4:8787`); the server binds to `0.0.0.0` and the QR points at
+  that address. Open the port in your firewall, and put a reverse proxy in front
+  for HTTPS.
+
+Either way, set a credential password when prompted, then scan the QR in the app.
+Re-run `./setup.sh` anytime to restart and regenerate the QR (quick-tunnel URLs
+change on every restart).
+
+Prerequisites: Node.js ≥ 18, `pm2` (`npm install -g pm2`), plus `cloudflared` for
+tunnel mode.
+
+## Manual Backend Setup
+
+If you prefer to run the steps yourself instead of `setup.sh`:
 
 ```bash
 cd /path/to/AgentDeck/server
