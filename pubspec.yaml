@@ -1,0 +1,26 @@
+name: agentdeck
+description: "A dedicated Flutter chat client for local Claude Code, Codex, and Antigravity CLI agents."
+publish_to: "none"
+
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.0
+  http: ^1.2.0
+  cryptography: ^2.7.0
+  mobile_scanner: ^7.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,21 @@
+{
+  "name": "agentdeck-server",
+  "version": "0.1.0",
+  "description": "Local HTTP backend for the AgentDeck Flutter client.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "credential": "node scripts/create-credential.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

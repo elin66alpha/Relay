@@ -1,0 +1,7 @@
+node_modules/
+.env
+agent-sessions.json
+tokens.json
+credentials/*.agentdeck
+credentials/*.png
+credentials/*.passphrase.txt
