@@ -34,7 +34,26 @@ AgentDeck/
     └── lib/              agents、tokens、workdir、usage、quota-watch、credentials
 ```
 
-## 后端启动
+## 快速开始
+
+最快的方式是运行仓库根目录下的交互式 `setup.sh` 脚本。它会使用 PM2 启动后端，可选择开启隧道，并打印出供 app 扫描的凭证二维码：
+
+```bash
+./setup.sh
+```
+
+脚本会询问一个问题 —— **你是否需要隧道 (tunnel)？**
+
+- **是** (默认)：通过 cloudflared quick tunnel 暴露 `localhost:8787` (维护者自己的设置)。公网 URL 会被自动探测并写入二维码中。需要安装 `cloudflared`。
+- **否**：直连模式，适用于 VPS 或任何拥有可达公网 IP/域名的主机。你需要输入 app 应该连接的地址 (例如 `https://agent.example.com` 或 `http://1.2.3.4:8787`)；服务器会绑定到 `0.0.0.0`，且二维码将指向该地址。请在防火墙中放行该端口，并在前面放置一个反向代理来处理 HTTPS。
+
+无论哪种方式，在提示时设置一个凭证密码，然后在 app 中扫描二维码。随时可以重新运行 `./setup.sh` 来重启并重新生成二维码 (quick-tunnel 的 URL 每次重启都会改变)。
+
+前置要求：Node.js ≥ 18，`pm2` (`npm install -g pm2`)，如果使用隧道模式还需 `cloudflared`。
+
+## 手动后端启动
+
+如果你不想使用 `setup.sh`，倾向于自己手动执行步骤：
 
 ```bash
 cd /path/to/AgentDeck/server
