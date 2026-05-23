@@ -27,6 +27,18 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
+## 2026-05-23 — macOS 后端平台入口【未提交，待 macOS 实机验证】
+
+- 保留 `server/` 作为共享 Node 后端核心，新增 `backends/` 区分平台安装脚本。
+- `backends/linux/setup.sh` 封装现有 Linux/PM2 安装流程。
+- `backends/macos/` 新增 LaunchAgent 方案：`setup.sh`、`start.sh`、`stop.sh`、
+  `status.sh`、`uninstall.sh` 和共享 `lib/common.sh`。后端服务 label 为
+  `dev.agentdeck.backend`，隧道服务 label 为 `dev.agentdeck.tunnel`。
+- macOS setup 支持 cloudflared quick tunnel 和直连模式，会生成/更新 `server/.env`，
+  安装 npm 依赖，启动服务，从日志识别 `trycloudflare.com` 地址，并用 `--url` 生成凭证二维码。
+- 由于当前环境不是 macOS，本次只能做 shell 语法和现有 Node/Flutter 验证；launchd 行为仍需
+  在真实 macOS 上测试。
+
 ## 2026-05-23 — 去除语音输入 / OpenAI STT【未提交，待真机测试】
 
 - 用户确认 OpenAI STT 不再使用。已移除聊天输入栏麦克风按钮、设置页语音语言选项、

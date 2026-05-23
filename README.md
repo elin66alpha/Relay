@@ -28,6 +28,9 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 
 ```text
 AgentDeck/
+├── backends/             OS-specific backend setup
+│   ├── linux/            PM2-based Linux setup wrapper
+│   └── macos/            LaunchAgent-based macOS setup
 ├── lib/                  Flutter client
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
@@ -38,33 +41,37 @@ AgentDeck/
     └── lib/              agents, tokens, workdir, usage, quota-watch, credentials
 ```
 
-## Quick Start
+## Backend Quick Start
 
-The fastest path is the interactive `setup.sh` in the repo root. It starts the
-backend with PM2, optionally opens a tunnel, and prints the credential QR to scan
-in the app:
+Linux uses the existing PM2-based backend setup:
 
 ```bash
-./setup.sh
+./backends/linux/setup.sh
 ```
 
-It asks one question — **do you need a tunnel?**
+macOS uses LaunchAgent services instead of PM2:
 
-- **Yes** (default): exposes `localhost:8787` through a cloudflared quick tunnel.
-  The public URL is detected automatically and baked into the QR. Requires
-  `cloudflared`.
-- **No**: direct mode for a VPS or any host with a reachable public IP/domain.
-  You enter the address the app should connect to (e.g. `https://agent.example.com`
-  or `http://1.2.3.4:8787`); the server binds to `0.0.0.0` and the QR points at
-  that address. Open the port in your firewall, and put a reverse proxy in front
-  for HTTPS.
+```bash
+./backends/macos/setup.sh
+```
 
-Either way, set a credential password when prompted, then scan the QR in the app.
-Re-run `./setup.sh` anytime to restart and regenerate the QR (quick-tunnel URLs
-change on every restart).
+Both setup flows can run in tunnel mode or direct mode.
 
-Prerequisites: Node.js ≥ 18, `pm2` (`npm install -g pm2`), plus `cloudflared` for
-tunnel mode.
+- **Tunnel mode** (default): exposes `localhost:8787` through a cloudflared
+  quick tunnel. The public URL is detected automatically and baked into the QR.
+- **Direct mode**: for a VPS, LAN host, or any host with a reachable IP/domain.
+  You enter the address the app should connect to; the server binds to
+  `0.0.0.0` and the QR points at that address. Put HTTPS in front before
+  exposing it to an untrusted network.
+
+Either way, set a credential password when prompted, then import the QR in the app.
+Quick-tunnel URLs change on restart, so regenerate the QR after restarting a
+quick tunnel.
+
+Prerequisites: Node.js ≥ 18. Linux setup also needs `pm2`
+(`npm install -g pm2`); tunnel mode on either platform needs `cloudflared`.
+
+The old repo-root `./setup.sh` remains as a Linux-compatible shortcut.
 
 ## Manual Backend Setup
 

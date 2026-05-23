@@ -17,6 +17,7 @@
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
 - Work directory management from the app, persisted to backend `.env`.
 - Protected APIs reject requests when no token has been generated yet.
+- Platform-separated backend setup under `backends/`, with Linux PM2 setup and macOS LaunchAgent setup.
 
 ## Planned
 
@@ -40,4 +41,5 @@ Reuse boundaries:
 - Stable tunnel/domain setup guide.
 - Desktop credential import through QR image or pasted payload.
 - More detailed backend diagnostics.
+- Windows backend setup.
 - Better Antigravity quota support when an API or reliable CLI source is available.
