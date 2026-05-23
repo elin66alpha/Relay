@@ -41,7 +41,12 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
             widget.machinesController.credentials;
         final MachineCredential? active =
             widget.machinesController.activeMachine;
-        const bool showCameraScan = !kIsWeb;
+        // Camera QR scanning only exists on mobile. Desktop (and web) have no
+        // mobile_scanner implementation, so they import via image upload or
+        // paste instead.
+        final bool showCameraScan = !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS);
         return Scaffold(
           appBar: widget.requireCredential
               ? null

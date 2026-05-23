@@ -21,7 +21,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
 - Protected backend APIs stay closed until at least one credential token has been generated.
-- The same Flutter client runs on mobile and Web. Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar.
+- The same Flutter client runs on mobile, Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
 - The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
 
 ## Repository Layout
@@ -147,7 +147,7 @@ flutter pub get
 flutter run
 ```
 
-On first launch, import the backend credential and enter the credential password. Mobile can scan the QR with the camera. Web imports credentials by pasting the encrypted QR payload or uploading the saved QR image; camera scanning is intentionally hidden on Web. More machines can be added later from the credential screen.
+On first launch, import the backend credential and enter the credential password. Mobile can scan the QR with the camera. Web and desktop (Windows/macOS/Linux) import credentials by pasting the encrypted QR payload or uploading the saved QR image; camera scanning is intentionally hidden there (no `mobile_scanner` desktop implementation). More machines can be added later from the credential screen.
 
 Web credentials persist in browser local storage through Flutter's Web secure-storage backend, so use a private browser profile for private machines.
 

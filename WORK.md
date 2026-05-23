@@ -27,7 +27,53 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
-## 2026-05-23 — macOS 后端平台入口【未提交，待 macOS 实机验证】
+## 2026-05-23 — 桌面前端 Windows/macOS（Flutter 原生）【未提交】
+
+需求：把 Windows / macOS 前端做出来。经确认用 **Flutter 原生桌面**（不套壳 web），
+本机（Linux）**不**真正构建 Linux 成品，重点是把 Win/macOS 工程配好 + 文档。
+
+**核查结论**：项目本就是 Flutter，`windows/`、`macos/`、`linux/` 三个原生工程都在；
+不需要 Electron/Tauri。Windows 工程已品牌化好（窗口标题/ProductName=AgentDeck、
+company dev.agentdeck、图标、binary agentdeck.exe），基本无需改。
+
+**硬约束**（已写进文档）：桌面成品不能交叉编译——Windows 必须在 Windows+VS 构建，
+**macOS 必须在 Mac+Xcode 构建**，这台 Linux 都做不出来。
+
+**macOS 修复（关键）** —— 之前 macOS 工程虽品牌化（`Configs/AppInfo.xcconfig`:
+PRODUCT_NAME=AgentDeck、bundle id `dev.agentdeck.app`，无需改），但有两个会导致
+Release 不可用的问题：
+- `Runner/DebugProfile.entitlements` + `Runner/Release.entitlements`：加
+  `com.apple.security.network.client`。sandbox 开着却没这条 → Release 版**连不上
+  后端**（任何网络请求被拒）。这是必修项。
+- `Runner/Info.plist`：加 `NSAppTransportSecurity > NSAllowsLocalNetworking`，让
+  本地明文 `http://LAN-IP:port` 直连后端可用（公网 cloudflared https 本就放行）。
+
+**客户端加固**：
+- `machine_credentials_screen.dart`：相机扫码守卫从 `!kIsWeb` 收紧为**仅
+  android/iOS**（`defaultTargetPlatform`）。`mobile_scanner` 无 Windows/Linux 实现，
+  桌面/Web 一律隐藏摄像头扫码，改用「上传二维码图片 / 粘贴凭证」。
+
+**插件桌面兼容性核查**（决定能否构建）：
+- `generated_plugins`（windows/linux）干净：`mobile_scanner` 在 Win/Linux 被自动
+  排除 → 构建不会因它失败；`flutter_secure_storage`/`flutter_local_notifications`
+  在 Windows 有实现。
+- `notification_service.dart` 已守卫：仅 android/iOS/macOS 调用通知，Win/Linux
+  自动降级为 app 内系统消息（不会崩）。
+
+**文档**：
+- 新增 `DESKTOP.md`（英文）：前置依赖、各 OS 构建/运行命令、产物路径、桌面连接方式
+  （无相机扫码、用上传/粘贴）、已知限制、macOS 签名/公证、Windows 打包、各平台已配置项。
+- `README.md` / `README.zh-CN.md`：平台描述加入「原生桌面 Windows/macOS/Linux」+ 指向
+  DESKTOP.md；凭证导入说明补充桌面端用上传/粘贴。
+
+**验证**：`flutter analyze lib/` No issues。**无法在本机（Linux）构建 Windows/macOS
+验证**——需在对应 OS 上 `flutter build windows` / `flutter build macos` 实测。
+
+**涉及文件**：`macos/Runner/DebugProfile.entitlements`、`macos/Runner/Release.entitlements`、
+`macos/Runner/Info.plist`、`lib/features/machines/machine_credentials_screen.dart`、
+`DESKTOP.md`(新)、`README.md`、`README.zh-CN.md`、`WORK.md`。
+
+## 2026-05-23 — macOS 后端平台入口（已提交 73d510c）
 
 - 保留 `server/` 作为共享 Node 后端核心，新增 `backends/` 区分平台安装脚本。
 - `backends/linux/setup.sh` 封装现有 Linux/PM2 安装流程。
