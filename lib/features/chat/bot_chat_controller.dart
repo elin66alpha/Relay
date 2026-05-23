@@ -3,17 +3,17 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
-import '../../core/storage/chat_history_store.dart';
+import '../../core/notifications/notification_service.dart';
+import '../../core/settings/app_settings_controller.dart';
 
 class BotChatController extends ChangeNotifier {
   BotChatController({
     BackendClient? backendClient,
-    ChatHistoryStore? historyStore,
-  })  : _backendClient = backendClient ?? BackendClient(),
-        _historyStore = historyStore ?? ChatHistoryStore();
+  }) : _backendClient = backendClient ?? BackendClient();
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -25,15 +25,16 @@ class BotChatController extends ChangeNotifier {
   static const String _cancelledKey = 'cancelled';
 
   final BackendClient _backendClient;
-  final ChatHistoryStore _historyStore;
 
   CliAgent _agent = defaultCliAgents.first;
   MachineCredential? _machine;
+  final Map<String, bool?> _authStatus = <String, bool?>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _isThinking = false;
   bool _isCancelling = false;
   String? _lastError;
   String? _activeRequestId;
+  AppLanguage _language = AppLanguage.en;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _eventReconnectTimer;
   bool _wantsEvents = false;
@@ -44,6 +45,32 @@ class BotChatController extends ChangeNotifier {
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
+  AppStrings get _strings => AppStrings(_language);
+
+  /// Login state for an agent CLI on the backend host: true/false when known,
+  /// or null when unchecked or undeterminable (e.g. agy). Drives the
+  /// "not logged in" banner; it never blocks sending, since detection is
+  /// best-effort and a real failure is still caught when the turn runs.
+  bool? agentLoggedIn(String agentKey) => _authStatus[agentKey];
+
+  /// Refreshes per-agent login state from the backend. Best-effort: a probe
+  /// failure (offline, older backend without the endpoint) is ignored.
+  Future<void> refreshAuthStatus() async {
+    if (_machine == null) return;
+    try {
+      final Map<String, bool?> status = await _backendClient.fetchAuthStatus();
+      _authStatus
+        ..clear()
+        ..addAll(status);
+      notifyListeners();
+    } catch (_) {
+      // A probe failure must not interfere with chatting.
+    }
+  }
+
+  void setLanguage(AppLanguage language) {
+    _language = language;
+  }
 
   bool isRetryable(ChatMessage message) =>
       message.isUser && message.metadata[_deliveryFailedKey] == true;
@@ -67,16 +94,17 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<void> loadFor(CliAgent agent, MachineCredential machine) async {
-    if (_agent.key == agent.key &&
-        _machine?.id == machine.id &&
-        _messages.isNotEmpty) {
-      _agent = agent;
-      _machine = machine;
+    // The app keeps no local chat history: the backend (CLI host) owns it and
+    // we fetch it back here. Keep the in-memory messages while the agent/machine
+    // is unchanged; switching either starts fresh and reloads from the backend.
+    final bool sameContext =
+        _agent.key == agent.key && _machine?.id == machine.id;
+    _agent = agent;
+    _machine = machine;
+    if (sameContext) {
       notifyListeners();
       return;
     }
-    _agent = agent;
-    _machine = machine;
     _messages.clear();
     _lastError = null;
     _isThinking = false;
@@ -84,30 +112,62 @@ class BotChatController extends ChangeNotifier {
     _activeRequestId = null;
     notifyListeners();
 
-    final List<ChatMessage> loaded =
-        await _historyStore.read(_historyKey(agent, machine));
-    if (_agent.key != agent.key || _machine?.id != machine.id) return;
-    _messages
-      ..clear()
-      ..addAll(loaded);
-    notifyListeners();
+    // Check login state for the new context so the banner can warn up front.
+    unawaited(refreshAuthStatus());
+
+    // Pull the previous conversation so reopening the app shows it. Best-effort:
+    // ignore failures (offline / no history), and never clobber messages the
+    // user has already typed or sent while this was in flight.
+    try {
+      final List<ChatMessage> history =
+          await _backendClient.fetchHistory(agent.key);
+      if (_agent.key != agent.key ||
+          _machine?.id != machine.id ||
+          _messages.isNotEmpty) {
+        return;
+      }
+      _messages.addAll(history);
+      notifyListeners();
+    } catch (_) {
+      // Leave the view empty when history can't be loaded.
+    }
   }
 
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
     _messages.clear();
     _lastError = null;
-    final MachineCredential? machine = _machine;
-    if (machine != null) {
-      await _historyStore.clear(_historyKey(agent, machine));
-    }
     notifyListeners();
-    // 同时重置后端会话，否则下一条消息会 resume 已删除的上下文。
-    // 尽力而为：后端不可达时仍保留本地清空结果，只提示一句。
+    // Also reset the machine-side session; otherwise the next prompt may
+    // resume context that the user just cleared locally.
     try {
       await _backendClient.clearSession(agent.key);
     } catch (err) {
-      _appendSystemMessage('已清空本地对话，但重置机器会话失败：$err');
+      _appendSystemMessage(_strings.localChatSessionResetFailed(err));
+    }
+  }
+
+  Future<void> compressConversation() async {
+    if (_isThinking || _machine == null) return;
+    _isThinking = true;
+    _isCancelling = false;
+    _lastError = null;
+    final String requestId = _newRequestId(_agent);
+    _activeRequestId = requestId;
+    notifyListeners();
+    try {
+      await _backendClient.compressConversation(
+        agentKey: _agent.key,
+        requestId: requestId,
+      );
+    } catch (err) {
+      _lastError = err.toString();
+      rethrow;
+    } finally {
+      if (_activeRequestId == requestId) _activeRequestId = null;
+      _isThinking = false;
+      _isCancelling = false;
+      notifyListeners();
     }
   }
 
@@ -118,7 +178,6 @@ class BotChatController extends ChangeNotifier {
     final ChatMessage userMessage = ChatMessage.user(text);
     _messages.add(userMessage);
     notifyListeners();
-    await _persist();
     await _runTurn(_agent, userMessage);
   }
 
@@ -131,8 +190,8 @@ class BotChatController extends ChangeNotifier {
       await _backendClient.cancelMessage(requestId);
     } catch (err) {
       if (err is BackendException && err.code == 'REQUEST_NOT_FOUND') {
-        // 请求已结束（成功或已取消）。不强行标记取消——交给 _runTurn 的正常
-        // 收尾按真实结果处理（成功则 finalize，已取消则走 AGENT_CANCELLED）。
+        // The request already finished. Let _runTurn finish with the real
+        // outcome instead of forcing a cancelled state here.
         return;
       }
       _lastError = err.toString();
@@ -151,30 +210,20 @@ class BotChatController extends ChangeNotifier {
     await _runTurn(_agent, _messages[index]);
   }
 
-  Future<String> statusText() async {
+  Future<String> statusText(AppStrings strings) async {
     final BackendStatus status = await _backendClient.status();
-    return status.toDisplayText();
+    return status.toDisplayText(strings);
   }
 
-  Future<void> appendUsage() async {
-    if (_isThinking) return;
-    _isThinking = true;
-    _lastError = null;
-    notifyListeners();
-    final int assistantIndex = _insertAwaitingAssistant(system: true);
-    try {
-      final String usage = await _backendClient.usage(_agent.key);
-      _finalizeAssistant(assistantIndex, usage, system: true);
-      await _persist();
-    } catch (err) {
-      _discardAssistant(assistantIndex);
-      _lastError = err.toString();
-      _appendSystemMessage('额度查询失败：$err');
-    } finally {
-      _isThinking = false;
-      notifyListeners();
-    }
-  }
+  Future<UsageReport> usageReport() => _backendClient.usageReport();
+
+  Future<WorkdirInfo> workdir() => _backendClient.workdir();
+
+  Future<WorkdirInfo> checkWorkdir(String path) =>
+      _backendClient.checkWorkdir(path);
+
+  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) =>
+      _backendClient.setWorkdir(path, create: create);
 
   Future<void> resetWorkdir() async {
     if (_isThinking) return;
@@ -183,11 +232,12 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
     try {
       final WorkdirResetResult result = await _backendClient.resetWorkdir();
-      _appendSystemMessage('已清空工作目录（删除 ${result.count} 项）：${result.dir}');
-      await _persist();
+      _appendSystemMessage(
+        _strings.workdirResetSuccess(result.count, result.dir),
+      );
     } catch (err) {
       _lastError = err.toString();
-      _appendSystemMessage('清空工作目录失败：$err');
+      _appendSystemMessage(_strings.workdirResetFailed(err));
     } finally {
       _isThinking = false;
       notifyListeners();
@@ -228,6 +278,7 @@ class BotChatController extends ChangeNotifier {
         agentKey: agent.key,
         prompt: userMessage.content,
         requestId: requestId,
+        onEvent: _handleEvent,
       );
       _finalizeAssistantByRequestId(
         requestId,
@@ -238,20 +289,21 @@ class BotChatController extends ChangeNotifier {
           'agentLabel': reply.agentLabel,
         },
       );
-      await _persist();
     } catch (err) {
       if (err is BackendException && err.code == 'AGENT_CANCELLED') {
         _markAssistantCancelled(requestId);
-        await _persist();
       } else {
         _discardAssistantByRequestId(requestId);
-        final String detail =
-            err is BackendException && err.code == 'AGENT_BUSY'
-                ? '该 agent 正在处理上一条消息，请稍后重试。'
-                : err.toString();
+        String detail = err.toString();
+        if (err is BackendException && err.code == 'AGENT_BUSY') {
+          detail = _strings.agentBusyRetryLater;
+        } else if (err is BackendException && err.code == 'NOT_LOGGED_IN') {
+          detail = _strings.agentNotLoggedIn(agent.label);
+          // Reflect the failure in the banner right away.
+          _authStatus[agent.key] = false;
+        }
         _markUserDeliveryFailed(userMessage.id, detail);
         _lastError = detail;
-        await _persist();
       }
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
@@ -355,9 +407,8 @@ class BotChatController extends ChangeNotifier {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
     final ChatMessage current = _messages[index];
-    // 只在消息仍处于 streaming 时追加。POST 最终结果到达后会 _finalizeAssistant
-    // 把 streaming 置 false；此后迟到的 SSE delta 必须丢弃，否则会把碎片追加到
-    // 权威答案末尾、并把气泡永久翻回 streaming 状态。
+    // Append only while the bubble is still streaming. Once the POST response
+    // finalizes the authoritative answer, late SSE deltas must be ignored.
     if (isCancelled(current) || current.metadata[_streamingKey] != true) return;
 
     _updateStreamingAssistant(
@@ -414,15 +465,6 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
-    final MachineCredential? machine = _machine;
-    if (machine == null) return;
-    await _historyStore.write(_historyKey(_agent, machine), _messages);
-  }
-
-  String _historyKey(CliAgent agent, MachineCredential machine) =>
-      'machine.${machine.id}.cli.${agent.key}';
-
   String _newRequestId(CliAgent agent) {
     final int micros = DateTime.now().microsecondsSinceEpoch;
     return '${agent.key}.$micros';
@@ -465,7 +507,6 @@ class BotChatController extends ChangeNotifier {
       final String requestId = event.data['requestId'] as String? ?? '';
       if (requestId.isNotEmpty) {
         _markAssistantCancelled(requestId);
-        _persist();
       }
       return;
     }
@@ -475,16 +516,33 @@ class BotChatController extends ChangeNotifier {
       if (requestId.isNotEmpty && error.isNotEmpty) {
         _appendProgress(<String, Object?>{
           'requestId': requestId,
-          'line': '出错：$error',
+          'line': _strings.agentErrorLine(error),
         });
       }
       return;
     }
     if (event.type != 'quota_reset') return;
-    final String message = event.data['message'] as String? ?? '';
+    final String message = _strings.isZh
+        ? event.data['messageZh'] as String? ??
+            event.data['message'] as String? ??
+            ''
+        : event.data['message'] as String? ?? '';
     if (message.isEmpty) return;
-    _appendSystemMessage('额度刷新通知\n$message');
-    _persist();
+    // Quota alerts prefer a system/browser notification. If the platform denies
+    // it, fall back to an in-page system message so Web users still see it.
+    unawaited(_showQuotaNotification(message));
+  }
+
+  Future<void> _showQuotaNotification(String message) async {
+    try {
+      final bool shown = await NotificationService.instance.show(
+        title: 'AgentDeck',
+        body: message,
+      );
+      if (!shown) _appendSystemMessage(message);
+    } catch (_) {
+      _appendSystemMessage(message);
+    }
   }
 
   void _appendProgress(Map<String, Object?> data) {

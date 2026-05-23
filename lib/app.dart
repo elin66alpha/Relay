@@ -49,7 +49,7 @@ class _BotAppState extends State<BotApp> {
         if (!authorized) activeMachine = null;
       }
       if (activeMachine != null) {
-        await widget.chatController.loadFor(
+        widget.chatController.loadFor(
           widget.agentsController.activeAgent,
           activeMachine,
         );

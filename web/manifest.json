@@ -3,10 +3,10 @@
     "short_name": "AgentDeck",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Private control surface for local CLI agents.",
-    "orientation": "portrait-primary",
+    "background_color": "#071019",
+    "theme_color": "#0B84FF",
+    "description": "Private control surface for local CLI agents on mobile and web.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

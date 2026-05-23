@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../i18n/app_strings.dart';
+import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
@@ -46,16 +48,16 @@ class BackendStatus {
   final bool quotaWatch;
   final String publicBaseUrl;
 
-  String toDisplayText() {
+  String toDisplayText(AppStrings strings) {
     final int timeoutMinutes = (agentTimeoutMs / 60000).round();
     final List<String> lines = <String>[
-      '后端在线',
-      '工作目录：$workdir',
-      '系统运行：$systemUptime',
-      '进程运行：$processUptime',
-      if (publicBaseUrl.isNotEmpty) '公网地址：$publicBaseUrl',
-      if (timeoutMinutes > 0) '任务超时：$timeoutMinutes 分钟',
-      '额度监听：${quotaWatch ? '开启' : '关闭'}',
+      strings.backendOnline,
+      strings.workDirectoryLine(workdir),
+      strings.systemUptimeLine(systemUptime),
+      strings.processUptimeLine(processUptime),
+      if (publicBaseUrl.isNotEmpty) strings.publicBaseUrlLine(publicBaseUrl),
+      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
+      strings.quotaWatchLine(quotaWatch),
     ];
     return lines.join('\n');
   }
@@ -83,6 +85,118 @@ class WorkdirResetResult {
 
   final String dir;
   final int count;
+}
+
+class WorkdirInfo {
+  const WorkdirInfo({
+    required this.dir,
+    this.exists = true,
+    this.isDirectory = true,
+    this.busy = false,
+    this.created = false,
+  });
+
+  factory WorkdirInfo.fromJson(Map<String, Object?> json) {
+    return WorkdirInfo(
+      dir: json['dir'] as String? ?? '',
+      exists: json['exists'] as bool? ?? true,
+      isDirectory: json['isDirectory'] as bool? ?? true,
+      busy: json['busy'] as bool? ?? false,
+      created: json['created'] as bool? ?? false,
+    );
+  }
+
+  final String dir;
+  final bool exists;
+  final bool isDirectory;
+  final bool busy;
+  final bool created;
+}
+
+class UsageQuota {
+  const UsageQuota({
+    required this.key,
+    required this.label,
+    required this.remainingPercent,
+    required this.resetsAt,
+  });
+
+  factory UsageQuota.fromJson(Map<String, Object?> json) {
+    return UsageQuota(
+      key: json['key'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
+      resetsAt: json['resetsAt'] as String?,
+    );
+  }
+
+  final String key;
+  final String label;
+  final double? remainingPercent;
+  final String? resetsAt;
+}
+
+class UsageAgent {
+  const UsageAgent({
+    required this.key,
+    required this.label,
+    required this.available,
+    required this.quotas,
+    this.detail = '',
+    this.error,
+    this.unavailableReason,
+  });
+
+  factory UsageAgent.fromJson(Map<String, Object?> json) {
+    final List<Object?> rawQuotas = json['quotas'] is List
+        ? (json['quotas'] as List).cast<Object?>()
+        : const <Object?>[];
+    return UsageAgent(
+      key: json['key'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      available: json['available'] as bool? ?? false,
+      detail: json['detail'] as String? ?? '',
+      error: json['error'] as String?,
+      unavailableReason: json['unavailableReason'] as String?,
+      quotas: rawQuotas
+          .whereType<Map>()
+          .map((Map q) => UsageQuota.fromJson(q.cast<String, Object?>()))
+          .toList(growable: false),
+    );
+  }
+
+  final String key;
+  final String label;
+  final bool available;
+  final String detail;
+  final String? error;
+  final String? unavailableReason;
+  final List<UsageQuota> quotas;
+}
+
+class UsageReport {
+  const UsageReport({
+    required this.createdAt,
+    required this.agents,
+  });
+
+  factory UsageReport.fromJson(Map<String, Object?> json) {
+    final List<Object?> rawAgents = json['agents'] is List
+        ? (json['agents'] as List).cast<Object?>()
+        : const <Object?>[];
+    return UsageReport(
+      createdAt: json['createdAt'] as String? ?? '',
+      agents: rawAgents
+          .whereType<Map>()
+          .map(
+            (Map agent) => UsageAgent.fromJson(agent.cast<String, Object?>()),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  final String createdAt;
+  final List<UsageAgent> agents;
 }
 
 class BackendEvent {
@@ -129,7 +243,7 @@ class BackendClient {
   Future<BackendStatus> status() async {
     final Object? decoded = await _requestJson('GET', '/api/status');
     if (decoded is! Map) {
-      throw BackendException('后端状态响应格式不正确。');
+      throw BackendException('Invalid backend status response.');
     }
     return BackendStatus.fromJson(decoded.cast<String, Object?>());
   }
@@ -138,7 +252,16 @@ class BackendClient {
     required String agentKey,
     required String prompt,
     required String requestId,
+    void Function(BackendEvent event)? onEvent,
   }) async {
+    if (onEvent != null) {
+      return _sendMessageStreamed(
+        agentKey: agentKey,
+        prompt: prompt,
+        requestId: requestId,
+        onEvent: onEvent,
+      );
+    }
     final Object? decoded = await _requestJson(
       'POST',
       '/api/chat',
@@ -150,7 +273,7 @@ class BackendClient {
       timeout: const Duration(minutes: 65),
     );
     if (decoded is! Map) {
-      throw BackendException('后端聊天响应格式不正确。');
+      throw BackendException('Invalid backend chat response.');
     }
     final Map<String, Object?> json = decoded.cast<String, Object?>();
     final Map<String, Object?> agent =
@@ -167,6 +290,80 @@ class BackendClient {
     );
   }
 
+  Future<void> compressConversation({
+    required String agentKey,
+    required String requestId,
+  }) async {
+    await _requestJson(
+      'POST',
+      '/api/chat',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'prompt': '/compact',
+        'requestId': requestId,
+        'recordHistory': false,
+      },
+      timeout: const Duration(minutes: 65),
+    );
+  }
+
+  Future<ChatReply> _sendMessageStreamed({
+    required String agentKey,
+    required String prompt,
+    required String requestId,
+    required void Function(BackendEvent event) onEvent,
+  }) async {
+    final MachineCredential credential = await _requireCredential();
+    final http.Request request = http.Request(
+      'POST',
+      _uri(credential, '/api/chat'),
+    );
+    request.headers.addAll(
+      await _headers(credential, accept: 'text/event-stream'),
+    );
+    request.body = jsonEncode(<String, Object?>{
+      'agent': agentKey,
+      'prompt': prompt,
+      'requestId': requestId,
+    });
+
+    final http.StreamedResponse response =
+        await _httpClient.send(request).timeout(const Duration(minutes: 65));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final String text = await response.stream.bytesToString();
+      throw _exceptionFor(response.statusCode, text);
+    }
+
+    ChatReply? reply;
+    BackendException? streamError;
+    await for (final BackendEvent event
+        in _parseSse(response.stream).timeout(const Duration(minutes: 65))) {
+      if (event.type == 'ready' || event.type == 'heartbeat') continue;
+      onEvent(event);
+      if (event.type == 'agent_done') {
+        reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
+      } else if (event.type == 'agent_cancelled') {
+        streamError = BackendException(
+          'request cancelled',
+          status: 499,
+          code: 'AGENT_CANCELLED',
+        );
+      } else if (event.type == 'agent_error') {
+        final String? code = event.data['code'] as String?;
+        streamError = BackendException(
+          event.data['error'] as String? ?? 'Agent stream failed.',
+          status: code == 'NOT_LOGGED_IN' ? 424 : 500,
+          code: code,
+        );
+      }
+    }
+    if (streamError != null) throw streamError;
+    if (reply == null) {
+      throw BackendException('Agent stream ended without a final response.');
+    }
+    return reply;
+  }
+
   Future<void> cancelMessage(String requestId) async {
     await _requestJson(
       'POST',
@@ -176,20 +373,58 @@ class BackendClient {
     );
   }
 
-  Future<String> usage(String agentKey) async {
+  Future<UsageReport> usageReport() async {
     final Object? decoded = await _requestJson(
       'GET',
-      '/api/usage/$agentKey',
+      '/api/usage',
       timeout: const Duration(seconds: 45),
     );
     if (decoded is! Map) {
-      throw BackendException('额度响应格式不正确。');
+      throw BackendException('Invalid usage response.');
     }
-    return decoded['text'] as String? ?? '';
+    return UsageReport.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// 清掉后端某个 agent 的持久会话，让下一条消息开新会话。
-  /// 与本地“清空对话”配套：否则后端仍会 resume 已删除的上下文。
+  /// Fetches the stored conversation for one agent so the app can show the
+  /// previous chat on reopen without persisting anything locally.
+  Future<List<ChatMessage>> fetchHistory(String agentKey) async {
+    final Object? decoded =
+        await _requestJson('GET', '/api/history?agent=$agentKey');
+    if (decoded is! Map) {
+      throw BackendException('历史响应格式不正确。');
+    }
+    final List<Object?> raw = decoded['messages'] is List
+        ? (decoded['messages'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw.whereType<Map>().map((Map item) {
+      final Map<String, Object?> json = item.cast<String, Object?>();
+      final String content = json['content'] as String? ?? '';
+      return (json['role'] as String? ?? 'assistant') == 'user'
+          ? ChatMessage.user(content)
+          : ChatMessage.assistant(content);
+    }).toList(growable: false);
+  }
+
+  /// Best-effort login state per agent so the app can warn before sending a
+  /// message. Maps agentKey -> loggedIn, where the value is true/false when the
+  /// backend can read the CLI's credentials, or null when it cannot tell (agy).
+  Future<Map<String, bool?>> fetchAuthStatus() async {
+    final Object? decoded = await _requestJson('GET', '/api/auth/status');
+    final Map<String, bool?> result = <String, bool?>{};
+    if (decoded is Map && decoded['agents'] is List) {
+      for (final Object? item in (decoded['agents'] as List)) {
+        if (item is! Map) continue;
+        final String key = item['key'] as String? ?? '';
+        if (key.isEmpty) continue;
+        final Object? loggedIn = item['loggedIn'];
+        result[key] = loggedIn is bool ? loggedIn : null;
+      }
+    }
+    return result;
+  }
+
+  /// Clears the backend-side session for one agent so the next message starts
+  /// a new machine-side conversation after local history is cleared.
   Future<void> clearSession(String agentKey) async {
     await _requestJson(
       'POST',
@@ -201,12 +436,44 @@ class BackendClient {
   Future<WorkdirResetResult> resetWorkdir() async {
     final Object? decoded = await _requestJson('POST', '/api/workdir/reset');
     if (decoded is! Map) {
-      throw BackendException('重置工作目录响应格式不正确。');
+      throw BackendException('Invalid work directory reset response.');
     }
     return WorkdirResetResult(
       dir: decoded['dir'] as String? ?? '',
       count: decoded['count'] as int? ?? 0,
     );
+  }
+
+  Future<WorkdirInfo> workdir() async {
+    final Object? decoded = await _requestJson('GET', '/api/workdir');
+    if (decoded is! Map) {
+      throw BackendException('Invalid work directory response.');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<WorkdirInfo> checkWorkdir(String path) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/workdir/check',
+      body: <String, Object?>{'path': path},
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid work directory check response.');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/workdir',
+      body: <String, Object?>{'path': path, 'create': create},
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid work directory update response.');
+    }
+    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
 
   Stream<BackendEvent> streamEvents() async* {
@@ -225,11 +492,14 @@ class BackendClient {
       throw _exceptionFor(response.statusCode, text);
     }
 
+    yield* _parseSse(response.stream);
+  }
+
+  Stream<BackendEvent> _parseSse(Stream<List<int>> stream) async* {
     String eventType = 'message';
     final StringBuffer data = StringBuffer();
-    await for (final String line in response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
+    await for (final String line
+        in stream.transform(utf8.decoder).transform(const LineSplitter())) {
       if (line.isEmpty) {
         if (data.isNotEmpty) {
           yield BackendEvent(type: eventType, data: _decodeEventData(data));
@@ -245,6 +515,25 @@ class BackendClient {
         data.write(line.substring(5).trimLeft());
       }
     }
+  }
+
+  ChatReply _chatReplyFromStreamDone(
+    Map<String, Object?> json,
+    String requestId,
+    String agentKey,
+  ) {
+    final Map<String, Object?> agent =
+        (json['agent'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final Map<String, Object?> message =
+        (json['message'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    return ChatReply(
+      requestId: json['requestId'] as String? ?? requestId,
+      agentKey: agent['key'] as String? ?? agentKey,
+      agentLabel: agent['label'] as String? ?? agentKey,
+      content: message['content'] as String? ?? '',
+    );
   }
 
   Future<Object?> _requestJson(
@@ -290,14 +579,14 @@ class BackendClient {
     try {
       return jsonDecode(response.body);
     } on FormatException {
-      throw BackendException('后端返回了非 JSON 内容。');
+      throw BackendException('Backend returned non-JSON content.');
     }
   }
 
   Future<MachineCredential> _requireCredential() async {
     final MachineCredential? credential = await _credentialsStore.readActive();
     if (credential == null) {
-      throw BackendException('请先导入这台机器提供的凭证文件。');
+      throw BackendException('Import a machine credential first.');
     }
     return credential;
   }

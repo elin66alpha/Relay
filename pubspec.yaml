@@ -16,6 +16,11 @@ dependencies:
   http: ^1.2.0
   cryptography: ^2.7.0
   mobile_scanner: ^7.2.0
+  flutter_local_notifications: ^21.0.0
+  image: ^4.8.0
+  zxing2: ^0.2.4
+  file_picker: ^11.0.2
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

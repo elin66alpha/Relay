@@ -11,6 +11,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by flutter_local_notifications (uses java.time APIs on older SDKs).
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -32,8 +34,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Dev stage: every APK (debug and release) is debug-signed. We do not
+            // maintain a release keystore yet, so the release build reuses the debug
+            // signing config. Revisit before any public/Play Store distribution.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -41,4 +44,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Backports java.time used by flutter_local_notifications to minSdk levels.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

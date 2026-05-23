@@ -23,7 +23,7 @@ class MachineCredential {
   final String token;
   final String createdAt;
 
-  String get displayName => name.isEmpty ? '未命名机器' : name;
+  String get displayName => name.isEmpty ? 'Unnamed machine' : name;
 
   String get hostLabel {
     final Uri? parsed = Uri.tryParse(baseUrl);
@@ -59,21 +59,27 @@ class MachineCredential {
 
   void validate() {
     if (id.trim().isEmpty) {
-      throw const MachineCredentialException('凭证缺少机器 id。');
+      throw const MachineCredentialException(
+        'Credential is missing a machine id.',
+      );
     }
     if (baseUrl.trim().isEmpty) {
-      throw const MachineCredentialException('凭证缺少公网访问地址。');
+      throw const MachineCredentialException(
+        'Credential is missing a public URL.',
+      );
     }
     final Uri? parsed = Uri.tryParse(baseUrl);
     if (parsed == null ||
         parsed.host.isEmpty ||
         !(parsed.isScheme('http') || parsed.isScheme('https'))) {
       throw const MachineCredentialException(
-        '凭证里的访问地址必须是 http:// 或 https:// URL。',
+        'The credential URL must start with http:// or https://.',
       );
     }
     if (token.trim().isEmpty) {
-      throw const MachineCredentialException('凭证缺少访问令牌。');
+      throw const MachineCredentialException(
+        'Credential is missing an access token.',
+      );
     }
   }
 }

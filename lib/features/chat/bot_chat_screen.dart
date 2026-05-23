@@ -1,7 +1,10 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -34,20 +37,27 @@ class _BotChatScreenState extends State<BotChatScreen> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
+  bool _autoScrollQueued = false;
+  int _lastMessageCount = 0;
+
   @override
   void initState() {
     super.initState();
-    widget.chatController.addListener(_scrollToBottomSoon);
+    widget.chatController.addListener(_onChatChanged);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
+    widget.settingsController.addListener(_onSettingsChanged);
     _syncContext();
+    // Open straight at the latest message rather than the top of the list.
+    _onChatChanged();
   }
 
   @override
   void dispose() {
-    widget.chatController.removeListener(_scrollToBottomSoon);
+    widget.chatController.removeListener(_onChatChanged);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
+    widget.settingsController.removeListener(_onSettingsChanged);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -57,7 +67,12 @@ class _BotChatScreenState extends State<BotChatScreen> {
     _syncContext();
   }
 
+  void _onSettingsChanged() {
+    widget.chatController.setLanguage(widget.settingsController.language);
+  }
+
   void _syncContext() {
+    widget.chatController.setLanguage(widget.settingsController.language);
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) return;
@@ -80,17 +95,52 @@ class _BotChatScreenState extends State<BotChatScreen> {
   }
 
   Future<void> _sendCompact() async {
-    await widget.chatController.sendUserText('/compact');
+    try {
+      await widget.chatController.compressConversation();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (BuildContext ctx) => AlertDialog(
+          title: Text(context.l10n.compressComplete),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(context.l10n.ok),
+            ),
+          ],
+        ),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.compressFailed(err)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
   }
 
-  void _scrollToBottomSoon() {
+  // A streaming reply notifies many times per second. Calling animateTo on each
+  // notification restarts the animation every frame, which is the main source
+  // of scroll jank (and it gets worse as the list grows). Instead, coalesce to
+  // at most one scroll per frame, jump rather than animate so nothing competes,
+  // and leave the user alone when they have scrolled up to read older messages.
+  void _onChatChanged() {
+    if (_autoScrollQueued) return;
+    _autoScrollQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoScrollQueued = false;
       if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-      );
+      final ScrollPosition pos = _scroll.position;
+      final int count = widget.chatController.messages.length;
+      final bool messageAdded = count != _lastMessageCount;
+      _lastMessageCount = count;
+      final bool nearBottom = pos.maxScrollExtent - pos.pixels < 280;
+      // Follow streaming text only while pinned to the bottom; always snap when
+      // a new message (user send / new reply bubble) is appended.
+      if (!nearBottom && !messageAdded) return;
+      _scroll.jumpTo(pos.maxScrollExtent);
     });
   }
 
@@ -117,30 +167,82 @@ class _BotChatScreenState extends State<BotChatScreen> {
     }
   }
 
+  Future<void> _showUsageDialog() async {
+    final Future<UsageReport> usageFuture = widget.chatController.usageReport();
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.usageTitle),
+          content: SizedBox(
+            width: 420,
+            child: FutureBuilder<UsageReport>(
+              future: usageFuture,
+              builder:
+                  (BuildContext context, AsyncSnapshot<UsageReport> snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return Text(context.l10n.loadingUsage);
+                }
+                if (snapshot.hasError) {
+                  return Text(
+                    snapshot.error.toString(),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
+                  );
+                }
+                final UsageReport report = snapshot.data!;
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      for (final UsageAgent agent in report.agents)
+                        _UsageAgentPanel(agent: agent),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.close),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bool usePermanentSidebar = MediaQuery.sizeOf(context).width >= 900;
+    final Widget sidebar = CliAgentsDrawer(
+      agentsController: widget.agentsController,
+      chatController: widget.chatController,
+      machinesController: widget.machinesController,
+      settingsController: widget.settingsController,
+      closeOnAction: !usePermanentSidebar,
+    );
     return Scaffold(
       drawerScrimColor: Colors.black54,
-      drawer: Drawer(
-        child: SafeArea(
-          child: CliAgentsDrawer(
-            agentsController: widget.agentsController,
-            chatController: widget.chatController,
-            machinesController: widget.machinesController,
-            settingsController: widget.settingsController,
-          ),
-        ),
-      ),
+      drawer: usePermanentSidebar
+          ? null
+          : Drawer(
+              child: SafeArea(child: sidebar),
+            ),
       appBar: AppBar(
-        leading: Builder(
-          builder: (BuildContext context) {
-            return IconButton(
-              icon: const Icon(Icons.menu),
-              tooltip: context.l10n.menu,
-              onPressed: () => Scaffold.of(context).openDrawer(),
-            );
-          },
-        ),
+        leading: usePermanentSidebar
+            ? null
+            : Builder(
+                builder: (BuildContext context) {
+                  return IconButton(
+                    icon: const Icon(Icons.menu),
+                    tooltip: context.l10n.menu,
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  );
+                },
+              ),
         title: AnimatedBuilder(
           animation: Listenable.merge(<Listenable>[
             widget.agentsController,
@@ -202,65 +304,134 @@ class _BotChatScreenState extends State<BotChatScreen> {
               return IconButton(
                 icon: const Icon(Icons.query_stats_outlined),
                 tooltip: context.l10n.usage,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : widget.chatController.appendUsage,
+                onPressed:
+                    widget.chatController.isThinking ? null : _showUsageDialog,
               );
             },
           ),
         ],
       ),
       body: SafeArea(
-        child: AnimatedBuilder(
-          animation: Listenable.merge(<Listenable>[
-            widget.agentsController,
-            widget.machinesController,
-            widget.chatController,
-          ]),
-          builder: (BuildContext context, Widget? _) {
-            final CliAgent agent = widget.agentsController.activeAgent;
-            return Column(
-              children: <Widget>[
-                Expanded(
-                  child: widget.chatController.messages.isEmpty
-                      ? _EmptyChatPlaceholder(agentName: agent.label)
-                      : ListView.builder(
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                          itemCount: widget.chatController.messages.length,
-                          itemBuilder: (BuildContext context, int index) {
-                            final ChatMessage message =
-                                widget.chatController.messages[index];
-                            return _MessageBubble(
-                              message: message,
-                              retryable:
-                                  widget.chatController.isRetryable(message),
-                              awaitingFirstToken: widget.chatController
-                                  .isAwaitingFirstToken(message),
-                              errorDetail:
-                                  widget.chatController.errorDetailFor(message),
-                              system: widget.chatController
-                                  .isSystemMessage(message),
-                              cancelled:
-                                  widget.chatController.isCancelled(message),
-                              progressLines: widget.chatController
-                                  .progressLinesFor(message),
-                              onRetry: () =>
-                                  widget.chatController.retry(message),
-                            );
-                          },
+        child: Row(
+          children: <Widget>[
+            if (usePermanentSidebar)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  border: Border(
+                    right: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                ),
+                child: SizedBox(width: 320, child: sidebar),
+              ),
+            Expanded(
+              child: AnimatedBuilder(
+                animation: Listenable.merge(<Listenable>[
+                  widget.agentsController,
+                  widget.machinesController,
+                  widget.chatController,
+                ]),
+                builder: (BuildContext context, Widget? _) {
+                  final CliAgent agent = widget.agentsController.activeAgent;
+                  return Column(
+                    children: <Widget>[
+                      if (widget.chatController.agentLoggedIn(agent.key) ==
+                          false)
+                        _NotLoggedInBanner(
+                          agentLabel: agent.label,
+                          onRecheck: widget.chatController.refreshAuthStatus,
                         ),
+                      Expanded(
+                        child: widget.chatController.messages.isEmpty
+                            ? _EmptyChatPlaceholder(agentName: agent.label)
+                            : ListView.builder(
+                                controller: _scroll,
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                                itemCount:
+                                    widget.chatController.messages.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final ChatMessage message =
+                                      widget.chatController.messages[index];
+                                  return _MessageBubble(
+                                    message: message,
+                                    retryable: widget.chatController
+                                        .isRetryable(message),
+                                    awaitingFirstToken: widget.chatController
+                                        .isAwaitingFirstToken(message),
+                                    errorDetail: widget.chatController
+                                        .errorDetailFor(message),
+                                    system: widget.chatController
+                                        .isSystemMessage(message),
+                                    cancelled: widget.chatController
+                                        .isCancelled(message),
+                                    progressLines: widget.chatController
+                                        .progressLinesFor(message),
+                                    onRetry: () =>
+                                        widget.chatController.retry(message),
+                                  );
+                                },
+                              ),
+                      ),
+                      _InputBar(
+                        controller: _input,
+                        isThinking: widget.chatController.isThinking,
+                        isCancelling: widget.chatController.isCancelling,
+                        onSend: _send,
+                        onCancel: widget.chatController.cancelActiveTurn,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NotLoggedInBanner extends StatelessWidget {
+  const _NotLoggedInBanner({
+    required this.agentLabel,
+    required this.onRecheck,
+  });
+
+  final String agentLabel;
+  final Future<void> Function() onRecheck;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.lock_outline_rounded,
+              size: 18,
+              color: colors.onErrorContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                context.l10n.agentNotLoggedInBanner(agentLabel),
+                style: TextStyle(
+                  color: colors.onErrorContainer,
+                  fontSize: 13,
                 ),
-                _InputBar(
-                  controller: _input,
-                  isThinking: widget.chatController.isThinking,
-                  isCancelling: widget.chatController.isCancelling,
-                  onSend: _send,
-                  onCancel: widget.chatController.cancelActiveTurn,
-                ),
-              ],
-            );
-          },
+              ),
+            ),
+            TextButton(
+              onPressed: () => onRecheck(),
+              child: Text(context.l10n.recheck),
+            ),
+          ],
         ),
       ),
     );
@@ -286,7 +457,119 @@ class _EmptyChatPlaceholder extends StatelessWidget {
   }
 }
 
-class _InputBar extends StatelessWidget {
+class _UsageAgentPanel extends StatelessWidget {
+  const _UsageAgentPanel({required this.agent});
+
+  final UsageAgent agent;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  agent.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (agent.detail.isNotEmpty)
+                Text(
+                  agent.detail,
+                  style: TextStyle(color: colors.outline, fontSize: 12),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (!agent.available)
+            Text(
+              context.l10n.unavailable,
+              style: TextStyle(color: colors.outline),
+            )
+          else if (agent.error != null)
+            Text(
+              agent.error!,
+              style: TextStyle(color: colors.error),
+            )
+          else
+            for (final UsageQuota quota in agent.quotas)
+              _UsageQuotaRow(quota: quota),
+        ],
+      ),
+    );
+  }
+}
+
+class _UsageQuotaRow extends StatelessWidget {
+  const _UsageQuotaRow({required this.quota});
+
+  final UsageQuota quota;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String label = switch (quota.key) {
+      'five_hour' => context.l10n.fiveHourQuota,
+      'seven_day' => context.l10n.weeklyQuota,
+      _ => quota.label,
+    };
+    final String percent = quota.remainingPercent == null
+        ? context.l10n.unknown
+        : '${quota.remainingPercent!.round()}%';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('$percent ${context.l10n.remaining}'),
+                const SizedBox(height: 2),
+                Text(
+                  '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
+                  style: TextStyle(color: colors.outline, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatUsageTime(BuildContext context, String? iso) {
+  if (iso == null || iso.isEmpty) return context.l10n.unknown;
+  final DateTime? parsed = DateTime.tryParse(iso);
+  if (parsed == null) return context.l10n.unknown;
+  final DateTime local = parsed.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
+}
+
+class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
     required this.isThinking,
@@ -302,9 +585,40 @@ class _InputBar extends StatelessWidget {
   final VoidCallback onCancel;
 
   @override
+  State<_InputBar> createState() => _InputBarState();
+}
+
+class _InputBarState extends State<_InputBar> {
+  final FocusNode _inputFocus = FocusNode();
+
+  @override
+  void didUpdateWidget(_InputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // On web the text field loses focus once a reply finishes, forcing the user
+    // to click back into it. Refocus when the turn ends. On mobile we leave
+    // focus alone so we don't pop the soft keyboard open after every reply.
+    if (kIsWeb && oldWidget.isThinking && !widget.isThinking) {
+      _inputFocus.requestFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    _inputFocus.dispose();
+    super.dispose();
+  }
+
+  void _submitFromKeyboard() {
+    if (!kIsWeb) return;
+    if (!widget.isThinking) {
+      widget.onSend();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final bool canSend = !isThinking;
-    final bool canCancel = isThinking && !isCancelling;
+    final bool canSend = !widget.isThinking;
+    final bool canCancel = widget.isThinking && !widget.isCancelling;
     final ColorScheme colors = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -313,38 +627,82 @@ class _InputBar extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: controller,
-                enabled: canSend,
-                minLines: 1,
-                maxLines: 6,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: context.l10n.inputHint,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                Expanded(
+                  child: kIsWeb
+                      ? CallbackShortcuts(
+                          bindings: <ShortcutActivator, VoidCallback>{
+                            const SingleActivator(LogicalKeyboardKey.enter):
+                                _submitFromKeyboard,
+                          },
+                          child: _MessageTextField(
+                            focusNode: _inputFocus,
+                            controller: widget.controller,
+                            enabled: canSend,
+                          ),
+                        )
+                      : _MessageTextField(
+                          focusNode: _inputFocus,
+                          controller: widget.controller,
+                          enabled: canSend,
+                        ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: isThinking
-                  ? canCancel
-                      ? onCancel
-                      : null
-                  : onSend,
-              icon: Icon(
-                isThinking ? Icons.stop_rounded : Icons.arrow_upward_rounded,
-              ),
-              tooltip: isThinking ? context.l10n.stop : context.l10n.send,
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: widget.isThinking
+                      ? canCancel
+                          ? widget.onCancel
+                          : null
+                      : canSend
+                          ? widget.onSend
+                          : null,
+                  icon: Icon(
+                    widget.isThinking
+                        ? Icons.stop_rounded
+                        : Icons.arrow_upward_rounded,
+                  ),
+                  tooltip:
+                      widget.isThinking ? context.l10n.stop : context.l10n.send,
+                ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageTextField extends StatelessWidget {
+  const _MessageTextField({
+    required this.focusNode,
+    required this.controller,
+    required this.enabled,
+  });
+
+  final FocusNode focusNode;
+  final TextEditingController controller;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      focusNode: focusNode,
+      controller: controller,
+      enabled: enabled,
+      minLines: 1,
+      maxLines: 6,
+      textInputAction: TextInputAction.newline,
+      decoration: InputDecoration(
+        hintText: context.l10n.inputHint,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
         ),
       ),
     );
