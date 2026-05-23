@@ -14,6 +14,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 
 - One backend machine can expose Claude Code, Codex, and Antigravity from the same work directory.
 - Each device has isolated persistent sessions per agent.
+- The app stores no chat history locally. The conversation is kept on the backend (the CLI host) and reloaded when the app reopens, so it opens at your latest message rather than the top. Clearing chat wipes both the backend history and the agent's resumable session.
 - Claude Code and Codex stream assistant text over SSE.
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.

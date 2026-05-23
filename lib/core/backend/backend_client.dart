@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../i18n/app_strings.dart';
+import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
@@ -338,6 +339,26 @@ class BackendClient {
       throw BackendException('Invalid speech transcription response.');
     }
     return SttResult.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Fetches the stored conversation for one agent so the app can show the
+  /// previous chat on reopen without persisting anything locally.
+  Future<List<ChatMessage>> fetchHistory(String agentKey) async {
+    final Object? decoded =
+        await _requestJson('GET', '/api/history?agent=$agentKey');
+    if (decoded is! Map) {
+      throw BackendException('历史响应格式不正确。');
+    }
+    final List<Object?> raw = decoded['messages'] is List
+        ? (decoded['messages'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw.whereType<Map>().map((Map item) {
+      final Map<String, Object?> json = item.cast<String, Object?>();
+      final String content = json['content'] as String? ?? '';
+      return (json['role'] as String? ?? 'assistant') == 'user'
+          ? ChatMessage.user(content)
+          : ChatMessage.assistant(content);
+    }).toList(growable: false);
   }
 
   /// Clears the backend-side session for one agent so the next message starts

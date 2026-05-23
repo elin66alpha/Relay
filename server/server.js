@@ -27,6 +27,7 @@ const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { SttError, transcribeAudio } = require('./lib/stt');
+const { readHistory, appendHistory, clearHistory } = require('./lib/history');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -289,13 +290,20 @@ app.post('/api/chat', async (req, res) => {
       agent,
       deviceId,
     });
+    const createdAt = new Date().toISOString();
+    // Record the completed turn so the app can reload it after a restart.
+    // Only successful turns are stored; cancelled/failed turns are skipped.
+    appendHistory(scopeKey, [
+      { role: 'user', content: prompt, agent: agent.key, createdAt },
+      { role: 'assistant', content, agent: agent.key, createdAt },
+    ]);
     return res.json({
       requestId,
       agent: agentPayload(agent),
       message: {
         role: 'assistant',
         content,
-        createdAt: new Date().toISOString(),
+        createdAt,
       },
     });
   } catch (err) {
@@ -361,6 +369,26 @@ app.post('/api/chat/cancel', (req, res) => {
   return res.json({ ok: true, requestId });
 });
 
+// Return the stored conversation for this device + agent so the app can show
+// the previous chat on reopen without persisting anything locally.
+app.get('/api/history', (req, res) => {
+  const agentKey = String(req.query.agent || '').trim();
+  const deviceId = normalizeDeviceId(req.get('x-device-id'));
+  if (!agentKey) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
+  }
+  const scopeKey = sessionKeyFor(agent.key, deviceId);
+  return res.json({
+    agent: agent.key,
+    deviceId,
+    messages: readHistory(scopeKey),
+  });
+});
+
 app.get('/api/usage', async (_req, res) => {
   try {
     const report = await buildUsageReport();
@@ -407,11 +435,14 @@ app.post('/api/session/clear', (req, res) => {
     }
     const sessionKey = sessionKeyFor(agent.key, deviceId);
     const cleared = clearSession(sessionKey);
+    clearHistory(sessionKey);
     return res.json({ ok: true, agent: agentKey, deviceId, cleared });
   }
   let cleared = 0;
   for (const agent of listAgents()) {
-    if (clearSession(sessionKeyFor(agent.key, deviceId))) cleared += 1;
+    const sessionKey = sessionKeyFor(agent.key, deviceId);
+    if (clearSession(sessionKey)) cleared += 1;
+    clearHistory(sessionKey);
   }
   return res.json({ ok: true, deviceId, cleared });
 });

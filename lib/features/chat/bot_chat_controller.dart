@@ -10,14 +10,11 @@ import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/settings/app_settings_controller.dart';
-import '../../core/storage/chat_history_store.dart';
 
 class BotChatController extends ChangeNotifier {
   BotChatController({
     BackendClient? backendClient,
-    ChatHistoryStore? historyStore,
-  })  : _backendClient = backendClient ?? BackendClient(),
-        _historyStore = historyStore ?? ChatHistoryStore();
+  }) : _backendClient = backendClient ?? BackendClient();
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -29,7 +26,6 @@ class BotChatController extends ChangeNotifier {
   static const String _cancelledKey = 'cancelled';
 
   final BackendClient _backendClient;
-  final ChatHistoryStore _historyStore;
 
   CliAgent _agent = defaultCliAgents.first;
   MachineCredential? _machine;
@@ -77,16 +73,17 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<void> loadFor(CliAgent agent, MachineCredential machine) async {
-    if (_agent.key == agent.key &&
-        _machine?.id == machine.id &&
-        _messages.isNotEmpty) {
-      _agent = agent;
-      _machine = machine;
+    // The app keeps no local chat history: the backend (CLI host) owns it and
+    // we fetch it back here. Keep the in-memory messages while the agent/machine
+    // is unchanged; switching either starts fresh and reloads from the backend.
+    final bool sameContext =
+        _agent.key == agent.key && _machine?.id == machine.id;
+    _agent = agent;
+    _machine = machine;
+    if (sameContext) {
       notifyListeners();
       return;
     }
-    _agent = agent;
-    _machine = machine;
     _messages.clear();
     _lastError = null;
     _isThinking = false;
@@ -94,23 +91,28 @@ class BotChatController extends ChangeNotifier {
     _activeRequestId = null;
     notifyListeners();
 
-    final List<ChatMessage> loaded =
-        await _historyStore.read(_historyKey(agent, machine));
-    if (_agent.key != agent.key || _machine?.id != machine.id) return;
-    _messages
-      ..clear()
-      ..addAll(loaded);
-    notifyListeners();
+    // Pull the previous conversation so reopening the app shows it. Best-effort:
+    // ignore failures (offline / no history), and never clobber messages the
+    // user has already typed or sent while this was in flight.
+    try {
+      final List<ChatMessage> history =
+          await _backendClient.fetchHistory(agent.key);
+      if (_agent.key != agent.key ||
+          _machine?.id != machine.id ||
+          _messages.isNotEmpty) {
+        return;
+      }
+      _messages.addAll(history);
+      notifyListeners();
+    } catch (_) {
+      // Leave the view empty when history can't be loaded.
+    }
   }
 
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
     _messages.clear();
     _lastError = null;
-    final MachineCredential? machine = _machine;
-    if (machine != null) {
-      await _historyStore.clear(_historyKey(agent, machine));
-    }
     notifyListeners();
     // Also reset the machine-side session; otherwise the next prompt may
     // resume context that the user just cleared locally.
@@ -128,7 +130,6 @@ class BotChatController extends ChangeNotifier {
     final ChatMessage userMessage = ChatMessage.user(text);
     _messages.add(userMessage);
     notifyListeners();
-    await _persist();
     await _runTurn(_agent, userMessage);
   }
 
@@ -199,7 +200,6 @@ class BotChatController extends ChangeNotifier {
       _appendSystemMessage(
         _strings.workdirResetSuccess(result.count, result.dir),
       );
-      await _persist();
     } catch (err) {
       _lastError = err.toString();
       _appendSystemMessage(_strings.workdirResetFailed(err));
@@ -253,11 +253,9 @@ class BotChatController extends ChangeNotifier {
           'agentLabel': reply.agentLabel,
         },
       );
-      await _persist();
     } catch (err) {
       if (err is BackendException && err.code == 'AGENT_CANCELLED') {
         _markAssistantCancelled(requestId);
-        await _persist();
       } else {
         _discardAssistantByRequestId(requestId);
         final String detail =
@@ -266,7 +264,6 @@ class BotChatController extends ChangeNotifier {
                 : err.toString();
         _markUserDeliveryFailed(userMessage.id, detail);
         _lastError = detail;
-        await _persist();
       }
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
@@ -428,15 +425,6 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
-    final MachineCredential? machine = _machine;
-    if (machine == null) return;
-    await _historyStore.write(_historyKey(_agent, machine), _messages);
-  }
-
-  String _historyKey(CliAgent agent, MachineCredential machine) =>
-      'machine.${machine.id}.cli.${agent.key}';
-
   String _newRequestId(CliAgent agent) {
     final int micros = DateTime.now().microsecondsSinceEpoch;
     return '${agent.key}.$micros';
@@ -487,7 +475,6 @@ class BotChatController extends ChangeNotifier {
       final String requestId = event.data['requestId'] as String? ?? '';
       if (requestId.isNotEmpty) {
         _markAssistantCancelled(requestId);
-        _persist();
       }
       return;
     }

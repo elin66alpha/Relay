@@ -48,6 +48,8 @@ class _BotChatScreenState extends State<BotChatScreen> {
     widget.machinesController.addListener(_onContextChanged);
     widget.settingsController.addListener(_onSettingsChanged);
     _syncContext();
+    // Open straight at the latest message rather than the top of the list.
+    _scrollToBottom(animated: false);
   }
 
   @override
@@ -103,14 +105,21 @@ class _BotChatScreenState extends State<BotChatScreen> {
     );
   }
 
-  void _scrollToBottomSoon() {
+  void _scrollToBottomSoon() => _scrollToBottom(animated: true);
+
+  void _scrollToBottom({required bool animated}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-      );
+      final double target = _scroll.position.maxScrollExtent;
+      if (animated) {
+        _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _scroll.jumpTo(target);
+      }
     });
   }
 
