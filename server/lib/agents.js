@@ -383,7 +383,13 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
   // new sessions still pass -C explicitly.
   const args = resuming
     ? ['exec', 'resume', ...common, prior.id, String(prompt)]
-    : ['exec', ...common, '-C', cwd, String(prompt)];
+    : [
+        'exec',
+        ...common,
+        '-C',
+        cwd,
+        String(prompt),
+      ];
 
   let threadId = resuming ? prior.id : null;
   let sawTextDelta = false;

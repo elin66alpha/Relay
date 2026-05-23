@@ -26,8 +26,6 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AgentDeck records voice input so the backend can transcribe it into text.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

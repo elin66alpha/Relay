@@ -27,7 +27,6 @@ const {
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
-const { SttError, transcribeAudio } = require('./lib/stt');
 const { authStatus } = require('./lib/auth-status');
 const { readHistory, appendHistory, clearHistory } = require('./lib/history');
 
@@ -95,16 +94,6 @@ function sendWorkdirError(res, err) {
       error: err.message,
       code: err.code,
       dir: err.dir,
-    });
-  }
-  return res.status(500).json({ error: err.message });
-}
-
-function sendSttError(res, err) {
-  if (err instanceof SttError) {
-    return res.status(err.status || 400).json({
-      error: err.message,
-      code: err.code,
     });
   }
   return res.status(500).json({ error: err.message });
@@ -257,6 +246,7 @@ app.post('/api/chat', async (req, res) => {
   const agentKey = String(req.body.agent || DEFAULT_AGENT).trim();
   const requestId = String(req.body.requestId || randomUUID()).trim();
   const prompt = String(req.body.prompt || '').trim();
+  const recordHistory = req.body.recordHistory !== false;
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
@@ -367,10 +357,12 @@ app.post('/api/chat', async (req, res) => {
     const createdAt = new Date().toISOString();
     // Record the completed turn so the app can reload it after a restart.
     // Only successful turns are stored; cancelled/failed turns are skipped.
-    appendHistory(scopeKey, [
-      { role: 'user', content: prompt, agent: agent.key, createdAt },
-      { role: 'assistant', content, agent: agent.key, createdAt },
-    ]);
+    if (recordHistory) {
+      appendHistory(scopeKey, [
+        { role: 'user', content: prompt, agent: agent.key, createdAt },
+        { role: 'assistant', content, agent: agent.key, createdAt },
+      ]);
+    }
     const reply = {
       requestId,
       agent: agentPayload(agent),
@@ -523,30 +515,6 @@ app.get('/api/usage', async (_req, res) => {
     return res.json(report);
   } catch (err) {
     return res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/stt', async (req, res) => {
-  try {
-    const audioBase64 = String((req.body && req.body.audioBase64) || '').trim();
-    if (!audioBase64) {
-      throw new SttError('audioBase64 is required', {
-        code: 'STT_AUDIO_REQUIRED',
-      });
-    }
-    const result = await transcribeAudio({
-      buffer: Buffer.from(audioBase64, 'base64'),
-      mimeType: String((req.body && req.body.mimeType) || 'audio/mp4'),
-      language: String((req.body && req.body.language) || 'auto'),
-    });
-    return res.json({
-      text: result.text,
-      model: result.model,
-      language: result.language,
-      createdAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    return sendSttError(res, err);
   }
 });
 

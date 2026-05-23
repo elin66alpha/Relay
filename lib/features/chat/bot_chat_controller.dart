@@ -147,6 +147,30 @@ class BotChatController extends ChangeNotifier {
     }
   }
 
+  Future<void> compressConversation() async {
+    if (_isThinking || _machine == null) return;
+    _isThinking = true;
+    _isCancelling = false;
+    _lastError = null;
+    final String requestId = _newRequestId(_agent);
+    _activeRequestId = requestId;
+    notifyListeners();
+    try {
+      await _backendClient.compressConversation(
+        agentKey: _agent.key,
+        requestId: requestId,
+      );
+    } catch (err) {
+      _lastError = err.toString();
+      rethrow;
+    } finally {
+      if (_activeRequestId == requestId) _activeRequestId = null;
+      _isThinking = false;
+      _isCancelling = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> sendUserText(String rawText) async {
     final String text = rawText.trim();
     if (text.isEmpty || _isThinking || _machine == null) return;
@@ -192,19 +216,6 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<UsageReport> usageReport() => _backendClient.usageReport();
-
-  Future<String> transcribeAudio({
-    required Uint8List bytes,
-    required String mimeType,
-    required String language,
-  }) async {
-    final SttResult result = await _backendClient.transcribeAudio(
-      bytes: bytes,
-      mimeType: mimeType,
-      language: language,
-    );
-    return result.text.trim();
-  }
 
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
 

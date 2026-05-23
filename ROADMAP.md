@@ -17,7 +17,6 @@
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
 - Work directory management from the app, persisted to backend `.env`.
 - Protected APIs reject requests when no token has been generated yet.
-- Voice input with backend OpenAI speech-to-text transcription and Auto / Chinese / English language hints.
 
 ## Planned
 

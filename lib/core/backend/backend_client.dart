@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -200,23 +199,6 @@ class UsageReport {
   final List<UsageAgent> agents;
 }
 
-class SttResult {
-  const SttResult({
-    required this.text,
-    required this.model,
-  });
-
-  factory SttResult.fromJson(Map<String, Object?> json) {
-    return SttResult(
-      text: json['text'] as String? ?? '',
-      model: json['model'] as String? ?? '',
-    );
-  }
-
-  final String text;
-  final String model;
-}
-
 class BackendEvent {
   const BackendEvent({
     required this.type,
@@ -308,6 +290,23 @@ class BackendClient {
     );
   }
 
+  Future<void> compressConversation({
+    required String agentKey,
+    required String requestId,
+  }) async {
+    await _requestJson(
+      'POST',
+      '/api/chat',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'prompt': '/compact',
+        'requestId': requestId,
+        'recordHistory': false,
+      },
+      timeout: const Duration(minutes: 65),
+    );
+  }
+
   Future<ChatReply> _sendMessageStreamed({
     required String agentKey,
     required String prompt,
@@ -384,27 +383,6 @@ class BackendClient {
       throw BackendException('Invalid usage response.');
     }
     return UsageReport.fromJson(decoded.cast<String, Object?>());
-  }
-
-  Future<SttResult> transcribeAudio({
-    required Uint8List bytes,
-    required String mimeType,
-    required String language,
-  }) async {
-    final Object? decoded = await _requestJson(
-      'POST',
-      '/api/stt',
-      body: <String, Object?>{
-        'audioBase64': base64Encode(bytes),
-        'mimeType': mimeType,
-        'language': language,
-      },
-      timeout: const Duration(minutes: 2),
-    );
-    if (decoded is! Map) {
-      throw BackendException('Invalid speech transcription response.');
-    }
-    return SttResult.fromJson(decoded.cast<String, Object?>());
   }
 
   /// Fetches the stored conversation for one agent so the app can show the

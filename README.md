@@ -22,7 +22,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
 - Protected backend APIs stay closed until at least one credential token has been generated.
 - The same Flutter client runs on mobile and Web. Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar.
-- Voice input records audio in the app/browser, sends it to the backend for OpenAI speech-to-text transcription, and inserts the text into the message box without auto-sending.
+- The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
 
 ## Repository Layout
 
@@ -31,7 +31,7 @@ AgentDeck/
 ├── lib/                  Flutter client
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
-│   ├── core/storage/     secure storage and local history
+│   ├── core/storage/     secure storage and device identity
 │   └── features/         chat, drawer, credentials, settings, work directory
 └── server/               local Node backend
     ├── server.js         HTTP API + SSE events
@@ -89,16 +89,9 @@ BOTS_SESSION_DIR=
 AGENT_TIMEOUT_MS=3600000
 ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
-OPENAI_API_KEY=
-STT_MODEL=gpt-4o-mini-transcribe
-STT_MAX_AUDIO_BYTES=12582912
 ```
 
 Leave `BOTS_SESSION_DIR` empty to use `~/agent_deck`. The app can later change this directory through the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
-
-Voice input uses the backend's `OPENAI_API_KEY`. `STT_MODEL` defaults to
-`gpt-4o-mini-transcribe`. The app can hint the transcription language as Auto,
-Chinese, or English from Settings; Auto is the default.
 
 ## Credential QR
 
@@ -177,14 +170,15 @@ release keystore before any public/Play Store distribution.
 - `GET /api/health`
 - `GET /api/status`
 - `GET /api/agents`
+- `GET /api/auth/status`
 - `GET /api/usage`
-- `POST /api/stt`
 - `GET /api/workdir`
 - `POST /api/workdir/check`
 - `POST /api/workdir`
 - `POST /api/workdir/reset`
 - `POST /api/chat`
 - `POST /api/chat/cancel`
+- `GET /api/history`
 - `POST /api/session/clear`
 - `GET /api/events`
 

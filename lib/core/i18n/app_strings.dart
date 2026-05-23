@@ -106,6 +106,7 @@ class AppStrings {
   String get menu => isZh ? '菜单' : 'Menu';
   String get clearChat => isZh ? '清空当前对话' : 'Clear chat';
   String get close => isZh ? '关闭' : 'Close';
+  String get ok => isZh ? '确认' : 'OK';
   String get cancel => isZh ? '取消' : 'Cancel';
   String get clear => isZh ? '清空' : 'Clear';
   String get delete => isZh ? '删除' : 'Delete';
@@ -149,21 +150,12 @@ class AppStrings {
       : 'Private control surface for local Claude Code, Codex, and Antigravity CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
-  String get speechInput => isZh ? '语音输入' : 'Voice input';
-  String get speechLanguage => isZh ? '语音语言' : 'Speech language';
-  String get autoDetect => isZh ? '自动' : 'Auto';
-  String get chineseSpeech => isZh ? '中文' : 'Chinese';
-  String get englishSpeech => isZh ? '英文' : 'English';
-  String get startRecording => isZh ? '开始录音' : 'Start recording';
-  String get stopRecording => isZh ? '停止录音' : 'Stop recording';
-  String get transcribing => isZh ? '正在转文字' : 'Transcribing';
-  String transcriptionFailed(Object err) =>
-      isZh ? '语音识别失败：$err' : 'Speech transcription failed: $err';
-  String get microphonePermissionDenied =>
-      isZh ? '没有麦克风权限。' : 'Microphone permission was denied.';
   String get online => isZh ? '在线' : 'Online';
   String get offline => isZh ? '未在线' : 'Not online';
   String get compress => isZh ? '压缩对话' : 'Compress';
+  String get compressComplete => isZh ? '压缩完成' : 'Compression complete';
+  String compressFailed(Object err) =>
+      isZh ? '压缩失败：$err' : 'Compression failed: $err';
   String get english => 'English';
   String get chinese => '中文';
   String get systemTheme => isZh ? '跟随系统' : 'System';

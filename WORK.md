@@ -27,7 +27,36 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
-## 2026-05-23 — 未登录态适配（前后端，移动+Web）【未提交】
+## 2026-05-23 — 去除语音输入 / OpenAI STT【未提交，待真机测试】
+
+- 用户确认 OpenAI STT 不再使用。已移除聊天输入栏麦克风按钮、设置页语音语言选项、
+  Flutter 录音抽象、后端 `/api/stt`、OpenAI STT 环境变量、平台麦克风权限与相关依赖。
+- `server/.env` 不再需要 `OPENAI_API_KEY`、`STT_MODEL`、`STT_MAX_AUDIO_BYTES`。
+- README / ROADMAP / 当前 API 总览同步删除语音输入说明。
+
+## 2026-05-23 — 聊天优化 + 移除输入框 "/" 菜单 + 静默压缩【未提交，待真机测试】
+
+**滚动动画卡顿（移动 + Web）**
+- `bot_chat_screen.dart`：流式回复期间不再每次通知都 `animateTo`。现在每帧最多一次
+  `jumpTo`，用户上滑读历史时不强行拉到底，仅在贴底或新增消息时跟随。
+
+**Web 回复后输入框失焦**
+- `bot_chat_screen.dart` `_InputBar.didUpdateWidget`：Web 上一轮回复结束后重新聚焦输入框；
+  移动端不主动弹软键盘。
+
+**移除输入框 "/" 菜单**
+- 后端非交互模式（`claude --print` / `codex exec`）不能可靠转发交互式 slash 指令。
+  额度、清空、压缩已由明确按钮覆盖，因此删除输入框里的 slash 弹出菜单，避免误导。
+
+**去除模型选择残留**
+- 上次实现后又决定不保留模型选择。当前代码已删除聊天页入口、后端 `/api/chat` 参数、
+  agent 启动参数、相关 i18n 文案。
+
+**静默压缩**
+- 压缩按钮调用 `/api/chat` 时传 `recordHistory:false`，仍向当前 agent 发送 `/compact`，
+  但不在聊天界面插入用户消息、也不保存 agent 的压缩回复。完成后只弹出“压缩完成”确认框。
+
+## 2026-05-23 — 未登录态适配（前后端，移动+Web）
 
 **背景**：此前聊天主链路完全不感知 agent CLI 的登录态——某个平台没登录时，CLI 的
 登录错误会被当成「助手的回复」以 HTTP 200 返回，甚至被 `appendHistory` 当成功轮次
@@ -116,14 +145,11 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 ---
 
-## 2026-05-22 — 语音输入 + 清理遗留代码 (`7b16331`)
+## 2026-05-22 — 已废弃：语音输入 + 清理遗留代码 (`7b16331`)
 
-**意图**：接入语音输入，并删掉早期“app 内直接调用 LLM / 管理 agent provider”的整套
-遗留实现——现在架构是“客户端只控制后端 CLI”，那些代码已无用。
+**历史记录**：当时接入过语音输入；该功能已在 2026-05-23 后续记录中移除。该提交同时
+删掉早期“app 内直接调用 LLM / 管理 agent provider”的整套遗留实现。
 
-- 语音输入：客户端录音上传，后端 `POST /api/stt` 走 OpenAI STT
-  （`OPENAI_API_KEY`、`STT_MODEL=gpt-4o-mini-transcribe`、`STT_MAX_AUDIO_BYTES`）。
-  涉及 `backend_client.dart`、`app_strings.dart`、`AndroidManifest.xml`、`ios/Runner/Info.plist`。
 - 大规模删除遗留代码：`lib/core/llm/*`（claude/gemini/openai 客户端）、
   `lib/core/models/agent.dart`、`llm_provider.dart`、`lib/core/storage/agents_store.dart`、
   `api_keys_store.dart`、整个 `lib/features/agents/*`（agent 编辑/列表界面）。
@@ -161,6 +187,6 @@ AgentDeck 初始提交：Flutter 客户端 + Node.js 后端骨架。
 
 ## 后端接口总览（当前）
 
-`/api/health`、`/api/status`、`/api/agents`、`/api/usage`、`/api/stt`、
+`/api/health`、`/api/status`、`/api/agents`、`/api/auth/status`、`/api/usage`、
 `/api/workdir`、`/api/workdir/check`、`POST /api/workdir`、`/api/workdir/reset`、
-`/api/chat`、`/api/chat/cancel`、`/api/history`（新增）、`/api/session/clear`、`/api/events`。
+`/api/chat`、`/api/chat/cancel`、`/api/history`、`/api/session/clear`、`/api/events`。
