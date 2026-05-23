@@ -10,6 +10,7 @@ const express = require('express');
 
 const {
   AgentCancelledError,
+  AgentAuthError,
   DEFAULT_AGENT,
   TIMEOUT_MS,
   getAgent,
@@ -27,6 +28,7 @@ const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { SttError, transcribeAudio } = require('./lib/stt');
+const { authStatus } = require('./lib/auth-status');
 const { readHistory, appendHistory, clearHistory } = require('./lib/history');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
@@ -146,12 +148,55 @@ function emitAgentEvent(type, { requestId, agent, deviceId, ...payload }) {
   });
 }
 
+function wantsChatStream(req) {
+  return String(req.get('accept') || '')
+    .toLowerCase()
+    .includes('text/event-stream');
+}
+
+function writeStreamEvent(res, type, payload) {
+  res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function streamTextFallback(res, requestId, agent, deviceId, text) {
+  const value = String(text || '');
+  if (!value) return;
+  const chunks = value.match(/[\s\S]{1,64}/g) || [];
+  for (const chunk of chunks) {
+    writeStreamEvent(res, 'agent_delta', {
+      requestId,
+      deviceId,
+      agent: agentPayload(agent),
+      text: chunk,
+      createdAt: new Date().toISOString(),
+    });
+    await sleep(18);
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
 app.get('/api/agents', (_req, res) => {
   res.json({ defaultAgent: DEFAULT_AGENT, agents: listAgents() });
+});
+
+// Best-effort login state per agent so the app can warn before sending a
+// message. loggedIn is true/false when detectable from on-disk credentials,
+// or null when it cannot be determined without running the CLI (e.g. agy).
+app.get('/api/auth/status', (_req, res) => {
+  res.json({
+    agents: listAgents().map((agent) => ({
+      key: agent.key,
+      label: agent.label,
+      loggedIn: authStatus(agent.key),
+    })),
+  });
 });
 
 app.get('/api/status', (_req, res) => {
@@ -248,48 +293,77 @@ app.post('/api/chat', async (req, res) => {
   activeRequests.set(requestId, runState);
   runningScopes.add(scopeKey);
 
+  const streaming = wantsChatStream(req);
+  let streamedText = '';
+
+  if (streaming) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    });
+    writeStreamEvent(res, 'ready', { ok: true, requestId });
+  }
+
+  const emitRunEvent = (event) => {
+    if (!event || event.type === 'progress') {
+      const line = event && event.line ? String(event.line) : '';
+      if (!line) return;
+      const payload = { requestId, agent, deviceId, line };
+      if (streaming) {
+        writeStreamEvent(res, 'agent_progress', {
+          requestId,
+          deviceId,
+          agent: agentPayload(agent),
+          line,
+          createdAt: new Date().toISOString(),
+        });
+      } else {
+        emitAgentEvent('agent_progress', payload);
+      }
+      return;
+    }
+    if (event.type === 'delta') {
+      const text = String(event.text || '');
+      if (!text) return;
+      streamedText += text;
+      const payload = { requestId, agent, deviceId, text };
+      if (streaming) {
+        writeStreamEvent(res, 'agent_delta', {
+          requestId,
+          deviceId,
+          agent: agentPayload(agent),
+          text,
+          createdAt: new Date().toISOString(),
+        });
+      } else {
+        emitAgentEvent('agent_delta', payload);
+      }
+    }
+  };
+
   try {
-    emitAgentEvent('agent_start', {
-      requestId,
-      agent,
-      deviceId,
+    if (!streaming) {
+      emitAgentEvent('agent_start', {
+        requestId,
+        agent,
+        deviceId,
+      });
+    }
+    const content = await runAgent(agentKey, prompt, emitRunEvent, {
+      sessionKey: scopeKey,
+      signal: abortController.signal,
     });
-    const content = await runAgent(
-      agentKey,
-      prompt,
-      (event) => {
-        if (!event || event.type === 'progress') {
-          const line = event && event.line ? String(event.line) : '';
-          if (!line) return;
-          emitAgentEvent('agent_progress', {
-            requestId,
-            agent,
-            deviceId,
-            line,
-          });
-          return;
-        }
-        if (event.type === 'delta') {
-          const text = String(event.text || '');
-          if (!text) return;
-          emitAgentEvent('agent_delta', {
-            requestId,
-            agent,
-            deviceId,
-            text,
-          });
-        }
-      },
-      {
-        sessionKey: scopeKey,
-        signal: abortController.signal,
-      },
-    );
-    emitAgentEvent('agent_done', {
-      requestId,
-      agent,
-      deviceId,
-    });
+    if (streaming && !streamedText.trim()) {
+      await streamTextFallback(res, requestId, agent, deviceId, content);
+    }
+    if (!streaming) {
+      emitAgentEvent('agent_done', {
+        requestId,
+        agent,
+        deviceId,
+      });
+    }
     const createdAt = new Date().toISOString();
     // Record the completed turn so the app can reload it after a restart.
     // Only successful turns are stored; cancelled/failed turns are skipped.
@@ -297,7 +371,7 @@ app.post('/api/chat', async (req, res) => {
       { role: 'user', content: prompt, agent: agent.key, createdAt },
       { role: 'assistant', content, agent: agent.key, createdAt },
     ]);
-    return res.json({
+    const reply = {
       requestId,
       agent: agentPayload(agent),
       message: {
@@ -305,16 +379,32 @@ app.post('/api/chat', async (req, res) => {
         content,
         createdAt,
       },
-    });
+    };
+    if (streaming) {
+      writeStreamEvent(res, 'agent_done', reply);
+      return res.end();
+    }
+    return res.json(reply);
   } catch (err) {
     if (err instanceof AgentCancelledError || err.code === 'AGENT_CANCELLED') {
       if (!runState.cancelEventSent) {
         runState.cancelEventSent = true;
-        emitAgentEvent('agent_cancelled', {
+        if (!streaming) {
+          emitAgentEvent('agent_cancelled', {
+            requestId,
+            agent,
+            deviceId,
+          });
+        }
+      }
+      if (streaming) {
+        writeStreamEvent(res, 'agent_cancelled', {
           requestId,
-          agent,
           deviceId,
+          agent: agentPayload(agent),
+          createdAt: new Date().toISOString(),
         });
+        return res.end();
       }
       return res.status(499).json({
         error: 'request cancelled',
@@ -322,6 +412,44 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
+    // Agent CLI has no logged-in account: surface a real, actionable state
+    // instead of returning the raw CLI error as the assistant's reply. The
+    // turn already failed (threw), so it is never written to chat history.
+    if (err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN') {
+      const message =
+        `${agentPayload(agent).label} is not logged in on the backend host. ` +
+        'Log in there, then try again.';
+      if (streaming) {
+        writeStreamEvent(res, 'agent_error', {
+          requestId,
+          deviceId,
+          agent: agentPayload(agent),
+          error: message,
+          code: 'NOT_LOGGED_IN',
+          createdAt: new Date().toISOString(),
+        });
+        return res.end();
+      }
+      // 424 Failed Dependency: not 401 (reserved for an invalid device token)
+      // and not 503 (TOKEN_NOT_CONFIGURED). Clients branch on the code field.
+      return res.status(424).json({
+        error: message,
+        code: 'NOT_LOGGED_IN',
+        agent: agent.key,
+      });
+    }
+
+    if (streaming) {
+      writeStreamEvent(res, 'agent_error', {
+        requestId,
+        deviceId,
+        agent: agentPayload(agent),
+        error: err.message,
+        code: err.code,
+        createdAt: new Date().toISOString(),
+      });
+      return res.end();
+    }
     emitAgentEvent('agent_error', {
       requestId,
       agent,

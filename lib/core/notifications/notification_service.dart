@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'browser_notifications.dart';
+
 /// Wraps the OS notification tray so alerts (e.g. quota resets) surface as native
 /// system notifications instead of cluttering the chat message list.
 ///
@@ -66,6 +68,10 @@ class NotificationService {
 
   /// Ask the user for notification permission (Android 13+ / iOS / macOS).
   Future<void> requestPermission() async {
+    if (kIsWeb) {
+      await requestBrowserNotificationPermission();
+      return;
+    }
     if (!_supported) return;
     await init();
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -81,9 +87,13 @@ class NotificationService {
     }
   }
 
-  /// Show an immediate system notification. No-op on unsupported platforms.
-  Future<void> show({required String title, required String body}) async {
-    if (!_supported) return;
+  /// Show an immediate system notification. Returns false when unsupported or
+  /// denied so callers can show an in-page fallback.
+  Future<bool> show({required String title, required String body}) async {
+    if (kIsWeb) {
+      return showBrowserNotification(title: title, body: body);
+    }
+    if (!_supported) return false;
     await init();
     const AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
@@ -104,5 +114,6 @@ class NotificationService {
         macOS: darwinDetails,
       ),
     );
+    return true;
   }
 }

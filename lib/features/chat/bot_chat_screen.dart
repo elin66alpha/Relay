@@ -1,12 +1,12 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/audio/voice_recorder.dart';
 import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
@@ -98,9 +98,10 @@ class _BotChatScreenState extends State<BotChatScreen> {
     await widget.chatController.sendUserText('/compact');
   }
 
-  Future<String> _transcribeRecording(String path) {
-    return widget.chatController.transcribeAudioFile(
-      path: path,
+  Future<String> _transcribeRecording(RecordedAudio audio) {
+    return widget.chatController.transcribeAudio(
+      bytes: audio.bytes,
+      mimeType: audio.mimeType,
       language: widget.settingsController.sttLanguage.apiValue,
     );
   }
@@ -195,28 +196,33 @@ class _BotChatScreenState extends State<BotChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool usePermanentSidebar = MediaQuery.sizeOf(context).width >= 900;
+    final Widget sidebar = CliAgentsDrawer(
+      agentsController: widget.agentsController,
+      chatController: widget.chatController,
+      machinesController: widget.machinesController,
+      settingsController: widget.settingsController,
+      closeOnAction: !usePermanentSidebar,
+    );
     return Scaffold(
       drawerScrimColor: Colors.black54,
-      drawer: Drawer(
-        child: SafeArea(
-          child: CliAgentsDrawer(
-            agentsController: widget.agentsController,
-            chatController: widget.chatController,
-            machinesController: widget.machinesController,
-            settingsController: widget.settingsController,
-          ),
-        ),
-      ),
+      drawer: usePermanentSidebar
+          ? null
+          : Drawer(
+              child: SafeArea(child: sidebar),
+            ),
       appBar: AppBar(
-        leading: Builder(
-          builder: (BuildContext context) {
-            return IconButton(
-              icon: const Icon(Icons.menu),
-              tooltip: context.l10n.menu,
-              onPressed: () => Scaffold.of(context).openDrawer(),
-            );
-          },
-        ),
+        leading: usePermanentSidebar
+            ? null
+            : Builder(
+                builder: (BuildContext context) {
+                  return IconButton(
+                    icon: const Icon(Icons.menu),
+                    tooltip: context.l10n.menu,
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  );
+                },
+              ),
         title: AnimatedBuilder(
           animation: Listenable.merge(<Listenable>[
             widget.agentsController,
@@ -286,57 +292,128 @@ class _BotChatScreenState extends State<BotChatScreen> {
         ],
       ),
       body: SafeArea(
-        child: AnimatedBuilder(
-          animation: Listenable.merge(<Listenable>[
-            widget.agentsController,
-            widget.machinesController,
-            widget.chatController,
-          ]),
-          builder: (BuildContext context, Widget? _) {
-            final CliAgent agent = widget.agentsController.activeAgent;
-            return Column(
-              children: <Widget>[
-                Expanded(
-                  child: widget.chatController.messages.isEmpty
-                      ? _EmptyChatPlaceholder(agentName: agent.label)
-                      : ListView.builder(
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                          itemCount: widget.chatController.messages.length,
-                          itemBuilder: (BuildContext context, int index) {
-                            final ChatMessage message =
-                                widget.chatController.messages[index];
-                            return _MessageBubble(
-                              message: message,
-                              retryable:
-                                  widget.chatController.isRetryable(message),
-                              awaitingFirstToken: widget.chatController
-                                  .isAwaitingFirstToken(message),
-                              errorDetail:
-                                  widget.chatController.errorDetailFor(message),
-                              system: widget.chatController
-                                  .isSystemMessage(message),
-                              cancelled:
-                                  widget.chatController.isCancelled(message),
-                              progressLines: widget.chatController
-                                  .progressLinesFor(message),
-                              onRetry: () =>
-                                  widget.chatController.retry(message),
-                            );
-                          },
+        child: Row(
+          children: <Widget>[
+            if (usePermanentSidebar)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  border: Border(
+                    right: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                ),
+                child: SizedBox(width: 320, child: sidebar),
+              ),
+            Expanded(
+              child: AnimatedBuilder(
+                animation: Listenable.merge(<Listenable>[
+                  widget.agentsController,
+                  widget.machinesController,
+                  widget.chatController,
+                ]),
+                builder: (BuildContext context, Widget? _) {
+                  final CliAgent agent = widget.agentsController.activeAgent;
+                  return Column(
+                    children: <Widget>[
+                      if (widget.chatController.agentLoggedIn(agent.key) ==
+                          false)
+                        _NotLoggedInBanner(
+                          agentLabel: agent.label,
+                          onRecheck: widget.chatController.refreshAuthStatus,
                         ),
+                      Expanded(
+                        child: widget.chatController.messages.isEmpty
+                            ? _EmptyChatPlaceholder(agentName: agent.label)
+                            : ListView.builder(
+                                controller: _scroll,
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                                itemCount:
+                                    widget.chatController.messages.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final ChatMessage message =
+                                      widget.chatController.messages[index];
+                                  return _MessageBubble(
+                                    message: message,
+                                    retryable: widget.chatController
+                                        .isRetryable(message),
+                                    awaitingFirstToken: widget.chatController
+                                        .isAwaitingFirstToken(message),
+                                    errorDetail: widget.chatController
+                                        .errorDetailFor(message),
+                                    system: widget.chatController
+                                        .isSystemMessage(message),
+                                    cancelled: widget.chatController
+                                        .isCancelled(message),
+                                    progressLines: widget.chatController
+                                        .progressLinesFor(message),
+                                    onRetry: () =>
+                                        widget.chatController.retry(message),
+                                  );
+                                },
+                              ),
+                      ),
+                      _InputBar(
+                        agentKey: agent.key,
+                        controller: _input,
+                        isThinking: widget.chatController.isThinking,
+                        isCancelling: widget.chatController.isCancelling,
+                        onSend: _send,
+                        onCancel: widget.chatController.cancelActiveTurn,
+                        onTranscribeRecording: _transcribeRecording,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NotLoggedInBanner extends StatelessWidget {
+  const _NotLoggedInBanner({
+    required this.agentLabel,
+    required this.onRecheck,
+  });
+
+  final String agentLabel;
+  final Future<void> Function() onRecheck;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.lock_outline_rounded,
+              size: 18,
+              color: colors.onErrorContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                context.l10n.agentNotLoggedInBanner(agentLabel),
+                style: TextStyle(
+                  color: colors.onErrorContainer,
+                  fontSize: 13,
                 ),
-                _InputBar(
-                  controller: _input,
-                  isThinking: widget.chatController.isThinking,
-                  isCancelling: widget.chatController.isCancelling,
-                  onSend: _send,
-                  onCancel: widget.chatController.cancelActiveTurn,
-                  onTranscribeRecording: _transcribeRecording,
-                ),
-              ],
-            );
-          },
+              ),
+            ),
+            TextButton(
+              onPressed: () => onRecheck(),
+              child: Text(context.l10n.recheck),
+            ),
+          ],
         ),
       ),
     );
@@ -476,6 +553,7 @@ String _formatUsageTime(BuildContext context, String? iso) {
 
 class _InputBar extends StatefulWidget {
   const _InputBar({
+    required this.agentKey,
     required this.controller,
     required this.isThinking,
     required this.isCancelling,
@@ -484,29 +562,71 @@ class _InputBar extends StatefulWidget {
     required this.onTranscribeRecording,
   });
 
+  final String agentKey;
   final TextEditingController controller;
   final bool isThinking;
   final bool isCancelling;
   final VoidCallback onSend;
   final VoidCallback onCancel;
-  final Future<String> Function(String path) onTranscribeRecording;
+  final Future<String> Function(RecordedAudio audio) onTranscribeRecording;
 
   @override
   State<_InputBar> createState() => _InputBarState();
 }
 
 class _InputBarState extends State<_InputBar> {
-  final AudioRecorder _recorder = AudioRecorder();
+  final VoiceRecorder _recorder = createVoiceRecorder();
+  final FocusNode _inputFocus = FocusNode();
   bool _isRecording = false;
   bool _isTranscribing = false;
   Timer? _recordingTimer;
-  String? _recordingPath;
+  String _slashQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onInputChanged);
+  }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onInputChanged);
     _recordingTimer?.cancel();
-    _recorder.dispose();
+    unawaited(_recorder.dispose());
+    _inputFocus.dispose();
     super.dispose();
+  }
+
+  void _onInputChanged() {
+    final TextSelection selection = widget.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      _setSlashQuery('');
+      return;
+    }
+    final String beforeCursor =
+        widget.controller.text.substring(0, selection.baseOffset);
+    if (!beforeCursor.startsWith('/') ||
+        beforeCursor.contains('\n') ||
+        beforeCursor.contains(RegExp(r'\s'))) {
+      _setSlashQuery('');
+      return;
+    }
+    _setSlashQuery(beforeCursor.substring(1).toLowerCase());
+  }
+
+  void _setSlashQuery(String value) {
+    if (_slashQuery == value) return;
+    if (mounted) setState(() => _slashQuery = value);
+  }
+
+  bool get _showSlashCommands {
+    final TextSelection selection = widget.controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) return false;
+    final String beforeCursor =
+        widget.controller.text.substring(0, selection.baseOffset);
+    return beforeCursor.startsWith('/') &&
+        !beforeCursor.contains('\n') &&
+        !beforeCursor.contains(RegExp(r'\s'));
   }
 
   Future<void> _toggleRecording() async {
@@ -522,22 +642,9 @@ class _InputBarState extends State<_InputBar> {
       return;
     }
 
-    final Directory tempDir = await getTemporaryDirectory();
-    final String path =
-        '${tempDir.path}/agentdeck-voice-${DateTime.now().microsecondsSinceEpoch}.m4a';
-    await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: 64000,
-        sampleRate: 16000,
-      ),
-      path: path,
-    );
+    await _recorder.start();
     if (!mounted) return;
-    setState(() {
-      _isRecording = true;
-      _recordingPath = path;
-    });
+    setState(() => _isRecording = true);
     _recordingTimer?.cancel();
     _recordingTimer = Timer(const Duration(seconds: 60), () {
       if (mounted && _isRecording) unawaited(_stopAndTranscribe());
@@ -546,34 +653,22 @@ class _InputBarState extends State<_InputBar> {
 
   Future<void> _stopAndTranscribe() async {
     _recordingTimer?.cancel();
-    final String? path = await _recorder.stop() ?? _recordingPath;
+    final RecordedAudio? audio = await _recorder.stop();
     if (!mounted) return;
     setState(() {
       _isRecording = false;
       _isTranscribing = true;
-      _recordingPath = null;
     });
 
     try {
-      if (path == null || path.isEmpty) return;
-      final String text = await widget.onTranscribeRecording(path);
+      if (audio == null || audio.bytes.isEmpty) return;
+      final String text = await widget.onTranscribeRecording(audio);
       if (!mounted || text.trim().isEmpty) return;
       _appendInput(text.trim());
     } catch (err) {
       if (mounted) _showError(context.l10n.transcriptionFailed(err));
     } finally {
-      if (path != null && path.isNotEmpty) {
-        unawaited(_deleteRecording(path));
-      }
       if (mounted) setState(() => _isTranscribing = false);
-    }
-  }
-
-  Future<void> _deleteRecording(String path) async {
-    try {
-      await File(path).delete();
-    } catch (_) {
-      // Best effort cleanup.
     }
   }
 
@@ -584,6 +679,22 @@ class _InputBarState extends State<_InputBar> {
       text: next,
       selection: TextSelection.collapsed(offset: next.length),
     );
+  }
+
+  void _submitFromKeyboard() {
+    if (!kIsWeb) return;
+    if (!widget.isThinking && !_isTranscribing) {
+      widget.onSend();
+    }
+  }
+
+  void _selectSlashCommand(_SlashCommand command) {
+    final String insert = command.insertText;
+    widget.controller.value = TextEditingValue(
+      text: insert,
+      selection: TextSelection.collapsed(offset: insert.length),
+    );
+    _inputFocus.requestFocus();
   }
 
   void _showError(String message) {
@@ -601,6 +712,9 @@ class _InputBarState extends State<_InputBar> {
     final bool canCancel = widget.isThinking && !widget.isCancelling;
     final bool canRecord = !widget.isThinking && !_isTranscribing;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final List<_SlashCommand> slashCommands = _showSlashCommands
+        ? _slashCommandsFor(widget.agentKey, _slashQuery)
+        : const <_SlashCommand>[];
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainer,
@@ -608,61 +722,77 @@ class _InputBarState extends State<_InputBar> {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: widget.controller,
-                enabled: canSend,
-                minLines: 1,
-                maxLines: 6,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: context.l10n.inputHint,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
+            if (slashCommands.isNotEmpty) ...<Widget>[
+              _SlashCommandPanel(
+                commands: slashCommands,
+                onSelected: _selectSlashCommand,
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                Expanded(
+                  child: kIsWeb
+                      ? CallbackShortcuts(
+                          bindings: <ShortcutActivator, VoidCallback>{
+                            const SingleActivator(LogicalKeyboardKey.enter):
+                                _submitFromKeyboard,
+                          },
+                          child: _MessageTextField(
+                            focusNode: _inputFocus,
+                            controller: widget.controller,
+                            enabled: canSend,
+                          ),
+                        )
+                      : _MessageTextField(
+                          focusNode: _inputFocus,
+                          controller: widget.controller,
+                          enabled: canSend,
+                        ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              onPressed: canRecord || _isRecording ? _toggleRecording : null,
-              icon: _isTranscribing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      _isRecording
-                          ? Icons.stop_circle_outlined
-                          : Icons.mic_none_rounded,
-                    ),
-              tooltip: _isTranscribing
-                  ? context.l10n.transcribing
-                  : _isRecording
-                      ? context.l10n.stopRecording
-                      : context.l10n.startRecording,
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: widget.isThinking
-                  ? canCancel
-                      ? widget.onCancel
-                      : null
-                  : canSend
-                      ? widget.onSend
-                      : null,
-              icon: Icon(
-                widget.isThinking
-                    ? Icons.stop_rounded
-                    : Icons.arrow_upward_rounded,
-              ),
-              tooltip:
-                  widget.isThinking ? context.l10n.stop : context.l10n.send,
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed:
+                      canRecord || _isRecording ? _toggleRecording : null,
+                  icon: _isTranscribing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _isRecording
+                              ? Icons.stop_circle_outlined
+                              : Icons.mic_none_rounded,
+                        ),
+                  tooltip: _isTranscribing
+                      ? context.l10n.transcribing
+                      : _isRecording
+                          ? context.l10n.stopRecording
+                          : context.l10n.startRecording,
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: widget.isThinking
+                      ? canCancel
+                          ? widget.onCancel
+                          : null
+                      : canSend
+                          ? widget.onSend
+                          : null,
+                  icon: Icon(
+                    widget.isThinking
+                        ? Icons.stop_rounded
+                        : Icons.arrow_upward_rounded,
+                  ),
+                  tooltip:
+                      widget.isThinking ? context.l10n.stop : context.l10n.send,
+                ),
+              ],
             ),
           ],
         ),
@@ -670,6 +800,159 @@ class _InputBarState extends State<_InputBar> {
     );
   }
 }
+
+class _MessageTextField extends StatelessWidget {
+  const _MessageTextField({
+    required this.focusNode,
+    required this.controller,
+    required this.enabled,
+  });
+
+  final FocusNode focusNode;
+  final TextEditingController controller;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      focusNode: focusNode,
+      controller: controller,
+      enabled: enabled,
+      minLines: 1,
+      maxLines: 6,
+      textInputAction: TextInputAction.newline,
+      decoration: InputDecoration(
+        hintText: context.l10n.inputHint,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _SlashCommandPanel extends StatelessWidget {
+  const _SlashCommandPanel({
+    required this.commands,
+    required this.onSelected,
+  });
+
+  final List<_SlashCommand> commands;
+  final ValueChanged<_SlashCommand> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 260),
+        child: Material(
+          color: colors.surface,
+          elevation: 3,
+          borderRadius: BorderRadius.circular(8),
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            itemCount: commands.length,
+            separatorBuilder: (BuildContext context, int index) => Divider(
+              height: 1,
+              color: colors.outlineVariant,
+            ),
+            itemBuilder: (BuildContext context, int index) {
+              final _SlashCommand command = commands[index];
+              return ListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                title: Text(
+                  command.command,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(command.description),
+                onTap: () => onSelected(command),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SlashCommand {
+  const _SlashCommand(this.command, this.description, {String? insertText})
+      : insertText = insertText ?? command;
+
+  final String command;
+  final String description;
+  final String insertText;
+}
+
+List<_SlashCommand> _slashCommandsFor(String agentKey, String query) {
+  final List<_SlashCommand> commands = switch (agentKey) {
+    'codex' => _codexSlashCommands,
+    'agy' => _agySlashCommands,
+    _ => _claudeSlashCommands,
+  };
+  if (query.isEmpty) return commands;
+  return commands
+      .where(
+        (_SlashCommand command) =>
+            command.command.substring(1).startsWith(query) ||
+            command.description.toLowerCase().contains(query),
+      )
+      .toList(growable: false);
+}
+
+const List<_SlashCommand> _codexSlashCommands = <_SlashCommand>[
+  _SlashCommand('/help', 'Show available Codex commands.'),
+  _SlashCommand('/init', 'Create or update repository guidance for Codex.'),
+  _SlashCommand(
+    '/status',
+    'Show session, model, account, and workspace state.',
+  ),
+  _SlashCommand('/model', 'Switch the active Codex model.'),
+  _SlashCommand('/approvals', 'Change approval and sandbox behavior.'),
+  _SlashCommand('/diff', 'Show the current worktree diff.'),
+  _SlashCommand('/review', 'Start a Codex code review.'),
+  _SlashCommand('/compact', 'Compact the conversation context.'),
+  _SlashCommand(
+    '/mention',
+    'Attach or mention a file/path in the prompt.',
+    insertText: '/mention ',
+  ),
+  _SlashCommand('/prompts', 'Browse saved prompts.', insertText: '/prompts '),
+  _SlashCommand('/new', 'Start a new Codex thread.'),
+  _SlashCommand('/resume', 'Resume a previous Codex thread.'),
+  _SlashCommand('/fork', 'Fork a previous Codex thread.'),
+  _SlashCommand('/logout', 'Sign out of Codex.'),
+  _SlashCommand('/quit', 'Quit the Codex session.'),
+];
+
+const List<_SlashCommand> _claudeSlashCommands = <_SlashCommand>[
+  _SlashCommand('/help', 'Show available Claude Code commands.'),
+  _SlashCommand('/init', 'Create or update Claude project memory.'),
+  _SlashCommand('/status', 'Show Claude Code session status.'),
+  _SlashCommand('/model', 'Switch the active Claude model.'),
+  _SlashCommand('/permissions', 'Review or change tool permissions.'),
+  _SlashCommand('/memory', 'Open or edit Claude memory.'),
+  _SlashCommand('/mcp', 'Manage MCP servers.'),
+  _SlashCommand('/agents', 'Manage Claude Code agents.'),
+  _SlashCommand('/review', 'Ask Claude Code to review the current work.'),
+  _SlashCommand('/compact', 'Compact the conversation context.'),
+  _SlashCommand('/clear', 'Clear the current conversation.'),
+  _SlashCommand('/resume', 'Resume a previous conversation.'),
+  _SlashCommand('/logout', 'Sign out of Claude Code.'),
+  _SlashCommand('/exit', 'Exit Claude Code.'),
+];
+
+const List<_SlashCommand> _agySlashCommands = <_SlashCommand>[
+  _SlashCommand('/help', 'Show available Antigravity commands.'),
+  _SlashCommand('/status', 'Show Antigravity session status.'),
+  _SlashCommand('/compact', 'Compact the conversation context.'),
+  _SlashCommand('/clear', 'Clear the current conversation.'),
+];
 
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({

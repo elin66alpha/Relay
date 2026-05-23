@@ -19,6 +19,10 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   record: ^6.2.0
   path_provider: ^2.1.5
+  image: ^4.8.0
+  zxing2: ^0.2.4
+  file_picker: ^11.0.2
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

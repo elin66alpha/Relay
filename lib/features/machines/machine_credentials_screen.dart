@@ -1,12 +1,14 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/credentials/qr_image_decoder.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/machine_credential.dart';
 import 'machine_credentials_controller.dart';
@@ -39,6 +41,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
             widget.machinesController.credentials;
         final MachineCredential? active =
             widget.machinesController.activeMachine;
+        const bool showCameraScan = !kIsWeb;
         return Scaffold(
           appBar: widget.requireCredential
               ? null
@@ -47,59 +50,54 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
             child: credentials.isEmpty
                 ? _EmptyCredentialState(
                     isImporting: _isImporting,
+                    showCameraScan: showCameraScan,
                     onScan: _scanCredential,
+                    onPaste: _pasteCredential,
+                    onUpload: _uploadCredentialQr,
                   )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     children: <Widget>[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-                        child: Text(
-                          context.l10n.currentMachine,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.outline,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      for (final MachineCredential credential in credentials)
-                        _MachineTile(
-                          credential: credential,
-                          active: credential.id == active?.id,
-                          onSelect: () => widget.machinesController.setActive(
-                            credential.id,
-                          ),
-                          onDelete: () => _confirmDelete(credential),
-                        ),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: _isImporting ? null : _scanCredential,
-                        icon: _isImporting
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 720),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+                              child: Text(
+                                context.l10n.currentMachine,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.outline,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              )
-                            : const Icon(Icons.qr_code_scanner_rounded),
-                        label: Text(context.l10n.scanQr),
-                      ),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed:
-                            active == null || _isTesting ? null : _testActive,
-                        icon: _isTesting
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                              ),
+                            ),
+                            for (final MachineCredential credential
+                                in credentials)
+                              _MachineTile(
+                                credential: credential,
+                                active: credential.id == active?.id,
+                                onSelect: () =>
+                                    widget.machinesController.setActive(
+                                  credential.id,
                                 ),
-                              )
-                            : const Icon(Icons.lan_outlined),
-                        label: Text(context.l10n.testMachine),
+                                onDelete: () => _confirmDelete(credential),
+                              ),
+                            const SizedBox(height: 16),
+                            _CredentialActionButtons(
+                              active: active,
+                              isImporting: _isImporting,
+                              isTesting: _isTesting,
+                              showCameraScan: showCameraScan,
+                              onScan: _scanCredential,
+                              onPaste: _pasteCredential,
+                              onUpload: _uploadCredentialQr,
+                              onTest: _testActive,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -118,12 +116,54 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
         ),
       );
       if (raw == null || raw.trim().isEmpty) return;
-      await _finishImport(Uint8List.fromList(utf8.encode(raw.trim())));
+      await _finishImportPayload(raw);
     } catch (err) {
       _showMessage(context.l10n.importFailed(err), error: true);
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
+  }
+
+  Future<void> _pasteCredential() async {
+    final String? raw = await _askCredentialPayload();
+    if (raw == null || raw.trim().isEmpty) return;
+    setState(() => _isImporting = true);
+    try {
+      await _finishImportPayload(raw);
+    } catch (err) {
+      _showMessage(context.l10n.importFailed(err), error: true);
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _uploadCredentialQr() async {
+    setState(() => _isImporting = true);
+    try {
+      final FilePickerResult? result = await FilePicker.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final Uint8List? bytes = result.files.single.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        throw MachineCredentialException(context.l10n.fileUnreadable);
+      }
+      final String raw = decodeCredentialQrImage(bytes);
+      if (raw.trim().isEmpty) {
+        throw MachineCredentialException(context.l10n.invalidQr);
+      }
+      await _finishImportPayload(raw);
+    } catch (err) {
+      _showMessage(context.l10n.importFailed(err), error: true);
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
+    }
+  }
+
+  Future<void> _finishImportPayload(String raw) {
+    return _finishImport(Uint8List.fromList(utf8.encode(raw.trim())));
   }
 
   Future<void> _finishImport(Uint8List bytes) async {
@@ -147,6 +187,43 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     if (!mounted) return;
     if (!widget.requireCredential) {
       _showMessage(context.l10n.imported(credential.displayName));
+    }
+  }
+
+  Future<String?> _askCredentialPayload() async {
+    final TextEditingController controller = TextEditingController();
+    try {
+      return showDialog<String>(
+        context: context,
+        builder: (BuildContext ctx) => AlertDialog(
+          title: Text(context.l10n.pasteCredential),
+          content: SizedBox(
+            width: 460,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              minLines: 5,
+              maxLines: 10,
+              decoration: InputDecoration(
+                labelText: context.l10n.credentialPayload,
+                hintText: context.l10n.credentialPayloadHint,
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+              child: Text(context.l10n.importCredential),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -239,11 +316,17 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
 class _EmptyCredentialState extends StatelessWidget {
   const _EmptyCredentialState({
     required this.isImporting,
+    required this.showCameraScan,
     required this.onScan,
+    required this.onPaste,
+    required this.onUpload,
   });
 
   final bool isImporting;
+  final bool showCameraScan;
   final VoidCallback onScan;
+  final VoidCallback onPaste;
+  final VoidCallback onUpload;
 
   @override
   Widget build(BuildContext context) {
@@ -278,24 +361,86 @@ class _EmptyCredentialState extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: isImporting ? null : onScan,
-                  icon: isImporting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.qr_code_scanner_rounded),
-                  label: Text(context.l10n.scanQr),
-                ),
+              _CredentialActionButtons(
+                active: null,
+                isImporting: isImporting,
+                isTesting: false,
+                showCameraScan: showCameraScan,
+                onScan: onScan,
+                onPaste: onPaste,
+                onUpload: onUpload,
+                onTest: null,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CredentialActionButtons extends StatelessWidget {
+  const _CredentialActionButtons({
+    required this.active,
+    required this.isImporting,
+    required this.isTesting,
+    required this.showCameraScan,
+    required this.onScan,
+    required this.onPaste,
+    required this.onUpload,
+    required this.onTest,
+  });
+
+  final MachineCredential? active;
+  final bool isImporting;
+  final bool isTesting;
+  final bool showCameraScan;
+  final VoidCallback onScan;
+  final VoidCallback onPaste;
+  final VoidCallback onUpload;
+  final VoidCallback? onTest;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: <Widget>[
+        if (showCameraScan)
+          FilledButton.icon(
+            onPressed: isImporting ? null : onScan,
+            icon: isImporting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.qr_code_scanner_rounded),
+            label: Text(context.l10n.scanQr),
+          ),
+        OutlinedButton.icon(
+          onPressed: isImporting ? null : onPaste,
+          icon: const Icon(Icons.content_paste_rounded),
+          label: Text(context.l10n.pasteCredential),
+        ),
+        OutlinedButton.icon(
+          onPressed: isImporting ? null : onUpload,
+          icon: const Icon(Icons.image_search_rounded),
+          label: Text(context.l10n.uploadQrImage),
+        ),
+        if (onTest != null)
+          OutlinedButton.icon(
+            onPressed: active == null || isTesting ? null : onTest,
+            icon: isTesting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.lan_outlined),
+            label: Text(context.l10n.testMachine),
+          ),
+      ],
     );
   }
 }

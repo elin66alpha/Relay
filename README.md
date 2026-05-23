@@ -21,7 +21,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
 - Protected backend APIs stay closed until at least one credential token has been generated.
-- Voice input records audio in the app, sends it to the backend for OpenAI speech-to-text transcription, and inserts the text into the message box without auto-sending.
+- The same Flutter client runs on mobile and Web. Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar.
+- Voice input records audio in the app/browser, sends it to the backend for OpenAI speech-to-text transcription, and inserts the text into the message box without auto-sending.
 
 ## Repository Layout
 
@@ -146,7 +147,20 @@ flutter pub get
 flutter run
 ```
 
-On first launch, scan the backend QR code and enter the credential password. More machines can be added later from the credential screen.
+On first launch, import the backend credential and enter the credential password. Mobile can scan the QR with the camera. Web imports credentials by pasting the encrypted QR payload or uploading the saved QR image; camera scanning is intentionally hidden on Web. More machines can be added later from the credential screen.
+
+Web credentials persist in browser local storage through Flutter's Web secure-storage backend, so use a private browser profile for private machines.
+
+To build the Web frontend and let the Node backend serve it:
+
+```bash
+cd /path/to/AgentDeck
+flutter build web
+cd server
+npm start
+```
+
+When `build/web/index.html` exists, the backend serves the Flutter Web app on the same host/port as the API.
 
 ### APK signing (dev stage)
 

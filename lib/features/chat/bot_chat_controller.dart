@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -29,6 +28,7 @@ class BotChatController extends ChangeNotifier {
 
   CliAgent _agent = defaultCliAgents.first;
   MachineCredential? _machine;
+  final Map<String, bool?> _authStatus = <String, bool?>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _isThinking = false;
   bool _isCancelling = false;
@@ -46,6 +46,27 @@ class BotChatController extends ChangeNotifier {
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
   AppStrings get _strings => AppStrings(_language);
+
+  /// Login state for an agent CLI on the backend host: true/false when known,
+  /// or null when unchecked or undeterminable (e.g. agy). Drives the
+  /// "not logged in" banner; it never blocks sending, since detection is
+  /// best-effort and a real failure is still caught when the turn runs.
+  bool? agentLoggedIn(String agentKey) => _authStatus[agentKey];
+
+  /// Refreshes per-agent login state from the backend. Best-effort: a probe
+  /// failure (offline, older backend without the endpoint) is ignored.
+  Future<void> refreshAuthStatus() async {
+    if (_machine == null) return;
+    try {
+      final Map<String, bool?> status = await _backendClient.fetchAuthStatus();
+      _authStatus
+        ..clear()
+        ..addAll(status);
+      notifyListeners();
+    } catch (_) {
+      // A probe failure must not interfere with chatting.
+    }
+  }
 
   void setLanguage(AppLanguage language) {
     _language = language;
@@ -90,6 +111,9 @@ class BotChatController extends ChangeNotifier {
     _isCancelling = false;
     _activeRequestId = null;
     notifyListeners();
+
+    // Check login state for the new context so the banner can warn up front.
+    unawaited(refreshAuthStatus());
 
     // Pull the previous conversation so reopening the app shows it. Best-effort:
     // ignore failures (offline / no history), and never clobber messages the
@@ -169,14 +193,14 @@ class BotChatController extends ChangeNotifier {
 
   Future<UsageReport> usageReport() => _backendClient.usageReport();
 
-  Future<String> transcribeAudioFile({
-    required String path,
+  Future<String> transcribeAudio({
+    required Uint8List bytes,
+    required String mimeType,
     required String language,
   }) async {
-    final Uint8List bytes = await File(path).readAsBytes();
     final SttResult result = await _backendClient.transcribeAudio(
       bytes: bytes,
-      mimeType: _mimeTypeFor(path),
+      mimeType: mimeType,
       language: language,
     );
     return result.text.trim();
@@ -243,6 +267,7 @@ class BotChatController extends ChangeNotifier {
         agentKey: agent.key,
         prompt: userMessage.content,
         requestId: requestId,
+        onEvent: _handleEvent,
       );
       _finalizeAssistantByRequestId(
         requestId,
@@ -258,10 +283,14 @@ class BotChatController extends ChangeNotifier {
         _markAssistantCancelled(requestId);
       } else {
         _discardAssistantByRequestId(requestId);
-        final String detail =
-            err is BackendException && err.code == 'AGENT_BUSY'
-                ? _strings.agentBusyRetryLater
-                : err.toString();
+        String detail = err.toString();
+        if (err is BackendException && err.code == 'AGENT_BUSY') {
+          detail = _strings.agentBusyRetryLater;
+        } else if (err is BackendException && err.code == 'NOT_LOGGED_IN') {
+          detail = _strings.agentNotLoggedIn(agent.label);
+          // Reflect the failure in the banner right away.
+          _authStatus[agent.key] = false;
+        }
         _markUserDeliveryFailed(userMessage.id, detail);
         _lastError = detail;
       }
@@ -430,14 +459,6 @@ class BotChatController extends ChangeNotifier {
     return '${agent.key}.$micros';
   }
 
-  String _mimeTypeFor(String path) {
-    final String lower = path.toLowerCase();
-    if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
-    if (lower.endsWith('.wav')) return 'audio/wav';
-    if (lower.endsWith('.webm')) return 'audio/webm';
-    return 'application/octet-stream';
-  }
-
   void _connectEventsNow() {
     if (!_wantsEvents || _eventsSub != null) return;
     _eventsSub = _backendClient.streamEvents().listen(
@@ -496,11 +517,21 @@ class BotChatController extends ChangeNotifier {
             ''
         : event.data['message'] as String? ?? '';
     if (message.isEmpty) return;
-    // Quota alerts go to the OS notification tray, not the chat bubble stream.
-    // Fire-and-forget: a denied/unsupported notification must not break events.
-    unawaited(
-      NotificationService.instance.show(title: 'AgentDeck', body: message),
-    );
+    // Quota alerts prefer a system/browser notification. If the platform denies
+    // it, fall back to an in-page system message so Web users still see it.
+    unawaited(_showQuotaNotification(message));
+  }
+
+  Future<void> _showQuotaNotification(String message) async {
+    try {
+      final bool shown = await NotificationService.instance.show(
+        title: 'AgentDeck',
+        body: message,
+      );
+      if (!shown) _appendSystemMessage(message);
+    } catch (_) {
+      _appendSystemMessage(message);
+    }
   }
 
   void _appendProgress(Map<String, Object?> data) {

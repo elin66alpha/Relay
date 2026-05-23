@@ -27,6 +27,57 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
+## 2026-05-23 — 未登录态适配（前后端，移动+Web）【未提交】
+
+**背景**：此前聊天主链路完全不感知 agent CLI 的登录态——某个平台没登录时，CLI 的
+登录错误会被当成「助手的回复」以 HTTP 200 返回，甚至被 `appendHistory` 当成功轮次
+写进 `chat-history.json`。唯一沾边的只有额度弹窗（`usage.js`，且 agy 连这都没有）。
+本次只补后端。
+
+**改动**
+- `server/lib/agents.js`：
+  - 新增 `AgentAuthError`（`code: 'NOT_LOGGED_IN'`, 带 `agent`）和启发式
+    `isAuthError(text)`（匹配 not logged in / please log in / run `<cli> login` /
+    /login / unauthorized / invalid api key 等；**刻意只匹配鉴权类**，不会误吞
+    resume 的「session not found」消息）。
+  - claude/codex/agy 三个 `finalize`：当没有可用输出且文本像登录错误时，返回
+    `{ __authError: true }`，在各自 `.then()` 里抛 `AgentAuthError`。agy 原来直接
+    `return spawnStream(...)`，这次补了 `.then()` 包装。
+  - 导出 `AgentAuthError`。
+- `server/server.js`：`/api/chat` 的 catch 里新增 `NOT_LOGGED_IN` 分支——
+  - 非流式：返回 **HTTP 424**（避开 401=坏设备 token、503=TOKEN_NOT_CONFIGURED），
+    body `{error, code:'NOT_LOGGED_IN', agent}`；
+  - 流式：发 SSE `agent_error` 事件并带 `code:'NOT_LOGGED_IN'`（流式响应头已 200 发出，
+    无法再改状态码）；通用流式 `agent_error` 也顺手带上 `code: err.code`。
+  - 因为现在是「抛异常」而不是返回内容，未登录的回合**不再写进 `chat-history.json`**。
+- 新增 `server/lib/auth-status.js` + `GET /api/auth/status`：只读凭证文件、不 spawn CLI，
+  返回每个 agent 的 `loggedIn`（claude/codex 可判 true/false；agy 无可靠凭证文件，返回
+  `null` 表示未知）。供 app 在发消息前提示。
+
+**客户端（移动 + Web，纯 Material/跨平台，无平台专属 API）**
+- `lib/core/backend/backend_client.dart`：
+  - 流式 `agent_error` 现在读取并透传 `code`（之前只取 `error`、丢弃 code），
+    `NOT_LOGGED_IN` 映射为 `BackendException(status:424, code:'NOT_LOGGED_IN')`。
+  - 新增 `fetchAuthStatus()` → 调 `GET /api/auth/status`，返回 `Map<String,bool?>`。
+- `lib/features/chat/bot_chat_controller.dart`：
+  - 新增 `_authStatus` + `agentLoggedIn(key)` getter + `refreshAuthStatus()`（best-effort，
+    失败不影响聊天）；`loadFor` 切换上下文时 `unawaited(refreshAuthStatus())`。
+  - `_runTurn` catch 识别 `code=='NOT_LOGGED_IN'`，显示本地化文案
+    `agentNotLoggedIn(label)`，并立即把该 agent 标记为未登录以更新横幅。
+    **不阻断发送**——检测是 best-effort，真失败仍由这条回退路径兜底。
+- `lib/features/chat/bot_chat_screen.dart`：聊天列表上方新增 `_NotLoggedInBanner`
+  （`errorContainer` 配色 + 锁图标 + 「重新检查」按钮调 `refreshAuthStatus`），
+  仅当 `agentLoggedIn(key)==false` 显示（agy 为 null/未知时不显示）。
+- `lib/core/i18n/app_strings.dart`：新增 `agentNotLoggedIn` / `agentNotLoggedInBanner` /
+  `recheck` 三个中英文案。
+
+**验证**：
+- 后端：`node -c` 三文件通过；`isAuthError` 单测正确区分鉴权错误 vs resume/正常回复；
+  本机 boot 测 `GET /api/auth/status` 返回 `claude:true, codex:true, agy:null`；测试端口
+  已清理无残留 tunnel。
+- 客户端：`flutter analyze lib/` No issues；`flutter build web` ✓；
+  `flutter build apk --debug` ✓（移动 + Web 两个目标都编译通过）。
+
 ## 2026-05-22 — 聊天记录从「本地」改为「后端持久化」
 
 **意图**：app 不再在本地保存聊天记录。对话由后端（CLI 宿主机）保存，app 重开时

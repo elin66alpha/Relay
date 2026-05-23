@@ -17,6 +17,7 @@ class CliAgentsDrawer extends StatelessWidget {
     required this.chatController,
     required this.machinesController,
     required this.settingsController,
+    this.closeOnAction = true,
     super.key,
   });
 
@@ -24,6 +25,7 @@ class CliAgentsDrawer extends StatelessWidget {
   final BotChatController chatController;
   final MachineCredentialsController machinesController;
   final AppSettingsController settingsController;
+  final bool closeOnAction;
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +64,7 @@ class CliAgentsDrawer extends StatelessWidget {
                     leading: const Icon(Icons.vpn_key_outlined),
                     title: Text(context.l10n.manageCredentials),
                     onTap: () {
-                      Navigator.of(context).pop();
+                      if (closeOnAction) Navigator.of(context).pop();
                       Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
                           builder: (_) => MachineCredentialsScreen(
@@ -96,7 +98,9 @@ class CliAgentsDrawer extends StatelessWidget {
                       selected: agent.key == activeKey,
                       onTap: () async {
                         await agentsController.setActive(agent.key);
-                        if (context.mounted) Navigator.of(context).pop();
+                        if (context.mounted && closeOnAction) {
+                          Navigator.of(context).pop();
+                        }
                       },
                     ),
                 ],
@@ -107,7 +111,7 @@ class CliAgentsDrawer extends StatelessWidget {
               leading: const Icon(Icons.folder_open_outlined),
               title: Text(context.l10n.workDirectory),
               onTap: () {
-                Navigator.of(context).pop();
+                if (closeOnAction) Navigator.of(context).pop();
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(
                     builder: (_) => WorkDirectoryScreen(
@@ -121,7 +125,7 @@ class CliAgentsDrawer extends StatelessWidget {
               leading: const Icon(Icons.settings_outlined),
               title: Text(context.l10n.settings),
               onTap: () {
-                Navigator.of(context).pop();
+                if (closeOnAction) Navigator.of(context).pop();
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(
                     builder: (_) => AppSettingsScreen(

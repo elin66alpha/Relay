@@ -27,6 +27,44 @@ class AgentCancelledError extends Error {
   }
 }
 
+// Raised when an agent CLI has no logged-in account / no usable API key, so the
+// caller can surface a real "log in on the host" state instead of returning the
+// raw CLI error as if it were the assistant's reply.
+class AgentAuthError extends Error {
+  constructor(agentKey) {
+    super(`${agentKey} is not logged in`);
+    this.name = 'AgentAuthError';
+    this.code = 'NOT_LOGGED_IN';
+    this.agent = agentKey;
+  }
+}
+
+// Heuristic detection of "the CLI has no logged-in account / no API key". The
+// CLIs expose no machine-readable signal for this, so we match the human
+// messages they print. Kept deliberately auth-specific so it never swallows the
+// separate "resumed session not found" messages, which are handled on their own.
+const AUTH_ERROR_RE = new RegExp(
+  [
+    'not logged in',
+    'not authenticated',
+    'please log\\s?in',
+    'please sign in',
+    '(?:must|need to) log\\s?in',
+    'run\\s+`?(?:claude|codex|agy|gemini)?\\s*login`?',
+    '/login\\b',
+    'login (?:required|expired)',
+    'unauthorized',
+    'authentication (?:failed|required|error)',
+    'invalid api key',
+    '(?:missing|no) api key',
+  ].join('|'),
+  'i',
+);
+
+function isAuthError(text) {
+  return AUTH_ERROR_RE.test(String(text || ''));
+}
+
 function loadSessions() {
   try {
     return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
@@ -234,6 +272,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
     '--print',
     '--output-format',
     'stream-json',
+    '--include-partial-messages',
     '--verbose',
     '--dangerously-skip-permissions',
   ];
@@ -277,6 +316,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
       const error = String(stderr).trim();
       if (finalText.trim()) {
         if (!isError) setSession(sessionKey, { id: sessionId });
+        if (isError && isAuthError(finalText)) return { __authError: true };
         return `${isError ? 'Claude returned an error:\n' : ''}${finalText.trim()}`;
       }
       // Resume can fail if the CLI removed an old session. Drop it and retry.
@@ -289,6 +329,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
         clearSession(sessionKey);
         return { __retry: true };
       }
+      if (isAuthError(error)) return { __authError: true };
       return error || '(claude produced no output)';
     },
   }).then((result) => {
@@ -296,6 +337,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
       return runClaude(prompt, onEvent, sessionKey, signal);
     }
+    if (result && result.__authError) throw new AgentAuthError('claude');
     return result;
   });
 }
@@ -344,6 +386,7 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
     : ['exec', ...common, '-C', cwd, String(prompt)];
 
   let threadId = resuming ? prior.id : null;
+  let sawTextDelta = false;
   const emitDelta = makeDeltaEmitter(onEvent);
 
   return spawnStream({
@@ -362,16 +405,19 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
       if (event.type === 'thread.started' && event.thread_id) {
         threadId = event.thread_id;
       }
-      if (
-        event.type &&
-        String(event.type).includes('delta') &&
+      const deltaText =
         typeof event.text === 'string'
-      ) {
-        emitDelta(event.text);
+          ? event.text
+          : typeof event.delta === 'string'
+            ? event.delta
+            : '';
+      if (event.type && String(event.type).includes('delta') && deltaText) {
+        sawTextDelta = true;
+        emitDelta(deltaText);
       }
       if (event.type !== 'item.completed' || !event.item) return;
       if (event.item.type === 'agent_message' && event.item.text) {
-        emitDelta(event.item.text);
+        if (sawTextDelta) emitDelta(event.item.text);
       }
       const label = codexItemLabel(event.item);
       if (label) emit(onEvent, label);
@@ -399,6 +445,7 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
         if (threadId) setSession(sessionKey, { id: threadId });
         return text;
       }
+      if (isAuthError(error) || isAuthError(stdout)) return { __authError: true };
       return fallback(stdout, stderr, code, 'codex');
     },
   }).then((result) => {
@@ -406,6 +453,7 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
       return runCodex(prompt, onEvent, sessionKey, signal);
     }
+    if (result && result.__authError) throw new AgentAuthError('codex');
     return result;
   });
 }
@@ -496,8 +544,14 @@ function runAgy(prompt, onEvent, sessionKey, signal) {
         }
       }
 
+      if (!text && (isAuthError(stdout) || isAuthError(stderr))) {
+        return { __authError: true };
+      }
       return text || fallback(stdout, stderr, code, 'agy');
     },
+  }).then((result) => {
+    if (result && result.__authError) throw new AgentAuthError('agy');
+    return result;
   });
 }
 
@@ -551,6 +605,7 @@ async function runAgent(agentKey, prompt, onEvent, options = {}) {
 module.exports = {
   AGENTS,
   AgentCancelledError,
+  AgentAuthError,
   DEFAULT_AGENT,
   TIMEOUT_MS,
   listAgents,

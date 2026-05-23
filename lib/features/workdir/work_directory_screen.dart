@@ -125,29 +125,39 @@ class _WorkDirectoryScreenState extends State<WorkDirectoryScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: <Widget>[
-            TextField(
-              controller: _path,
-              enabled: !_isLoading && !_isSaving,
-              decoration: InputDecoration(
-                labelText: context.l10n.workDirectory,
-                hintText: context.l10n.workDirectoryHint,
-                border: const OutlineInputBorder(),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  TextField(
+                    controller: _path,
+                    enabled: !_isLoading && !_isSaving,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.workDirectory,
+                      hintText: context.l10n.workDirectoryHint,
+                      border: const OutlineInputBorder(),
+                    ),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _isSaving ? null : _save(),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_isLoading)
+                    Text(context.l10n.loadingWorkDirectory)
+                  else if (_error != null)
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: _isLoading || _isSaving ? null : _save,
+                    child: Text(context.l10n.save),
+                  ),
+                ],
               ),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _isSaving ? null : _save(),
-            ),
-            const SizedBox(height: 12),
-            if (_isLoading)
-              Text(context.l10n.loadingWorkDirectory)
-            else if (_error != null)
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: _isLoading || _isSaving ? null : _save,
-              child: Text(context.l10n.save),
             ),
           ],
         ),

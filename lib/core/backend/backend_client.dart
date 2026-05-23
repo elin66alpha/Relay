@@ -270,7 +270,16 @@ class BackendClient {
     required String agentKey,
     required String prompt,
     required String requestId,
+    void Function(BackendEvent event)? onEvent,
   }) async {
+    if (onEvent != null) {
+      return _sendMessageStreamed(
+        agentKey: agentKey,
+        prompt: prompt,
+        requestId: requestId,
+        onEvent: onEvent,
+      );
+    }
     final Object? decoded = await _requestJson(
       'POST',
       '/api/chat',
@@ -297,6 +306,63 @@ class BackendClient {
       agentLabel: agent['label'] as String? ?? agentKey,
       content: message['content'] as String? ?? '',
     );
+  }
+
+  Future<ChatReply> _sendMessageStreamed({
+    required String agentKey,
+    required String prompt,
+    required String requestId,
+    required void Function(BackendEvent event) onEvent,
+  }) async {
+    final MachineCredential credential = await _requireCredential();
+    final http.Request request = http.Request(
+      'POST',
+      _uri(credential, '/api/chat'),
+    );
+    request.headers.addAll(
+      await _headers(credential, accept: 'text/event-stream'),
+    );
+    request.body = jsonEncode(<String, Object?>{
+      'agent': agentKey,
+      'prompt': prompt,
+      'requestId': requestId,
+    });
+
+    final http.StreamedResponse response =
+        await _httpClient.send(request).timeout(const Duration(minutes: 65));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final String text = await response.stream.bytesToString();
+      throw _exceptionFor(response.statusCode, text);
+    }
+
+    ChatReply? reply;
+    BackendException? streamError;
+    await for (final BackendEvent event
+        in _parseSse(response.stream).timeout(const Duration(minutes: 65))) {
+      if (event.type == 'ready' || event.type == 'heartbeat') continue;
+      onEvent(event);
+      if (event.type == 'agent_done') {
+        reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
+      } else if (event.type == 'agent_cancelled') {
+        streamError = BackendException(
+          'request cancelled',
+          status: 499,
+          code: 'AGENT_CANCELLED',
+        );
+      } else if (event.type == 'agent_error') {
+        final String? code = event.data['code'] as String?;
+        streamError = BackendException(
+          event.data['error'] as String? ?? 'Agent stream failed.',
+          status: code == 'NOT_LOGGED_IN' ? 424 : 500,
+          code: code,
+        );
+      }
+    }
+    if (streamError != null) throw streamError;
+    if (reply == null) {
+      throw BackendException('Agent stream ended without a final response.');
+    }
+    return reply;
   }
 
   Future<void> cancelMessage(String requestId) async {
@@ -359,6 +425,24 @@ class BackendClient {
           ? ChatMessage.user(content)
           : ChatMessage.assistant(content);
     }).toList(growable: false);
+  }
+
+  /// Best-effort login state per agent so the app can warn before sending a
+  /// message. Maps agentKey -> loggedIn, where the value is true/false when the
+  /// backend can read the CLI's credentials, or null when it cannot tell (agy).
+  Future<Map<String, bool?>> fetchAuthStatus() async {
+    final Object? decoded = await _requestJson('GET', '/api/auth/status');
+    final Map<String, bool?> result = <String, bool?>{};
+    if (decoded is Map && decoded['agents'] is List) {
+      for (final Object? item in (decoded['agents'] as List)) {
+        if (item is! Map) continue;
+        final String key = item['key'] as String? ?? '';
+        if (key.isEmpty) continue;
+        final Object? loggedIn = item['loggedIn'];
+        result[key] = loggedIn is bool ? loggedIn : null;
+      }
+    }
+    return result;
   }
 
   /// Clears the backend-side session for one agent so the next message starts
@@ -430,11 +514,14 @@ class BackendClient {
       throw _exceptionFor(response.statusCode, text);
     }
 
+    yield* _parseSse(response.stream);
+  }
+
+  Stream<BackendEvent> _parseSse(Stream<List<int>> stream) async* {
     String eventType = 'message';
     final StringBuffer data = StringBuffer();
-    await for (final String line in response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
+    await for (final String line
+        in stream.transform(utf8.decoder).transform(const LineSplitter())) {
       if (line.isEmpty) {
         if (data.isNotEmpty) {
           yield BackendEvent(type: eventType, data: _decodeEventData(data));
@@ -450,6 +537,25 @@ class BackendClient {
         data.write(line.substring(5).trimLeft());
       }
     }
+  }
+
+  ChatReply _chatReplyFromStreamDone(
+    Map<String, Object?> json,
+    String requestId,
+    String agentKey,
+  ) {
+    final Map<String, Object?> agent =
+        (json['agent'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final Map<String, Object?> message =
+        (json['message'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    return ChatReply(
+      requestId: json['requestId'] as String? ?? requestId,
+      agentKey: agent['key'] as String? ?? agentKey,
+      agentLabel: agent['label'] as String? ?? agentKey,
+      content: message['content'] as String? ?? '',
+    );
   }
 
   Future<Object?> _requestJson(
