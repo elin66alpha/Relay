@@ -9,6 +9,7 @@ import '../machines/machine_credentials_controller.dart';
 import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
 import '../workdir/work_directory_screen.dart';
+import '../cards/card_deck_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -103,6 +104,28 @@ class CliAgentsDrawer extends StatelessWidget {
                         }
                       },
                     ),
+                  const Divider(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.style_outlined),
+                    title: Text(context.l10n.cardMode),
+                    subtitle: Text(
+                      context.l10n.cardModeSubtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () {
+                      if (closeOnAction) Navigator.of(context).pop();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => CardDeckScreen(
+                            agentsController: agentsController,
+                            chatController: chatController,
+                            machinesController: machinesController,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),

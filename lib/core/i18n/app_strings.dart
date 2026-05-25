@@ -34,6 +34,9 @@ class AppStrings {
   String get machines => isZh ? '机器' : 'Machines';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
+  String get cardMode => isZh ? '卡片模式' : 'Card Mode';
+  String get cardModeSubtitle =>
+      isZh ? '基于对话历史的行动建议' : 'Suggested actions from your chats';
   String get usage => isZh ? '额度' : 'Usage';
   String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
   String get loadingUsage => isZh ? '正在查询额度...' : 'Loading quota...';
