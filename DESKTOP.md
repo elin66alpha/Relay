@@ -67,10 +67,10 @@ Artifacts:
   offers **"Upload QR image"** and **"Paste credential"** instead. Generate the
   credential on the backend host (see the main README "Credential QR" section),
   then upload the PNG or paste the payload, and enter the passphrase.
-- A backend reached over a **Tailscale 100.x IP** works once the client has
-  Tailscale enabled. MagicDNS also works when client DNS supports it (and
-  `https://…ts.net` works if you use `tailscale serve`).
-- For a plain **`http://<tailscale-or-LAN-ip>:port`** backend: macOS normally
+- A backend exposed through **Cloudflare Quick Tunnel** uses the same
+  `https://*.trycloudflare.com` URL as mobile/Web credentials. Regenerate the
+  QR after the tunnel URL rotates.
+- For a plain **`http://<LAN-or-public-ip>:port`** backend: macOS normally
   blocks cleartext HTTP via App Transport Security; we set
   `NSAllowsLocalNetworking` so local HTTP works. Windows/Linux have no such
   restriction.

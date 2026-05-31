@@ -39,7 +39,11 @@ for file in \
   run node --check "$file"
 done
 
-run flutter build web --no-pub --pwa-strategy=none
+# --no-web-resources-cdn: bundle CanvasKit locally instead of loading it from
+# gstatic.com. The CDN is unreachable on some networks (e.g. mainland China),
+# which leaves the app loaded-but-blank. Serving it from our own backend over
+# the tunnel keeps the web app fully self-hosted with zero external deps.
+run flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
 run pm2 restart "$PM2_APP_NAME" --update-env
 wait_for_web
 

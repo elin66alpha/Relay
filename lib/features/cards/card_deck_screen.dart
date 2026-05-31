@@ -54,15 +54,15 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     _anim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 260),
-    )
-      ..addListener(() {
-        if (_slide != null) setState(() => _drag = _slide!.value);
-      })
-      ..addStatusListener((AnimationStatus status) {
+    )..addStatusListener((AnimationStatus status) {
         if (status != AnimationStatus.completed) return;
-        if (_pendingRemove && _cards.isNotEmpty) _cards.removeAt(0);
+        setState(() {
+          if (_pendingRemove && _cards.isNotEmpty) _cards.removeAt(0);
+          _pendingRemove = false;
+          _slide = null;
+          _drag = Offset.zero;
+        });
         _anim.reset();
-        setState(() => _drag = Offset.zero);
       });
     _load();
   }
@@ -170,7 +170,8 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     final DateTime? deferUntil = await _pickDeferTime();
     if (deferUntil == null || !mounted) return;
     unawaited(
-      _service.sendFeedback(card.id, 'defer', deferUntil: deferUntil)
+      _service
+          .sendFeedback(card.id, 'defer', deferUntil: deferUntil)
           .catchError((_) {}),
     );
     if (_cards.isNotEmpty && _cards.first.id == card.id && !_anim.isAnimating) {
@@ -281,64 +282,71 @@ class _CardDeckScreenState extends State<CardDeckScreen>
       );
     }
 
-    final bool horizontal = _drag.dx.abs() >= _drag.dy.abs();
-    final double distance = horizontal ? _drag.dx.abs() : _drag.dy.abs();
-    final double overlayOpacity = (distance / _threshold).clamp(0.0, 1.0);
-    final (Color color, IconData icon, String label) = horizontal
-        ? (_drag.dx > 0
-            ? (const Color(0xFF10B981), Icons.check_rounded, 'Execute')
-            : (const Color(0xFFEF4444), Icons.close_rounded, 'Reject'))
-        : (_drag.dy < 0
-            ? (const Color(0xFFF59E0B), Icons.pause_rounded, 'Defer')
-            : (Colors.grey, Icons.remove_rounded, 'Irrelevant'));
-
     return Positioned(
       top: 0,
-      child: Transform.translate(
-        offset: _drag,
-        child: Transform.rotate(
-          angle: (_drag.dx / 900).clamp(-0.35, 0.35),
-          child: GestureDetector(
-            onPanUpdate: _onPanUpdate,
-            onPanEnd: _onPanEnd,
-            child: SizedBox(
-              width: w,
-              height: h,
-              child: Stack(
-                children: <Widget>[
-                  CardWidget(card: card),
-                  if (overlayOpacity > 0)
-                    Positioned.fill(
-                      child: Opacity(
-                        opacity: overlayOpacity,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: <Widget>[
-                              Icon(icon, color: Colors.white, size: 64),
-                              const SizedBox(height: 8),
-                              Text(
-                                label,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                ),
+      child: AnimatedBuilder(
+        animation: _anim,
+        child: CardWidget(card: card),
+        builder: (BuildContext context, Widget? child) {
+          final Offset drag = _slide?.value ?? _drag;
+          final bool horizontal = drag.dx.abs() >= drag.dy.abs();
+          final double distance = horizontal ? drag.dx.abs() : drag.dy.abs();
+          final double overlayOpacity = (distance / _threshold).clamp(0.0, 1.0);
+          final (Color color, IconData icon, String label) = horizontal
+              ? (drag.dx > 0
+                  ? (const Color(0xFF10B981), Icons.check_rounded, 'Execute')
+                  : (const Color(0xFFEF4444), Icons.close_rounded, 'Reject'))
+              : (drag.dy < 0
+                  ? (const Color(0xFFF59E0B), Icons.pause_rounded, 'Defer')
+                  : (Colors.grey, Icons.remove_rounded, 'Irrelevant'));
+
+          return Transform.translate(
+            offset: drag,
+            child: Transform.rotate(
+              angle: (drag.dx / 900).clamp(-0.35, 0.35),
+              child: GestureDetector(
+                onPanUpdate: _onPanUpdate,
+                onPanEnd: _onPanEnd,
+                child: SizedBox(
+                  width: w,
+                  height: h,
+                  child: Stack(
+                    children: <Widget>[
+                      child!,
+                      if (overlayOpacity > 0)
+                        Positioned.fill(
+                          child: Opacity(
+                            opacity: overlayOpacity,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(16),
                               ),
-                            ],
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: <Widget>[
+                                  Icon(icon, color: Colors.white, size: 64),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    label,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

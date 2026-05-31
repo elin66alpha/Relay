@@ -7,10 +7,9 @@ cd /path/to/AgentDeck
 backends/linux/setup.sh
 ```
 
-This wrapper calls `./setup.sh`, which offers Tailscale mode (recommended;
-reach the backend over your private tailnet at a stable `100.x` Tailscale IP) or
-direct mode for a VPS/public host. Install Tailscale first:
-`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`.
+This wrapper calls `./setup.sh`, which offers Cloudflare Quick Tunnel mode
+(default; `cloudflared tunnel --url http://localhost:8787`) or direct mode for
+a VPS/public host. Install `cloudflared` for tunnel mode.
 
 Useful commands:
 
@@ -18,5 +17,5 @@ Useful commands:
 pm2 list
 pm2 logs agentdeck-server
 pm2 restart agentdeck-server
-tailscale status        # check the tailnet / this machine's address
+pm2 logs agentdeck-tunnel
 ```

@@ -8,6 +8,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
+const compression = require('compression');
 
 const {
   AgentCancelledError,
@@ -69,6 +70,21 @@ const rawUpload = express.raw({
   type: 'application/octet-stream',
   limit: process.env.FILE_UPLOAD_LIMIT || '256mb',
 });
+
+// Compress responses before they cross the tunnel. The web bundle is the bulk of
+// first-load bytes (main.dart.js ~3.6MB + canvaskit.wasm ~7MB); gzip cuts it ~60%,
+// turning a multi-minute first load into seconds. `compressible` does not flag
+// application/wasm, so allow it explicitly. Streaming/SSE responses set
+// `Cache-Control: no-transform`, which compression honors by skipping them.
+app.use(
+  compression({
+    filter(req, res) {
+      const type = String(res.getHeader('Content-Type') || '');
+      if (/application\/wasm/i.test(type)) return true;
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 app.use(express.json({ limit: '16mb' }));
 app.use((req, res, next) => {
@@ -689,6 +705,7 @@ app.post('/api/chat', async (req, res) => {
         return await runAgent(agentKey, prompt, emitRunEvent, {
           sessionKey: scopeKey,
           signal: abortController.signal,
+          workdir,
         });
       } finally {
         runningScopes.delete(scopeKey);
@@ -984,21 +1001,29 @@ app.post('/api/cards/refresh', (_req, res) => {
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
   app.use(express.static(WEB_BUILD_DIR, {
-    etag: false,
-    maxAge: 0,
-    setHeaders(res) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
+    etag: true,
+    lastModified: true,
+    setHeaders(res, filePath) {
+      const rel = path.relative(WEB_BUILD_DIR, filePath);
+      // CanvasKit is pinned to the Flutter engine revision and is effectively
+      // immutable between SDK upgrades; cache the 7MB wasm hard so it downloads
+      // once and is then served from the browser cache with no request at all.
+      if (rel.split(path.sep)[0] === 'canvaskit') {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return;
+      }
+      // Other files (index.html, *.js, assets) keep their filenames across builds,
+      // so allow caching but always revalidate: a matching ETag returns a tiny 304
+      // instead of re-sending the bytes. Never `no-store` — that re-downloaded the
+      // whole ~11MB bundle on every load, which is what made the web take minutes.
+      res.setHeader('Cache-Control', 'no-cache');
     },
   }));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'not found' });
     }
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+    res.setHeader('Cache-Control', 'no-cache');
     return res.sendFile(path.join(WEB_BUILD_DIR, 'index.html'));
   });
 }

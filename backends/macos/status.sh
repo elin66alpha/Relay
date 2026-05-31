@@ -17,8 +17,8 @@ print_one() {
 }
 
 print_one "$SERVER_LABEL"
+print_one "$TUNNEL_LABEL"
 
 printf '\nLogs:\n'
 printf '  %s\n' "$LOG_DIR/backend.out.log" "$LOG_DIR/backend.err.log"
-
-printf '\nNetworking: Tailscale (run `tailscale status` to check the tailnet).\n'
+printf '  %s\n' "$LOG_DIR/tunnel.out.log" "$LOG_DIR/tunnel.err.log"

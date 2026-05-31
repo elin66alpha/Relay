@@ -39,7 +39,9 @@ class BotChatController extends ChangeNotifier {
   Timer? _eventReconnectTimer;
   Timer? _historyPollTimer;
   Timer? _remoteSettleTimer;
+  Timer? _streamNotifyTimer;
   bool _wantsEvents = false;
+  bool _streamNotifyQueued = false;
   // True while another device is running a turn on the conversation we are
   // viewing (same workdir + agent). We mirror it by polling the backend's
   // authoritative history rather than replaying its deltas, which keeps the two
@@ -47,6 +49,7 @@ class BotChatController extends ChangeNotifier {
   bool _remoteActive = false;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
+  int get messageCount => _messages.length;
   bool get isThinking => _isThinking;
   bool get isCancelling => _isCancelling;
   String? get lastError => _lastError;
@@ -84,6 +87,9 @@ class BotChatController extends ChangeNotifier {
 
   bool isAwaitingFirstToken(ChatMessage message) =>
       message.metadata[_awaitingFirstTokenKey] == true;
+
+  bool isStreaming(ChatMessage message) =>
+      message.metadata[_streamingKey] == true;
 
   bool isSystemMessage(ChatMessage message) =>
       message.metadata[_systemKey] == true;
@@ -335,6 +341,7 @@ class BotChatController extends ChangeNotifier {
     _eventReconnectTimer?.cancel();
     _historyPollTimer?.cancel();
     _remoteSettleTimer?.cancel();
+    _cancelStreamingNotifyTimer();
     await _eventsSub?.cancel();
     await _backendClient.close();
   }
@@ -534,7 +541,7 @@ class BotChatController extends ChangeNotifier {
         _awaitingFirstTokenKey: awaitingFirstToken,
       },
     );
-    notifyListeners();
+    _notifyStreamingUpdate();
   }
 
   void _finalizeAssistant(
@@ -543,6 +550,7 @@ class BotChatController extends ChangeNotifier {
     bool system = false,
     Map<String, Object?> metadata = const <String, Object?>{},
   }) {
+    _cancelStreamingNotifyTimer();
     final Map<String, Object?> finalMetadata = <String, Object?>{
       _streamingKey: false,
       _awaitingFirstTokenKey: false,
@@ -580,6 +588,7 @@ class BotChatController extends ChangeNotifier {
 
   void _discardAssistant(int assistantIndex) {
     if (assistantIndex >= _messages.length) return;
+    _cancelStreamingNotifyTimer();
     _messages.removeAt(assistantIndex);
     notifyListeners();
   }
@@ -612,6 +621,7 @@ class BotChatController extends ChangeNotifier {
   void _markAssistantCancelled(String requestId) {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
+    _cancelStreamingNotifyTimer();
     final ChatMessage message = _messages[index];
     _messages[index] = message.copyWith(
       content: message.content,
@@ -623,6 +633,26 @@ class BotChatController extends ChangeNotifier {
       },
     );
     notifyListeners();
+  }
+
+  void _notifyStreamingUpdate() {
+    if (_streamNotifyTimer != null) {
+      _streamNotifyQueued = true;
+      return;
+    }
+    notifyListeners();
+    _streamNotifyTimer = Timer(const Duration(milliseconds: 80), () {
+      _streamNotifyTimer = null;
+      if (!_streamNotifyQueued) return;
+      _streamNotifyQueued = false;
+      _notifyStreamingUpdate();
+    });
+  }
+
+  void _cancelStreamingNotifyTimer() {
+    _streamNotifyTimer?.cancel();
+    _streamNotifyTimer = null;
+    _streamNotifyQueued = false;
   }
 
   int _assistantIndexForRequest(String requestId) {

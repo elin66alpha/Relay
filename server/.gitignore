@@ -7,5 +7,7 @@ cards.json
 quota-state-*.json
 tokens.json
 credentials/*.agentdeck
+credentials/*.agentdeck.json
+credentials/*.json
 credentials/*.png
 credentials/*.passphrase.txt

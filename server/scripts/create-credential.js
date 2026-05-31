@@ -6,7 +6,6 @@ const os = require('os');
 const path = require('path');
 const readline = require('readline/promises');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
 const QRCode = require('qrcode');
 const qrcodeTerminal = require('qrcode-terminal');
 
@@ -42,14 +41,16 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
-  npm run credential                 # Auto-detect the Tailscale address, prompt for a password, print the credential QR
+  npm run credential                 # Auto-detect the cloudflared tunnel URL, prompt for a password, print the credential QR
 
 Options:
-  --url <url>          Backend URL (default: auto-detected from Tailscale; use this for direct/VPS mode)
+  --url <url>          Public URL (default: auto-detected from the cloudflared tunnel log)
   --name <name>        Machine name shown in the app (default: hostname)
   --label <label>      Token label (default: machine name)
   --qr-out <path>      Output path for the QR PNG
+  --json-out <path>    Output path for the copy/paste credential JSON
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
+  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: agentdeck-tunnel, then bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
 
@@ -58,59 +59,53 @@ does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
 `);
 }
 
-// Auto-detect this machine's stable Tailscale address. Use the 100.x tailnet
-// IPv4 first because it does not depend on client-side MagicDNS being enabled
-// on Android/iOS. Fall back to the MagicDNS name when no IPv4 is available.
-// Unlike a quick tunnel, this address is stable across restarts. Tailscale's
-// WireGuard transport is end-to-end encrypted, so plain http over the tailnet is
-// fine; the backend is never exposed to the public internet.
-function runTailscale(args) {
-  try {
-    return execFileSync('tailscale', args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
-    });
-  } catch (_err) {
-    return '';
+// Auto-detect the Cloudflare quick-tunnel public URL. cloudflared prints the URL
+// to stderr, which PM2 captures in per-process logs. Quick-tunnel URLs rotate
+// on every restart, so use the newest matching URL in the newest known log.
+const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
+const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
+
+function detectTunnelUrl(args) {
+  const names = [];
+  const override = String(
+    args['tunnel-name'] || process.env.TUNNEL_PM2_NAME || '',
+  ).trim();
+  if (override) names.push(override);
+  names.push('agentdeck-tunnel', 'bot-app-tunnel');
+
+  const files = [];
+  for (const name of names) {
+    files.push(path.join(PM2_LOG_DIR, `${name}-error.log`));
+    files.push(path.join(PM2_LOG_DIR, `${name}-out.log`));
   }
-}
+  const existing = files
+    .filter((file) => fs.existsSync(file))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
-function detectTailscaleUrl(port) {
-  const ip = runTailscale(['ip', '-4']).trim().split('\n')[0].trim();
-  if (ip) return { url: `http://${ip}:${port}`, source: 'Tailscale IPv4' };
-
-  let host = '';
-  const statusJson = runTailscale(['status', '--json']);
-  if (statusJson) {
+  for (const file of existing) {
+    let text;
     try {
-      const status = JSON.parse(statusJson);
-      if (status && status.Self && status.Self.DNSName) {
-        host = String(status.Self.DNSName).replace(/\.$/, '');
-      }
+      text = fs.readFileSync(file, 'utf8');
     } catch (_err) {
-      // Fall through to no detected URL.
+      continue;
     }
+    const matches = text.match(TRYCLOUDFLARE_RE);
+    if (matches && matches.length) return matches[matches.length - 1];
   }
-  return host
-    ? { url: `http://${host}:${port}`, source: 'Tailscale MagicDNS' }
-    : null;
+  return '';
 }
 
 function resolvePublicBaseUrl(args) {
-  const port = String(process.env.PORT || '8787').trim() || '8787';
   const explicit = String(args.url || '').trim();
   if (explicit) return { url: explicit, source: 'command line (--url)' };
-  const detected = detectTailscaleUrl(port);
-  if (detected) return detected;
+  const detected = detectTunnelUrl(args);
+  if (detected) return { url: detected, source: 'cloudflared tunnel log' };
   const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
   if (envUrl) {
     return { url: envUrl, source: '.env PUBLIC_BASE_URL (may be stale)' };
   }
   throw new Error(
-    'Could not determine the backend address. Install Tailscale and run `tailscale up` ' +
-      '(https://tailscale.com/download), then re-run. For a VPS / public host / own domain, ' +
-      'pass the address explicitly with --url.',
+    'Could not determine the public URL. Make sure the cloudflared tunnel is running (pm2 status), or pass --url explicitly.',
   );
 }
 
@@ -220,7 +215,7 @@ function printTokens() {
 function cleanOldCredentialFiles(dir) {
   fs.mkdirSync(dir, { recursive: true });
   for (const entry of fs.readdirSync(dir)) {
-    if (/\.(botcred|png|svg|txt)$/i.test(entry)) {
+    if (/\.(botcred|json|png|svg|txt)$/i.test(entry)) {
       fs.rmSync(path.join(dir, entry), { force: true });
     }
   }
@@ -290,21 +285,30 @@ async function main() {
     args['qr-out'] ||
       path.join('credentials', `${safeFilename(machineName)}.agentdeck.png`),
   );
+  const jsonPath = path.resolve(
+    SERVER_DIR,
+    args['json-out'] ||
+      path.join('credentials', `${safeFilename(machineName)}.agentdeck.json`),
+  );
   fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+  fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
   await QRCode.toFile(qrPath, qrPayload, {
     errorCorrectionLevel: 'M',
     margin: 2,
     width: 1024,
   });
+  fs.writeFileSync(jsonPath, `${qrPayload}\n`, { mode: 0o600 });
 
   console.log(`QR saved: ${qrPath}`);
+  console.log(`Credential JSON saved: ${jsonPath}`);
   console.log(`Machine: ${machineName}`);
   console.log(`Public URL: ${credential.baseUrl} (source: ${resolved.source})`);
   console.log(`Token id: ${tokenRecord.id}`);
   console.log('Existing device tokens were left active. Use --revoke to disable an old device.');
   console.log('\nIn the app, tap "Scan QR", point it at the QR below, then enter the password you just set:\n');
   qrcodeTerminal.generate(qrPayload, { small: true });
-  console.log('\nToken appended to server/tokens.json; machine id and public URL written to server/.env.');
+  console.log('\nFor paste import, open the credential JSON file above, copy the whole file content, then paste it in the app.');
+  console.log('Token appended to server/tokens.json; machine id and public URL written to server/.env.');
 }
 
 main().catch((err) => {

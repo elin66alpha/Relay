@@ -7,12 +7,11 @@ LaunchAgent services under `~/Library/LaunchAgents`.
 
 - macOS with Node.js 18 or newer.
 - Claude Code / Codex / Antigravity CLIs installed and logged in on the Mac.
-- Tailscale for the recommended networking mode (install on the Mac and each
-  client device, signed into the same account):
+- `cloudflared` for the default quick-tunnel networking mode:
 
 ```bash
 brew install node
-brew install tailscale && sudo tailscale up   # or the Mac App Store app
+brew install cloudflared
 ```
 
 ## Setup
@@ -27,7 +26,8 @@ The setup script:
 - creates `server/.env` from `server/.env.example` when needed;
 - installs backend npm dependencies;
 - creates a LaunchAgent for the backend (`dev.agentdeck.backend`);
-- in Tailscale mode, detects this machine's stable `100.x` Tailscale IP;
+- in tunnel mode, creates a LaunchAgent for cloudflared (`dev.agentdeck.tunnel`);
+- reads the latest `trycloudflare.com` URL from the tunnel logs;
 - runs `npm run credential` so the terminal shows and saves the encrypted
   credential QR pointing at that address.
 
@@ -45,6 +45,8 @@ Logs:
 ```text
 ~/Library/Logs/AgentDeck/backend.out.log
 ~/Library/Logs/AgentDeck/backend.err.log
+~/Library/Logs/AgentDeck/tunnel.out.log
+~/Library/Logs/AgentDeck/tunnel.err.log
 ```
 
 ## Notes
@@ -53,6 +55,7 @@ LaunchAgent services do not inherit your interactive shell PATH. The generated
 plist sets a PATH that includes common Homebrew and user-bin locations so
 `claude`, `codex`, and `agy` can be found when launched by macOS.
 
-The backend binds to `0.0.0.0` so the Tailscale interface can reach it; the
-tailnet keeps it private. For direct mode (public IP/domain), put a reverse
-proxy with HTTPS in front of it before exposing it beyond a trusted network.
+In quick-tunnel mode the backend binds to `127.0.0.1`, and cloudflared reaches
+it locally. For direct mode (public IP/domain), bind to `0.0.0.0` and put a
+reverse proxy with HTTPS in front of it before exposing it beyond a trusted
+network.

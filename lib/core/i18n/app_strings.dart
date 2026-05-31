@@ -212,17 +212,17 @@ class AppStrings {
       ? '已连接到 $host，但凭证 token 被拒绝。这个二维码可能已经过期，或对应 token 已被吊销。请在后端重新生成二维码，并导入最新二维码。'
       : 'Connected to $host, but the credential token was rejected. This QR may be stale, or its token was revoked. Regenerate the QR on the backend and import the latest QR.';
   String credentialHostLookupFailed(String host) => isZh
-      ? '无法解析 $host。请确认这台手机/电脑已连接到同一个 Tailscale 网络；如果仍失败，请在后端重新生成二维码（新版会优先使用 100.x Tailscale IP）。'
-      : 'Cannot resolve $host. Make sure this device is connected to the same Tailscale network. If it still fails, regenerate the QR on the backend; the new generator prefers the 100.x Tailscale IP.';
+      ? '无法解析 $host。请确认二维码里的地址仍然有效；如果使用 Cloudflare quick tunnel，请在后端重新生成二维码。'
+      : 'Cannot resolve $host. Make sure the QR URL is still valid. If you use Cloudflare quick tunnel, regenerate the QR on the backend.';
   String credentialConnectionRefused(String host) => isZh
       ? '能找到 $host，但后端端口拒绝连接。请确认 AgentDeck 后端正在运行，并监听二维码里的端口。'
       : '$host resolved, but the backend port refused the connection. Make sure the AgentDeck backend is running and listening on the QR port.';
   String credentialNetworkUnreachable(String host) => isZh
-      ? '无法连接到 $host。请确认本设备和后端都已连接同一个 Tailscale 网络。'
-      : 'Cannot reach $host. Make sure this device and the backend are both connected to the same Tailscale network.';
+      ? '无法连接到 $host。请确认网络可用、后端在线，或 Cloudflare quick tunnel 仍在运行。'
+      : 'Cannot reach $host. Make sure the network is available, the backend is online, or the Cloudflare quick tunnel is still running.';
   String credentialConnectionTimedOut(String host) => isZh
-      ? '连接 $host 超时。请确认 Tailscale 已开启、后端在线，并且二维码地址仍然有效。'
-      : 'Timed out connecting to $host. Make sure Tailscale is on, the backend is online, and the QR URL is still valid.';
+      ? '连接 $host 超时。请确认后端在线，并且二维码地址仍然有效。'
+      : 'Timed out connecting to $host. Make sure the backend is online and the QR URL is still valid.';
   String credentialConnectionFailed(String host, Object err) =>
       isZh ? '无法连接到 $host：$err' : 'Could not connect to $host: $err';
   String get testingCredentialConnection =>
