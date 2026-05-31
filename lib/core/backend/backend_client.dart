@@ -9,6 +9,7 @@ import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
+import '../storage/workdir_store.dart';
 
 class BackendException implements Exception {
   BackendException(this.message, {this.status, this.code});
@@ -288,29 +289,46 @@ class BackendClient {
   BackendClient({
     MachineCredentialsStore? credentialsStore,
     DeviceIdStore? deviceIdStore,
+    WorkdirStore? workdirStore,
     http.Client? httpClient,
   })  : _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
+        _workdirStore = workdirStore ?? WorkdirStore(),
         _httpClient = httpClient ?? http.Client();
 
   final MachineCredentialsStore _credentialsStore;
   final DeviceIdStore _deviceIdStore;
+  final WorkdirStore _workdirStore;
   final http.Client _httpClient;
+
+  /// This device's current work directory, or null when it has not chosen one
+  /// (the backend then uses its default).
+  Future<String?> currentWorkdir() => _workdirStore.read();
 
   Future<void> close() async {
     _httpClient.close();
   }
 
-  Future<bool> health() async {
-    final Object? decoded = await _requestJson('GET', '/api/health');
+  Future<bool> health({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/health',
+      timeout: timeout,
+    );
     return decoded is Map && decoded['ok'] == true;
   }
 
-  Future<bool> healthFor(MachineCredential credential) async {
+  Future<bool> healthFor(
+    MachineCredential credential, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     final Object? decoded = await _requestJsonWithCredential(
       credential,
       'GET',
       '/api/health',
+      timeout: timeout,
     );
     return decoded is Map && decoded['ok'] == true;
   }
@@ -545,7 +563,14 @@ class BackendClient {
     if (decoded is! Map) {
       throw BackendException('Invalid work directory update response.');
     }
-    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    final WorkdirInfo info =
+        WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    // The backend only validates the path; this device owns its current workdir,
+    // so persist the canonical path locally and send it on later requests.
+    if (info.dir.isNotEmpty) {
+      await _workdirStore.write(info.dir);
+    }
+    return info;
   }
 
   Future<FsListing> listFiles(
@@ -721,14 +746,28 @@ class BackendClient {
     final Uri uri = _uri(credential, path);
     final Map<String, String> headers = await _headers(credential);
     late final http.Response response;
-    if (method == 'GET') {
-      response = await _httpClient.get(uri, headers: headers).timeout(timeout);
-    } else if (method == 'POST') {
-      response = await _httpClient
-          .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
-          .timeout(timeout);
-    } else {
-      throw BackendException('Unsupported method: $method');
+    try {
+      if (method == 'GET') {
+        response =
+            await _httpClient.get(uri, headers: headers).timeout(timeout);
+      } else if (method == 'POST') {
+        response = await _httpClient
+            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
+            .timeout(timeout);
+      } else {
+        throw BackendException('Unsupported method: $method');
+      }
+    } on BackendException {
+      rethrow;
+    } on TimeoutException {
+      throw BackendException(
+        'Timed out connecting to ${uri.host}.',
+        code: 'NETWORK_TIMEOUT',
+      );
+    } on http.ClientException catch (err) {
+      throw _networkExceptionFor(err, uri);
+    } catch (err) {
+      throw _networkExceptionFor(err, uri);
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -764,11 +803,13 @@ class BackendClient {
     String contentType = 'application/json',
   }) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
+    final String? workdir = await _workdirStore.read();
     return <String, String>{
       'Accept': accept,
       'Content-Type': contentType,
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
+      if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
     };
   }
 
@@ -806,6 +847,24 @@ class BackendClient {
     }
     if (message.isEmpty) message = 'HTTP $status';
     return BackendException(message, status: status);
+  }
+
+  BackendException _networkExceptionFor(Object err, Uri uri) {
+    final String raw = err.toString();
+    final String lower = raw.toLowerCase();
+    String code = 'NETWORK_ERROR';
+    if (lower.contains('failed host lookup') ||
+        lower.contains('no address associated') ||
+        lower.contains('name_not_resolved') ||
+        lower.contains('nodename nor servname')) {
+      code = 'NETWORK_HOST_LOOKUP';
+    } else if (lower.contains('connection refused')) {
+      code = 'NETWORK_CONNECTION_REFUSED';
+    } else if (lower.contains('network is unreachable') ||
+        lower.contains('no route to host')) {
+      code = 'NETWORK_UNREACHABLE';
+    }
+    return BackendException(raw, code: code);
   }
 
   Map<String, Object?> _decodeEventData(StringBuffer data) {

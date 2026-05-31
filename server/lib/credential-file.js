@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const FORMAT = 'agentdeck.credentials.v1';
 const KDF_NAME = 'pbkdf2-sha256';
 const CIPHER_NAME = 'aes-256-gcm';
-const PBKDF2_ITERATIONS = 210000;
+const PBKDF2_ITERATIONS = 120000;
 
 function encryptCredential(machine, passphrase) {
   if (!passphrase || !String(passphrase).trim()) {

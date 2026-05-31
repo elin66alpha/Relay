@@ -7,7 +7,7 @@ macOS 后端复用 `server/` 里的 Node 后端核心，并把服务安装为
 
 - macOS，Node.js 18 或更新版本。
 - Mac 上已经安装并登录 Claude Code / Codex / Antigravity CLI。
-- 如果使用隧道模式，需要安装 `cloudflared`：
+- 默认 quick tunnel 网络模式需要 `cloudflared`：
 
 ```bash
 brew install node
@@ -26,9 +26,9 @@ backends/macos/setup.sh
 - 需要时从 `server/.env.example` 创建 `server/.env`；
 - 安装后端 npm 依赖；
 - 创建后端 LaunchAgent：`dev.agentdeck.backend`；
-- 可选创建 Cloudflare quick tunnel LaunchAgent：`dev.agentdeck.tunnel`；
-- 从 macOS 日志里读取 `trycloudflare.com` 公网地址；
-- 执行 `npm run credential -- --url <public-url>`，在终端显示并保存加密凭证二维码。
+- 隧道模式下创建 cloudflared LaunchAgent：`dev.agentdeck.tunnel`；
+- 从隧道日志读取最新的 `trycloudflare.com` 地址；
+- 执行 `npm run credential`，在终端显示并保存指向该地址的加密凭证二维码。
 
 ## 服务命令
 
@@ -51,7 +51,7 @@ backends/macos/uninstall.sh
 ## 说明
 
 LaunchAgent 不会继承你在终端里的 shell PATH。生成的 plist 会写入常见 Homebrew 和用户
-bin 路径，确保 macOS 启动服务时能找到 `claude`、`codex`、`agy` 和 `cloudflared`。
+bin 路径，确保 macOS 启动服务时能找到 `claude`、`codex` 和 `agy`。
 
-如果不用隧道模式，直连模式会让后端绑定到 `0.0.0.0`；对公网暴露前请在前面放 HTTPS
-反向代理，不要裸露在不可信网络上。
+Quick Tunnel 模式下后端绑定到 `127.0.0.1`，cloudflared 从本机访问后端。若用直连模式
+（公网 IP/域名），后端绑定到 `0.0.0.0`，对外暴露前请在前面放 HTTPS 反向代理。

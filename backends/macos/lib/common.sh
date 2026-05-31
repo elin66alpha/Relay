@@ -128,6 +128,27 @@ write_server_plist() {
 EOF
 }
 
+start_agent() {
+  local label="$1" plist="$2" domain
+  domain="$(launch_domain)"
+  launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
+  launchctl bootstrap "$domain" "$plist"
+  launchctl enable "$domain/$label" >/dev/null 2>&1 || true
+  launchctl kickstart -k "$domain/$label"
+}
+
+stop_agent() {
+  local label="$1" domain
+  domain="$(launch_domain)"
+  launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
+}
+
+print_agent() {
+  local label="$1" domain
+  domain="$(launch_domain)"
+  launchctl print "$domain/$label"
+}
+
 write_tunnel_plist() {
   local port="$1"
   ensure_dirs
@@ -162,27 +183,6 @@ write_tunnel_plist() {
 </dict>
 </plist>
 EOF
-}
-
-start_agent() {
-  local label="$1" plist="$2" domain
-  domain="$(launch_domain)"
-  launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
-  launchctl bootstrap "$domain" "$plist"
-  launchctl enable "$domain/$label" >/dev/null 2>&1 || true
-  launchctl kickstart -k "$domain/$label"
-}
-
-stop_agent() {
-  local label="$1" domain
-  domain="$(launch_domain)"
-  launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
-}
-
-print_agent() {
-  local label="$1" domain
-  domain="$(launch_domain)"
-  launchctl print "$domain/$label"
 }
 
 wait_for_tunnel_url() {

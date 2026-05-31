@@ -2,7 +2,7 @@
 #
 # AgentDeck one-command setup.
 #
-# Starts the backend with PM2, optionally opens a cloudflared tunnel, then
+# Starts the backend with PM2, optionally opens a Cloudflare quick tunnel, then
 # generates the credential QR that the AgentDeck app scans. Run from the repo
 # root:
 #
@@ -67,7 +67,7 @@ PORT_NUM="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)"
 PORT_NUM="${PORT_NUM:-8787}"
 
 c_info "AgentDeck setup"
-read -rp "Do you need a tunnel (cloudflared) to expose this machine to the internet? [Y/n]: " USE_TUNNEL
+read -rp "Do you need a Cloudflare quick tunnel to expose this machine to the internet? [Y/n]: " USE_TUNNEL
 USE_TUNNEL="${USE_TUNNEL:-Y}"
 
 case "$USE_TUNNEL" in
@@ -98,13 +98,13 @@ case "$USE_TUNNEL" in
     npm run credential -- --url "$PUBLIC_URL"
     ;;
   *)
-    # ---------- Tunnel mode (cloudflared quick tunnel) ----------
+    # ---------- Tunnel mode (Cloudflare quick tunnel) ----------
     need cloudflared || {
       c_err "cloudflared is required for tunnel mode."
       c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
       exit 1
     }
-    c_info "Tunnel mode: exposing localhost:${PORT_NUM} via a cloudflared quick tunnel."
+    c_info "Tunnel mode: exposing localhost:${PORT_NUM} via a Cloudflare quick tunnel."
 
     # Tunnel reaches the server over localhost; keep it bound locally.
     set_env HOST 127.0.0.1

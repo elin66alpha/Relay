@@ -16,7 +16,6 @@ const {
   createToken,
   listTokenSummaries,
   revokeToken,
-  revokeTokensByLabel,
 } = require('../lib/tokens');
 
 const SERVER_DIR = path.resolve(__dirname, '..');
@@ -42,26 +41,27 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
-  npm run credential                 # Auto-detect tunnel URL, prompt for a password, print the credential QR
+  npm run credential                 # Auto-detect the cloudflared tunnel URL, prompt for a password, print the credential QR
 
 Options:
   --url <url>          Public URL (default: auto-detected from the cloudflared tunnel log)
   --name <name>        Machine name shown in the app (default: hostname)
   --label <label>      Token label (default: machine name)
   --qr-out <path>      Output path for the QR PNG
+  --json-out <path>    Output path for the copy/paste credential JSON
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
-  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: tries agentdeck-tunnel and bot-app-tunnel)
+  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: agentdeck-tunnel, then bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
+
+Generating a new QR deletes old QR image files from server/credentials, but it
+does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
 `);
 }
 
-// Auto-detect the cloudflared quick-tunnel public URL. cloudflared prints the
-// URL to stderr, which PM2 captures in its per-process log. Quick-tunnel URLs
-// rotate on every restart, so we take the most recent occurrence. The PM2
-// process name has varied across deployments (agentdeck-tunnel / bot-app-tunnel),
-// so we probe the known names (plus any --tunnel-name / TUNNEL_PM2_NAME override)
-// and prefer the log file written most recently.
+// Auto-detect the Cloudflare quick-tunnel public URL. cloudflared prints the URL
+// to stderr, which PM2 captures in per-process logs. Quick-tunnel URLs rotate
+// on every restart, so use the newest matching URL in the newest known log.
 const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
 const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 
@@ -78,7 +78,6 @@ function detectTunnelUrl(args) {
     files.push(path.join(PM2_LOG_DIR, `${name}-error.log`));
     files.push(path.join(PM2_LOG_DIR, `${name}-out.log`));
   }
-  // Newest log first, so a freshly rotated tunnel wins.
   const existing = files
     .filter((file) => fs.existsSync(file))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
@@ -155,16 +154,33 @@ async function readPassphrase(args) {
     input: process.stdin,
     output: process.stdout,
   });
+
+  rl._writeToOutput = function _writeToOutput(stringToWrite) {
+    if (rl.stdoutMuted) {
+      rl.output.write(stringToWrite.replace(/[^\r\n]/g, '*'));
+    } else {
+      rl.output.write(stringToWrite);
+    }
+  };
+
+  const ask = async (promptText) => {
+    rl.stdoutMuted = false;
+    const p = rl.question(promptText);
+    rl.stdoutMuted = true;
+    const ans = await p;
+    return ans;
+  };
+
   try {
     for (;;) {
-      const first = await rl.question(
-        `Set a credential password (min ${MIN_PASSPHRASE_LEN} chars): `,
-      );
+      const first = await ask(`Set a credential password (min ${MIN_PASSPHRASE_LEN} chars): `);
+      process.stdout.write('\n');
       if (String(first).length < MIN_PASSPHRASE_LEN) {
         console.log(`Password must be at least ${MIN_PASSPHRASE_LEN} characters. Try again.`);
         continue;
       }
-      const second = await rl.question('Confirm password: ');
+      const second = await ask('Confirm password: ');
+      process.stdout.write('\n');
       if (first !== second) {
         console.log('Passwords do not match. Try again.');
         continue;
@@ -199,7 +215,7 @@ function printTokens() {
 function cleanOldCredentialFiles(dir) {
   fs.mkdirSync(dir, { recursive: true });
   for (const entry of fs.readdirSync(dir)) {
-    if (/\.(botcred|png|svg|txt)$/i.test(entry)) {
+    if (/\.(botcred|json|png|svg|txt)$/i.test(entry)) {
       fs.rmSync(path.join(dir, entry), { force: true });
     }
   }
@@ -240,7 +256,6 @@ async function main() {
   const passphrase = await readPassphrase(args);
   const label = String(args.label || machineName).trim() || machineName;
   const credentialsDir = path.join(SERVER_DIR, 'credentials');
-  const revoked = revokeTokensByLabel(label);
   cleanOldCredentialFiles(credentialsDir);
   const tokenRecord = createToken({
     label,
@@ -270,23 +285,30 @@ async function main() {
     args['qr-out'] ||
       path.join('credentials', `${safeFilename(machineName)}.agentdeck.png`),
   );
+  const jsonPath = path.resolve(
+    SERVER_DIR,
+    args['json-out'] ||
+      path.join('credentials', `${safeFilename(machineName)}.agentdeck.json`),
+  );
   fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+  fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
   await QRCode.toFile(qrPath, qrPayload, {
     errorCorrectionLevel: 'M',
     margin: 2,
     width: 1024,
   });
+  fs.writeFileSync(jsonPath, `${qrPayload}\n`, { mode: 0o600 });
 
   console.log(`QR saved: ${qrPath}`);
+  console.log(`Credential JSON saved: ${jsonPath}`);
   console.log(`Machine: ${machineName}`);
   console.log(`Public URL: ${credential.baseUrl} (source: ${resolved.source})`);
   console.log(`Token id: ${tokenRecord.id}`);
-  if (revoked.length > 0) {
-    console.log(`Revoked ${revoked.length} old token(s) for "${label}"`);
-  }
+  console.log('Existing device tokens were left active. Use --revoke to disable an old device.');
   console.log('\nIn the app, tap "Scan QR", point it at the QR below, then enter the password you just set:\n');
   qrcodeTerminal.generate(qrPayload, { small: true });
-  console.log('\nToken appended to server/tokens.json; machine id and public URL written to server/.env.');
+  console.log('\nFor paste import, open the credential JSON file above, copy the whole file content, then paste it in the app.');
+  console.log('Token appended to server/tokens.json; machine id and public URL written to server/.env.');
 }
 
 main().catch((err) => {

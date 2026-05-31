@@ -118,6 +118,9 @@ class AppStrings {
   String get agentBusyRetryLater => isZh
       ? '该 agent 正在处理上一条消息，请稍后重试。'
       : 'This agent is still handling the previous message. Try again later.';
+  String get agentQueued => isZh
+      ? '排队中…（前一条消息还在处理）'
+      : 'Queued — waiting for the current turn to finish…';
   String agentErrorLine(String error) => isZh ? '出错：$error' : 'Error: $error';
   String agentNotLoggedIn(String agent) => isZh
       ? '$agent 在后端主机上未登录，请在主机上登录后重试。'
@@ -197,7 +200,39 @@ class AppStrings {
   String get fileUnreadable =>
       isZh ? '无法读取凭证。' : 'Unable to read the credential.';
   String imported(String name) => isZh ? '已导入：$name' : 'Imported: $name';
+  String get importFailedTitle => isZh ? '导入失败' : 'Import failed';
   String importFailed(Object err) => isZh ? '导入失败：$err' : 'Import failed: $err';
+  String get credentialDecryptFailed => isZh
+      ? '凭证解密失败。请确认二维码和密码是否正确。'
+      : 'Credential decryption failed. Check the QR code and password.';
+  String credentialBackendNotOk(String host) => isZh
+      ? '已解密凭证，但 $host 没有返回正常状态。'
+      : 'The credential decrypted, but $host did not return a healthy status.';
+  String credentialTokenRejected(String host) => isZh
+      ? '已连接到 $host，但凭证 token 被拒绝。这个二维码可能已经过期，或对应 token 已被吊销。请在后端重新生成二维码，并导入最新二维码。'
+      : 'Connected to $host, but the credential token was rejected. This QR may be stale, or its token was revoked. Regenerate the QR on the backend and import the latest QR.';
+  String credentialHostLookupFailed(String host) => isZh
+      ? '无法解析 $host。请确认二维码里的地址仍然有效；如果使用 Cloudflare quick tunnel，请在后端重新生成二维码。'
+      : 'Cannot resolve $host. Make sure the QR URL is still valid. If you use Cloudflare quick tunnel, regenerate the QR on the backend.';
+  String credentialConnectionRefused(String host) => isZh
+      ? '能找到 $host，但后端端口拒绝连接。请确认 AgentDeck 后端正在运行，并监听二维码里的端口。'
+      : '$host resolved, but the backend port refused the connection. Make sure the AgentDeck backend is running and listening on the QR port.';
+  String credentialNetworkUnreachable(String host) => isZh
+      ? '无法连接到 $host。请确认网络可用、后端在线，或 Cloudflare quick tunnel 仍在运行。'
+      : 'Cannot reach $host. Make sure the network is available, the backend is online, or the Cloudflare quick tunnel is still running.';
+  String credentialConnectionTimedOut(String host) => isZh
+      ? '连接 $host 超时。请确认后端在线，并且二维码地址仍然有效。'
+      : 'Timed out connecting to $host. Make sure the backend is online and the QR URL is still valid.';
+  String credentialConnectionFailed(String host, Object err) =>
+      isZh ? '无法连接到 $host：$err' : 'Could not connect to $host: $err';
+  String get testingCredentialConnection =>
+      isZh ? '正在验证后端连接...' : 'Testing backend connection...';
+  String get credentialDecryptTimedOut => isZh
+      ? '凭证解密耗时过长。请确认二维码图片有效，或在后端重新生成最新二维码后再试。'
+      : 'Credential decryption took too long. Check the QR image, or regenerate the latest QR on the backend and try again.';
+  String get credentialQrDecodeTimedOut => isZh
+      ? '二维码图片解析耗时过长。请上传后端保存的二维码 PNG，或重新生成最新二维码后再试。'
+      : 'QR image parsing took too long. Upload the backend-saved QR PNG, or regenerate the latest QR and try again.';
   String get connectionOk => isZh ? '连接正常。' : 'Connection OK.';
   String get backendNotOk => isZh ? '后端没有返回 ok。' : 'Backend did not return ok.';
   String connectionFailed(Object err) =>

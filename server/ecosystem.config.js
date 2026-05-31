@@ -1,3 +1,4 @@
+// AgentDeck backend + Cloudflare quick tunnel, managed by PM2.
 module.exports = {
   apps: [
     {

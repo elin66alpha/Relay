@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { getWorkdir } = require('./workdir');
+const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
 
 class FilesystemError extends Error {
   constructor(message, { status = 400, code = 'FS_ERROR' } = {}) {
@@ -42,14 +42,14 @@ function toApiPath(root, target) {
   return path.relative(root, target).split(path.sep).filter(Boolean).join('/');
 }
 
-function currentRoot() {
-  const root = path.resolve(getWorkdir());
+function currentRoot(workdir) {
+  const root = path.resolve(ensureWorkdirExists(workdir));
   const realRoot = fs.realpathSync(root);
   return { root, realRoot };
 }
 
-function resolveExisting(relativePath) {
-  const { root, realRoot } = currentRoot();
+function resolveExisting(relativePath, workdir) {
+  const { root, realRoot } = currentRoot(workdir);
   const relative = normalizeRelative(relativePath);
   const target = path.resolve(root, relative);
   if (!isInside(root, target)) {
@@ -117,8 +117,8 @@ function sortEntries(entries) {
   });
 }
 
-function listDirectory(relativePath, { showHidden = false } = {}) {
-  const resolved = resolveExisting(relativePath);
+function listDirectory(relativePath, { showHidden = false, workdir } = {}) {
+  const resolved = resolveExisting(relativePath, workdir);
   if (!resolved.stat.isDirectory()) {
     throw new FilesystemError('path is not a directory', {
       status: 400,
@@ -143,7 +143,7 @@ function listDirectory(relativePath, { showHidden = false } = {}) {
   };
 }
 
-function listAbsoluteDirectory(value, { showHidden = false } = {}) {
+function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) {
   const raw = String(value || '').trim();
   if (raw && !path.isAbsolute(raw)) {
     throw new FilesystemError('directory browser path must be absolute', {
@@ -151,7 +151,7 @@ function listAbsoluteDirectory(value, { showHidden = false } = {}) {
       code: 'FS_PATH_MUST_BE_ABSOLUTE',
     });
   }
-  const target = path.resolve(raw || getWorkdir());
+  const target = path.resolve(raw || fallbackDir || getDefaultWorkdir());
   let stat;
   try {
     stat = fs.statSync(target);
@@ -184,8 +184,8 @@ function listAbsoluteDirectory(value, { showHidden = false } = {}) {
   };
 }
 
-function prepareDownload(relativePath) {
-  const resolved = resolveExisting(relativePath);
+function prepareDownload(relativePath, workdir) {
+  const resolved = resolveExisting(relativePath, workdir);
   if (!resolved.stat.isFile() && !resolved.stat.isDirectory()) {
     throw new FilesystemError('only files and directories can be downloaded', {
       status: 400,
@@ -202,8 +202,8 @@ function prepareDownload(relativePath) {
   };
 }
 
-function resolveUploadTarget(relativePath, filename) {
-  const resolved = resolveExisting(relativePath);
+function resolveUploadTarget(relativePath, filename, workdir) {
+  const resolved = resolveExisting(relativePath, workdir);
   if (!resolved.stat.isDirectory()) {
     throw new FilesystemError('upload target is not a directory', {
       status: 400,

@@ -21,6 +21,7 @@ set_env PORT "$PORT_NUM"
 read -rp "Use a Cloudflare quick tunnel for phone access? [Y/n]: " USE_TUNNEL
 USE_TUNNEL="${USE_TUNNEL:-Y}"
 
+PUBLIC_URL=""
 case "$USE_TUNNEL" in
   [Nn]*)
     c_info "Direct mode"
