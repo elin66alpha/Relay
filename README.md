@@ -17,8 +17,10 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - The app stores no chat history locally. The conversation is kept on the backend (the CLI host) and reloaded when the app reopens, so it opens at your latest message rather than the top. Clearing chat wipes both the backend history and the agent's resumable session.
 - Claude Code and Codex stream assistant text over SSE.
 - Assistant chat bubbles render agent output as Markdown for readable headings,
-  emphasis, lists, quotes, code, and dividers. The renderer also accepts common
-  CLI output shortcuts such as `###Title` without a space and legacy inline
+  emphasis, lists, quotes, code blocks, and dividers. `**text**` renders as
+  bold, `*text*` renders as italic, and inline code renders as italic instead
+  of getting a tinted code background. The renderer also accepts common CLI
+  output shortcuts such as `###Title` without a space and legacy inline
   `##text##` emphasis; user-authored messages remain plain text.
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.

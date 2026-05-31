@@ -36,9 +36,10 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 - `lib/features/chat/bot_chat_screen.dart`：assistant/agent 气泡改用
   `flutter_markdown_plus` 的 `MarkdownBody(selectable: true)` 渲染；用户自己发送的消息仍用
   `SelectableText` 原文显示，避免用户输入被误格式化。
-- Markdown 样式按现有聊天气泡颜色重建：标题按 `h1`~`h6` 分级放大加粗；按用户偏好，
-  `strong`（`**文字**`）和 `em`（`*文字*`）都显示为斜体，不给 `**文字**` 加背景色；
-  代码块、引用、列表、分隔线也有气泡内样式。
+- Markdown 样式按现有聊天气泡颜色重建：标题按 `h1`~`h6` 分级放大加粗；
+  `strong`（`**文字**`）按标准显示为加粗，`em`（`*文字*`）显示为斜体；行内 code
+  不再给文字加背景/等宽样式，而是按用户偏好显示为斜体。代码块、引用、列表、分隔线也有
+  气泡内样式。
 - 兼容 CLI/agent 常见不严格输出：
   - `###标题`、`##标题`、`#标题` 这类中文无空格标题会在渲染前规范成 Markdown 标题。
   - 行首 `**标题` 且没有闭合 `**` 时，会补成粗体。

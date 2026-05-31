@@ -869,7 +869,7 @@ MarkdownStyleSheet _markdownStyleSheet(
   return MarkdownStyleSheet(
     p: base,
     pPadding: EdgeInsets.zero,
-    strong: base.copyWith(fontStyle: FontStyle.italic),
+    strong: base.copyWith(fontWeight: FontWeight.w700),
     em: base.copyWith(fontStyle: FontStyle.italic),
     h1: base.copyWith(
       fontSize: 21,
@@ -898,11 +898,7 @@ MarkdownStyleSheet _markdownStyleSheet(
     blockSpacing: 8,
     listIndent: 22,
     listBullet: base,
-    code: base.copyWith(
-      fontFamily: 'monospace',
-      fontSize: 14,
-      backgroundColor: codeBackground,
-    ),
+    code: base.copyWith(fontStyle: FontStyle.italic),
     codeblockPadding: const EdgeInsets.all(9),
     codeblockDecoration: BoxDecoration(
       color: codeBackground,
