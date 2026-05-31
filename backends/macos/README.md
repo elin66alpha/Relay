@@ -7,11 +7,12 @@ LaunchAgent services under `~/Library/LaunchAgents`.
 
 - macOS with Node.js 18 or newer.
 - Claude Code / Codex / Antigravity CLIs installed and logged in on the Mac.
-- Optional tunnel mode requires `cloudflared`:
+- Tailscale for the recommended networking mode (install on the Mac and each
+  client device, signed into the same account):
 
 ```bash
 brew install node
-brew install cloudflared
+brew install tailscale && sudo tailscale up   # or the Mac App Store app
 ```
 
 ## Setup
@@ -26,11 +27,9 @@ The setup script:
 - creates `server/.env` from `server/.env.example` when needed;
 - installs backend npm dependencies;
 - creates a LaunchAgent for the backend (`dev.agentdeck.backend`);
-- optionally creates a LaunchAgent for a Cloudflare quick tunnel
-  (`dev.agentdeck.tunnel`);
-- detects the `trycloudflare.com` URL from macOS logs;
-- runs `npm run credential -- --url <public-url>` so the terminal shows and
-  saves the encrypted credential QR.
+- in Tailscale mode, detects this machine's stable MagicDNS address;
+- runs `npm run credential` so the terminal shows and saves the encrypted
+  credential QR pointing at that address.
 
 ## Service Commands
 
@@ -46,15 +45,14 @@ Logs:
 ```text
 ~/Library/Logs/AgentDeck/backend.out.log
 ~/Library/Logs/AgentDeck/backend.err.log
-~/Library/Logs/AgentDeck/tunnel.out.log
-~/Library/Logs/AgentDeck/tunnel.err.log
 ```
 
 ## Notes
 
 LaunchAgent services do not inherit your interactive shell PATH. The generated
 plist sets a PATH that includes common Homebrew and user-bin locations so
-`claude`, `codex`, `agy`, and `cloudflared` can be found when launched by macOS.
+`claude`, `codex`, and `agy` can be found when launched by macOS.
 
-If you do not use tunnel mode, direct mode binds the backend to `0.0.0.0`; put a
-reverse proxy with HTTPS in front of it before exposing it beyond a trusted LAN.
+The backend binds to `0.0.0.0` so the Tailscale interface can reach it; the
+tailnet keeps it private. For direct mode (public IP/domain), put a reverse
+proxy with HTTPS in front of it before exposing it beyond a trusted network.

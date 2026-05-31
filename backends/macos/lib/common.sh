@@ -9,11 +9,9 @@ ENV_FILE="$SERVER_DIR/.env"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 
 SERVER_LABEL="dev.agentdeck.backend"
-TUNNEL_LABEL="dev.agentdeck.tunnel"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs/AgentDeck"
 SERVER_PLIST="$LAUNCH_AGENTS_DIR/$SERVER_LABEL.plist"
-TUNNEL_PLIST="$LAUNCH_AGENTS_DIR/$TUNNEL_LABEL.plist"
 
 AGENTDECK_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -128,42 +126,6 @@ write_server_plist() {
 EOF
 }
 
-write_tunnel_plist() {
-  local port="$1"
-  ensure_dirs
-  cat >"$TUNNEL_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>$TUNNEL_LABEL</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/env</string>
-    <string>cloudflared</string>
-    <string>tunnel</string>
-    <string>--url</string>
-    <string>http://127.0.0.1:$port</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>$AGENTDECK_PATH</string>
-  </dict>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>$LOG_DIR/tunnel.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>$LOG_DIR/tunnel.err.log</string>
-</dict>
-</plist>
-EOF
-}
-
 start_agent() {
   local label="$1" plist="$2" domain
   domain="$(launch_domain)"
@@ -185,13 +147,26 @@ print_agent() {
   launchctl print "$domain/$label"
 }
 
-wait_for_tunnel_url() {
-  local url=""
-  for _ in $(seq 1 45); do
-    url="$(grep -hoE 'https://[a-z0-9-]+\.trycloudflare\.com' \
-      "$LOG_DIR/tunnel.out.log" "$LOG_DIR/tunnel.err.log" 2>/dev/null | tail -1 || true)"
-    [ -n "$url" ] && break
-    sleep 1
-  done
-  printf '%s' "$url"
+# Print cross-platform Tailscale install guidance.
+tailscale_install_hint() {
+  c_err "Tailscale is required for the recommended networking mode."
+  c_warn "Install it (one time), log in, then re-run setup:"
+  c_warn "  macOS:  brew install tailscale && sudo tailscale up   (or the Mac App Store app)"
+  c_warn "  Install Tailscale on your phone / other client devices too, signed into the same account."
+  c_warn "  Download: https://tailscale.com/download"
+}
+
+# Echo this machine's stable Tailscale address (http://<magicdns-or-ip>:<port>),
+# or nothing if Tailscale is not connected. MagicDNS name is preferred; the
+# 100.x tailnet IP is the fallback. The address never rotates.
+detect_tailscale_url() {
+  local port="$1" host=""
+  host="$(tailscale status --json 2>/dev/null \
+    | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+    | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
+  host="${host%.}"
+  if [ -z "$host" ]; then
+    host="$(tailscale ip -4 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+  fi
+  [ -n "$host" ] && printf 'http://%s:%s' "$host" "$port"
 }

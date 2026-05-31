@@ -118,6 +118,9 @@ class AppStrings {
   String get agentBusyRetryLater => isZh
       ? '该 agent 正在处理上一条消息，请稍后重试。'
       : 'This agent is still handling the previous message. Try again later.';
+  String get agentQueued => isZh
+      ? '排队中…（前一条消息还在处理）'
+      : 'Queued — waiting for the current turn to finish…';
   String agentErrorLine(String error) => isZh ? '出错：$error' : 'Error: $error';
   String agentNotLoggedIn(String agent) => isZh
       ? '$agent 在后端主机上未登录，请在主机上登录后重试。'

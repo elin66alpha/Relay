@@ -38,7 +38,13 @@ class BotChatController extends ChangeNotifier {
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _eventReconnectTimer;
   Timer? _historyPollTimer;
+  Timer? _remoteSettleTimer;
   bool _wantsEvents = false;
+  // True while another device is running a turn on the conversation we are
+  // viewing (same workdir + agent). We mirror it by polling the backend's
+  // authoritative history rather than replaying its deltas, which keeps the two
+  // views identical without delta/snapshot races.
+  bool _remoteActive = false;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   bool get isThinking => _isThinking;
@@ -111,6 +117,8 @@ class BotChatController extends ChangeNotifier {
     _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _remoteActive = false;
+    _remoteSettleTimer?.cancel();
     _stopHistoryPolling();
     notifyListeners();
 
@@ -227,8 +235,47 @@ class BotChatController extends ChangeNotifier {
   Future<WorkdirInfo> checkWorkdir(String path) =>
       _backendClient.checkWorkdir(path);
 
-  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) =>
-      _backendClient.setWorkdir(path, create: create);
+  Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
+    final WorkdirInfo info =
+        await _backendClient.setWorkdir(path, create: create);
+    // Switching paths switches conversations: the session is keyed by
+    // workdir + agent. Reconnect the event stream with the new workdir and
+    // reload the shared history for this path so it shows immediately.
+    await reconnectEvents();
+    await _reloadConversation();
+    return info;
+  }
+
+  /// Clears the view and pulls the shared conversation for the current
+  /// workdir + agent. Used after switching the work directory.
+  Future<void> _reloadConversation() async {
+    final MachineCredential? machine = _machine;
+    if (machine == null) return;
+    final CliAgent agent = _agent;
+    _messages.clear();
+    _lastError = null;
+    _isThinking = false;
+    _isCancelling = false;
+    _activeRequestId = null;
+    _remoteActive = false;
+    _remoteSettleTimer?.cancel();
+    _stopHistoryPolling();
+    notifyListeners();
+    unawaited(refreshAuthStatus());
+    try {
+      final List<ChatMessage> history =
+          await _backendClient.fetchHistory(agent.key);
+      if (_agent.key != agent.key || _machine?.id != machine.id) return;
+      _messages
+        ..clear()
+        ..addAll(history);
+      _restorePendingTurnFromHistory();
+      if (_isThinking) _startHistoryPolling();
+      notifyListeners();
+    } catch (_) {
+      // Leave the view empty when history can't be loaded.
+    }
+  }
 
   Future<FsListing> listFiles(
     String path, {
@@ -287,6 +334,7 @@ class BotChatController extends ChangeNotifier {
     _wantsEvents = false;
     _eventReconnectTimer?.cancel();
     _historyPollTimer?.cancel();
+    _remoteSettleTimer?.cancel();
     await _eventsSub?.cancel();
     await _backendClient.close();
   }
@@ -328,7 +376,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> _refreshHistorySnapshot() async {
     final MachineCredential? machine = _machine;
-    if (!_isThinking || machine == null) {
+    if (!(_isThinking || _remoteActive) || machine == null) {
       _stopHistoryPolling();
       return;
     }
@@ -338,15 +386,42 @@ class BotChatController extends ChangeNotifier {
           await _backendClient.fetchHistory(agent.key);
       if (_agent.key != agent.key || _machine?.id != machine.id) return;
       if (history.isEmpty) return;
+      // Never clobber our own in-flight turn (our chat stream is the smoother,
+      // authoritative source for it); only mirror when the activity is remote.
+      if (_isThinking && !_remoteActive) return;
       _messages
         ..clear()
         ..addAll(history);
       _restorePendingTurnFromHistory();
-      if (!_isThinking) _stopHistoryPolling();
+      if (!(_isThinking || _remoteActive)) _stopHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Keep the last visible snapshot; the next poll/event may recover.
     }
+  }
+
+  // A turn started by another device on the conversation we are viewing. Mirror
+  // it from persisted history. Skip while we have our own turn in flight; we do
+  // a catch-up refresh when ours finishes.
+  void _beginRemoteMirror() {
+    if (_isThinking) return;
+    _remoteSettleTimer?.cancel();
+    _remoteActive = true;
+    _startHistoryPolling();
+    unawaited(_refreshHistorySnapshot());
+  }
+
+  // A remote turn finished. Do a final refresh shortly after so the snapshot
+  // captures the finalized (non-streaming) message, then stop mirroring.
+  void _endRemoteMirror() {
+    if (!_remoteActive) return;
+    unawaited(_refreshHistorySnapshot());
+    _remoteSettleTimer?.cancel();
+    _remoteSettleTimer = Timer(const Duration(milliseconds: 900), () {
+      _remoteActive = false;
+      unawaited(_refreshHistorySnapshot());
+      if (!_isThinking) _stopHistoryPolling();
+    });
   }
 
   Future<void> _runTurn(CliAgent agent, ChatMessage userMessage) async {
@@ -396,6 +471,36 @@ class BotChatController extends ChangeNotifier {
       _isThinking = false;
       _isCancelling = false;
       notifyListeners();
+      // A remote turn may have started and finished on this scope while ours was
+      // in flight (we skip mirroring then). Catch up to the shared truth now.
+      unawaited(_catchUpHistory());
+    }
+  }
+
+  // One-shot pull of the shared history, used after our own turn ends to pick up
+  // any changes other devices made meanwhile. No-op if a new turn is running.
+  Future<void> _catchUpHistory() async {
+    final MachineCredential? machine = _machine;
+    if (_isThinking || _remoteActive || machine == null) return;
+    final CliAgent agent = _agent;
+    try {
+      final List<ChatMessage> history =
+          await _backendClient.fetchHistory(agent.key);
+      if (_agent.key != agent.key ||
+          _machine?.id != machine.id ||
+          _isThinking ||
+          _remoteActive ||
+          history.isEmpty) {
+        return;
+      }
+      _messages
+        ..clear()
+        ..addAll(history);
+      _restorePendingTurnFromHistory();
+      if (_isThinking) _startHistoryPolling();
+      notifyListeners();
+    } catch (_) {
+      // Best-effort; the next interaction will reconcile.
     }
   }
 
@@ -559,7 +664,7 @@ class BotChatController extends ChangeNotifier {
   void _connectEventsNow() {
     if (!_wantsEvents || _eventsSub != null) return;
     _eventsSub = _backendClient.streamEvents().listen(
-      _handleEvent,
+      _handleScopeEvent,
       onError: (Object error) {
         _eventsSub = null;
         _scheduleEventReconnect();
@@ -580,43 +685,84 @@ class BotChatController extends ChangeNotifier {
     });
   }
 
+  // Events for our own in-flight turn, delivered on the chat POST stream.
   void _handleEvent(BackendEvent event) {
-    if (event.type == 'agent_delta') {
-      _appendDelta(event.data);
+    switch (event.type) {
+      case 'agent_delta':
+        _appendDelta(event.data);
+        return;
+      case 'agent_progress':
+        _appendProgress(event.data);
+        return;
+      case 'agent_queued':
+        final String requestId = event.data['requestId'] as String? ?? '';
+        if (requestId.isNotEmpty) {
+          _appendProgress(<String, Object?>{
+            'requestId': requestId,
+            'line': _strings.agentQueued,
+          });
+        }
+        return;
+      case 'agent_cancelled':
+        final String requestId = event.data['requestId'] as String? ?? '';
+        if (requestId.isNotEmpty) {
+          _markAssistantCancelled(requestId);
+        }
+        return;
+      case 'agent_error':
+        final String requestId = event.data['requestId'] as String? ?? '';
+        final String error = event.data['error'] as String? ?? '';
+        if (requestId.isNotEmpty && error.isNotEmpty) {
+          _appendProgress(<String, Object?>{
+            'requestId': requestId,
+            'line': _strings.agentErrorLine(error),
+          });
+        }
+        return;
+    }
+  }
+
+  // Events on the shared event stream, scoped by the backend to our current
+  // work directory. Drives quota alerts and cross-device mirroring: a turn
+  // started on another device in the same path is mirrored here from history.
+  void _handleScopeEvent(BackendEvent event) {
+    if (event.type == 'quota_reset') {
+      final String message = _strings.isZh
+          ? event.data['messageZh'] as String? ??
+              event.data['message'] as String? ??
+              ''
+          : event.data['message'] as String? ?? '';
+      if (message.isEmpty) return;
+      // Quota alerts prefer a system/browser notification. If the platform
+      // denies it, fall back to an in-page system message for Web users.
+      unawaited(_showQuotaNotification(message));
       return;
     }
-    if (event.type == 'agent_progress') {
-      _appendProgress(event.data);
-      return;
+
+    final String requestId = event.data['requestId'] as String? ?? '';
+    if (requestId.isEmpty) return;
+    // Our own turn is driven by the chat POST stream; ignore its echo here.
+    if (requestId == _activeRequestId) return;
+    // Only mirror activity for the agent we are currently viewing.
+    final Map<String, Object?> agentData =
+        (event.data['agent'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final String agentKey = agentData['key'] as String? ?? '';
+    if (agentKey.isNotEmpty && agentKey != _agent.key) return;
+
+    switch (event.type) {
+      case 'agent_start':
+      case 'agent_queued':
+      case 'agent_delta':
+      case 'agent_progress':
+        _beginRemoteMirror();
+        return;
+      case 'agent_done':
+      case 'agent_cancelled':
+      case 'agent_error':
+        _endRemoteMirror();
+        return;
     }
-    if (event.type == 'agent_cancelled') {
-      final String requestId = event.data['requestId'] as String? ?? '';
-      if (requestId.isNotEmpty) {
-        _markAssistantCancelled(requestId);
-      }
-      return;
-    }
-    if (event.type == 'agent_error') {
-      final String requestId = event.data['requestId'] as String? ?? '';
-      final String error = event.data['error'] as String? ?? '';
-      if (requestId.isNotEmpty && error.isNotEmpty) {
-        _appendProgress(<String, Object?>{
-          'requestId': requestId,
-          'line': _strings.agentErrorLine(error),
-        });
-      }
-      return;
-    }
-    if (event.type != 'quota_reset') return;
-    final String message = _strings.isZh
-        ? event.data['messageZh'] as String? ??
-            event.data['message'] as String? ??
-            ''
-        : event.data['message'] as String? ?? '';
-    if (message.isEmpty) return;
-    // Quota alerts prefer a system/browser notification. If the platform denies
-    // it, fall back to an in-page system message so Web users still see it.
-    unawaited(_showQuotaNotification(message));
   }
 
   Future<void> _showQuotaNotification(String message) async {

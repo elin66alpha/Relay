@@ -67,11 +67,12 @@ Artifacts:
   offers **"Upload QR image"** and **"Paste credential"** instead. Generate the
   credential on the backend host (see the main README "Credential QR" section),
   then upload the PNG or paste the payload, and enter the passphrase.
-- A backend exposed over the **cloudflared https tunnel** works everywhere with
-  no extra config.
-- For a plain **`http://LAN-IP:port`** backend: macOS normally blocks cleartext
-  HTTP via App Transport Security; we set `NSAllowsLocalNetworking` so local
-  HTTP works. Windows/Linux have no such restriction.
+- A backend reached over a **Tailscale MagicDNS** address works everywhere with
+  no extra config (and over `https://…ts.net` if you use `tailscale serve`).
+- For a plain **`http://<tailscale-or-LAN-ip>:port`** backend: macOS normally
+  blocks cleartext HTTP via App Transport Security; we set
+  `NSAllowsLocalNetworking` so local HTTP works. Windows/Linux have no such
+  restriction.
 
 ## Platform notes / known limitations
 

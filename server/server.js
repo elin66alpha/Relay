@@ -21,9 +21,11 @@ const {
 } = require('./lib/agents');
 const {
   WorkdirError,
-  getWorkdir,
+  resolveWorkdir,
+  getDefaultWorkdir,
+  resolveRequestWorkdir,
   inspectWorkdir,
-  setWorkdir,
+  validateWorkdir,
 } = require('./lib/workdir');
 const {
   FilesystemError,
@@ -57,7 +59,12 @@ const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
 const app = express();
 const eventClients = new Set();
 const activeRequests = new Map();
+// Scopes currently executing an agent turn, keyed by `workdir\0agentKey`.
 const runningScopes = new Set();
+// Per-scope serial execution chains. A new message on a busy scope waits for the
+// in-flight turn (the underlying `claude --resume` session cannot run two turns
+// at once), then runs automatically. Maps scopeKey -> tail Promise.
+const scopeChains = new Map();
 const rawUpload = express.raw({
   type: 'application/octet-stream',
   limit: process.env.FILE_UPLOAD_LIMIT || '256mb',
@@ -68,7 +75,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Device-Id',
+    'Content-Type, Authorization, X-Device-Id, X-Workdir',
   );
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -101,8 +108,7 @@ function formatUptime(seconds) {
   return `${d}d ${h}h ${m}m ${s}s`;
 }
 
-function clearWorkdir() {
-  const dir = getWorkdir();
+function clearWorkdir(dir) {
   let count = 0;
   for (const entry of fs.readdirSync(dir)) {
     fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
@@ -145,11 +151,12 @@ function attachmentHeader(filename) {
 
 function sendEvent(type, payload) {
   const packet = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
-  const targetDeviceId = normalizeDeviceId(payload && payload.deviceId);
+  const scopeWorkdir = payload && payload.scopeWorkdir;
   for (const client of eventClients) {
-    // Targeted events carry a deviceId and are only delivered to that device.
-    // Broadcast events without a deviceId, such as quota_reset, reach everyone.
-    if (targetDeviceId && client.deviceId !== targetDeviceId) {
+    // Scope events carry a scopeWorkdir and only reach devices currently in that
+    // work directory, so a conversation is shared across same-path devices.
+    // Events without a scopeWorkdir (such as quota_reset) reach everyone.
+    if (scopeWorkdir && client.workdir !== scopeWorkdir) {
       continue;
     }
     client.res.write(packet);
@@ -163,8 +170,69 @@ function normalizeDeviceId(value) {
   return text;
 }
 
-function sessionKeyFor(agentKey, deviceId) {
-  return deviceId ? `${deviceId}:${agentKey}` : agentKey;
+// Session identity = work directory + agent. Two devices in the same path share
+// one conversation, resumable CLI session, and history. NUL separates the parts
+// so no real path can collide with the agent suffix.
+const SCOPE_SEPARATOR = '\u0000';
+
+function scopeKeyFor(agentKey, workdir) {
+  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
+}
+
+// The work directory for a request: the device's x-workdir header, or the
+// default for a device that has not chosen one yet. The path is created if
+// missing. Throws WorkdirError for an invalid header, handled by the caller.
+function requestWorkdir(req) {
+  return resolveRequestWorkdir(req.get('x-workdir'));
+}
+
+// Resolve a workdir for read-only contexts (SSE subscription, status) without
+// creating it; fall back to the default if the header is missing or invalid.
+function eventWorkdir(req) {
+  const raw = String(req.get('x-workdir') || '').trim();
+  if (!raw) return getDefaultWorkdir();
+  try {
+    return resolveWorkdir(raw);
+  } catch (_err) {
+    return getDefaultWorkdir();
+  }
+}
+
+// True when an agent turn is currently executing anywhere under this workdir.
+function workdirBusy(workdir) {
+  const prefix = `${workdir}${SCOPE_SEPARATOR}`;
+  for (const key of runningScopes) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+// Run taskFn after any in-flight turn on the same scope completes, so turns on a
+// shared conversation execute one at a time. The returned promise settles with
+// taskFn's result/error; the chain itself never rejects so later turns proceed.
+function enqueueScope(scopeKey, taskFn) {
+  const prev = scopeChains.get(scopeKey) || Promise.resolve();
+  const run = prev.then(() => taskFn());
+  const tail = run.catch(() => {});
+  scopeChains.set(scopeKey, tail);
+  tail.then(() => {
+    if (scopeChains.get(scopeKey) === tail) scopeChains.delete(scopeKey);
+  });
+  return run;
+}
+
+// Broadcast a chat event to every device currently in the same work directory
+// (including the originator, which ignores its own requestId). This is what
+// makes a message sent on one device appear on the others in real time.
+function broadcastScope(type, { scopeWorkdir, agent, requestId, deviceId, ...rest }) {
+  sendEvent(type, {
+    scopeWorkdir,
+    deviceId,
+    requestId,
+    agent: agentPayload(agent),
+    createdAt: new Date().toISOString(),
+    ...rest,
+  });
 }
 
 function agentPayload(agent) {
@@ -246,11 +314,12 @@ app.get('/api/auth/status', (_req, res) => {
   });
 });
 
-app.get('/api/status', (_req, res) => {
+app.get('/api/status', (req, res) => {
   res.json({
     ok: true,
     defaultAgent: DEFAULT_AGENT,
-    workdir: getWorkdir(),
+    workdir: eventWorkdir(req),
+    defaultWorkdir: getDefaultWorkdir(),
     systemUptime: formatUptime(os.uptime()),
     processUptime: formatUptime(process.uptime()),
     agentTimeoutMs: TIMEOUT_MS,
@@ -259,12 +328,10 @@ app.get('/api/status', (_req, res) => {
   });
 });
 
-app.get('/api/workdir', (_req, res) => {
+app.get('/api/workdir', (req, res) => {
   try {
-    return res.json({
-      dir: getWorkdir(),
-      busy: activeRequests.size > 0 || runningScopes.size > 0,
-    });
+    const dir = requestWorkdir(req);
+    return res.json({ dir, busy: workdirBusy(dir) });
   } catch (err) {
     return sendWorkdirError(res, err);
   }
@@ -279,15 +346,12 @@ app.post('/api/workdir/check', (req, res) => {
   }
 });
 
+// Validate (and optionally create) a path the device wants to switch to. With
+// per-device workdirs there is no global state to change here: the client
+// stores the returned canonical path locally and sends it back via x-workdir.
 app.post('/api/workdir', (req, res) => {
-  if (activeRequests.size > 0 || runningScopes.size > 0) {
-    return res.status(409).json({
-      error: 'agent task is running',
-      code: 'WORKDIR_BUSY',
-    });
-  }
   try {
-    const result = setWorkdir(req.body && req.body.path, {
+    const result = validateWorkdir(req.body && req.body.path, {
       create: req.body && req.body.create === true,
     });
     return res.json({
@@ -305,6 +369,7 @@ app.get('/api/workdir/browse', (req, res) => {
     return res.json(
       listAbsoluteDirectory(req.query.path, {
         showHidden: queryBool(req.query.showHidden),
+        fallbackDir: eventWorkdir(req),
       }),
     );
   } catch (err) {
@@ -317,6 +382,7 @@ app.get('/api/fs/list', (req, res) => {
     return res.json(
       listDirectory(req.query.path, {
         showHidden: queryBool(req.query.showHidden),
+        workdir: requestWorkdir(req),
       }),
     );
   } catch (err) {
@@ -327,7 +393,7 @@ app.get('/api/fs/list', (req, res) => {
 app.get('/api/fs/download', (req, res) => {
   let download;
   try {
-    download = prepareDownload(req.query.path);
+    download = prepareDownload(req.query.path, requestWorkdir(req));
   } catch (err) {
     return sendFilesystemError(res, err);
   }
@@ -372,7 +438,7 @@ app.get('/api/fs/download', (req, res) => {
 app.post('/api/fs/upload', rawUpload, (req, res) => {
   let target;
   try {
-    target = resolveUploadTarget(req.query.path, req.query.name);
+    target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
     if (fs.existsSync(target.target)) {
       const realTarget = fs.realpathSync(target.target);
       if (
@@ -418,13 +484,16 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const scopeKey = sessionKeyFor(agent.key, deviceId);
-  if (runningScopes.has(scopeKey)) {
-    return res.status(409).json({
-      error: 'agent is already handling a message',
-      code: 'AGENT_BUSY',
-    });
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
   }
+  // Session = workdir + agent. Concurrent turns on the same scope are serialized
+  // (see enqueueScope below) rather than rejected, so a second device's message
+  // queues behind the in-flight one instead of failing.
+  const scopeKey = scopeKeyFor(agent.key, workdir);
 
   const abortController = new AbortController();
   const createdAt = new Date().toISOString();
@@ -440,6 +509,7 @@ app.post('/api/chat', async (req, res) => {
     agent,
     deviceId,
     scopeKey,
+    scopeWorkdir: workdir,
     recordHistory,
     historyAssistantId,
     cancelled: false,
@@ -447,7 +517,6 @@ app.post('/api/chat', async (req, res) => {
     abortController,
   };
   activeRequests.set(requestId, runState);
-  runningScopes.add(scopeKey);
 
   const streaming = wantsChatStream(req);
   let streamedText = '';
@@ -594,28 +663,41 @@ app.post('/api/chat', async (req, res) => {
     }
   };
 
-  try {
-    if (!streaming) {
-      emitAgentEvent('agent_start', {
+  // Other devices in this workdir learn a turn started and begin mirroring from
+  // persisted history. The originator ignores its own requestId. If the scope is
+  // already busy this turn will queue behind the in-flight one.
+  broadcastScope('agent_start', { scopeWorkdir: workdir, agent, requestId, deviceId });
+  const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
+  if (willQueue) {
+    broadcastScope('agent_queued', { scopeWorkdir: workdir, agent, requestId, deviceId });
+    if (streaming) {
+      writeStreamEvent(res, 'agent_queued', {
         requestId,
-        agent,
         deviceId,
+        agent: agentPayload(agent),
+        createdAt: new Date().toISOString(),
       });
     }
-    const content = await runAgent(agentKey, prompt, emitRunEvent, {
-      sessionKey: scopeKey,
-      signal: abortController.signal,
+  }
+
+  try {
+    const content = await enqueueScope(scopeKey, async () => {
+      // The turn may have been cancelled while waiting its turn in the queue.
+      if (runState.cancelled) throw new AgentCancelledError();
+      runningScopes.add(scopeKey);
+      try {
+        return await runAgent(agentKey, prompt, emitRunEvent, {
+          sessionKey: scopeKey,
+          signal: abortController.signal,
+        });
+      } finally {
+        runningScopes.delete(scopeKey);
+      }
     });
     if (streaming && !streamedText.trim()) {
       await streamTextFallback(res, requestId, agent, deviceId, content);
     }
-    if (!streaming) {
-      emitAgentEvent('agent_done', {
-        requestId,
-        agent,
-        deviceId,
-      });
-    }
+    broadcastScope('agent_done', { scopeWorkdir: workdir, agent, requestId, deviceId });
     finalizeAssistantHistory(content);
     const completedAt = new Date().toISOString();
     const reply = {
@@ -638,13 +720,12 @@ app.post('/api/chat', async (req, res) => {
       finalizeAssistantHistory(streamedText, { cancelled: true });
       if (!runState.cancelEventSent) {
         runState.cancelEventSent = true;
-        if (!streaming) {
-          emitAgentEvent('agent_cancelled', {
-            requestId,
-            agent,
-            deviceId,
-          });
-        }
+        broadcastScope('agent_cancelled', {
+          scopeWorkdir: workdir,
+          agent,
+          requestId,
+          deviceId,
+        });
       }
       if (streaming) {
         writeStreamEvent(res, 'agent_cancelled', {
@@ -669,6 +750,14 @@ app.post('/api/chat', async (req, res) => {
         `${agentPayload(agent).label} is not logged in on the backend host. ` +
         'Log in there, then try again.';
       finalizeAssistantHistory(message, { errorCode: 'NOT_LOGGED_IN' });
+      broadcastScope('agent_error', {
+        scopeWorkdir: workdir,
+        agent,
+        requestId,
+        deviceId,
+        error: message,
+        code: 'NOT_LOGGED_IN',
+      });
       if (streaming) {
         writeStreamEvent(res, 'agent_error', {
           requestId,
@@ -694,6 +783,14 @@ app.post('/api/chat', async (req, res) => {
     finalizeAssistantHistory(errorMessage, {
       errorCode: err.code || 'AGENT_ERROR',
     });
+    broadcastScope('agent_error', {
+      scopeWorkdir: workdir,
+      agent,
+      requestId,
+      deviceId,
+      error: errorMessage,
+      code: err.code,
+    });
     if (streaming) {
       writeStreamEvent(res, 'agent_error', {
         requestId,
@@ -706,16 +803,9 @@ app.post('/api/chat', async (req, res) => {
       endStream(res);
       return;
     }
-    emitAgentEvent('agent_error', {
-      requestId,
-      agent,
-      deviceId,
-      error: errorMessage,
-    });
     return res.status(500).json({ error: errorMessage });
   } finally {
     activeRequests.delete(requestId);
-    runningScopes.delete(scopeKey);
   }
 });
 
@@ -733,7 +823,15 @@ app.post('/api/chat/cancel', (req, res) => {
       code: 'REQUEST_NOT_FOUND',
     });
   }
-  if (deviceId && runState.deviceId && deviceId !== runState.deviceId) {
+  // Shared sessions: any device currently in the same work directory may cancel
+  // the turn, not just the device that started it.
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  if (runState.scopeWorkdir && runState.scopeWorkdir !== workdir) {
     return res.status(404).json({
       error: 'request not found',
       code: 'REQUEST_NOT_FOUND',
@@ -743,9 +841,10 @@ app.post('/api/chat/cancel', (req, res) => {
   runState.cancelled = true;
   if (!runState.cancelEventSent) {
     runState.cancelEventSent = true;
-    emitAgentEvent('agent_cancelled', {
-      requestId,
+    broadcastScope('agent_cancelled', {
+      scopeWorkdir: runState.scopeWorkdir,
       agent: runState.agent,
+      requestId,
       deviceId: runState.deviceId,
     });
   }
@@ -753,11 +852,10 @@ app.post('/api/chat/cancel', (req, res) => {
   return res.json({ ok: true, requestId });
 });
 
-// Return the stored conversation for this device + agent so the app can show
-// the previous chat on reopen without persisting anything locally.
+// Return the stored conversation for this work directory + agent so any device
+// in the same path shows the same chat, without persisting anything locally.
 app.get('/api/history', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
   if (!agentKey) {
     return res.status(400).json({ error: 'agent is required' });
   }
@@ -765,13 +863,22 @@ app.get('/api/history', (req, res) => {
   if (!agent) {
     return res.status(400).json({ error: `unknown agent: ${agentKey}` });
   }
-  const scopeKey = sessionKeyFor(agent.key, deviceId);
-  if (!runningScopes.has(scopeKey)) {
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir);
+  // Only finalize a streaming bubble as stale when nothing is running OR queued
+  // for this scope; a queued turn has a persisted awaiting bubble that is not
+  // yet in runningScopes and must not be prematurely marked cancelled.
+  if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
     finalizeStaleStreamingHistory(scopeKey);
   }
   return res.json({
     agent: agent.key,
-    deviceId,
+    workdir,
     messages: readHistory(scopeKey),
   });
 });
@@ -786,48 +893,59 @@ app.get('/api/usage', async (_req, res) => {
 });
 
 // Clear one agent's persistent session so the next message starts a new
-// machine-side conversation. Without an agent, clear every agent for the
-// current device. This does not touch files in the work directory.
+// machine-side conversation. Scoped to the requesting device's work directory,
+// so it only resets the shared conversation for that path. Without an agent,
+// clear every agent in that path. This does not touch files on disk.
 app.post('/api/session/clear', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
   if (agentKey) {
     const agent = getAgent(agentKey);
     if (!agent) {
       return res.status(400).json({ error: `unknown agent: ${agentKey}` });
     }
-    const sessionKey = sessionKeyFor(agent.key, deviceId);
-    const cleared = clearSession(sessionKey);
-    clearHistory(sessionKey);
-    return res.json({ ok: true, agent: agentKey, deviceId, cleared });
+    const scopeKey = scopeKeyFor(agent.key, workdir);
+    const cleared = clearSession(scopeKey);
+    clearHistory(scopeKey);
+    return res.json({ ok: true, agent: agentKey, workdir, cleared });
   }
   let cleared = 0;
   for (const agent of listAgents()) {
-    const sessionKey = sessionKeyFor(agent.key, deviceId);
-    if (clearSession(sessionKey)) cleared += 1;
-    clearHistory(sessionKey);
+    const scopeKey = scopeKeyFor(agent.key, workdir);
+    if (clearSession(scopeKey)) cleared += 1;
+    clearHistory(scopeKey);
   }
-  return res.json({ ok: true, deviceId, cleared });
+  return res.json({ ok: true, workdir, cleared });
 });
 
-app.post('/api/workdir/reset', (_req, res) => {
+app.post('/api/workdir/reset', (req, res) => {
   try {
-    const result = clearWorkdir();
+    const result = clearWorkdir(requestWorkdir(req));
     return res.json(result);
   } catch (err) {
+    if (err instanceof WorkdirError) return sendWorkdirError(res, err);
     return res.status(500).json({ error: err.message });
   }
 });
 
 app.get('/api/events', (req, res) => {
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
+  // Scope this subscription to the device's current work directory so it only
+  // receives chat events for the conversation it is viewing. The client
+  // reconnects with a new x-workdir header when the user switches paths.
+  const workdir = eventWorkdir(req);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
-  const client = { res, deviceId };
+  const client = { res, deviceId, workdir };
   eventClients.add(client);
   res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
@@ -879,7 +997,7 @@ app.listen(PORT, HOST, () => {
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }
-  console.log(`workdir: ${getWorkdir()}`);
+  console.log(`default workdir: ${getDefaultWorkdir()}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);

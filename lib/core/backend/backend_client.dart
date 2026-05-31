@@ -9,6 +9,7 @@ import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
+import '../storage/workdir_store.dart';
 
 class BackendException implements Exception {
   BackendException(this.message, {this.status, this.code});
@@ -288,14 +289,21 @@ class BackendClient {
   BackendClient({
     MachineCredentialsStore? credentialsStore,
     DeviceIdStore? deviceIdStore,
+    WorkdirStore? workdirStore,
     http.Client? httpClient,
   })  : _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
+        _workdirStore = workdirStore ?? WorkdirStore(),
         _httpClient = httpClient ?? http.Client();
 
   final MachineCredentialsStore _credentialsStore;
   final DeviceIdStore _deviceIdStore;
+  final WorkdirStore _workdirStore;
   final http.Client _httpClient;
+
+  /// This device's current work directory, or null when it has not chosen one
+  /// (the backend then uses its default).
+  Future<String?> currentWorkdir() => _workdirStore.read();
 
   Future<void> close() async {
     _httpClient.close();
@@ -545,7 +553,13 @@ class BackendClient {
     if (decoded is! Map) {
       throw BackendException('Invalid work directory update response.');
     }
-    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    final WorkdirInfo info = WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    // The backend only validates the path; this device owns its current workdir,
+    // so persist the canonical path locally and send it on later requests.
+    if (info.dir.isNotEmpty) {
+      await _workdirStore.write(info.dir);
+    }
+    return info;
   }
 
   Future<FsListing> listFiles(
@@ -764,11 +778,13 @@ class BackendClient {
     String contentType = 'application/json',
   }) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
+    final String? workdir = await _workdirStore.read();
     return <String, String>{
       'Accept': accept,
       'Content-Type': contentType,
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
+      if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
     };
   }
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-PM2_APP_NAME="${PM2_APP_NAME:-bot-app-server}"
+PM2_APP_NAME="${PM2_APP_NAME:-agentdeck-server}"
 WEB_URL="${WEB_URL:-http://127.0.0.1:8787/}"
 APK_PATH="${APK_PATH:-build/app/outputs/flutter-apk/app-debug.apk}"
 

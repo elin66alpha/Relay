@@ -2,17 +2,18 @@
 #
 # AgentDeck one-command setup.
 #
-# Starts the backend with PM2, optionally opens a cloudflared tunnel, then
-# generates the credential QR that the AgentDeck app scans. Run from the repo
-# root:
+# Starts the backend with PM2, then generates the credential QR that the
+# AgentDeck app scans. Run from the repo root:
 #
 #   ./setup.sh
 #
-# Two modes:
-#   - Tunnel mode (default): exposes localhost:8787 via a cloudflared quick
-#     tunnel using PM2 + cloudflared.
+# Networking has two modes:
+#   - Tailscale mode (recommended, default): the backend is reached over your
+#     private tailnet at a stable MagicDNS address. No public exposure, no
+#     rotating URL, works behind NAT/CGNAT, cross-platform. Requires Tailscale
+#     on the host and on each client device (one install + login).
 #   - Direct mode: for a VPS / box with a reachable public IP or domain. Binds
-#     the server to 0.0.0.0 and uses the address you provide; no tunnel.
+#     the server to 0.0.0.0 and uses the address you provide.
 #
 set -euo pipefail
 
@@ -22,7 +23,6 @@ ENV_FILE="$SERVER_DIR/.env"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 
 SERVER_PROC="agentdeck-server"
-TUNNEL_PROC="agentdeck-tunnel"
 
 c_info() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 c_warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
@@ -66,14 +66,30 @@ fi
 PORT_NUM="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)"
 PORT_NUM="${PORT_NUM:-8787}"
 
-c_info "AgentDeck setup"
-read -rp "Do you need a tunnel (cloudflared) to expose this machine to the internet? [Y/n]: " USE_TUNNEL
-USE_TUNNEL="${USE_TUNNEL:-Y}"
+# Print cross-platform Tailscale install guidance, then exit non-zero.
+tailscale_install_hint() {
+  c_err "Tailscale is required for the recommended networking mode."
+  c_warn "Install it (one time), log in, then re-run ./setup.sh:"
+  case "$(uname -s)" in
+    Darwin) c_warn "  macOS:  brew install tailscale && sudo tailscale up   (or the Mac App Store app)" ;;
+    Linux)  c_warn "  Linux:  curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up" ;;
+    *)      c_warn "  Download: https://tailscale.com/download" ;;
+  esac
+  c_warn "  Install Tailscale on your phone / other client devices too, signed into the same account."
+  c_warn "Or choose Direct mode (option 2) if this host has a public IP or domain."
+}
 
-case "$USE_TUNNEL" in
-  [Nn]*)
+c_info "AgentDeck setup"
+echo "How should the app reach this backend?"
+echo "  1) Tailscale (recommended) - private, encrypted, stable address; never exposed to the public internet."
+echo "  2) Direct - this host already has a reachable public IP or domain (e.g. a VPS)."
+read -rp "Choose 1/2 [1]: " NET_MODE
+NET_MODE="${NET_MODE:-1}"
+
+case "$NET_MODE" in
+  2)
     # ---------- Direct mode (e.g. VPS with a public IP / domain) ----------
-    c_info "Direct mode: the app connects straight to your address (no tunnel)."
+    c_info "Direct mode: the app connects straight to your address."
     read -rp "Public address the app will use (e.g. https://agent.example.com or http://1.2.3.4:${PORT_NUM}): " PUBLIC_URL
     [ -n "$PUBLIC_URL" ] || { c_err "A public address is required in direct mode."; exit 1; }
     case "$PUBLIC_URL" in
@@ -98,42 +114,31 @@ case "$USE_TUNNEL" in
     npm run credential -- --url "$PUBLIC_URL"
     ;;
   *)
-    # ---------- Tunnel mode (cloudflared quick tunnel) ----------
-    need cloudflared || {
-      c_err "cloudflared is required for tunnel mode."
-      c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    # ---------- Tailscale mode (recommended) ----------
+    need tailscale || { tailscale_install_hint; exit 1; }
+    if ! tailscale status >/dev/null 2>&1; then
+      c_err "Tailscale is installed but not connected."
+      c_warn "Run 'sudo tailscale up' to log in, then re-run ./setup.sh."
       exit 1
-    }
-    c_info "Tunnel mode: exposing localhost:${PORT_NUM} via a cloudflared quick tunnel."
-
-    # Tunnel reaches the server over localhost; keep it bound locally.
-    set_env HOST 127.0.0.1
-
-    # Fresh logs so we read THIS run's tunnel URL, not a stale one.
-    rm -f "$HOME/.pm2/logs/${TUNNEL_PROC}-error.log" \
-          "$HOME/.pm2/logs/${TUNNEL_PROC}-out.log"
-
-    c_info "Starting backend + tunnel (PM2: $SERVER_PROC, $TUNNEL_PROC)..."
-    pm2 delete "$SERVER_PROC" "$TUNNEL_PROC" >/dev/null 2>&1 || true
-    pm2 start ecosystem.config.js
-    pm2 save >/dev/null 2>&1 || true
-
-    c_info "Waiting for the tunnel URL..."
-    TUNNEL_URL=""
-    for _ in $(seq 1 30); do
-      TUNNEL_URL="$(grep -hoE 'https://[a-z0-9-]+\.trycloudflare\.com' \
-        "$HOME/.pm2/logs/${TUNNEL_PROC}-error.log" \
-        "$HOME/.pm2/logs/${TUNNEL_PROC}-out.log" 2>/dev/null | tail -1 || true)"
-      [ -n "$TUNNEL_URL" ] && break
-      sleep 1
-    done
-    if [ -n "$TUNNEL_URL" ]; then
-      c_info "Tunnel URL: $TUNNEL_URL"
-    else
-      c_warn "Tunnel URL not visible yet; the credential step will retry detection."
     fi
 
-    c_info "Generating credential QR..."
+    # The backend listens on the tailnet interface; reachability is provided by
+    # Tailscale (WireGuard, end-to-end encrypted), not a public tunnel.
+    set_env HOST 0.0.0.0
+
+    c_info "Starting backend (PM2: $SERVER_PROC)..."
+    pm2 delete "$SERVER_PROC" >/dev/null 2>&1 || true
+    pm2 start ecosystem.config.js --only "$SERVER_PROC"
+    pm2 save >/dev/null 2>&1 || true
+
+    TS_NAME="$(tailscale status --json 2>/dev/null \
+      | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+      | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
+    [ -n "$TS_NAME" ] && c_info "Tailscale address: http://${TS_NAME%.}:${PORT_NUM}"
+    c_warn "Tip: for tailnet-only access with HTTPS, you can instead run:"
+    c_warn "  tailscale serve --bg ${PORT_NUM}   (then regenerate the QR with the https URL)"
+
+    c_info "Generating credential QR (auto-detects the Tailscale address)..."
     npm run credential
     ;;
 esac

@@ -19,6 +19,7 @@
 - app/Web 端支持限定在当前 workdir 内的文件浏览、上传与下载。
 - 未生成 token 时，受保护 API 不再以未鉴权状态运行。
 - `backends/` 下区分平台后端安装入口：Linux 使用 PM2，macOS 使用 LaunchAgent。
+- 会话身份从 `deviceId + agent` 改为 `workdir + agent`：每台设备在本地各自持有当前工作路径（通过 `X-Workdir` 请求头发送），同一路径下的所有设备共享同一段对话、同一个可恢复的 CLI 会话与历史，彼此的消息以及 agent 的实时进度都会同步镜像。由于底层 CLI 会话不能并发，同一会话的并发消息会自动排队串行执行。跨设备事件按 workdir scope 广播，而不再只发给单台设备。
 
 ## 规划
 
@@ -28,21 +29,19 @@
 
 1. Android / iOS 手机连接 Linux / macOS / Windows 后端。
 2. 用一套响应式 Web 前端作为所有平台的桌面客户端。Windows / macOS / Linux 桌面应用都是这套 Web 前端的套壳（webview 外壳），不再单独开发原生桌面 UI，三个平台共用同一份代码。
-3. 各后端平台提供服务安装、隧道配置、CLI agent 检测与诊断。
+3. 各后端平台提供服务安装、Tailscale（私有 mesh）联网、CLI agent 检测与诊断。
 
 复用边界：
 
 - HTTP/SSE API、二维码凭证格式、token 吊销、会话语义保持平台无关。
 - Flutter 的聊天、凭证、设置、机器管理、后端 client 逻辑保持共用。
 - Node 的鉴权、会话、并发控制、额度报告、agent 调度保持共用。
-- 平台差异放到 adapter 层：默认工作路径、进程启动/取消、服务管理、隧道路径和日志、shell 行为、额度来源。
+- 平台差异放到 adapter 层：默认工作路径、进程启动/取消、服务管理、Tailscale 地址发现、shell 行为、额度来源。
 
 ### 后续提升
 
-- 按 `workdir + agent` 而不是 `deviceId + agent` 共享会话：多个客户端进入同一个后端路径时，
-  看到同一份对话和正在进行的 agent 进度。需要设计现有按设备历史的迁移、并发客户端冲突处理，
-  以及按会话 scope 广播 SSE 事件。
-- 固定隧道/固定域名配置指南。
+- **单工作路径多会话**: 支持在同一个工作路径下，为三个 AI agent 开启多个不同的 Session。切换到对应工作路径后，自动读取并恢复留存的 Session（包括名称和对话记忆）。在左侧栏 CLI 智能体位置增加一个“+”号按钮用于新建该 agent 的会话，并支持会话的删除功能。
+- 可选 `tailscale serve`（仅 tailnet 的 HTTPS）与自有域名 / 直连模式加固指南。
 - 桌面端通过二维码图片或粘贴 payload 导入凭证。
 - 更完整的后端诊断。
 - Windows 后端安装流程。

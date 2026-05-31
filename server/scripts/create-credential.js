@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const readline = require('readline/promises');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const QRCode = require('qrcode');
 const qrcodeTerminal = require('qrcode-terminal');
 
@@ -42,71 +43,71 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
-  npm run credential                 # Auto-detect tunnel URL, prompt for a password, print the credential QR
+  npm run credential                 # Auto-detect the Tailscale address, prompt for a password, print the credential QR
 
 Options:
-  --url <url>          Public URL (default: auto-detected from the cloudflared tunnel log)
+  --url <url>          Backend URL (default: auto-detected from Tailscale; use this for direct/VPS mode)
   --name <name>        Machine name shown in the app (default: hostname)
   --label <label>      Token label (default: machine name)
   --qr-out <path>      Output path for the QR PNG
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
-  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: tries agentdeck-tunnel and bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
 `);
 }
 
-// Auto-detect the cloudflared quick-tunnel public URL. cloudflared prints the
-// URL to stderr, which PM2 captures in its per-process log. Quick-tunnel URLs
-// rotate on every restart, so we take the most recent occurrence. The PM2
-// process name has varied across deployments (agentdeck-tunnel / bot-app-tunnel),
-// so we probe the known names (plus any --tunnel-name / TUNNEL_PM2_NAME override)
-// and prefer the log file written most recently.
-const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
-const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
-
-function detectTunnelUrl(args) {
-  const names = [];
-  const override = String(
-    args['tunnel-name'] || process.env.TUNNEL_PM2_NAME || '',
-  ).trim();
-  if (override) names.push(override);
-  names.push('agentdeck-tunnel', 'bot-app-tunnel');
-
-  const files = [];
-  for (const name of names) {
-    files.push(path.join(PM2_LOG_DIR, `${name}-error.log`));
-    files.push(path.join(PM2_LOG_DIR, `${name}-out.log`));
+// Auto-detect this machine's stable Tailscale address. We prefer the MagicDNS
+// name (human-readable and permanent, e.g. my-box.tailnet-name.ts.net) and fall
+// back to the 100.x tailnet IP. Unlike a quick tunnel, this address never
+// rotates, so the credential QR stays valid across restarts. Tailscale's
+// WireGuard transport is end-to-end encrypted, so plain http over the tailnet is
+// fine; the backend is never exposed to the public internet.
+function runTailscale(args) {
+  try {
+    return execFileSync('tailscale', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+    });
+  } catch (_err) {
+    return '';
   }
-  // Newest log first, so a freshly rotated tunnel wins.
-  const existing = files
-    .filter((file) => fs.existsSync(file))
-    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+}
 
-  for (const file of existing) {
-    let text;
+function detectTailscaleUrl(port) {
+  let host = '';
+  const statusJson = runTailscale(['status', '--json']);
+  if (statusJson) {
     try {
-      text = fs.readFileSync(file, 'utf8');
+      const status = JSON.parse(statusJson);
+      if (status && status.Self && status.Self.DNSName) {
+        host = String(status.Self.DNSName).replace(/\.$/, '');
+      }
     } catch (_err) {
-      continue;
+      // Fall through to the IP probe.
     }
-    const matches = text.match(TRYCLOUDFLARE_RE);
-    if (matches && matches.length) return matches[matches.length - 1];
   }
-  return '';
+  if (!host) {
+    const ip = runTailscale(['ip', '-4']).trim().split('\n')[0].trim();
+    if (ip) host = ip;
+  }
+  return host ? `http://${host}:${port}` : '';
 }
 
 function resolvePublicBaseUrl(args) {
+  const port = String(process.env.PORT || '8787').trim() || '8787';
   const explicit = String(args.url || '').trim();
   if (explicit) return { url: explicit, source: 'command line (--url)' };
-  const detected = detectTunnelUrl(args);
-  if (detected) return { url: detected, source: 'cloudflared tunnel log' };
+  const detected = detectTailscaleUrl(port);
+  if (detected) return { url: detected, source: 'Tailscale (MagicDNS)' };
   const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
   if (envUrl) {
     return { url: envUrl, source: '.env PUBLIC_BASE_URL (may be stale)' };
   }
   throw new Error(
-    'Could not determine the public URL. Make sure the cloudflared tunnel is running (pm2 status), or pass --url explicitly.',
+    'Could not determine the backend address. Install Tailscale and run `tailscale up` ' +
+      '(https://tailscale.com/download), then re-run. For a VPS / public host / own domain, ' +
+      'pass the address explicitly with --url.',
   );
 }
 
