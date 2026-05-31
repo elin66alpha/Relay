@@ -16,13 +16,20 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Each device has isolated persistent sessions per agent.
 - The app stores no chat history locally. The conversation is kept on the backend (the CLI host) and reloaded when the app reopens, so it opens at your latest message rather than the top. Clearing chat wipes both the backend history and the agent's resumable session.
 - Claude Code and Codex stream assistant text over SSE.
+- Assistant chat bubbles render agent output as Markdown for readable headings,
+  emphasis, lists, quotes, code blocks, and dividers. `**text**` renders as
+  bold, `*text*` renders as italic, and inline code renders as italic instead
+  of getting a tinted code background. The renderer also accepts common CLI
+  output shortcuts such as `###Title` without a space and legacy inline
+  `##text##` emphasis; user-authored messages remain plain text.
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
 - Protected backend APIs stay closed until at least one credential token has been generated.
-- The same Flutter client runs on mobile, Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
+- The same Flutter client runs on mobile (Android / iOS), Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
 - The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
+- **Card Mode** is a secondary surface (opened from the drawer). The backend scans recent chat history with keyword heuristics (no ML) and generates a few action-suggestion cards per agent — e.g. debug a recent error, re-run tests, or summarize the session. The app shows them as a swipeable deck: swipe right to execute (sends the card's prompt through the normal chat path), left to reject, up to defer, down to mark irrelevant. Chat stays the primary mode and cards never appear in chat history.
 
 ## Repository Layout
 
@@ -35,10 +42,11 @@ AgentDeck/
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
 │   ├── core/storage/     secure storage and device identity
-│   └── features/         chat, drawer, credentials, settings, work directory
+│   └── features/         chat, drawer, credentials, settings, work directory, cards
 └── server/               local Node backend
     ├── server.js         HTTP API + SSE events
-    └── lib/              agents, tokens, workdir, usage, quota-watch, credentials
+    └── lib/              agents, tokens, workdir, usage, quota-watch, credentials,
+                          cards + chat-learner (Card Mode)
 ```
 
 ## Backend Quick Start
@@ -102,42 +110,17 @@ Leave `BOTS_SESSION_DIR` empty to use `~/agent_deck`. The app can later change t
 
 ## Credential QR
 
-Start the backend and tunnel first. With the included PM2 config, the tunnel process is named `agentdeck-tunnel`.
-
-### Option A: Standard Interactive (Auto-Detect Tunnel URL)
-This is the most common method. The script automatically parses the PM2 log to find your Cloudflare quick tunnel URL and guides you through setting a password:
-```bash
-cd /path/to/AgentDeck/server
-pm2 start ecosystem.config.js
-npm run credential
-```
-
-### Option B: Instant One-Liner (Automation Only)
-For automation, you can supply the passphrase directly as an argument. This is less private than the interactive prompt because shell history or process lists may expose the password:
-```bash
-npm run credential -- --passphrase "your-password"
-```
-
-### Option C: Manual URL & Passphrase (No PM2 / Custom Stable Domains)
-If you are running the backend without PM2 or have configured a custom stable domain, run this unified one-liner to generate your QR instantly:
-```bash
-npm run credential -- --passphrase "your-password" --url "https://your-stable-domain.example"
-```
-
-### What happens under the hood:
-- Automatically detects the tunnel URL from `agentdeck-tunnel` PM2 logs (unless overridden via `--url`).
-- Creates `MACHINE_ID` when missing and updates `.env`.
-- Creates a revocable, device-specific token in `server/tokens.json`.
-- Prints a QR code directly in the terminal and saves it as `server/credentials/<machine>.agentdeck.png`.
-
-The QR payload contains an encrypted credential envelope using PBKDF2-SHA256 and AES-256-GCM. Your plain text password is never written to disk.
-
-Token management:
+`backends/*/setup.sh` generates the QR for you, so you rarely call this directly. To (re)generate it manually from `server/`:
 
 ```bash
-npm run credential -- --list-tokens
-npm run credential -- --revoke <token-id>
+npm run credential                                  # interactive; auto-detects the tunnel URL from PM2 logs
+npm run credential -- --passphrase "pw"             # non-interactive (less private: pw visible in shell history)
+npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL, no PM2
 ```
+
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves `server/credentials/<machine>.agentdeck.png`. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Quick-tunnel URLs change on restart — regenerate the QR afterward.
+
+Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 
 ## Flutter Client
 
@@ -161,6 +144,16 @@ npm start
 ```
 
 When `build/web/index.html` exists, the backend serves the Flutter Web app on the same host/port as the API.
+
+For the repeated local "old flow" used during development, run:
+
+```bash
+./scripts/old_flow.sh
+```
+
+It runs Flutter analysis/tests, Node syntax checks, builds Web, restarts the
+PM2 backend, waits for the Web endpoint, builds the Android debug APK, and
+installs it with `adb install -r`.
 
 ### APK signing (dev stage)
 
