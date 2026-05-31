@@ -208,11 +208,14 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
   bool _isLoading = false;
   bool _isOnline = false;
   String? _statusText;
+  int _statusRequestSerial = 0;
 
   @override
   void initState() {
     super.initState();
-    _checkStatus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkStatus();
+    });
   }
 
   @override
@@ -224,7 +227,10 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
   }
 
   Future<void> _checkStatus() async {
-    if (widget.activeMachine == null) {
+    final int requestSerial = ++_statusRequestSerial;
+    final MachineCredential? machine = widget.activeMachine;
+    final AppStrings strings = context.l10n;
+    if (machine == null) {
       if (mounted) {
         setState(() {
           _statusText = null;
@@ -243,8 +249,12 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
     }
 
     try {
-      final String text = await widget.chatController.statusText(context.l10n);
-      if (mounted) {
+      final String text = await widget.chatController
+          .statusText(strings, timeout: const Duration(seconds: 6))
+          .timeout(const Duration(seconds: 8));
+      if (mounted &&
+          requestSerial == _statusRequestSerial &&
+          widget.activeMachine?.id == machine.id) {
         setState(() {
           _statusText = text;
           _isOnline = true;
@@ -252,9 +262,11 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
         });
       }
     } catch (err) {
-      if (mounted) {
+      if (mounted &&
+          requestSerial == _statusRequestSerial &&
+          widget.activeMachine?.id == machine.id) {
         setState(() {
-          _statusText = context.l10n.statusLoadFailed(err);
+          _statusText = strings.statusLoadFailed(err);
           _isOnline = false;
           _isLoading = false;
         });

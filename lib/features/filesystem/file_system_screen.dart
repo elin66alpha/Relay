@@ -355,10 +355,19 @@ class _FileList extends StatelessWidget {
             : context.l10n.fileTypeOther;
     final String size =
         entry.isDirectory ? '' : ' · ${_formatBytes(entry.size)}';
-    final String modified = entry.modifiedAt.isEmpty
-        ? ''
-        : ' · ${entry.modifiedAt.replaceFirst('T', ' ').split('.').first}';
+    final String modifiedAt = _formatModifiedAt(entry.modifiedAt);
+    final String modified = modifiedAt.isEmpty ? '' : ' · $modifiedAt';
     return '$type$size$modified';
+  }
+
+  String _formatModifiedAt(String iso) {
+    if (iso.isEmpty) return '';
+    final DateTime? parsed = DateTime.tryParse(iso);
+    if (parsed == null) return iso.replaceFirst('T', ' ').split('.').first;
+    final DateTime local = parsed.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
   }
 
   String _formatBytes(int bytes) {

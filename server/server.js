@@ -627,6 +627,7 @@ app.post('/api/chat', async (req, res) => {
         ...metadata,
         streaming: false,
         awaitingFirstToken: false,
+        progressLines: [],
       },
     }));
   };

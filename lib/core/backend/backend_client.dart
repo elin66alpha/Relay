@@ -333,8 +333,14 @@ class BackendClient {
     return decoded is Map && decoded['ok'] == true;
   }
 
-  Future<BackendStatus> status() async {
-    final Object? decoded = await _requestJson('GET', '/api/status');
+  Future<BackendStatus> status({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/status',
+      timeout: timeout,
+    );
     if (decoded is! Map) {
       throw BackendException('Invalid backend status response.');
     }

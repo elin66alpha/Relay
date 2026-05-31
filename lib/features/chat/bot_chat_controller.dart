@@ -101,6 +101,7 @@ class BotChatController extends ChangeNotifier {
       message.metadata[_errorDetailKey] as String?;
 
   List<String> progressLinesFor(ChatMessage message) {
+    if (message.metadata[_streamingKey] != true) return const <String>[];
     final Object? raw = message.metadata[_progressLinesKey];
     if (raw is! List) return const <String>[];
     return raw.whereType<String>().toList(growable: false);
@@ -229,8 +230,11 @@ class BotChatController extends ChangeNotifier {
     await _runTurn(_agent, _messages[index]);
   }
 
-  Future<String> statusText(AppStrings strings) async {
-    final BackendStatus status = await _backendClient.status();
+  Future<String> statusText(
+    AppStrings strings, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final BackendStatus status = await _backendClient.status(timeout: timeout);
     return status.toDisplayText(strings);
   }
 
