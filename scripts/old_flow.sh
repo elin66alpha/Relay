@@ -29,11 +29,17 @@ run flutter pub get
 run flutter analyze --no-pub
 run flutter test --no-pub
 
-for file in server/server.js server/lib/history.js server/lib/filesystem.js; do
+for file in \
+  server/server.js \
+  server/lib/history.js \
+  server/lib/filesystem.js \
+  server/lib/tokens.js \
+  server/lib/credential-file.js \
+  server/scripts/create-credential.js; do
   run node --check "$file"
 done
 
-run flutter build web --no-pub
+run flutter build web --no-pub --pwa-strategy=none
 run pm2 restart "$PM2_APP_NAME" --update-env
 wait_for_web
 

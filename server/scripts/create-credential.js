@@ -17,7 +17,6 @@ const {
   createToken,
   listTokenSummaries,
   revokeToken,
-  revokeTokensByLabel,
 } = require('../lib/tokens');
 
 const SERVER_DIR = path.resolve(__dirname, '..');
@@ -53,6 +52,9 @@ Options:
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
+
+Generating a new QR deletes old QR image files from server/credentials, but it
+does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
 `);
 }
 
@@ -157,16 +159,33 @@ async function readPassphrase(args) {
     input: process.stdin,
     output: process.stdout,
   });
+
+  rl._writeToOutput = function _writeToOutput(stringToWrite) {
+    if (rl.stdoutMuted) {
+      rl.output.write(stringToWrite.replace(/[^\r\n]/g, '*'));
+    } else {
+      rl.output.write(stringToWrite);
+    }
+  };
+
+  const ask = async (promptText) => {
+    rl.stdoutMuted = false;
+    const p = rl.question(promptText);
+    rl.stdoutMuted = true;
+    const ans = await p;
+    return ans;
+  };
+
   try {
     for (;;) {
-      const first = await rl.question(
-        `Set a credential password (min ${MIN_PASSPHRASE_LEN} chars): `,
-      );
+      const first = await ask(`Set a credential password (min ${MIN_PASSPHRASE_LEN} chars): `);
+      process.stdout.write('\n');
       if (String(first).length < MIN_PASSPHRASE_LEN) {
         console.log(`Password must be at least ${MIN_PASSPHRASE_LEN} characters. Try again.`);
         continue;
       }
-      const second = await rl.question('Confirm password: ');
+      const second = await ask('Confirm password: ');
+      process.stdout.write('\n');
       if (first !== second) {
         console.log('Passwords do not match. Try again.');
         continue;
@@ -242,7 +261,6 @@ async function main() {
   const passphrase = await readPassphrase(args);
   const label = String(args.label || machineName).trim() || machineName;
   const credentialsDir = path.join(SERVER_DIR, 'credentials');
-  const revoked = revokeTokensByLabel(label);
   cleanOldCredentialFiles(credentialsDir);
   const tokenRecord = createToken({
     label,
@@ -283,9 +301,7 @@ async function main() {
   console.log(`Machine: ${machineName}`);
   console.log(`Public URL: ${credential.baseUrl} (source: ${resolved.source})`);
   console.log(`Token id: ${tokenRecord.id}`);
-  if (revoked.length > 0) {
-    console.log(`Revoked ${revoked.length} old token(s) for "${label}"`);
-  }
+  console.log('Existing device tokens were left active. Use --revoke to disable an old device.');
   console.log('\nIn the app, tap "Scan QR", point it at the QR below, then enter the password you just set:\n');
   qrcodeTerminal.generate(qrPayload, { small: true });
   console.log('\nToken appended to server/tokens.json; machine id and public URL written to server/.env.');

@@ -80,29 +80,10 @@ function revokeToken(idOrToken) {
   return records[index];
 }
 
-function revokeTokensByLabel(label) {
-  const target = String(label || '').trim();
-  if (!target) return [];
-  const records = readTokenRecords();
-  const revoked = [];
-  const now = new Date().toISOString();
-  const next = records.map((record) => {
-    if (!record.revoked && String(record.label || '').trim() === target) {
-      const updated = { ...record, revoked: true, revokedAt: now };
-      revoked.push(updated);
-      return updated;
-    }
-    return record;
-  });
-  if (revoked.length > 0) writeTokenRecords(next);
-  return revoked;
-}
-
 module.exports = {
   createToken,
   hasConfiguredToken,
   isTokenAllowed,
   listTokenSummaries,
   revokeToken,
-  revokeTokensByLabel,
 };

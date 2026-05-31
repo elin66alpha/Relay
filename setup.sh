@@ -111,7 +111,7 @@ ensure_tailscale() {
 
 c_info "AgentDeck setup"
 echo "How should the app reach this backend?"
-echo "  1) Tailscale (recommended) - private, encrypted, stable address; never exposed to the public internet."
+echo "  1) Tailscale Funnel (recommended) - public, encrypted MagicDNS address exposed to the internet."
 echo "  2) Direct - this host already has a reachable public IP or domain (e.g. a VPS)."
 read -rp "Choose 1/2 [1]: " NET_MODE
 NET_MODE="${NET_MODE:-1}"
@@ -144,44 +144,44 @@ case "$NET_MODE" in
     npm run credential -- --url "$PUBLIC_URL"
     ;;
   *)
-    # ---------- Tailscale mode (recommended) ----------
+    # ---------- Tailscale Funnel mode (recommended) ----------
     ensure_tailscale
 
-    # The backend listens on the tailnet interface; reachability is provided by
-    # Tailscale (WireGuard, end-to-end encrypted), not a public tunnel.
-    set_env HOST 0.0.0.0
+    # The backend listens locally; Tailscale Funnel routes to it.
+    set_env HOST 127.0.0.1
 
     c_info "Starting backend (PM2: $SERVER_PROC)..."
     pm2 delete "$SERVER_PROC" >/dev/null 2>&1 || true
     pm2 start ecosystem.config.js --only "$SERVER_PROC"
     pm2 save >/dev/null 2>&1 || true
 
-    TS_IP="$(tailscale ip -4 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
     TS_NAME="$(tailscale status --json 2>/dev/null \
       | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
       | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
     TS_NAME="${TS_NAME%.}"
-    if [ -n "$TS_IP" ]; then
-      c_info "Tailscale address used in QR: http://${TS_IP}:${PORT_NUM}"
-      [ -n "$TS_NAME" ] && c_info "MagicDNS also available when client DNS supports it: http://${TS_NAME}:${PORT_NUM}"
-    elif [ -n "$TS_NAME" ]; then
-      c_info "Tailscale address used in QR: http://${TS_NAME}:${PORT_NUM}"
+
+    if [ -z "$TS_NAME" ]; then
+      c_err "Could not determine MagicDNS name. Ensure Tailscale is connected."
+      exit 1
     fi
-    c_warn "Tip: for tailnet-only access with HTTPS, you can instead run:"
-    c_warn "  tailscale serve --bg ${PORT_NUM}   (then regenerate the QR with the https URL)"
 
-    c_info "Generating credential QR (auto-detects the Tailscale address)..."
-    npm run credential
+    FUNNEL_URL="https://${TS_NAME}"
+    set_env PUBLIC_BASE_URL "$FUNNEL_URL"
 
-    BASE_HOST="${TS_IP:-${TS_NAME:-<your-machine-tailnet-ip>}}"
-    BASE_URL="http://${BASE_HOST}:${PORT_NUM}"
+    c_info "Ensuring Tailscale Funnel is active for port ${PORT_NUM}..."
+    tailscale funnel --bg "${PORT_NUM}" || true
+
+    c_info "Tailscale Funnel address used in QR: ${FUNNEL_URL}"
+    c_info "Generating credential QR..."
+    npm run credential -- --url "$FUNNEL_URL"
+
+    BASE_URL="$FUNNEL_URL"
     c_info "Next steps to connect your devices:"
-    c_warn "  Phone: install the Tailscale app, sign into the SAME account, turn it ON;"
-    c_warn "         then in AgentDeck tap \"Scan QR\", scan the QR above, enter the password."
-    c_warn "  Web:   on any device that has Tailscale on, open ${BASE_URL}/ ,"
-    c_warn "         then import the credential via \"Upload QR image\""
-    c_warn "         (server/credentials/*.agentdeck.png) or \"Paste credential\"."
+    c_warn "  Any client can now reach your backend over the public internet via:"
+    c_warn "  ${BASE_URL}"
+    c_warn "  In AgentDeck tap \"Scan QR\", scan the QR above, enter the password."
     ;;
+
 esac
 
 c_info "Done. Backend is managed by PM2 (pm2 list / pm2 logs / pm2 restart ${SERVER_PROC})."

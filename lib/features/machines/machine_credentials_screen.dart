@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -155,7 +156,15 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (bytes == null || bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
-      final String raw = decodeCredentialQrImage(bytes);
+      final String raw = await compute<Uint8List, String>(
+        decodeCredentialQrImage,
+        bytes,
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw MachineCredentialException(
+          context.l10n.credentialQrDecodeTimedOut,
+        ),
+      );
       if (raw.trim().isEmpty) {
         throw MachineCredentialException(context.l10n.invalidQr);
       }
@@ -178,10 +187,14 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
 
     late final MachineCredential credential;
     try {
-      credential = await widget.machinesController.decryptEncryptedBytes(
-        bytes,
-        passphrase: passphrase,
-      );
+      credential = await widget.machinesController
+          .decryptEncryptedBytes(
+            bytes,
+            passphrase: passphrase,
+          )
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw MachineCredentialException(context.l10n.credentialDecryptTimedOut);
     } on MachineCredentialException catch (err) {
       if (err.message.contains('decryption failed')) {
         throw MachineCredentialException(context.l10n.credentialDecryptFailed);

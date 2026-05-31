@@ -983,11 +983,22 @@ app.post('/api/cards/refresh', (_req, res) => {
 });
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
-  app.use(express.static(WEB_BUILD_DIR));
+  app.use(express.static(WEB_BUILD_DIR, {
+    etag: false,
+    maxAge: 0,
+    setHeaders(res) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    },
+  }));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'not found' });
     }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     return res.sendFile(path.join(WEB_BUILD_DIR, 'index.html'));
   });
 }

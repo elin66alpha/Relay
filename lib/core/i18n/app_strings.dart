@@ -209,8 +209,8 @@ class AppStrings {
       ? '已解密凭证，但 $host 没有返回正常状态。'
       : 'The credential decrypted, but $host did not return a healthy status.';
   String credentialTokenRejected(String host) => isZh
-      ? '已连接到 $host，但凭证 token 被拒绝。请在后端重新生成二维码。'
-      : 'Connected to $host, but the credential token was rejected. Regenerate the QR on the backend.';
+      ? '已连接到 $host，但凭证 token 被拒绝。这个二维码可能已经过期，或对应 token 已被吊销。请在后端重新生成二维码，并导入最新二维码。'
+      : 'Connected to $host, but the credential token was rejected. This QR may be stale, or its token was revoked. Regenerate the QR on the backend and import the latest QR.';
   String credentialHostLookupFailed(String host) => isZh
       ? '无法解析 $host。请确认这台手机/电脑已连接到同一个 Tailscale 网络；如果仍失败，请在后端重新生成二维码（新版会优先使用 100.x Tailscale IP）。'
       : 'Cannot resolve $host. Make sure this device is connected to the same Tailscale network. If it still fails, regenerate the QR on the backend; the new generator prefers the 100.x Tailscale IP.';
@@ -227,6 +227,12 @@ class AppStrings {
       isZh ? '无法连接到 $host：$err' : 'Could not connect to $host: $err';
   String get testingCredentialConnection =>
       isZh ? '正在验证后端连接...' : 'Testing backend connection...';
+  String get credentialDecryptTimedOut => isZh
+      ? '凭证解密耗时过长。请确认二维码图片有效，或在后端重新生成最新二维码后再试。'
+      : 'Credential decryption took too long. Check the QR image, or regenerate the latest QR on the backend and try again.';
+  String get credentialQrDecodeTimedOut => isZh
+      ? '二维码图片解析耗时过长。请上传后端保存的二维码 PNG，或重新生成最新二维码后再试。'
+      : 'QR image parsing took too long. Upload the backend-saved QR PNG, or regenerate the latest QR and try again.';
   String get connectionOk => isZh ? '连接正常。' : 'Connection OK.';
   String get backendNotOk => isZh ? '后端没有返回 ok。' : 'Backend did not return ok.';
   String connectionFailed(Object err) =>

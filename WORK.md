@@ -20,12 +20,38 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 - 客户端不内置后端地址，靠扫描**加密凭证二维码**（PBKDF2-SHA256 + AES-256-GCM）首次连接。
 - 受保护接口用**可吊销的设备 bearer token**鉴权（`server/tokens.json`，0o600）；没有任何 token 时返回 `TOKEN_NOT_CONFIGURED`，不存在免鉴权回退。
 - 助手文本通过 **SSE** 流式返回。
-- 工作目录默认 `~/agent_deck`（`BOTS_SESSION_DIR`）。
+- 工作目录默认 `~/agent_deck`（`AGENTDECK_DEFAULT_DIR`）。
 - 详细文档见 `README.md` / `README.zh-CN.md`，规划见 `ROADMAP.md`。
 
 ---
 
 # 工作记录（最新在最上）
+
+## 2026-05-31 — 凭证 token 不再被新二维码误吊销 + Web 导入去缓存【未提交】
+
+**问题**：Tailscale 100.x URL 本机可访问，`/api/health` 不带 token 返回 401、带当前有效
+token 返回 200，说明“连接超时 401”里的 401 本质是凭证 token 被后端拒绝，而不是 HTTP
+cleartext、MagicDNS 或 IPv4 本身的问题。当前 `server/tokens.json` 里只有少数 active token，
+大量同名旧 token 已被脚本自动吊销；用户扫到旧二维码或旧前端继续使用旧凭证时就会稳定 401。
+
+**改动**
+- `server/scripts/create-credential.js`：生成新二维码时仍清理 `server/credentials/` 里的旧二维码
+  文件，但**不再按 label 自动吊销已有 token**。停用旧设备只能显式
+  `npm run credential -- --revoke <token-id>`，避免新 QR 误伤已导入设备。
+- `server/lib/credential-file.js`：新凭证 PBKDF2 迭代数从 210k 降到 120k，旧 210k 凭证仍受
+  客户端支持；这是为了降低 Web 导入时的卡顿。
+- `MachineCredentialsScreen` / `BackendClient` 相关文案：401 显示为“已连接但 token 被拒绝，
+  可能是旧 QR 或 token 已吊销”，引导用户重新生成并导入最新二维码。
+- `qr_image_decoder.dart`：二维码图片解码前缩小大图，并通过 `compute` 执行，减少 Web/桌面
+  上传大截图时的 UI 卡顿。
+- `server/server.js` + `web/index.html` + `scripts/old_flow.sh`：Web 静态资源改为 no-store；
+  Flutter Web 构建使用 `--pwa-strategy=none`，页面启动时注销旧 service worker、清理 Web cache，
+  避免浏览器继续跑旧构建导致导入卡住或错误提示不同步。
+
+**操作提示**
+- 已经被吊销的旧二维码无法恢复，需要重新运行 `npm run credential` 生成一个最新二维码再导入。
+- 如果确实想用 MagicDNS，可用 `npm run credential -- --url "http://<magicdns>:8787"`；默认仍优先
+  100.x Tailscale IP，因为它不依赖客户端 DNS。
 
 ## 2026-05-31 — 修复 Tailscale QR 连接与凭证导入错误反馈【未提交】
 

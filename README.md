@@ -142,9 +142,10 @@ QUOTA_POLL_MS=300000
 npm run credential                                  # interactive; auto-detects the Tailscale address
 npm run credential -- --passphrase "pw"             # non-interactive (less private: pw visible in shell history)
 npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL (direct mode)
+npm run credential -- --url "http://your-magicdns.ts.net:8787"         # custom MagicDNS URL
 ```
 
-This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves `server/credentials/<machine>.agentdeck.png`. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. The Tailscale IPv4 address is stable for the device, so the QR stays valid across restarts.
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves `server/credentials/<machine>.agentdeck.png`. Old QR image files in `server/credentials/` are removed so the latest QR is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. The Tailscale IPv4 address is stable for the device, so the QR stays valid across restarts. MagicDNS is also fine when every client device has Tailscale DNS working; pass it with `--url` if you prefer it.
 
 Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 
@@ -164,12 +165,12 @@ To build the Web frontend and let the Node backend serve it:
 
 ```bash
 cd /path/to/AgentDeck
-flutter build web
+flutter build web --pwa-strategy=none
 cd server
 npm start
 ```
 
-When `build/web/index.html` exists, the backend serves the Flutter Web app on the same host/port as the API.
+When `build/web/index.html` exists, the backend serves the Flutter Web app on the same host/port as the API. The recommended build disables Flutter's service worker so browsers do not keep serving stale frontend code after a backend restart.
 
 For the repeated local "old flow" used during development, run:
 
