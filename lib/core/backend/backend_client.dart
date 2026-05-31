@@ -396,13 +396,10 @@ class BackendClient {
     final List<Object?> raw = decoded['messages'] is List
         ? (decoded['messages'] as List).cast<Object?>()
         : const <Object?>[];
-    return raw.whereType<Map>().map((Map item) {
-      final Map<String, Object?> json = item.cast<String, Object?>();
-      final String content = json['content'] as String? ?? '';
-      return (json['role'] as String? ?? 'assistant') == 'user'
-          ? ChatMessage.user(content)
-          : ChatMessage.assistant(content);
-    }).toList(growable: false);
+    return raw
+        .whereType<Map>()
+        .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
   }
 
   /// Best-effort login state per agent so the app can warn before sending a

@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/models/chat_message.dart';
@@ -771,13 +772,10 @@ class _MessageBubble extends StatelessWidget {
                 if (awaitingFirstToken && message.content.isEmpty)
                   _TypingDots(color: textColor)
                 else if (message.content.isNotEmpty)
-                  SelectableText(
-                    message.content,
-                    style: TextStyle(
-                      color: textColor,
-                      height: 1.45,
-                      fontSize: 15,
-                    ),
+                  _MessageText(
+                    text: message.content,
+                    color: textColor,
+                    formatInlineEmphasis: !isUser,
                   ),
                 if (progressLines.isNotEmpty) ...<Widget>[
                   if (message.content.isNotEmpty) const SizedBox(height: 8),
@@ -828,6 +826,155 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MessageText extends StatelessWidget {
+  const _MessageText({
+    required this.text,
+    required this.color,
+    required this.formatInlineEmphasis,
+  });
+
+  final String text;
+  final Color color;
+  final bool formatInlineEmphasis;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle style = TextStyle(
+      color: color,
+      height: 1.45,
+      fontSize: 15,
+    );
+    if (!formatInlineEmphasis) {
+      return SelectableText(text, style: style);
+    }
+    return MarkdownBody(
+      data: _normalizeAgentMarkdown(text),
+      selectable: true,
+      softLineBreak: true,
+      styleSheet: _markdownStyleSheet(context, color, style),
+    );
+  }
+}
+
+MarkdownStyleSheet _markdownStyleSheet(
+  BuildContext context,
+  Color color,
+  TextStyle base,
+) {
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  final Color codeBackground = colors.surface.withValues(alpha: 0.55);
+  final Color borderColor = color.withValues(alpha: 0.20);
+  return MarkdownStyleSheet(
+    p: base,
+    pPadding: EdgeInsets.zero,
+    strong: base.copyWith(fontStyle: FontStyle.italic),
+    em: base.copyWith(fontStyle: FontStyle.italic),
+    h1: base.copyWith(
+      fontSize: 21,
+      fontWeight: FontWeight.w800,
+      height: 1.25,
+    ),
+    h1Padding: const EdgeInsets.only(top: 4, bottom: 6),
+    h2: base.copyWith(
+      fontSize: 19,
+      fontWeight: FontWeight.w800,
+      height: 1.28,
+    ),
+    h2Padding: const EdgeInsets.only(top: 4, bottom: 5),
+    h3: base.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w700,
+      height: 1.30,
+    ),
+    h3Padding: const EdgeInsets.only(top: 3, bottom: 4),
+    h4: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+    h4Padding: const EdgeInsets.only(top: 3, bottom: 3),
+    h5: base.copyWith(fontWeight: FontWeight.w700),
+    h5Padding: const EdgeInsets.only(top: 2, bottom: 2),
+    h6: base.copyWith(fontWeight: FontWeight.w700),
+    h6Padding: const EdgeInsets.only(top: 2, bottom: 2),
+    blockSpacing: 8,
+    listIndent: 22,
+    listBullet: base,
+    code: base.copyWith(
+      fontFamily: 'monospace',
+      fontSize: 14,
+      backgroundColor: codeBackground,
+    ),
+    codeblockPadding: const EdgeInsets.all(9),
+    codeblockDecoration: BoxDecoration(
+      color: codeBackground,
+      borderRadius: BorderRadius.circular(7),
+      border: Border.all(color: borderColor),
+    ),
+    blockquote: base.copyWith(color: color.withValues(alpha: 0.78)),
+    blockquotePadding: const EdgeInsets.only(left: 10),
+    blockquoteDecoration: BoxDecoration(
+      border: Border(
+        left: BorderSide(
+          color: color.withValues(alpha: 0.45),
+          width: 3,
+        ),
+      ),
+    ),
+    horizontalRuleDecoration: BoxDecoration(
+      border: Border(top: BorderSide(color: borderColor)),
+    ),
+  );
+}
+
+String _normalizeAgentMarkdown(String raw) {
+  final List<String> output = <String>[];
+  bool inFence = false;
+  String? fenceMarker;
+  for (final String line in raw.split('\n')) {
+    final String trimmed = line.trimLeft();
+    final String? marker = trimmed.startsWith('```')
+        ? '```'
+        : trimmed.startsWith('~~~')
+            ? '~~~'
+            : null;
+    if (marker != null) {
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = marker;
+      } else if (fenceMarker == marker) {
+        inFence = false;
+        fenceMarker = null;
+      }
+      output.add(line);
+      continue;
+    }
+    output.add(inFence ? line : _normalizeMarkdownLine(line));
+  }
+  return output.join('\n');
+}
+
+String _normalizeMarkdownLine(String line) {
+  final RegExpMatch? heading =
+      RegExp(r'^( {0,3})(#{1,6})(?!#)\s*(.*?)\s*#*\s*$').firstMatch(line);
+  if (heading != null) {
+    final String content = (heading.group(3) ?? '').trim();
+    if (content.isNotEmpty) {
+      return '${heading.group(1)}${heading.group(2)} $content';
+    }
+  }
+
+  String value = line.replaceAllMapped(
+    RegExp(r'##([^#\n]+?)##'),
+    (Match match) => '*${match.group(1)}*',
+  );
+
+  final RegExpMatch? boldPrefix =
+      RegExp(r'^(\s*)\*\*\s*(\S.*)$').firstMatch(value);
+  if (boldPrefix == null) return value;
+  final String leadingWhitespace = boldPrefix.group(1) ?? '';
+  final int contentStart = leadingWhitespace.length + 2;
+  if (value.indexOf('**', contentStart) != -1) return value;
+  value = '$leadingWhitespace**${boldPrefix.group(2)}**';
+  return value;
 }
 
 class _ProgressLines extends StatelessWidget {

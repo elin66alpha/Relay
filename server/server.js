@@ -28,7 +28,14 @@ const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { authStatus } = require('./lib/auth-status');
-const { readHistory, appendHistory, clearHistory } = require('./lib/history');
+const {
+  readHistory,
+  upsertHistoryMessage,
+  updateHistoryMessage,
+  finalizeStaleStreamingHistory,
+  finalizeAllStaleStreamingHistory,
+  clearHistory,
+} = require('./lib/history');
 const cards = require('./lib/cards');
 const { generateCardsForAllAgents } = require('./lib/chat-learner');
 
@@ -146,7 +153,21 @@ function wantsChatStream(req) {
 }
 
 function writeStreamEvent(res, type, payload) {
-  res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+  if (res.destroyed || res.writableEnded) return;
+  try {
+    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+  } catch (_err) {
+    // The client may have closed the app/web tab while the CLI keeps running.
+  }
+}
+
+function endStream(res) {
+  if (res.destroyed || res.writableEnded) return;
+  try {
+    res.end();
+  } catch (_err) {
+    // The request can already be gone; the server-side run still finishes.
+  }
 }
 
 function sleep(ms) {
@@ -273,11 +294,21 @@ app.post('/api/chat', async (req, res) => {
   }
 
   const abortController = new AbortController();
+  const createdAt = new Date().toISOString();
+  const historyUserId = `${requestId}:user`;
+  const historyAssistantId = `${requestId}:assistant`;
+  const baseHistoryMetadata = {
+    requestId,
+    agentKey: agent.key,
+    agentLabel: agent.label,
+  };
   const runState = {
     requestId,
     agent,
     deviceId,
     scopeKey,
+    recordHistory,
+    historyAssistantId,
     cancelled: false,
     cancelEventSent: false,
     abortController,
@@ -287,6 +318,100 @@ app.post('/api/chat', async (req, res) => {
 
   const streaming = wantsChatStream(req);
   let streamedText = '';
+
+  if (recordHistory) {
+    upsertHistoryMessage(scopeKey, {
+      id: historyUserId,
+      role: 'user',
+      content: prompt,
+      agent: agent.key,
+      createdAt,
+      metadata: baseHistoryMetadata,
+    });
+    upsertHistoryMessage(scopeKey, {
+      id: historyAssistantId,
+      role: 'assistant',
+      content: '',
+      agent: agent.key,
+      createdAt,
+      metadata: {
+        ...baseHistoryMetadata,
+        streaming: true,
+        awaitingFirstToken: true,
+        progressLines: [],
+      },
+    });
+  }
+
+  const updateAssistantHistory = (updater) => {
+    if (!recordHistory) return;
+    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
+      const currentMetadata =
+        message &&
+        typeof message.metadata === 'object' &&
+        !Array.isArray(message.metadata)
+          ? message.metadata
+          : {};
+      return updater({
+        ...message,
+        content: typeof message.content === 'string' ? message.content : '',
+        metadata: currentMetadata,
+      });
+    });
+  };
+
+  const persistProgressLine = (line) => {
+    updateAssistantHistory((message) => {
+      const lines = Array.isArray(message.metadata.progressLines)
+        ? message.metadata.progressLines.filter(
+            (item) => typeof item === 'string',
+          )
+        : [];
+      if (lines.length === 0 || lines[lines.length - 1] !== line) {
+        lines.push(line);
+      }
+      while (lines.length > 6) lines.shift();
+      return {
+        ...message,
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          ...message.metadata,
+          ...baseHistoryMetadata,
+          streaming: true,
+          progressLines: lines,
+        },
+      };
+    });
+  };
+
+  const persistDelta = (text) => {
+    updateAssistantHistory((message) => ({
+      ...message,
+      content: `${message.content}${text}`,
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        ...message.metadata,
+        ...baseHistoryMetadata,
+        streaming: true,
+        awaitingFirstToken: false,
+      },
+    }));
+  };
+
+  const finalizeAssistantHistory = (content, metadata = {}) => {
+    updateAssistantHistory((message) => ({
+      ...message,
+      content,
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        ...message.metadata,
+        ...baseHistoryMetadata,
+        ...metadata,
+        streaming: false,
+        awaitingFirstToken: false,
+      },
+    }));
+  };
 
   if (streaming) {
     res.writeHead(200, {
@@ -301,6 +426,7 @@ app.post('/api/chat', async (req, res) => {
     if (!event || event.type === 'progress') {
       const line = event && event.line ? String(event.line) : '';
       if (!line) return;
+      persistProgressLine(line);
       const payload = { requestId, agent, deviceId, line };
       if (streaming) {
         writeStreamEvent(res, 'agent_progress', {
@@ -319,6 +445,7 @@ app.post('/api/chat', async (req, res) => {
       const text = String(event.text || '');
       if (!text) return;
       streamedText += text;
+      persistDelta(text);
       const payload = { requestId, agent, deviceId, text };
       if (streaming) {
         writeStreamEvent(res, 'agent_delta', {
@@ -356,31 +483,26 @@ app.post('/api/chat', async (req, res) => {
         deviceId,
       });
     }
-    const createdAt = new Date().toISOString();
-    // Record the completed turn so the app can reload it after a restart.
-    // Only successful turns are stored; cancelled/failed turns are skipped.
-    if (recordHistory) {
-      appendHistory(scopeKey, [
-        { role: 'user', content: prompt, agent: agent.key, createdAt },
-        { role: 'assistant', content, agent: agent.key, createdAt },
-      ]);
-    }
+    finalizeAssistantHistory(content);
+    const completedAt = new Date().toISOString();
     const reply = {
       requestId,
       agent: agentPayload(agent),
       message: {
         role: 'assistant',
         content,
-        createdAt,
+        createdAt: completedAt,
       },
     };
     if (streaming) {
       writeStreamEvent(res, 'agent_done', reply);
-      return res.end();
+      endStream(res);
+      return;
     }
     return res.json(reply);
   } catch (err) {
     if (err instanceof AgentCancelledError || err.code === 'AGENT_CANCELLED') {
+      finalizeAssistantHistory(streamedText, { cancelled: true });
       if (!runState.cancelEventSent) {
         runState.cancelEventSent = true;
         if (!streaming) {
@@ -398,7 +520,8 @@ app.post('/api/chat', async (req, res) => {
           agent: agentPayload(agent),
           createdAt: new Date().toISOString(),
         });
-        return res.end();
+        endStream(res);
+        return;
       }
       return res.status(499).json({
         error: 'request cancelled',
@@ -407,12 +530,12 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Agent CLI has no logged-in account: surface a real, actionable state
-    // instead of returning the raw CLI error as the assistant's reply. The
-    // turn already failed (threw), so it is never written to chat history.
+    // instead of leaving the persisted in-flight bubble stuck forever.
     if (err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN') {
       const message =
         `${agentPayload(agent).label} is not logged in on the backend host. ` +
         'Log in there, then try again.';
+      finalizeAssistantHistory(message, { errorCode: 'NOT_LOGGED_IN' });
       if (streaming) {
         writeStreamEvent(res, 'agent_error', {
           requestId,
@@ -422,7 +545,8 @@ app.post('/api/chat', async (req, res) => {
           code: 'NOT_LOGGED_IN',
           createdAt: new Date().toISOString(),
         });
-        return res.end();
+        endStream(res);
+        return;
       }
       // 424 Failed Dependency: not 401 (reserved for an invalid device token)
       // and not 503 (TOKEN_NOT_CONFIGURED). Clients branch on the code field.
@@ -433,24 +557,29 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
+    const errorMessage = err.message || 'agent request failed';
+    finalizeAssistantHistory(errorMessage, {
+      errorCode: err.code || 'AGENT_ERROR',
+    });
     if (streaming) {
       writeStreamEvent(res, 'agent_error', {
         requestId,
         deviceId,
         agent: agentPayload(agent),
-        error: err.message,
+        error: errorMessage,
         code: err.code,
         createdAt: new Date().toISOString(),
       });
-      return res.end();
+      endStream(res);
+      return;
     }
     emitAgentEvent('agent_error', {
       requestId,
       agent,
       deviceId,
-      error: err.message,
+      error: errorMessage,
     });
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: errorMessage });
   } finally {
     activeRequests.delete(requestId);
     runningScopes.delete(scopeKey);
@@ -504,6 +633,9 @@ app.get('/api/history', (req, res) => {
     return res.status(400).json({ error: `unknown agent: ${agentKey}` });
   }
   const scopeKey = sessionKeyFor(agent.key, deviceId);
+  if (!runningScopes.has(scopeKey)) {
+    finalizeStaleStreamingHistory(scopeKey);
+  }
   return res.json({
     agent: agent.key,
     deviceId,
@@ -615,6 +747,10 @@ app.listen(PORT, HOST, () => {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }
   console.log(`workdir: ${getWorkdir()}`);
+  const staleHistoryCount = finalizeAllStaleStreamingHistory();
+  if (staleHistoryCount > 0) {
+    console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);
+  }
   // Card Mode: seed suggestions once if none are pending yet.
   try {
     if (cards.pendingCount() === 0) {

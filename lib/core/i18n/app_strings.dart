@@ -29,7 +29,7 @@ class AppStrings {
   final AppLanguage appLanguage;
   bool get isZh => appLanguage == AppLanguage.zh;
 
-  String get appName => isZh ? '智能体工作台' : 'AgentDeck';
+  String get appName => 'AgentDeck';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get machines => isZh ? '机器' : 'Machines';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';

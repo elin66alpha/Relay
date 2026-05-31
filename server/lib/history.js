@@ -39,6 +39,104 @@ function appendHistory(scopeKey, messages) {
   saveAll(all);
 }
 
+function upsertHistoryMessage(scopeKey, message) {
+  if (!message || !message.id) return;
+  const all = loadAll();
+  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
+  const index = list.findIndex((item) => item && item.id === message.id);
+  if (index === -1) {
+    list.push(message);
+  } else {
+    list[index] = {
+      ...list[index],
+      ...message,
+      metadata: {
+        ...(list[index].metadata || {}),
+        ...(message.metadata || {}),
+      },
+    };
+  }
+  if (list.length > MAX_PER_SCOPE) {
+    list.splice(0, list.length - MAX_PER_SCOPE);
+  }
+  all[scopeKey] = list;
+  saveAll(all);
+}
+
+function updateHistoryMessage(scopeKey, messageId, updater) {
+  if (!messageId || typeof updater !== 'function') return false;
+  const all = loadAll();
+  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
+  const index = list.findIndex((item) => item && item.id === messageId);
+  if (index === -1) return false;
+  const next = updater(list[index]);
+  if (!next) return false;
+  list[index] = next;
+  all[scopeKey] = list;
+  saveAll(all);
+  return true;
+}
+
+function finalizeStaleStreamingHistory(scopeKey) {
+  const all = loadAll();
+  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
+  let changed = 0;
+  const now = new Date().toISOString();
+  all[scopeKey] = list.map((message) => {
+    const metadata =
+      message &&
+      typeof message.metadata === 'object' &&
+      !Array.isArray(message.metadata)
+        ? message.metadata
+        : {};
+    if (!message || metadata.streaming !== true) return message;
+    changed += 1;
+    return {
+      ...message,
+      updatedAt: now,
+      metadata: {
+        ...metadata,
+        streaming: false,
+        awaitingFirstToken: false,
+        cancelled: true,
+      },
+    };
+  });
+  if (changed > 0) saveAll(all);
+  return changed;
+}
+
+function finalizeAllStaleStreamingHistory() {
+  const all = loadAll();
+  let changed = 0;
+  const now = new Date().toISOString();
+  for (const [scopeKey, list] of Object.entries(all)) {
+    if (!Array.isArray(list)) continue;
+    all[scopeKey] = list.map((message) => {
+      const metadata =
+        message &&
+        typeof message.metadata === 'object' &&
+        !Array.isArray(message.metadata)
+          ? message.metadata
+          : {};
+      if (!message || metadata.streaming !== true) return message;
+      changed += 1;
+      return {
+        ...message,
+        updatedAt: now,
+        metadata: {
+          ...metadata,
+          streaming: false,
+          awaitingFirstToken: false,
+          cancelled: true,
+        },
+      };
+    });
+  }
+  if (changed > 0) saveAll(all);
+  return changed;
+}
+
 function clearHistory(scopeKey) {
   const all = loadAll();
   if (!(scopeKey in all)) return false;
@@ -47,4 +145,12 @@ function clearHistory(scopeKey) {
   return true;
 }
 
-module.exports = { readHistory, appendHistory, clearHistory };
+module.exports = {
+  readHistory,
+  appendHistory,
+  upsertHistoryMessage,
+  updateHistoryMessage,
+  finalizeStaleStreamingHistory,
+  finalizeAllStaleStreamingHistory,
+  clearHistory,
+};

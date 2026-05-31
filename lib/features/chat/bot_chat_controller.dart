@@ -37,6 +37,7 @@ class BotChatController extends ChangeNotifier {
   AppLanguage _language = AppLanguage.en;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _eventReconnectTimer;
+  Timer? _historyPollTimer;
   bool _wantsEvents = false;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
@@ -110,6 +111,7 @@ class BotChatController extends ChangeNotifier {
     _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _stopHistoryPolling();
     notifyListeners();
 
     // Check login state for the new context so the banner can warn up front.
@@ -127,6 +129,8 @@ class BotChatController extends ChangeNotifier {
         return;
       }
       _messages.addAll(history);
+      _restorePendingTurnFromHistory();
+      if (_isThinking) _startHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Leave the view empty when history can't be loaded.
@@ -135,6 +139,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
+    _stopHistoryPolling();
     _messages.clear();
     _lastError = null;
     notifyListeners();
@@ -259,8 +264,67 @@ class BotChatController extends ChangeNotifier {
   Future<void> disposeController() async {
     _wantsEvents = false;
     _eventReconnectTimer?.cancel();
+    _historyPollTimer?.cancel();
     await _eventsSub?.cancel();
     await _backendClient.close();
+  }
+
+  void _restorePendingTurnFromHistory() {
+    ChatMessage? pending;
+    for (int i = _messages.length - 1; i >= 0; i -= 1) {
+      final ChatMessage message = _messages[i];
+      if (!message.isUser && message.metadata[_streamingKey] == true) {
+        pending = message;
+        break;
+      }
+    }
+
+    final String requestId = pending?.metadata[_requestIdKey] as String? ?? '';
+    if (pending != null && requestId.isNotEmpty) {
+      _isThinking = true;
+      _isCancelling = false;
+      _activeRequestId = requestId;
+      return;
+    }
+    _isThinking = false;
+    _isCancelling = false;
+    _activeRequestId = null;
+  }
+
+  void _startHistoryPolling() {
+    if (_historyPollTimer != null) return;
+    _historyPollTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_refreshHistorySnapshot()),
+    );
+  }
+
+  void _stopHistoryPolling() {
+    _historyPollTimer?.cancel();
+    _historyPollTimer = null;
+  }
+
+  Future<void> _refreshHistorySnapshot() async {
+    final MachineCredential? machine = _machine;
+    if (!_isThinking || machine == null) {
+      _stopHistoryPolling();
+      return;
+    }
+    final CliAgent agent = _agent;
+    try {
+      final List<ChatMessage> history =
+          await _backendClient.fetchHistory(agent.key);
+      if (_agent.key != agent.key || _machine?.id != machine.id) return;
+      if (history.isEmpty) return;
+      _messages
+        ..clear()
+        ..addAll(history);
+      _restorePendingTurnFromHistory();
+      if (!_isThinking) _stopHistoryPolling();
+      notifyListeners();
+    } catch (_) {
+      // Keep the last visible snapshot; the next poll/event may recover.
+    }
   }
 
   Future<void> _runTurn(CliAgent agent, ChatMessage userMessage) async {

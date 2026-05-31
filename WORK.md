@@ -27,6 +27,34 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
+## 2026-05-30 — Agent Markdown 渲染与标题兼容【未提交】
+
+需求：agent 回复常带 Markdown 风格的标题、加粗、斜体、列表和代码块；原前端只显示原始
+`#` / `*` 符号，不够可读。
+
+**客户端**
+- `lib/features/chat/bot_chat_screen.dart`：assistant/agent 气泡改用
+  `flutter_markdown_plus` 的 `MarkdownBody(selectable: true)` 渲染；用户自己发送的消息仍用
+  `SelectableText` 原文显示，避免用户输入被误格式化。
+- Markdown 样式按现有聊天气泡颜色重建：标题按 `h1`~`h6` 分级放大加粗；按用户偏好，
+  `strong`（`**文字**`）和 `em`（`*文字*`）都显示为斜体，不给 `**文字**` 加背景色；
+  代码块、引用、列表、分隔线也有气泡内样式。
+- 兼容 CLI/agent 常见不严格输出：
+  - `###标题`、`##标题`、`#标题` 这类中文无空格标题会在渲染前规范成 Markdown 标题。
+  - 行首 `**标题` 且没有闭合 `**` 时，会补成粗体。
+  - 普通段落里的旧写法 `##文字##` 仍转换成斜体，避免回退。
+  - 代码围栏 ``` / ~~~ 内不做这些规范化，防止改坏代码内容。
+
+**依赖**
+- `pubspec.yaml` / `pubspec.lock`：新增 `flutter_markdown_plus`（替代已废弃的
+  `flutter_markdown`）。
+
+**验证 / 部署**
+- 新增 `scripts/old_flow.sh` 固化本机“老流程”：`flutter analyze`、`flutter test`、
+  Node 语法检查、`flutter build web`、重启 `bot-app-server`、等待 Web 端点、
+  `flutter build apk --debug`、`adb install -r`。
+- 已用该脚本跑通完整流程并安装到真机。
+
 ## 2026-05-23 — 桌面前端 Windows/macOS（Flutter 原生）【未提交】
 
 需求：把 Windows / macOS 前端做出来。经确认用 **Flutter 原生桌面**（不套壳 web），
