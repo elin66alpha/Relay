@@ -27,6 +27,61 @@ AgentDeck = Flutter 客户端 + Node.js 后端，用来远程控制本机的 CLI
 
 # 工作记录（最新在最上）
 
+## 2026-05-31 — 目录上一级固定按钮 + 隐藏文件开关【未提交】
+
+需求：目录“上一级”不再作为列表中的临时行出现，而是固定按钮；到达边界时按钮变灰。
+同时两个目录入口默认隐藏点文件，并提供“显示/不显示隐藏文件”切换。
+
+**后端**
+- `server/lib/filesystem.js`：`listDirectory` 增加 `showHidden` 参数，默认过滤 `.` 开头的隐藏项。
+- 新增 `listAbsoluteDirectory`，供“工作路径”页从当前绝对路径向父目录浏览到系统根目录。
+- `server/server.js`：
+  - `GET /api/fs/list` 支持 `showHidden=true`。
+  - 新增 `GET /api/workdir/browse?path=<absolute>&showHidden=<bool>`，只用于工作路径选择浏览。
+
+**客户端**
+- `lib/features/workdir/work_directory_screen.dart`：目录浏览改用绝对路径浏览 API；固定显示“上一级”
+  和“显示/不显示隐藏文件”两个并排按钮，文件列表中不再插入上一级行。
+- `lib/features/filesystem/file_system_screen.dart`：同样使用固定“上一级”按钮，但边界仍是当前 workdir；
+  在 workdir 根部按钮禁用变灰。隐藏文件开关同步应用。
+- `BackendClient` / `BotChatController` 增加 `showHidden` 参数和 workdir browse 方法。
+
+## 2026-05-31 — Workdir 浏览与文件系统入口【未提交】
+
+需求：在“工作路径”里直观看到当前目录内容，并新增“文件系统”入口，用于浏览、上传和下载
+当前 workdir 内的文件。
+
+**后端**
+- 新增 `server/lib/filesystem.js`：所有文件路径都解析为相对当前 `BOTS_SESSION_DIR` /
+  workdir 的路径，拒绝绝对路径、`..` 越界以及指向 workdir 外的真实路径。
+- `server/server.js` 新增受鉴权保护的文件 API：
+  - `GET /api/fs/list?path=<relative>`：列出目录，目录优先排序，返回文件名、相对路径、
+    绝对路径、类型、大小和修改时间。
+  - `GET /api/fs/download?path=<relative>`：文件直接下载；文件夹用系统 `zip -r -q -y`
+    流式打包成 `.zip`。
+  - `POST /api/fs/upload?path=<relative>&name=<file>`：以
+    `application/octet-stream` 上传单个文件，写入当前目录。
+
+**客户端**
+- `lib/features/workdir/work_directory_screen.dart`：保留原来的绝对路径输入/保存流程，同时在下方展示
+  当前 workdir 的目录列表；文件夹可点进去并把候选工作路径设为该文件夹，文件只展示不选择。
+- 新增 `lib/features/filesystem/file_system_screen.dart`，并在抽屉的“工作路径”下方加入
+  “文件系统”入口：从当前 workdir 打开，可上下级导航、下载文件、下载文件夹 zip、上传文件。
+- Web 端新增拖拽上传支持（`lib/core/platform/file_drop*`）；下载用平台封装
+  `lib/core/platform/file_saver*`，Web 走浏览器 Blob 下载，移动/桌面走 `file_picker`。
+- `lib/core/backend/backend_client.dart` / `bot_chat_controller.dart` 增加文件系统 API client 和模型。
+
+**文档 / 脚本**
+- `README.md` / `README.zh-CN.md` / `ROADMAP*` 同步描述文件系统能力和 `zip` 依赖。
+- `scripts/old_flow.sh` 的 Node 语法检查加入 `server/lib/filesystem.js`。
+
+**验证**
+- `node --check server/server.js && node --check server/lib/filesystem.js` 通过。
+- `./scripts/old_flow.sh` 跑通：`flutter pub get`、`flutter analyze --no-pub`、
+  `flutter test --no-pub`、Node 语法检查、`flutter build web --no-pub`、PM2 后端重启、
+  Web 端点检查、`flutter build apk --debug --no-pub`、`adb install -r`。
+- 额外用本机 token 走 HTTP 验证 `/api/fs/list`、文件上传/下载、文件夹 zip 下载，测试文件已清理。
+
 ## 2026-05-30 — Agent Markdown 渲染与标题兼容【未提交】
 
 需求：agent 回复常带 Markdown 风格的标题、加粗、斜体、列表和代码块；原前端只显示原始
@@ -275,5 +330,6 @@ AgentDeck 初始提交：Flutter 客户端 + Node.js 后端骨架。
 ## 后端接口总览（当前）
 
 `/api/health`、`/api/status`、`/api/agents`、`/api/auth/status`、`/api/usage`、
-`/api/workdir`、`/api/workdir/check`、`POST /api/workdir`、`/api/workdir/reset`、
+`/api/workdir`、`/api/workdir/browse`、`/api/workdir/check`、`POST /api/workdir`、
+`/api/workdir/reset`、`/api/fs/list`、`/api/fs/download`、`/api/fs/upload`、
 `/api/chat`、`/api/chat/cancel`、`/api/history`、`/api/session/clear`、`/api/events`。

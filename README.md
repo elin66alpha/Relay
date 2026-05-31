@@ -25,7 +25,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
-- The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running.
+- The work directory can be changed from the app. The backend validates the path, optionally creates it after user confirmation, persists it to `.env`, and refuses changes while an agent task is running. The Work directory screen also shows directories like `ls`: folders can be opened to select a nested directory, the fixed parent button can browse upward to the filesystem root, and files are visible but not selectable there.
+- The File system drawer entry opens a browser rooted at the current workdir. It supports folder navigation, file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Backend file APIs are confined to the configured workdir. Both directory browsers hide dotfiles by default and provide a show/hide hidden files toggle.
 - Protected backend APIs stay closed until at least one credential token has been generated.
 - The same Flutter client runs on mobile (Android / iOS), Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
 - The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
@@ -42,7 +43,8 @@ AgentDeck/
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
 │   ├── core/storage/     secure storage and device identity
-│   └── features/         chat, drawer, credentials, settings, work directory, cards
+│   └── features/         chat, drawer, credentials, settings, work directory,
+│                         file system, cards
 └── server/               local Node backend
     ├── server.js         HTTP API + SSE events
     └── lib/              agents, tokens, workdir, usage, quota-watch, credentials,
@@ -78,6 +80,8 @@ quick tunnel.
 
 Prerequisites: Node.js ≥ 18. Linux setup also needs `pm2`
 (`npm install -g pm2`); tunnel mode on either platform needs `cloudflared`.
+Folder download uses the system `zip` command, which is normally present on
+Linux/macOS but should be installed if your host image omits it.
 
 The old repo-root `./setup.sh` remains as a Linux-compatible shortcut.
 
@@ -173,9 +177,13 @@ release keystore before any public/Play Store distribution.
 - `GET /api/auth/status`
 - `GET /api/usage`
 - `GET /api/workdir`
+- `GET /api/workdir/browse`
 - `POST /api/workdir/check`
 - `POST /api/workdir`
 - `POST /api/workdir/reset`
+- `GET /api/fs/list`
+- `GET /api/fs/download`
+- `POST /api/fs/upload`
 - `POST /api/chat`
 - `POST /api/chat/cancel`
 - `GET /api/history`

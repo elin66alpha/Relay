@@ -230,6 +230,28 @@ class BotChatController extends ChangeNotifier {
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) =>
       _backendClient.setWorkdir(path, create: create);
 
+  Future<FsListing> listFiles(
+    String path, {
+    bool showHidden = false,
+  }) =>
+      _backendClient.listFiles(path, showHidden: showHidden);
+
+  Future<FsListing> browseWorkdir(
+    String path, {
+    bool showHidden = false,
+  }) =>
+      _backendClient.browseWorkdir(path, showHidden: showHidden);
+
+  Future<FsDownload> downloadFile(String path) =>
+      _backendClient.downloadFile(path);
+
+  Future<FsEntry> uploadFile({
+    required String path,
+    required String name,
+    required Uint8List bytes,
+  }) =>
+      _backendClient.uploadFile(path: path, name: name, bytes: bytes);
+
   Future<void> resetWorkdir() async {
     if (_isThinking) return;
     _isThinking = true;

@@ -22,7 +22,11 @@ class _WorkDirectoryScreenState extends State<WorkDirectoryScreen> {
   final TextEditingController _path = TextEditingController();
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isBrowsing = false;
+  bool _showHidden = false;
   String? _error;
+  String? _browserError;
+  FsListing? _listing;
 
   @override
   void initState() {
@@ -48,12 +52,46 @@ class _WorkDirectoryScreenState extends State<WorkDirectoryScreen> {
         _path.text = info.dir;
         _isLoading = false;
       });
+      await _loadListing(info.dir);
     } catch (err) {
       if (!mounted) return;
       setState(() {
         _error = err.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _loadListing(String path) async {
+    setState(() {
+      _isBrowsing = true;
+      _browserError = null;
+    });
+    try {
+      final FsListing listing = await widget.chatController.browseWorkdir(
+        path,
+        showHidden: _showHidden,
+      );
+      if (!mounted) return;
+      setState(() {
+        _listing = listing;
+        _path.text = listing.absolutePath;
+        _isBrowsing = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _browserError = err.toString();
+        _isBrowsing = false;
+      });
+    }
+  }
+
+  Future<void> _toggleHiddenFiles() async {
+    final String path = _listing?.path ?? _path.text.trim();
+    setState(() => _showHidden = !_showHidden);
+    if (path.isNotEmpty) {
+      await _loadListing(path);
     }
   }
 
@@ -156,6 +194,16 @@ class _WorkDirectoryScreenState extends State<WorkDirectoryScreen> {
                     onPressed: _isLoading || _isSaving ? null : _save,
                     child: Text(context.l10n.save),
                   ),
+                  const SizedBox(height: 28),
+                  _DirectoryBrowser(
+                    listing: _listing,
+                    isLoading: _isLoading || _isBrowsing,
+                    showHidden: _showHidden,
+                    error: _browserError,
+                    onOpen: (FsEntry entry) => _loadListing(entry.path),
+                    onParent: (String path) => _loadListing(path),
+                    onToggleHidden: _toggleHiddenFiles,
+                  ),
                 ],
               ),
             ),
@@ -163,5 +211,128 @@ class _WorkDirectoryScreenState extends State<WorkDirectoryScreen> {
         ),
       ),
     );
+  }
+}
+
+class _DirectoryBrowser extends StatelessWidget {
+  const _DirectoryBrowser({
+    required this.listing,
+    required this.isLoading,
+    required this.showHidden,
+    required this.error,
+    required this.onOpen,
+    required this.onParent,
+    required this.onToggleHidden,
+  });
+
+  final FsListing? listing;
+  final bool isLoading;
+  final bool showHidden;
+  final String? error;
+  final ValueChanged<FsEntry> onOpen;
+  final ValueChanged<String> onParent;
+  final VoidCallback onToggleHidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          context.l10n.currentFolder,
+          style: theme.textTheme.titleMedium,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          context.l10n.foldersOnlyHint,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (listing != null)
+          SelectableText(
+            listing!.absolutePath,
+            style: theme.textTheme.bodySmall,
+          ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            OutlinedButton.icon(
+              onPressed: listing?.parentPath == null || isLoading
+                  ? null
+                  : () => onParent(listing!.parentPath!),
+              icon: const Icon(Icons.arrow_upward_outlined),
+              label: Text(context.l10n.parentFolder),
+            ),
+            OutlinedButton.icon(
+              onPressed: listing == null || isLoading ? null : onToggleHidden,
+              icon: Icon(
+                showHidden
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+              label: Text(
+                showHidden
+                    ? context.l10n.hideHiddenFiles
+                    : context.l10n.showHiddenFiles,
+              ),
+            ),
+          ],
+        ),
+        if (isLoading) ...<Widget>[
+          const SizedBox(height: 12),
+          Text(context.l10n.loadingFiles),
+        ] else if (error != null) ...<Widget>[
+          const SizedBox(height: 12),
+          Text(
+            error!,
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        ] else if (listing != null) ...<Widget>[
+          const SizedBox(height: 12),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: <Widget>[
+                if (listing!.entries.isEmpty)
+                  ListTile(title: Text(context.l10n.emptyFolder)),
+                for (final FsEntry entry in listing!.entries)
+                  ListTile(
+                    leading: Icon(
+                      entry.isDirectory
+                          ? Icons.folder_outlined
+                          : Icons.insert_drive_file_outlined,
+                    ),
+                    title: Text(entry.name),
+                    subtitle: Text(
+                      entry.isDirectory
+                          ? context.l10n.fileTypeDirectory
+                          : _formatBytes(entry.size),
+                    ),
+                    enabled: entry.isDirectory,
+                    onTap: entry.isDirectory ? () => onOpen(entry) : null,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final double kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final double mb = kb / 1024;
+    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+    return '${(mb / 1024).toStringAsFixed(1)} GB';
   }
 }

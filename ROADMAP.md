@@ -16,6 +16,7 @@
 - Quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
 - Work directory management from the app, persisted to backend `.env`.
+- Workdir-scoped file browsing, upload, and download from the app/Web client.
 - Protected APIs reject requests when no token has been generated yet.
 - Platform-separated backend setup under `backends/`, with Linux PM2 setup and macOS LaunchAgent setup.
 
@@ -38,6 +39,11 @@ Reuse boundaries:
 
 ### Later Improvements
 
+- Shared sessions keyed by `workdir + agent` instead of `deviceId + agent`, so
+  every client viewing the same backend path sees the same conversation and
+  in-flight agent progress. This needs a migration path for existing
+  per-device history, conflict handling for simultaneous clients, and broadcast
+  SSE events by session scope rather than by only one device.
 - Stable tunnel/domain setup guide.
 - Desktop credential import through QR image or pasted payload.
 - More detailed backend diagnostics.

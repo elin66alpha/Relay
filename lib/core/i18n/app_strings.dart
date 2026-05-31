@@ -63,10 +63,38 @@ class AppStrings {
       : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
   String get resetWorkdir => isZh ? '清空工作目录' : 'Reset workdir';
   String get workDirectory => isZh ? '工作路径' : 'Work directory';
+  String get fileSystem => isZh ? '文件系统' : 'File system';
   String get loadingWorkDirectory =>
       isZh ? '正在读取工作路径...' : 'Loading work directory...';
   String get workDirectoryHint =>
       isZh ? '输入后端机器上的绝对路径' : 'Enter an absolute path on the backend machine';
+  String get currentFolder => isZh ? '当前文件夹' : 'Current folder';
+  String get parentFolder => isZh ? '上一级' : 'Parent folder';
+  String get showHiddenFiles => isZh ? '显示隐藏文件' : 'Show hidden files';
+  String get hideHiddenFiles => isZh ? '不显示隐藏文件' : 'Hide hidden files';
+  String get emptyFolder => isZh ? '这个文件夹是空的。' : 'This folder is empty.';
+  String get loadingFiles => isZh ? '正在读取文件...' : 'Loading files...';
+  String get foldersOnlyHint => isZh
+      ? '可以进入文件夹；文件只显示，不能在这里选择。'
+      : 'Folders can be opened; files are shown but cannot be selected here.';
+  String get uploadFile => isZh ? '上传文件' : 'Upload file';
+  String get download => isZh ? '下载' : 'Download';
+  String get dragDropUpload => isZh
+      ? 'Web 端可以把文件拖到此页上传。'
+      : 'On web, drag files onto this page to upload.';
+  String uploadingFile(String name) => isZh ? '正在上传：$name' : 'Uploading: $name';
+  String uploadComplete(int count) =>
+      isZh ? '已上传 $count 个文件。' : '$count file(s) uploaded.';
+  String uploadFailed(Object err) => isZh ? '上传失败：$err' : 'Upload failed: $err';
+  String downloadingFile(String name) =>
+      isZh ? '正在下载：$name' : 'Downloading: $name';
+  String downloadStarted(String name) =>
+      isZh ? '已开始下载：$name' : 'Download started: $name';
+  String downloadFailed(Object err) =>
+      isZh ? '下载失败：$err' : 'Download failed: $err';
+  String get fileTypeDirectory => isZh ? '文件夹' : 'Folder';
+  String get fileTypeFile => isZh ? '文件' : 'File';
+  String get fileTypeOther => isZh ? '其他' : 'Other';
   String get save => isZh ? '保存' : 'Save';
   String get create => isZh ? '创建' : 'Create';
   String get pathMissingTitle => isZh ? '创建工作路径？' : 'Create work directory?';

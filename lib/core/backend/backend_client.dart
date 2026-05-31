@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -111,6 +112,80 @@ class WorkdirInfo {
   final bool isDirectory;
   final bool busy;
   final bool created;
+}
+
+class FsEntry {
+  const FsEntry({
+    required this.name,
+    required this.path,
+    required this.absolutePath,
+    required this.type,
+    required this.size,
+    required this.modifiedAt,
+  });
+
+  factory FsEntry.fromJson(Map<String, Object?> json) {
+    return FsEntry(
+      name: json['name'] as String? ?? '',
+      path: json['path'] as String? ?? '',
+      absolutePath: json['absolutePath'] as String? ?? '',
+      type: json['type'] as String? ?? 'other',
+      size: (json['size'] as num?)?.toInt() ?? 0,
+      modifiedAt: json['modifiedAt'] as String? ?? '',
+    );
+  }
+
+  final String name;
+  final String path;
+  final String absolutePath;
+  final String type;
+  final int size;
+  final String modifiedAt;
+
+  bool get isDirectory => type == 'directory';
+  bool get isFile => type == 'file';
+}
+
+class FsListing {
+  const FsListing({
+    required this.root,
+    required this.path,
+    required this.absolutePath,
+    required this.entries,
+    this.parentPath,
+  });
+
+  factory FsListing.fromJson(Map<String, Object?> json) {
+    final List<Object?> rawEntries = json['entries'] is List
+        ? (json['entries'] as List).cast<Object?>()
+        : const <Object?>[];
+    return FsListing(
+      root: json['root'] as String? ?? '',
+      path: json['path'] as String? ?? '',
+      absolutePath: json['absolutePath'] as String? ?? '',
+      parentPath: json['parentPath'] as String?,
+      entries: rawEntries
+          .whereType<Map>()
+          .map((Map entry) => FsEntry.fromJson(entry.cast<String, Object?>()))
+          .toList(growable: false),
+    );
+  }
+
+  final String root;
+  final String path;
+  final String absolutePath;
+  final String? parentPath;
+  final List<FsEntry> entries;
+}
+
+class FsDownload {
+  const FsDownload({
+    required this.fileName,
+    required this.bytes,
+  });
+
+  final String fileName;
+  final Uint8List bytes;
 }
 
 class UsageQuota {
@@ -473,6 +548,93 @@ class BackendClient {
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
 
+  Future<FsListing> listFiles(
+    String path, {
+    bool showHidden = false,
+  }) async {
+    final String queryPath = Uri.encodeQueryComponent(path);
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/fs/list?path=$queryPath&showHidden=$showHidden',
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid file listing response.');
+    }
+    return FsListing.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<FsListing> browseWorkdir(
+    String path, {
+    bool showHidden = false,
+  }) async {
+    final String queryPath = Uri.encodeQueryComponent(path);
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/workdir/browse?path=$queryPath&showHidden=$showHidden',
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid work directory browser response.');
+    }
+    return FsListing.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<FsDownload> downloadFile(String path) async {
+    final MachineCredential credential = await _requireCredential();
+    final Uri uri = _uri(
+      credential,
+      '/api/fs/download?path=${Uri.encodeQueryComponent(path)}',
+    );
+    final http.Response response = await _httpClient
+        .get(
+          uri,
+          headers: await _headers(
+            credential,
+            accept: 'application/octet-stream',
+          ),
+        )
+        .timeout(const Duration(minutes: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _exceptionFor(response.statusCode, response.body);
+    }
+    return FsDownload(
+      fileName: _downloadFileName(response.headers, path),
+      bytes: response.bodyBytes,
+    );
+  }
+
+  Future<FsEntry> uploadFile({
+    required String path,
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    final MachineCredential credential = await _requireCredential();
+    final Uri uri = _uri(
+      credential,
+      '/api/fs/upload?path=${Uri.encodeQueryComponent(path)}'
+      '&name=${Uri.encodeQueryComponent(name)}',
+    );
+    final http.Response response = await _httpClient
+        .post(
+          uri,
+          headers: await _headers(
+            credential,
+            contentType: 'application/octet-stream',
+          ),
+          body: bytes,
+        )
+        .timeout(const Duration(minutes: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _exceptionFor(response.statusCode, response.body);
+    }
+    final Object? decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['entry'] is! Map) {
+      throw BackendException('Invalid file upload response.');
+    }
+    return FsEntry.fromJson(
+      (decoded['entry'] as Map).cast<String, Object?>(),
+    );
+  }
+
   Stream<BackendEvent> streamEvents() async* {
     final MachineCredential credential = await _requireCredential();
     final http.Request request = http.Request(
@@ -599,14 +761,30 @@ class BackendClient {
   Future<Map<String, String>> _headers(
     MachineCredential credential, {
     String accept = 'application/json',
+    String contentType = 'application/json',
   }) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
     return <String, String>{
       'Accept': accept,
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
     };
+  }
+
+  String _downloadFileName(Map<String, String> headers, String path) {
+    final String disposition = headers['content-disposition'] ?? '';
+    final RegExpMatch? encoded =
+        RegExp(r"filename\*=UTF-8''([^;]+)").firstMatch(disposition);
+    if (encoded != null) {
+      return Uri.decodeComponent(encoded.group(1)!);
+    }
+    final RegExpMatch? plain =
+        RegExp(r'filename="?([^";]+)"?').firstMatch(disposition);
+    if (plain != null) return plain.group(1)!;
+    final List<String> parts =
+        path.split('/').where((String p) => p.isNotEmpty).toList();
+    return parts.isEmpty ? 'workdir.zip' : parts.last;
   }
 
   BackendException _exceptionFor(int status, String body) {

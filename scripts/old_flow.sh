@@ -25,16 +25,17 @@ wait_for_web() {
   curl -sS -I "$WEB_URL"
 }
 
-run flutter analyze
-run flutter test
+run flutter pub get
+run flutter analyze --no-pub
+run flutter test --no-pub
 
-for file in server/server.js server/lib/history.js; do
+for file in server/server.js server/lib/history.js server/lib/filesystem.js; do
   run node --check "$file"
 done
 
-run flutter build web
+run flutter build web --no-pub
 run pm2 restart "$PM2_APP_NAME" --update-env
 wait_for_web
 
-run flutter build apk --debug
+run flutter build apk --debug --no-pub
 run adb install -r "$APK_PATH"

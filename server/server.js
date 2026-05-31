@@ -5,6 +5,7 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
 
@@ -24,6 +25,14 @@ const {
   inspectWorkdir,
   setWorkdir,
 } = require('./lib/workdir');
+const {
+  FilesystemError,
+  listAbsoluteDirectory,
+  listDirectory,
+  prepareDownload,
+  resolveUploadTarget,
+  uploadedEntry,
+} = require('./lib/filesystem');
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
@@ -49,6 +58,10 @@ const app = express();
 const eventClients = new Set();
 const activeRequests = new Map();
 const runningScopes = new Set();
+const rawUpload = express.raw({
+  type: 'application/octet-stream',
+  limit: process.env.FILE_UPLOAD_LIMIT || '256mb',
+});
 
 app.use(express.json({ limit: '16mb' }));
 app.use((req, res, next) => {
@@ -57,6 +70,7 @@ app.use((req, res, next) => {
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Device-Id',
   );
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   return next();
@@ -106,6 +120,27 @@ function sendWorkdirError(res, err) {
     });
   }
   return res.status(500).json({ error: err.message });
+}
+
+function sendFilesystemError(res, err) {
+  if (err instanceof FilesystemError) {
+    return res.status(err.status || 400).json({
+      error: err.message,
+      code: err.code,
+    });
+  }
+  return res.status(500).json({ error: err.message });
+}
+
+function queryBool(value) {
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
+function attachmentHeader(filename) {
+  const fallback = String(filename || 'download')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 function sendEvent(type, payload) {
@@ -262,6 +297,104 @@ app.post('/api/workdir', (req, res) => {
     });
   } catch (err) {
     return sendWorkdirError(res, err);
+  }
+});
+
+app.get('/api/workdir/browse', (req, res) => {
+  try {
+    return res.json(
+      listAbsoluteDirectory(req.query.path, {
+        showHidden: queryBool(req.query.showHidden),
+      }),
+    );
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+});
+
+app.get('/api/fs/list', (req, res) => {
+  try {
+    return res.json(
+      listDirectory(req.query.path, {
+        showHidden: queryBool(req.query.showHidden),
+      }),
+    );
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+});
+
+app.get('/api/fs/download', (req, res) => {
+  let download;
+  try {
+    download = prepareDownload(req.query.path);
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+
+  if (!download.isDirectory) {
+    return res.download(download.target, download.filename, (err) => {
+      if (err && !res.headersSent) {
+        return sendFilesystemError(res, err);
+      }
+      return undefined;
+    });
+  }
+
+  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
+    cwd: download.zipCwd,
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0 && !res.destroyed) {
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return undefined;
+  });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
+  return child.stdout.pipe(res);
+});
+
+app.post('/api/fs/upload', rawUpload, (req, res) => {
+  let target;
+  try {
+    target = resolveUploadTarget(req.query.path, req.query.name);
+    if (fs.existsSync(target.target)) {
+      const realTarget = fs.realpathSync(target.target);
+      if (
+        realTarget !== target.realRoot &&
+        !realTarget.startsWith(`${target.realRoot}${path.sep}`)
+      ) {
+        return res.status(403).json({
+          error: 'path is outside the work directory',
+          code: 'FS_PATH_OUTSIDE_WORKDIR',
+        });
+      }
+    }
+    fs.writeFileSync(
+      target.target,
+      Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+    );
+    return res.json({
+      ok: true,
+      entry: uploadedEntry(target.root, target.target),
+    });
+  } catch (err) {
+    return sendFilesystemError(res, err);
   }
 });
 
