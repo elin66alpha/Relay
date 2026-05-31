@@ -27,7 +27,7 @@ The setup script:
 - creates `server/.env` from `server/.env.example` when needed;
 - installs backend npm dependencies;
 - creates a LaunchAgent for the backend (`dev.agentdeck.backend`);
-- in Tailscale mode, detects this machine's stable MagicDNS address;
+- in Tailscale mode, detects this machine's stable `100.x` Tailscale IP;
 - runs `npm run credential` so the terminal shows and saves the encrypted
   credential QR pointing at that address.
 

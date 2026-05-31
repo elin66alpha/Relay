@@ -123,7 +123,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (raw == null || raw.trim().isEmpty) return;
       await _finishImportPayload(raw);
     } catch (err) {
-      _showMessage(context.l10n.importFailed(err), error: true);
+      await _showImportError(err);
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -136,7 +136,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     try {
       await _finishImportPayload(raw);
     } catch (err) {
-      _showMessage(context.l10n.importFailed(err), error: true);
+      await _showImportError(err);
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -161,7 +161,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       }
       await _finishImportPayload(raw);
     } catch (err) {
-      _showMessage(context.l10n.importFailed(err), error: true);
+      await _showImportError(err);
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -176,15 +176,33 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     final String? passphrase = await _askPassphrase();
     if (passphrase == null) return;
 
-    final MachineCredential credential =
-        await widget.machinesController.decryptEncryptedBytes(
-      bytes,
-      passphrase: passphrase,
-    );
+    late final MachineCredential credential;
+    try {
+      credential = await widget.machinesController.decryptEncryptedBytes(
+        bytes,
+        passphrase: passphrase,
+      );
+    } on MachineCredentialException catch (err) {
+      if (err.message.contains('decryption failed')) {
+        throw MachineCredentialException(context.l10n.credentialDecryptFailed);
+      }
+      rethrow;
+    }
     final BackendClient client = BackendClient();
     try {
-      final bool ok = await client.healthFor(credential);
-      if (!ok) throw BackendException(context.l10n.backendNotOk);
+      final bool ok = await client.healthFor(
+        credential,
+        timeout: const Duration(seconds: 8),
+      );
+      if (!ok) {
+        throw MachineCredentialException(
+          context.l10n.credentialBackendNotOk(credential.hostLabel),
+        );
+      }
+    } on BackendException catch (err) {
+      throw MachineCredentialException(
+        _credentialConnectionMessage(credential, err),
+      );
     } finally {
       await client.close();
     }
@@ -193,6 +211,24 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     if (!widget.requireCredential) {
       _showMessage(context.l10n.imported(credential.displayName));
     }
+  }
+
+  String _credentialConnectionMessage(
+    MachineCredential credential,
+    BackendException err,
+  ) {
+    final String host = credential.hostLabel;
+    if (err.status == 401) {
+      return context.l10n.credentialTokenRejected(host);
+    }
+    return switch (err.code) {
+      'NETWORK_HOST_LOOKUP' => context.l10n.credentialHostLookupFailed(host),
+      'NETWORK_CONNECTION_REFUSED' =>
+        context.l10n.credentialConnectionRefused(host),
+      'NETWORK_UNREACHABLE' => context.l10n.credentialNetworkUnreachable(host),
+      'NETWORK_TIMEOUT' => context.l10n.credentialConnectionTimedOut(host),
+      _ => context.l10n.credentialConnectionFailed(host, err.message),
+    };
   }
 
   Future<String?> _askCredentialPayload() async {
@@ -313,6 +349,28 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+      ),
+    );
+  }
+
+  Future<void> _showImportError(Object err) async {
+    if (!mounted) return;
+    final String message = err is MachineCredentialException
+        ? err.message
+        : err is BackendException
+            ? err.message
+            : err.toString();
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(context.l10n.importFailedTitle),
+        content: Text(message),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(context.l10n.ok),
+          ),
+        ],
       ),
     );
   }
@@ -444,6 +502,22 @@ class _CredentialActionButtons extends StatelessWidget {
                   )
                 : const Icon(Icons.lan_outlined),
             label: Text(context.l10n.testMachine),
+          ),
+        if (isImporting)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(context.l10n.testingCredentialConnection),
+              ],
+            ),
           ),
       ],
     );

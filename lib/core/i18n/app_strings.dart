@@ -200,7 +200,33 @@ class AppStrings {
   String get fileUnreadable =>
       isZh ? '无法读取凭证。' : 'Unable to read the credential.';
   String imported(String name) => isZh ? '已导入：$name' : 'Imported: $name';
+  String get importFailedTitle => isZh ? '导入失败' : 'Import failed';
   String importFailed(Object err) => isZh ? '导入失败：$err' : 'Import failed: $err';
+  String get credentialDecryptFailed => isZh
+      ? '凭证解密失败。请确认二维码和密码是否正确。'
+      : 'Credential decryption failed. Check the QR code and password.';
+  String credentialBackendNotOk(String host) => isZh
+      ? '已解密凭证，但 $host 没有返回正常状态。'
+      : 'The credential decrypted, but $host did not return a healthy status.';
+  String credentialTokenRejected(String host) => isZh
+      ? '已连接到 $host，但凭证 token 被拒绝。请在后端重新生成二维码。'
+      : 'Connected to $host, but the credential token was rejected. Regenerate the QR on the backend.';
+  String credentialHostLookupFailed(String host) => isZh
+      ? '无法解析 $host。请确认这台手机/电脑已连接到同一个 Tailscale 网络；如果仍失败，请在后端重新生成二维码（新版会优先使用 100.x Tailscale IP）。'
+      : 'Cannot resolve $host. Make sure this device is connected to the same Tailscale network. If it still fails, regenerate the QR on the backend; the new generator prefers the 100.x Tailscale IP.';
+  String credentialConnectionRefused(String host) => isZh
+      ? '能找到 $host，但后端端口拒绝连接。请确认 AgentDeck 后端正在运行，并监听二维码里的端口。'
+      : '$host resolved, but the backend port refused the connection. Make sure the AgentDeck backend is running and listening on the QR port.';
+  String credentialNetworkUnreachable(String host) => isZh
+      ? '无法连接到 $host。请确认本设备和后端都已连接同一个 Tailscale 网络。'
+      : 'Cannot reach $host. Make sure this device and the backend are both connected to the same Tailscale network.';
+  String credentialConnectionTimedOut(String host) => isZh
+      ? '连接 $host 超时。请确认 Tailscale 已开启、后端在线，并且二维码地址仍然有效。'
+      : 'Timed out connecting to $host. Make sure Tailscale is on, the backend is online, and the QR URL is still valid.';
+  String credentialConnectionFailed(String host, Object err) =>
+      isZh ? '无法连接到 $host：$err' : 'Could not connect to $host: $err';
+  String get testingCredentialConnection =>
+      isZh ? '正在验证后端连接...' : 'Testing backend connection...';
   String get connectionOk => isZh ? '连接正常。' : 'Connection OK.';
   String get backendNotOk => isZh ? '后端没有返回 ok。' : 'Backend did not return ok.';
   String connectionFailed(Object err) =>

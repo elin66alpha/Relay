@@ -78,12 +78,14 @@ macOS uses LaunchAgent services instead of PM2:
 Both setup flows offer two networking modes.
 
 - **Tailscale mode** (recommended, default): the backend is reached over your
-  private [Tailscale](https://tailscale.com) tailnet at a stable MagicDNS
-  address (`http://<machine>.<tailnet>.ts.net:8787`), auto-detected and baked
-  into the QR. The address never rotates across restarts, traffic is
-  end-to-end encrypted (WireGuard), it works behind NAT/CGNAT, and the backend
-  is never exposed to the public internet. Install Tailscale on the host and on
-  each client device (one install + login to the same account).
+  private [Tailscale](https://tailscale.com) tailnet. The QR uses the stable
+  `100.x` Tailscale IPv4 by default because it works even when a mobile client
+  has MagicDNS disabled; MagicDNS (`http://<machine>.<tailnet>.ts.net:8787`)
+  still works when client DNS supports it. The address never rotates across
+  restarts, traffic is end-to-end encrypted (WireGuard), it works behind
+  NAT/CGNAT, and the backend is never exposed to the public internet. Install
+  Tailscale on the host and on each client device (one install + login to the
+  same account).
   - Two backends behind the same router/public IP each get their own stable
     tailnet address and never collide — Tailscale addresses are per-device,
     independent of your LAN or public IP.
@@ -142,7 +144,7 @@ npm run credential -- --passphrase "pw"             # non-interactive (less priv
 npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL (direct mode)
 ```
 
-This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves `server/credentials/<machine>.agentdeck.png`. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. The Tailscale MagicDNS address is stable, so the QR stays valid across restarts.
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves `server/credentials/<machine>.agentdeck.png`. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. The Tailscale IPv4 address is stable for the device, so the QR stays valid across restarts.
 
 Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 

@@ -8,7 +8,7 @@ backends/linux/setup.sh
 ```
 
 这个入口会调用 `./setup.sh`。脚本提供 Tailscale 模式（推荐：通过你自己的 tailnet 以稳定
-MagicDNS 地址访问后端），也支持 VPS / 公网主机直连模式。先安装 Tailscale：
+`100.x` Tailscale IP 访问后端），也支持 VPS / 公网主机直连模式。先安装 Tailscale：
 `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`。
 
 常用命令：

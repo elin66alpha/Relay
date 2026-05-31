@@ -156,17 +156,17 @@ tailscale_install_hint() {
   c_warn "  Download: https://tailscale.com/download"
 }
 
-# Echo this machine's stable Tailscale address (http://<magicdns-or-ip>:<port>),
-# or nothing if Tailscale is not connected. MagicDNS name is preferred; the
-# 100.x tailnet IP is the fallback. The address never rotates.
+# Echo this machine's stable Tailscale address (http://<100.x-ip-or-magicdns>:<port>),
+# or nothing if Tailscale is not connected. The 100.x tailnet IP is preferred
+# because it does not depend on client-side MagicDNS being enabled.
 detect_tailscale_url() {
   local port="$1" host=""
-  host="$(tailscale status --json 2>/dev/null \
-    | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
-    | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
-  host="${host%.}"
+  host="$(tailscale ip -4 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
   if [ -z "$host" ]; then
-    host="$(tailscale ip -4 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    host="$(tailscale status --json 2>/dev/null \
+      | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+      | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
+    host="${host%.}"
   fi
   [ -n "$host" ] && printf 'http://%s:%s' "$host" "$port"
 }

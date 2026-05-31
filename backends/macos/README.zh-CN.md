@@ -26,7 +26,7 @@ backends/macos/setup.sh
 - 需要时从 `server/.env.example` 创建 `server/.env`；
 - 安装后端 npm 依赖；
 - 创建后端 LaunchAgent：`dev.agentdeck.backend`；
-- Tailscale 模式下探测本机稳定的 MagicDNS 地址；
+- Tailscale 模式下探测本机稳定的 `100.x` Tailscale IP；
 - 执行 `npm run credential`，在终端显示并保存指向该地址的加密凭证二维码。
 
 ## 服务命令

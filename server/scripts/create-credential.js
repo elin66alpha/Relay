@@ -56,10 +56,10 @@ Options:
 `);
 }
 
-// Auto-detect this machine's stable Tailscale address. We prefer the MagicDNS
-// name (human-readable and permanent, e.g. my-box.tailnet-name.ts.net) and fall
-// back to the 100.x tailnet IP. Unlike a quick tunnel, this address never
-// rotates, so the credential QR stays valid across restarts. Tailscale's
+// Auto-detect this machine's stable Tailscale address. Use the 100.x tailnet
+// IPv4 first because it does not depend on client-side MagicDNS being enabled
+// on Android/iOS. Fall back to the MagicDNS name when no IPv4 is available.
+// Unlike a quick tunnel, this address is stable across restarts. Tailscale's
 // WireGuard transport is end-to-end encrypted, so plain http over the tailnet is
 // fine; the backend is never exposed to the public internet.
 function runTailscale(args) {
@@ -75,6 +75,9 @@ function runTailscale(args) {
 }
 
 function detectTailscaleUrl(port) {
+  const ip = runTailscale(['ip', '-4']).trim().split('\n')[0].trim();
+  if (ip) return { url: `http://${ip}:${port}`, source: 'Tailscale IPv4' };
+
   let host = '';
   const statusJson = runTailscale(['status', '--json']);
   if (statusJson) {
@@ -84,14 +87,12 @@ function detectTailscaleUrl(port) {
         host = String(status.Self.DNSName).replace(/\.$/, '');
       }
     } catch (_err) {
-      // Fall through to the IP probe.
+      // Fall through to no detected URL.
     }
   }
-  if (!host) {
-    const ip = runTailscale(['ip', '-4']).trim().split('\n')[0].trim();
-    if (ip) host = ip;
-  }
-  return host ? `http://${host}:${port}` : '';
+  return host
+    ? { url: `http://${host}:${port}`, source: 'Tailscale MagicDNS' }
+    : null;
 }
 
 function resolvePublicBaseUrl(args) {
@@ -99,7 +100,7 @@ function resolvePublicBaseUrl(args) {
   const explicit = String(args.url || '').trim();
   if (explicit) return { url: explicit, source: 'command line (--url)' };
   const detected = detectTailscaleUrl(port);
-  if (detected) return { url: detected, source: 'Tailscale (MagicDNS)' };
+  if (detected) return detected;
   const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
   if (envUrl) {
     return { url: envUrl, source: '.env PUBLIC_BASE_URL (may be stale)' };

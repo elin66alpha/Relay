@@ -79,6 +79,36 @@ tailscale_install_hint() {
   c_warn "Or choose Direct mode (option 2) if this host has a public IP or domain."
 }
 
+# Make sure Tailscale is installed and this machine is connected to a tailnet.
+# On Linux we offer to install it via the official script; everywhere we run
+# `tailscale up` (interactive login) when not already connected.
+ensure_tailscale() {
+  if ! need tailscale; then
+    if [ "$(uname -s)" = "Linux" ]; then
+      read -rp "Tailscale is not installed. Install it now (official script, needs sudo)? [Y/n]: " yn
+      case "${yn:-Y}" in
+        [Nn]*) tailscale_install_hint; exit 1 ;;
+        *) c_info "Installing Tailscale..."; curl -fsSL https://tailscale.com/install.sh | sh ;;
+      esac
+      need tailscale || { c_err "Tailscale not found on PATH after install."; exit 1; }
+    else
+      tailscale_install_hint
+      exit 1
+    fi
+  fi
+  if ! tailscale status >/dev/null 2>&1; then
+    c_info "Connecting this machine to your tailnet..."
+    c_warn "A login URL will be printed below - open it on ANY browser (phone/laptop) and sign in."
+    c_warn "Headless / no browser at all? Cancel (Ctrl-C) and run:"
+    c_warn "  sudo tailscale up --authkey <key>   (create one at https://login.tailscale.com/admin/settings/keys)"
+    sudo tailscale up
+  fi
+  tailscale status >/dev/null 2>&1 || {
+    c_err "Still not connected to a tailnet. Run 'sudo tailscale up', then re-run ./setup.sh."
+    exit 1
+  }
+}
+
 c_info "AgentDeck setup"
 echo "How should the app reach this backend?"
 echo "  1) Tailscale (recommended) - private, encrypted, stable address; never exposed to the public internet."
@@ -115,12 +145,7 @@ case "$NET_MODE" in
     ;;
   *)
     # ---------- Tailscale mode (recommended) ----------
-    need tailscale || { tailscale_install_hint; exit 1; }
-    if ! tailscale status >/dev/null 2>&1; then
-      c_err "Tailscale is installed but not connected."
-      c_warn "Run 'sudo tailscale up' to log in, then re-run ./setup.sh."
-      exit 1
-    fi
+    ensure_tailscale
 
     # The backend listens on the tailnet interface; reachability is provided by
     # Tailscale (WireGuard, end-to-end encrypted), not a public tunnel.
@@ -131,17 +156,32 @@ case "$NET_MODE" in
     pm2 start ecosystem.config.js --only "$SERVER_PROC"
     pm2 save >/dev/null 2>&1 || true
 
+    TS_IP="$(tailscale ip -4 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
     TS_NAME="$(tailscale status --json 2>/dev/null \
       | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
       | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)\.?"/\1/' || true)"
-    [ -n "$TS_NAME" ] && c_info "Tailscale address: http://${TS_NAME%.}:${PORT_NUM}"
+    TS_NAME="${TS_NAME%.}"
+    if [ -n "$TS_IP" ]; then
+      c_info "Tailscale address used in QR: http://${TS_IP}:${PORT_NUM}"
+      [ -n "$TS_NAME" ] && c_info "MagicDNS also available when client DNS supports it: http://${TS_NAME}:${PORT_NUM}"
+    elif [ -n "$TS_NAME" ]; then
+      c_info "Tailscale address used in QR: http://${TS_NAME}:${PORT_NUM}"
+    fi
     c_warn "Tip: for tailnet-only access with HTTPS, you can instead run:"
     c_warn "  tailscale serve --bg ${PORT_NUM}   (then regenerate the QR with the https URL)"
 
     c_info "Generating credential QR (auto-detects the Tailscale address)..."
     npm run credential
+
+    BASE_HOST="${TS_IP:-${TS_NAME:-<your-machine-tailnet-ip>}}"
+    BASE_URL="http://${BASE_HOST}:${PORT_NUM}"
+    c_info "Next steps to connect your devices:"
+    c_warn "  Phone: install the Tailscale app, sign into the SAME account, turn it ON;"
+    c_warn "         then in AgentDeck tap \"Scan QR\", scan the QR above, enter the password."
+    c_warn "  Web:   on any device that has Tailscale on, open ${BASE_URL}/ ,"
+    c_warn "         then import the credential via \"Upload QR image\""
+    c_warn "         (server/credentials/*.agentdeck.png) or \"Paste credential\"."
     ;;
 esac
 
-c_info "Done. In the app, tap \"Scan QR\", scan the QR above, and enter the password you just set."
-c_info "Backend is managed by PM2 (pm2 list / pm2 logs / pm2 restart ${SERVER_PROC})."
+c_info "Done. Backend is managed by PM2 (pm2 list / pm2 logs / pm2 restart ${SERVER_PROC})."

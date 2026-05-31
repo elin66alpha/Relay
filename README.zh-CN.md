@@ -72,7 +72,7 @@ macOS 使用 LaunchAgent 管理服务，不依赖 PM2：
 
 两套安装流程都提供两种网络模式。
 
-- **Tailscale 模式**（推荐，默认）：后端通过你自己的 [Tailscale](https://tailscale.com) tailnet 以稳定的 MagicDNS 地址（`http://<机器名>.<tailnet>.ts.net:8787`）被访问，脚本自动探测并写入二维码。地址跨重启永不变化，流量端到端加密（WireGuard），能穿透 NAT/CGNAT，且后端**完全不暴露在公网**。需要在宿主机和每个客户端设备上安装 Tailscale（一次安装并登录同一账号）。
+- **Tailscale 模式**（推荐，默认）：后端通过你自己的 [Tailscale](https://tailscale.com) tailnet 访问。二维码默认写入稳定的 `100.x` Tailscale IPv4，因为即使手机客户端没有启用 MagicDNS 也能用；如果客户端 DNS 支持，MagicDNS（`http://<机器名>.<tailnet>.ts.net:8787`）也可以。地址跨重启不变，流量端到端加密（WireGuard），能穿透 NAT/CGNAT，且后端**完全不暴露在公网**。需要在宿主机和每个客户端设备上安装 Tailscale（一次安装并登录同一账号）。
   - 同一路由器/公网 IP 后面的两台后端，各自拿到独立且稳定的 tailnet 地址、永不冲突——Tailscale 地址是按设备分配的，与你的局域网或公网 IP 无关。
   - 想要"仅 tailnet 可达 + HTTPS"，可运行 `tailscale serve --bg 8787`，再用得到的 `https://…ts.net` 网址重新生成二维码。
 - **直连模式**：适用于 VPS 或任何有可达公网 IP/域名的主机。你输入 app 连接地址，后端绑定到 `0.0.0.0`，二维码指向这个地址。暴露到不可信网络前，请在前面配置 HTTPS 反向代理（nginx/Caddy）。
@@ -115,7 +115,7 @@ QUOTA_POLL_MS=300000
 先确保 Tailscale 已连接（`tailscale status`）并已启动后端（`pm2 start ecosystem.config.js`）。
 
 ### 方式 A：标准交互式创建（自动探测 Tailscale 地址）
-最常用方式，脚本会自动探测本机的 Tailscale MagicDNS 地址，并提示你输入密码：
+最常用方式，脚本会自动探测本机的 Tailscale IPv4 地址（MagicDNS 作为兜底），并提示你输入密码：
 ```bash
 cd /path/to/AgentDeck/server
 pm2 start ecosystem.config.js

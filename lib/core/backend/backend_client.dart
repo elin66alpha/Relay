@@ -309,16 +309,26 @@ class BackendClient {
     _httpClient.close();
   }
 
-  Future<bool> health() async {
-    final Object? decoded = await _requestJson('GET', '/api/health');
+  Future<bool> health({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/health',
+      timeout: timeout,
+    );
     return decoded is Map && decoded['ok'] == true;
   }
 
-  Future<bool> healthFor(MachineCredential credential) async {
+  Future<bool> healthFor(
+    MachineCredential credential, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     final Object? decoded = await _requestJsonWithCredential(
       credential,
       'GET',
       '/api/health',
+      timeout: timeout,
     );
     return decoded is Map && decoded['ok'] == true;
   }
@@ -553,7 +563,8 @@ class BackendClient {
     if (decoded is! Map) {
       throw BackendException('Invalid work directory update response.');
     }
-    final WorkdirInfo info = WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    final WorkdirInfo info =
+        WorkdirInfo.fromJson(decoded.cast<String, Object?>());
     // The backend only validates the path; this device owns its current workdir,
     // so persist the canonical path locally and send it on later requests.
     if (info.dir.isNotEmpty) {
@@ -735,14 +746,28 @@ class BackendClient {
     final Uri uri = _uri(credential, path);
     final Map<String, String> headers = await _headers(credential);
     late final http.Response response;
-    if (method == 'GET') {
-      response = await _httpClient.get(uri, headers: headers).timeout(timeout);
-    } else if (method == 'POST') {
-      response = await _httpClient
-          .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
-          .timeout(timeout);
-    } else {
-      throw BackendException('Unsupported method: $method');
+    try {
+      if (method == 'GET') {
+        response =
+            await _httpClient.get(uri, headers: headers).timeout(timeout);
+      } else if (method == 'POST') {
+        response = await _httpClient
+            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
+            .timeout(timeout);
+      } else {
+        throw BackendException('Unsupported method: $method');
+      }
+    } on BackendException {
+      rethrow;
+    } on TimeoutException {
+      throw BackendException(
+        'Timed out connecting to ${uri.host}.',
+        code: 'NETWORK_TIMEOUT',
+      );
+    } on http.ClientException catch (err) {
+      throw _networkExceptionFor(err, uri);
+    } catch (err) {
+      throw _networkExceptionFor(err, uri);
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -822,6 +847,24 @@ class BackendClient {
     }
     if (message.isEmpty) message = 'HTTP $status';
     return BackendException(message, status: status);
+  }
+
+  BackendException _networkExceptionFor(Object err, Uri uri) {
+    final String raw = err.toString();
+    final String lower = raw.toLowerCase();
+    String code = 'NETWORK_ERROR';
+    if (lower.contains('failed host lookup') ||
+        lower.contains('no address associated') ||
+        lower.contains('name_not_resolved') ||
+        lower.contains('nodename nor servname')) {
+      code = 'NETWORK_HOST_LOOKUP';
+    } else if (lower.contains('connection refused')) {
+      code = 'NETWORK_CONNECTION_REFUSED';
+    } else if (lower.contains('network is unreachable') ||
+        lower.contains('no route to host')) {
+      code = 'NETWORK_UNREACHABLE';
+    }
+    return BackendException(raw, code: code);
   }
 
   Map<String, Object?> _decodeEventData(StringBuffer data) {

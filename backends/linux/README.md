@@ -8,7 +8,7 @@ backends/linux/setup.sh
 ```
 
 This wrapper calls `./setup.sh`, which offers Tailscale mode (recommended;
-reach the backend over your private tailnet at a stable MagicDNS address) or
+reach the backend over your private tailnet at a stable `100.x` Tailscale IP) or
 direct mode for a VPS/public host. Install Tailscale first:
 `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`.
 

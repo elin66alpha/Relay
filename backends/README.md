@@ -7,7 +7,8 @@ in this directory.
 - `macos/`: macOS backend setup using LaunchAgent services for the Node backend.
 
 Networking uses Tailscale (a private mesh): the backend is reached over your
-tailnet at a stable MagicDNS address, never exposed to the public internet. A
+tailnet at a stable `100.x` Tailscale IP (MagicDNS also works when client DNS
+supports it), never exposed to the public internet. A
 direct mode is available for hosts that already have a public IP/domain.
 
 The Flutter app talks to the same HTTP/SSE API on every backend platform. The
