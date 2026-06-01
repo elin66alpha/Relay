@@ -162,30 +162,32 @@ function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) 
 // skipped so the walk cannot loop or escape via a linked directory. Used to
 // reject directory (zip) downloads before we start streaming, since the tunnel
 // has a hard size budget and a half-sent zip cannot become a clean error.
-function directorySize(dir) {
+// Async + yielding between syscalls so walking a large tree (e.g. node_modules)
+// does not block the single-threaded server for every other client and agent.
+async function directorySize(dir) {
   let total = 0;
   const stack = [dir];
   while (stack.length) {
     const current = stack.pop();
     let dirents;
     try {
-      dirents = fs.readdirSync(current, { withFileTypes: true });
+      dirents = await fs.promises.readdir(current, { withFileTypes: true });
     } catch (_err) {
       continue;
     }
     for (const dirent of dirents) {
+      // The dirent already classifies the entry without following symlinks, so
+      // we only need a stat for the size of regular files.
+      if (dirent.isSymbolicLink()) continue;
       const full = path.join(current, dirent.name);
-      let stat;
-      try {
-        stat = fs.lstatSync(full);
-      } catch (_err) {
-        continue;
-      }
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
+      if (dirent.isDirectory()) {
         stack.push(full);
-      } else if (stat.isFile()) {
-        total += stat.size;
+      } else if (dirent.isFile()) {
+        try {
+          total += (await fs.promises.lstat(full)).size;
+        } catch (_err) {
+          // Skip entries that vanish or can't be stat'd mid-walk.
+        }
       }
     }
   }
@@ -197,7 +199,7 @@ function directorySize(dir) {
 // root). `maxBytes`, when set, caps the download: a single file by its size, a
 // directory by its uncompressed total (which is >= the resulting zip, so the
 // zip is guaranteed to fit). Over-limit throws before any bytes are streamed.
-function prepareDownloadAbsolute(value, { maxBytes } = {}) {
+async function prepareDownloadAbsolute(value, { maxBytes } = {}) {
   const raw = String(value || '').trim();
   if (!raw || !path.isAbsolute(raw)) {
     throw new FilesystemError('download path must be absolute', {
@@ -208,7 +210,7 @@ function prepareDownloadAbsolute(value, { maxBytes } = {}) {
   const target = path.resolve(raw);
   let stat;
   try {
-    stat = fs.statSync(target);
+    stat = await fs.promises.stat(target);
   } catch (_err) {
     throw new FilesystemError('path not found', {
       status: 404,
@@ -222,7 +224,7 @@ function prepareDownloadAbsolute(value, { maxBytes } = {}) {
     });
   }
   const isDirectory = stat.isDirectory();
-  const totalBytes = isDirectory ? directorySize(target) : stat.size;
+  const totalBytes = isDirectory ? await directorySize(target) : stat.size;
   if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
     throw new FilesystemError('download exceeds the size limit', {
       status: 413,

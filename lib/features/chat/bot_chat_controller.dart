@@ -290,11 +290,8 @@ class BotChatController extends ChangeNotifier {
   }) =>
       _backendClient.browseWorkdir(path, showHidden: showHidden);
 
-  Future<FsDownload> downloadFile(
-    String path, {
-    void Function(int received, int? total)? onProgress,
-  }) =>
-      _backendClient.downloadFile(path, onProgress: onProgress);
+  Future<FsDownloadStream> openFileDownload(String path) =>
+      _backendClient.openFileDownload(path);
 
   Future<FsEntry> uploadFile({
     required String path,

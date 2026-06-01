@@ -40,11 +40,13 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   String? _operationText;
   String? _workPath;
   late int _seenDownloadTick;
+  bool _downloadActive = false;
 
   @override
   void initState() {
     super.initState();
     _seenDownloadTick = _downloads.completedTick;
+    _downloadActive = _downloads.isActive;
     _downloads.addListener(_onDownloadChanged);
     _dropController = registerFileDrop(_uploadDroppedFiles);
     _loadInitial();
@@ -71,7 +73,12 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
         );
       }
     }
-    setState(() {});
+    // Progress ticks repaint only the status widget (via the ListenableBuilder in
+    // build); rebuild the whole screen only when the active state flips, to
+    // enable/disable the per-row download buttons.
+    if (_downloads.isActive != _downloadActive) {
+      setState(() => _downloadActive = _downloads.isActive);
+    }
   }
 
   Future<void> _loadInitial() async {
@@ -241,8 +248,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     _downloads.startDownload(
       fileName: entry.name,
       strings: context.l10n,
-      fetch: (void Function(int, int?) onProgress) =>
-          widget.chatController.downloadFile(entry.path, onProgress: onProgress),
+      open: () => widget.chatController.openFileDownload(entry.path),
     );
   }
 
@@ -383,7 +389,11 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                       ),
                     ],
                   ),
-                  _DownloadStatus(downloads: _downloads),
+                  ListenableBuilder(
+                    listenable: _downloads,
+                    builder: (BuildContext context, Widget? _) =>
+                        _DownloadStatus(downloads: _downloads),
+                  ),
                   if (_operationText != null) ...<Widget>[
                     const SizedBox(height: 12),
                     Text(_operationText!),
@@ -402,7 +412,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                     _FileList(
                       listing: listing,
                       isBusy: _isBusy,
-                      downloadActive: _downloads.isActive,
+                      downloadActive: _downloadActive,
                       onOpen: (FsEntry entry) => _browse(entry.path),
                       onDownload: _download,
                     ),

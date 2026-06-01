@@ -169,14 +169,22 @@ class FsListing {
   final List<FsEntry> entries;
 }
 
-class FsDownload {
-  const FsDownload({
+/// An in-progress file download: response metadata plus the live byte stream.
+/// The caller consumes [bytes] straight to its destination (a file on native, a
+/// blob on web) so a large download is never buffered whole in memory.
+class FsDownloadStream {
+  const FsDownloadStream({
     required this.fileName,
+    required this.total,
     required this.bytes,
   });
 
   final String fileName;
-  final Uint8List bytes;
+
+  /// Total bytes when the server announced a Content-Length, else null.
+  final int? total;
+
+  final Stream<List<int>> bytes;
 }
 
 class UsageQuota {
@@ -561,13 +569,11 @@ class BackendClient {
     return FsListing.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// Streams a download so the UI can show progress instead of freezing on a
-  /// large transfer. [onProgress] reports (receivedBytes, totalBytes); total is
-  /// null when the server can't announce a length up front (zipped folders).
-  Future<FsDownload> downloadFile(
-    String path, {
-    void Function(int received, int? total)? onProgress,
-  }) async {
+  /// Opens a streaming download. [FsDownloadStream.bytes] is the live response
+  /// stream; the caller writes it straight to disk (native) or a blob (web) so a
+  /// large file is never buffered whole in memory. Throws before any bytes (e.g.
+  /// FS_DOWNLOAD_TOO_LARGE) when the server rejects the request up front.
+  Future<FsDownloadStream> openFileDownload(String path) async {
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(
       credential,
@@ -587,18 +593,10 @@ class BackendClient {
         (response.contentLength != null && response.contentLength! > 0)
             ? response.contentLength
             : null;
-    final BytesBuilder builder = BytesBuilder(copy: false);
-    int received = 0;
-    onProgress?.call(0, total);
-    await for (final List<int> chunk
-        in response.stream.timeout(const Duration(minutes: 15))) {
-      builder.add(chunk);
-      received += chunk.length;
-      onProgress?.call(received, total);
-    }
-    return FsDownload(
+    return FsDownloadStream(
       fileName: _downloadFileName(response.headers, path),
-      bytes: builder.takeBytes(),
+      total: total,
+      bytes: response.stream.timeout(const Duration(minutes: 15)),
     );
   }
 

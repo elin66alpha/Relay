@@ -504,14 +504,14 @@ app.get('/api/workdir/browse', (req, res) => {
   }
 });
 
-app.get('/api/fs/download', (req, res) => {
+app.get('/api/fs/download', async (req, res) => {
   let download;
   try {
     // The unified file browser sends absolute paths (it can reach anywhere up to
     // root); older relative paths stay confined to the workdir. Both enforce the
     // size cap so an oversized transfer is refused before it starts.
     if (req.query.path && path.isAbsolute(String(req.query.path))) {
-      download = prepareDownloadAbsolute(req.query.path, {
+      download = await prepareDownloadAbsolute(req.query.path, {
         maxBytes: MAX_DOWNLOAD_BYTES,
       });
     } else {
@@ -533,7 +533,7 @@ app.get('/api/fs/download', (req, res) => {
   return sendDirectoryZip(download, res);
 });
 
-app.post('/api/fs/upload', rawUpload, uploadErrorHandler, (req, res) => {
+app.post('/api/fs/upload', rawUpload, uploadErrorHandler, async (req, res) => {
   if (Buffer.isBuffer(req.body) && req.body.length > MAX_UPLOAD_BYTES) {
     return res.status(413).json({
       error: 'upload exceeds the size limit',
@@ -560,7 +560,7 @@ app.post('/api/fs/upload', rawUpload, uploadErrorHandler, (req, res) => {
         });
       }
     }
-    fs.writeFileSync(
+    await fs.promises.writeFile(
       target.target,
       Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
     );
