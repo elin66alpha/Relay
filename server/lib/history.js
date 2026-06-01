@@ -5,8 +5,8 @@ const path = require('path');
 
 // Server-side chat history. The app keeps no local copy of the conversation;
 // it pulls history back from here (the CLI host) when it reopens. Keyed by
-// scopeKey (`deviceId:agentKey`), matching the session key used in agents.js,
-// so history and the resumable CLI session are cleared together.
+// scopeKey (`workdir\0agentKey[\0sessionId]`), matching the session key used in
+// agents.js, so history and the resumable CLI session are cleared together.
 const HISTORY_FILE = path.join(__dirname, '..', 'chat-history.json');
 const MAX_PER_SCOPE = 200; // Cap per conversation so the file can't grow forever.
 

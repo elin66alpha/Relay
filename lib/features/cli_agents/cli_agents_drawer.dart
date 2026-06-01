@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
@@ -34,6 +35,7 @@ class CliAgentsDrawer extends StatelessWidget {
       animation: Listenable.merge(<Listenable>[
         agentsController,
         machinesController,
+        chatController,
       ]),
       builder: (BuildContext context, Widget? _) {
         final String activeKey = agentsController.activeAgentKey;
@@ -88,21 +90,11 @@ class CliAgentsDrawer extends StatelessWidget {
                     ),
                   ),
                   for (final CliAgent agent in agentsController.agents)
-                    ListTile(
-                      leading: Icon(_iconFor(agent.key)),
-                      title: Text(agent.label),
-                      subtitle: Text(
-                        agent.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      selected: agent.key == activeKey,
-                      onTap: () async {
-                        await agentsController.setActive(agent.key);
-                        if (context.mounted && closeOnAction) {
-                          Navigator.of(context).pop();
-                        }
-                      },
+                    ..._agentTiles(
+                      context,
+                      agent,
+                      activeKey,
+                      activeMachine,
                     ),
                   const Divider(height: 16),
                   ListTile(
@@ -164,7 +156,184 @@ class CliAgentsDrawer extends StatelessWidget {
       },
     );
   }
+
+  List<Widget> _agentTiles(
+    BuildContext context,
+    CliAgent agent,
+    String activeKey,
+    MachineCredential? activeMachine,
+  ) {
+    final bool selectedAgent = agent.key == activeKey;
+    final List<AgentSession> sessions = chatController.sessionsFor(agent.key);
+    final String? activeSessionId = selectedAgent
+        ? chatController.activeSessionId
+        : sessions.isNotEmpty
+            ? sessions.first.id
+            : null;
+    return <Widget>[
+      ListTile(
+        leading: Icon(_iconFor(agent.key)),
+        title: Text(agent.label),
+        selected: selectedAgent,
+        trailing: IconButton(
+          icon: const Icon(Icons.add_rounded),
+          tooltip: context.l10n.newSession,
+          onPressed:
+              chatController.isThinking || sessions.length >= _maxSessionsPerAgent
+                  ? null
+                  : () => _createSession(context, agent, activeMachine),
+        ),
+        onTap: () async {
+          await agentsController.setActive(agent.key);
+          if (activeMachine != null) {
+            await chatController.loadFor(agent, activeMachine);
+          }
+          if (context.mounted && closeOnAction) {
+            Navigator.of(context).pop();
+          }
+        },
+      ),
+      if (selectedAgent && chatController.sessionsLoadingFor(agent.key))
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: LinearProgressIndicator(minHeight: 2),
+        ),
+      if (selectedAgent)
+        for (final AgentSession session in sessions)
+          Padding(
+            padding: const EdgeInsets.only(left: 28),
+            child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              leading: Icon(
+                session.id == activeSessionId
+                    ? Icons.chat_bubble
+                    : Icons.chat_bubble_outline,
+                size: 18,
+              ),
+              title: Text(
+                session.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              selected: session.id == activeSessionId,
+              // The default "Main" session can't be deleted — it holds the
+              // original, pre-multi-session conversation for this path.
+              trailing: session.isDefault
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: context.l10n.deleteSession,
+                      onPressed: chatController.isThinking
+                          ? null
+                          : () => _deleteSession(context, agent, session),
+                    ),
+              onTap: () async {
+                await agentsController.setActive(agent.key);
+                await chatController.selectSession(agent, session.id);
+                if (context.mounted && closeOnAction) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ),
+    ];
+  }
+
+  Future<void> _createSession(
+    BuildContext context,
+    CliAgent agent,
+    MachineCredential? activeMachine,
+  ) async {
+    if (activeMachine == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.importOrChooseMachine)),
+      );
+      return;
+    }
+    final int next = chatController.sessionsFor(agent.key).length + 1;
+    final TextEditingController controller = TextEditingController(
+      text: context.l10n.defaultSessionName(next),
+    );
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.newSession),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(labelText: context.l10n.sessionName),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (String value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: Text(context.l10n.create),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (name == null || !context.mounted) return;
+    try {
+      await agentsController.setActive(agent.key);
+      await chatController.createSessionFor(agent, name: name);
+    } catch (err) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
+      );
+    }
+  }
+
+  Future<void> _deleteSession(
+    BuildContext context,
+    CliAgent agent,
+    AgentSession session,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.deleteSessionTitle(session.name)),
+          content: Text(context.l10n.deleteSessionBody),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(context.l10n.delete),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await chatController.deleteSession(agent, session.id);
+    } catch (err) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
+      );
+    }
+  }
 }
+
+// Mirrors the backend cap (server/lib/chat-sessions.js MAX_SESSIONS) so the
+// "new session" button disables before the create call would be rejected.
+const int _maxSessionsPerAgent = 8;
 
 IconData _iconFor(String key) {
   return switch (key) {

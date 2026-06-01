@@ -9,8 +9,7 @@ const path = require('path');
 // same time. This module only validates, resolves, and creates paths; there is
 // no shared "current workdir" state anymore. The `.env` AGENTDECK_DEFAULT_DIR is
 // kept solely as the default a brand-new device starts from. Session identity
-// is keyed by workdir + agent in server.js, so two devices in the same path
-// share one conversation.
+// is keyed by workdir + agent + chat session in server.js.
 const ENV_PATH = path.join(__dirname, '..', '.env');
 
 class WorkdirError extends Error {

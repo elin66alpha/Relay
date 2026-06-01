@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -248,10 +249,16 @@ class _BotChatScreenState extends State<BotChatScreen> {
           animation: Listenable.merge(<Listenable>[
             widget.agentsController,
             widget.machinesController,
+            widget.chatController,
           ]),
           builder: (BuildContext context, Widget? _) {
             final MachineCredential? machine =
                 widget.machinesController.activeMachine;
+            final AgentSession? session = widget.chatController.activeSession;
+            final String subtitle = <String>[
+              if (machine != null) machine.displayName,
+              if (session != null) session.name,
+            ].join(' - ');
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -263,9 +270,9 @@ class _BotChatScreenState extends State<BotChatScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (machine != null)
+                if (subtitle.isNotEmpty)
                   Text(
-                    machine.displayName,
+                    subtitle,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.outline,
                       fontSize: 12,

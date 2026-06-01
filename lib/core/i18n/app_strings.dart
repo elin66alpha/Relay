@@ -78,18 +78,16 @@ class AppStrings {
   String uploadFailed(Object err) => isZh ? '上传失败：$err' : 'Upload failed: $err';
   String downloadFailed(Object err) =>
       isZh ? '下载失败：$err' : 'Download failed: $err';
-  String downloadProgress(String name, int percent) => isZh
-      ? '正在下载 $name（$percent%）'
-      : 'Downloading $name ($percent%)';
+  String downloadProgress(String name, int percent) =>
+      isZh ? '正在下载 $name（$percent%）' : 'Downloading $name ($percent%)';
   String downloadIndeterminate(String name) =>
       isZh ? '正在下载 $name…' : 'Downloading $name…';
   String get downloadComplete => isZh ? '下载完成' : 'Download complete';
   String get downloadFailedTitle => isZh ? '下载失败' : 'Download failed';
   String savedTo(String location) =>
       isZh ? '已保存到：$location' : 'Saved to: $location';
-  String get savedToBrowserDownloads => isZh
-      ? '已下载到浏览器的下载文件夹。'
-      : 'Saved to your browser’s downloads folder.';
+  String get savedToBrowserDownloads =>
+      isZh ? '已下载到浏览器的下载文件夹。' : 'Saved to your browser’s downloads folder.';
   String downloadTooLarge(String limit) => isZh
       ? '文件超过下载上限（$limit），无法下载。'
       : 'This download exceeds the size limit ($limit) and was blocked.';
@@ -141,7 +139,19 @@ class AppStrings {
   String get ok => isZh ? '确认' : 'OK';
   String get cancel => isZh ? '取消' : 'Cancel';
   String get clear => isZh ? '清空' : 'Clear';
+  String get create => isZh ? '创建' : 'Create';
   String get delete => isZh ? '删除' : 'Delete';
+  String get newSession => isZh ? '新建会话' : 'New session';
+  String get sessionName => isZh ? '会话名称' : 'Session name';
+  String defaultSessionName(int index) => isZh ? '会话 $index' : 'Session $index';
+  String get deleteSession => isZh ? '删除会话' : 'Delete session';
+  String deleteSessionTitle(String name) =>
+      isZh ? '删除 $name？' : 'Delete $name?';
+  String get deleteSessionBody => isZh
+      ? '这个会话的聊天记录和机器侧上下文都会被删除，工作目录里的文件不会受影响。'
+      : 'This deletes the chat history and machine-side context for this session. Files in the workdir are not changed.';
+  String sessionActionFailed(Object err) =>
+      isZh ? '会话操作失败：$err' : 'Session action failed: $err';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get retry => isZh ? '重试' : 'Retry';
@@ -243,6 +253,6 @@ class AppStrings {
       : 'The QR code is not a valid AgentDeck credential.';
   String get clearChatTitle => isZh ? '清空当前对话？' : 'Clear this chat?';
   String get clearChatBody => isZh
-      ? '删除本地历史消息，并在机器上为当前 agent 开启新会话（不影响工作目录里的文件）。'
-      : 'Delete local history and start a new machine-side session for this agent. Files in the workdir are not changed.';
+      ? '删除当前会话的历史消息，并在机器上为这个会话开启新的上下文（不影响工作目录里的文件）。'
+      : 'Delete this session history and start a new machine-side context for it. Files in the workdir are not changed.';
 }

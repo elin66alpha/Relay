@@ -23,8 +23,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 ## Current Scope
 
 - One backend machine can expose Claude Code, Codex, and Antigravity from the same work directory.
-- **Sessions are shared by work directory + agent.** A conversation is keyed by `workdir + agent`, not by device. Every device currently in the same path shares one conversation, one resumable CLI session, and one history, and mirrors the others' messages and in-flight agent progress in real time. Each device holds its own current work directory locally (sent via the `X-Workdir` header), so two devices can work in different paths at once and converge when they match. Concurrent turns on the same shared session are serialized (queued), since the underlying CLI session is single-threaded.
-- The app stores no chat history locally. The conversation is kept on the backend (the CLI host) and reloaded when the app reopens, so it opens at your latest message rather than the top. Clearing chat wipes both the backend history and the agent's resumable session.
+- **Sessions are shared by work directory + agent + named session.** Each `workdir + agent` can hold multiple named sessions. Every session keeps its own history and resumable CLI context, can be created from the drawer with the `+` button, and can be switched or deleted without touching files in the workdir. Devices in the same workdir/session mirror each other's messages and in-flight agent progress in real time.
+- The app stores no chat history locally. Conversations are kept on the backend (the CLI host) and reloaded when the app reopens or when you switch work directories/sessions, so the active session opens at the latest message rather than the top. Clearing chat wipes the current session's backend history and resumable CLI context.
 - Claude Code and Codex stream assistant text over SSE. The client throttles
   high-frequency streaming UI updates on Web so long replies stay responsive.
 - Assistant chat bubbles render agent output as Markdown for readable headings,
@@ -36,7 +36,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
-- The **File system** drawer entry is the single place to browse files and set the work directory (the separate Work directory screen was merged into it). It opens at the current work path and browses by absolute path, so the parent button walks all the way up to the filesystem root, not just the workdir. Folders can be opened; **Set as work path** makes the current folder this device's work directory — each device holds its own path locally (sent via `X-Workdir`), and switching paths switches to that path's shared conversation. It supports file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Downloads stream with a progress bar, save straight to the system Downloads folder (Android via MediaStore, the browser's downloads folder on Web), show where the file landed, and raise a completion notification even after you leave the screen. A download is capped at 300 MB (a folder by its uncompressed total) and a single upload at 100 MB. Dotfiles are hidden by default with a show/hide toggle. File browse/download/upload accept any path the browser can reach and are gated only by the bearer token, consistent with the agents' own full-filesystem access on the host.
+- The **File system** drawer entry is the single place to browse files and set the work directory (the separate Work directory screen was merged into it). It opens at the current work path and browses by absolute path, so the parent button walks all the way up to the filesystem root, not just the workdir. Folders can be opened; **Set as work path** makes the current folder this device's work directory — each device holds its own path locally (sent via `X-Workdir`), and switching paths loads that path's saved agent sessions. It supports file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Downloads stream with a progress bar, save straight to the system Downloads folder (Android via MediaStore, the browser's downloads folder on Web), show where the file landed, and raise a completion notification even after you leave the screen. A download is capped at 300 MB (a folder by its uncompressed total) and a single upload at 100 MB. Dotfiles are hidden by default with a show/hide toggle. File browse/download/upload accept any path the browser can reach and are gated only by the bearer token, consistent with the agents' own full-filesystem access on the host.
 - Protected backend APIs stay closed until at least one credential token has been generated.
 - The same Flutter client runs on mobile (Android / iOS), Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
 - The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
@@ -217,6 +217,10 @@ release keystore before any public/Play Store distribution.
 - `POST /api/fs/upload`
 - `POST /api/chat`
 - `POST /api/chat/cancel`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `POST /api/sessions/active`
+- `POST /api/sessions/delete`
 - `GET /api/history`
 - `POST /api/session/clear`
 - `GET /api/events`

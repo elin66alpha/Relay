@@ -1,6 +1,7 @@
 node_modules/
 .env
 agent-sessions.json
+chat-sessions.json
 chat-history.json
 chat-history.*.json
 cards.json

@@ -6,11 +6,12 @@
 
 - QR-only credential import with user-chosen password.
 - Per-device token creation and revocation through `server/tokens.json`.
-- Shared persistent sessions keyed by `workdir + agent`.
+- Multiple named persistent sessions per `workdir + agent`, each with separate
+  chat history and resumable CLI context.
 - SSE streaming for Claude Code and Codex assistant text, with throttled Web UI
   updates during long replies.
 - Long-task cancellation.
-- Concurrent turns on the same `workdir + agent` session are queued.
+- Concurrent turns on the same `workdir + agent + session` are queued.
 - Theme and language switching.
 - English-first active app flow with Chinese toggle.
 - Drawer cleanup, machine status, and About dialog.
@@ -22,7 +23,8 @@
 - Protected APIs reject requests when no token has been generated yet.
 - Platform-separated backend setup under `backends/`, with Linux PM2 setup,
   macOS LaunchAgent setup, and Windows PowerShell/Scheduled Task setup.
-- Cross-device event mirroring by workdir scope.
+- Cross-device event mirroring by workdir and selected session scope.
+- Left-drawer session creation, switching, and deletion for each CLI agent.
 
 ## Planned
 
@@ -46,7 +48,6 @@ Reuse boundaries:
 
 ### Later Improvements
 
-- **Multiple Agent Sessions per Workdir**: Allow multiple concurrent sessions for each AI agent within the same working directory. Upon switching to a work directory, automatically load previously saved sessions (including names and conversation history/memory). Add a "New Session" (+) button in the left drawer next to the CLI agents, along with the ability to delete specific sessions.
 - Named-domain / direct-mode hardening guide for production use beyond quick tunnels.
 - More detailed backend diagnostics.
 - Scheduled quota-ready messages: let the user draft a message tied to the next

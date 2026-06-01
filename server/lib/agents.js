@@ -13,10 +13,9 @@ const TIMEOUT_MS = parseInt(
   10,
 );
 
-// Persistent sessions: each session key keeps one continuous conversation.
-// The backend is still single-machine, but sessions are isolated by
-// deviceId:agentKey. clearSession lets the app start a fresh machine-side
-// conversation after local history is cleared.
+// Persistent CLI sessions: each session key keeps one continuous conversation.
+// Keys are scoped by workdir + agent + optional chat session id. clearSession
+// lets the app start a fresh machine-side conversation after history is cleared.
 const SESSION_FILE = path.join(__dirname, '..', 'agent-sessions.json');
 
 class AgentCancelledError extends Error {

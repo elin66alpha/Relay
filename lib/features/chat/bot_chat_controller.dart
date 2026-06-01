@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
@@ -29,6 +30,10 @@ class BotChatController extends ChangeNotifier {
   CliAgent _agent = defaultCliAgents.first;
   MachineCredential? _machine;
   final Map<String, bool?> _authStatus = <String, bool?>{};
+  final Map<String, List<AgentSession>> _sessionsByAgent =
+      <String, List<AgentSession>>{};
+  final Map<String, String> _activeSessionByAgent = <String, String>{};
+  final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _isThinking = false;
   bool _isCancelling = false;
@@ -43,7 +48,7 @@ class BotChatController extends ChangeNotifier {
   bool _wantsEvents = false;
   bool _streamNotifyQueued = false;
   // True while another device is running a turn on the conversation we are
-  // viewing (same workdir + agent). We mirror it by polling the backend's
+  // viewing (same workdir + agent + session). We mirror it by polling the backend's
   // authoritative history rather than replaying its deltas, which keeps the two
   // views identical without delta/snapshot races.
   bool _remoteActive = false;
@@ -55,7 +60,33 @@ class BotChatController extends ChangeNotifier {
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
+  String? get activeSessionId => _activeSessionByAgent[_agent.key];
+  AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
   AppStrings get _strings => AppStrings(_language);
+
+  String? activeSessionIdFor(String agentKey) =>
+      _activeSessionByAgent[agentKey];
+
+  AgentSession? activeSessionFor(String agentKey) {
+    return sessionById(agentKey, activeSessionIdFor(agentKey));
+  }
+
+  List<AgentSession> sessionsFor(String agentKey) =>
+      List<AgentSession>.unmodifiable(
+        _sessionsByAgent[agentKey] ?? const <AgentSession>[],
+      );
+
+  bool sessionsLoadingFor(String agentKey) =>
+      _loadingSessions.contains(agentKey);
+
+  AgentSession? sessionById(String agentKey, String? sessionId) {
+    if (sessionId == null || sessionId.isEmpty) return null;
+    for (final AgentSession session
+        in _sessionsByAgent[agentKey] ?? const <AgentSession>[]) {
+      if (session.id == sessionId) return session;
+    }
+    return null;
+  }
 
   /// Login state for an agent CLI on the backend host: true/false when known,
   /// or null when unchecked or undeterminable (e.g. agy). Drives the
@@ -75,6 +106,88 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // A probe failure must not interfere with chatting.
+    }
+  }
+
+  Future<AgentSessionList?> _refreshSessionsFor(String agentKey) async {
+    final MachineCredential? machine = _machine;
+    if (machine == null) return null;
+    _loadingSessions.add(agentKey);
+    notifyListeners();
+    try {
+      final AgentSessionList result =
+          await _backendClient.fetchSessions(agentKey);
+      if (_machine?.id != machine.id) return null;
+      _sessionsByAgent[agentKey] = result.sessions;
+      _activeSessionByAgent[agentKey] = result.activeSession.id;
+      return result;
+    } finally {
+      _loadingSessions.remove(agentKey);
+      notifyListeners();
+    }
+  }
+
+  void _clearSessionLists() {
+    _sessionsByAgent.clear();
+    _activeSessionByAgent.clear();
+    _loadingSessions.clear();
+  }
+
+  void _prefetchInactiveSessions() {
+    if (_machine == null) return;
+    for (final CliAgent agent in defaultCliAgents) {
+      if (agent.key == _agent.key || _sessionsByAgent.containsKey(agent.key)) {
+        continue;
+      }
+      unawaited(_refreshSessionsFor(agent.key).catchError((_) => null));
+    }
+  }
+
+  Future<String> _ensureActiveSessionId(CliAgent agent) async {
+    final String? current = _activeSessionByAgent[agent.key];
+    if (current != null && current.isNotEmpty) return current;
+    final AgentSessionList? result = await _refreshSessionsFor(agent.key);
+    final AgentSession? active = result?.activeSession;
+    if (active != null) return active.id;
+    return AgentSession.defaultId;
+  }
+
+  Future<void> createSessionFor(CliAgent agent, {String name = ''}) async {
+    final MachineCredential? machine = _machine;
+    if (_isThinking || machine == null) return;
+    final AgentSessionList result =
+        await _backendClient.createSession(agent.key, name);
+    if (_machine?.id != machine.id) return;
+    _sessionsByAgent[agent.key] = result.sessions;
+    _activeSessionByAgent[agent.key] = result.activeSession.id;
+    _agent = agent;
+    await _reloadConversation();
+  }
+
+  Future<void> selectSession(CliAgent agent, String sessionId) async {
+    final MachineCredential? machine = _machine;
+    if (_isThinking || machine == null || sessionId.isEmpty) return;
+    final AgentSessionList result =
+        await _backendClient.selectSession(agent.key, sessionId);
+    if (_machine?.id != machine.id) return;
+    _sessionsByAgent[agent.key] = result.sessions;
+    _activeSessionByAgent[agent.key] = result.activeSession.id;
+    _agent = agent;
+    await _reloadConversation();
+  }
+
+  Future<void> deleteSession(CliAgent agent, String sessionId) async {
+    final MachineCredential? machine = _machine;
+    if (_isThinking || machine == null || sessionId.isEmpty) return;
+    final AgentSessionList result =
+        await _backendClient.deleteSession(agent.key, sessionId);
+    if (_machine?.id != machine.id) return;
+    _sessionsByAgent[agent.key] = result.sessions;
+    _activeSessionByAgent[agent.key] = result.activeSession.id;
+    if (_agent.key == agent.key) {
+      await _reloadConversation();
+    } else {
+      notifyListeners();
     }
   }
 
@@ -113,9 +226,11 @@ class BotChatController extends ChangeNotifier {
     // is unchanged; switching either starts fresh and reloads from the backend.
     final bool sameContext =
         _agent.key == agent.key && _machine?.id == machine.id;
+    final bool machineChanged = _machine?.id != machine.id;
     _agent = agent;
     _machine = machine;
-    if (sameContext) {
+    if (machineChanged) _clearSessionLists();
+    if (sameContext && activeSessionId != null) {
       notifyListeners();
       return;
     }
@@ -131,15 +246,18 @@ class BotChatController extends ChangeNotifier {
 
     // Check login state for the new context so the banner can warn up front.
     unawaited(refreshAuthStatus());
+    _prefetchInactiveSessions();
 
     // Pull the previous conversation so reopening the app shows it. Best-effort:
     // ignore failures (offline / no history), and never clobber messages the
     // user has already typed or sent while this was in flight.
     try {
+      final String sessionId = await _ensureActiveSessionId(agent);
       final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key);
+          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
       if (_agent.key != agent.key ||
           _machine?.id != machine.id ||
+          activeSessionId != sessionId ||
           _messages.isNotEmpty) {
         return;
       }
@@ -154,17 +272,22 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
+    final String sessionId = await _ensureActiveSessionId(agent);
+    // Reset the machine-side session first; otherwise the next prompt may
+    // resume context that the user just cleared locally. Only wipe the on-screen
+    // history once the backend confirms — if the clear fails (e.g. a turn is
+    // running → SESSION_BUSY), keep the messages so the view doesn't lie.
+    try {
+      await _backendClient.clearSession(agent.key, sessionId);
+      await _refreshSessionsFor(agent.key);
+    } catch (err) {
+      _appendSystemMessage(_strings.localChatSessionResetFailed(err));
+      return;
+    }
     _stopHistoryPolling();
     _messages.clear();
     _lastError = null;
     notifyListeners();
-    // Also reset the machine-side session; otherwise the next prompt may
-    // resume context that the user just cleared locally.
-    try {
-      await _backendClient.clearSession(agent.key);
-    } catch (err) {
-      _appendSystemMessage(_strings.localChatSessionResetFailed(err));
-    }
   }
 
   Future<void> compressConversation() async {
@@ -176,8 +299,10 @@ class BotChatController extends ChangeNotifier {
     _activeRequestId = requestId;
     notifyListeners();
     try {
+      final String sessionId = await _ensureActiveSessionId(_agent);
       await _backendClient.compressConversation(
         agentKey: _agent.key,
+        sessionId: sessionId,
         requestId: requestId,
       );
     } catch (err) {
@@ -246,15 +371,16 @@ class BotChatController extends ChangeNotifier {
     final WorkdirInfo info =
         await _backendClient.setWorkdir(path, create: create);
     // Switching paths switches conversations: the session is keyed by
-    // workdir + agent. Reconnect the event stream with the new workdir and
-    // reload the shared history for this path so it shows immediately.
+    // workdir + agent + chat session. Reconnect the event stream with the new
+    // workdir and reload the shared history for this path so it shows immediately.
+    _clearSessionLists();
     await reconnectEvents();
     await _reloadConversation();
     return info;
   }
 
   /// Clears the view and pulls the shared conversation for the current
-  /// workdir + agent. Used after switching the work directory.
+  /// workdir + agent + session. Used after switching the work directory.
   Future<void> _reloadConversation() async {
     final MachineCredential? machine = _machine;
     if (machine == null) return;
@@ -270,9 +396,14 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
     unawaited(refreshAuthStatus());
     try {
+      final String sessionId = await _ensureActiveSessionId(agent);
       final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key);
-      if (_agent.key != agent.key || _machine?.id != machine.id) return;
+          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
+      if (_agent.key != agent.key ||
+          _machine?.id != machine.id ||
+          activeSessionId != sessionId) {
+        return;
+      }
       _messages
         ..clear()
         ..addAll(history);
@@ -282,6 +413,7 @@ class BotChatController extends ChangeNotifier {
     } catch (_) {
       // Leave the view empty when history can't be loaded.
     }
+    _prefetchInactiveSessions();
   }
 
   Future<FsListing> browseWorkdir(
@@ -364,10 +496,16 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     final CliAgent agent = _agent;
+    final String? sessionId = activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
     try {
       final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key);
-      if (_agent.key != agent.key || _machine?.id != machine.id) return;
+          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
+      if (_agent.key != agent.key ||
+          _machine?.id != machine.id ||
+          activeSessionId != sessionId) {
+        return;
+      }
       if (history.isEmpty) return;
       // Never clobber our own in-flight turn (our chat stream is the smoother,
       // authoritative source for it); only mirror when the activity is remote.
@@ -415,11 +553,13 @@ class BotChatController extends ChangeNotifier {
 
     final String requestId = _newRequestId(agent);
     _activeRequestId = requestId;
-    _insertAwaitingAssistant(requestId: requestId);
 
     try {
+      final String sessionId = await _ensureActiveSessionId(agent);
+      _insertAwaitingAssistant(requestId: requestId);
       final ChatReply reply = await _backendClient.sendMessage(
         agentKey: agent.key,
+        sessionId: sessionId,
         prompt: userMessage.content,
         requestId: requestId,
         onEvent: _handleEvent,
@@ -466,11 +606,14 @@ class BotChatController extends ChangeNotifier {
     final MachineCredential? machine = _machine;
     if (_isThinking || _remoteActive || machine == null) return;
     final CliAgent agent = _agent;
+    final String? sessionId = activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
     try {
       final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key);
+          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
       if (_agent.key != agent.key ||
           _machine?.id != machine.id ||
+          activeSessionId != sessionId ||
           _isThinking ||
           _remoteActive ||
           history.isEmpty) {
@@ -755,6 +898,20 @@ class BotChatController extends ChangeNotifier {
             const <String, Object?>{};
     final String agentKey = agentData['key'] as String? ?? '';
     if (agentKey.isNotEmpty && agentKey != _agent.key) return;
+    final Map<String, Object?> sessionData =
+        (event.data['session'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final String sessionId = sessionData['id'] as String? ?? '';
+    // Only drop an event when we actually know which session we're viewing.
+    // While sessions are still loading (activeSessionId == null) we let events
+    // through; the history poll then reconciles against the correct session.
+    final String? active = activeSessionId;
+    if (sessionId.isNotEmpty &&
+        active != null &&
+        active.isNotEmpty &&
+        sessionId != active) {
+      return;
+    }
 
     switch (event.type) {
       case 'agent_start':

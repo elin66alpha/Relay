@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../i18n/app_strings.dart';
+import '../models/agent_session.dart';
 import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
@@ -103,6 +104,49 @@ class WorkdirInfo {
   final bool isDirectory;
   final bool busy;
   final bool created;
+}
+
+class AgentSessionList {
+  const AgentSessionList({
+    required this.agentKey,
+    required this.workdir,
+    required this.activeSessionId,
+    required this.sessions,
+  });
+
+  factory AgentSessionList.fromJson(Map<String, Object?> json) {
+    final Map<String, Object?> agent =
+        (json['agent'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final List<Object?> rawSessions = json['sessions'] is List
+        ? (json['sessions'] as List).cast<Object?>()
+        : const <Object?>[];
+    final List<AgentSession> sessions = rawSessions
+        .whereType<Map>()
+        .map((Map item) => AgentSession.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+    final String activeSessionId = json['activeSessionId'] as String? ??
+        (sessions.isNotEmpty ? sessions.first.id : AgentSession.defaultId);
+    return AgentSessionList(
+      agentKey: agent['key'] as String? ?? '',
+      workdir: json['workdir'] as String? ?? '',
+      activeSessionId: activeSessionId,
+      sessions:
+          sessions.isEmpty ? <AgentSession>[AgentSession.fallback()] : sessions,
+    );
+  }
+
+  final String agentKey;
+  final String workdir;
+  final String activeSessionId;
+  final List<AgentSession> sessions;
+
+  AgentSession get activeSession {
+    for (final AgentSession session in sessions) {
+      if (session.id == activeSessionId) return session;
+    }
+    return sessions.isNotEmpty ? sessions.first : AgentSession.fallback();
+  }
 }
 
 class FsEntry {
@@ -347,6 +391,7 @@ class BackendClient {
 
   Future<ChatReply> sendMessage({
     required String agentKey,
+    required String sessionId,
     required String prompt,
     required String requestId,
     void Function(BackendEvent event)? onEvent,
@@ -354,6 +399,7 @@ class BackendClient {
     if (onEvent != null) {
       return _sendMessageStreamed(
         agentKey: agentKey,
+        sessionId: sessionId,
         prompt: prompt,
         requestId: requestId,
         onEvent: onEvent,
@@ -364,6 +410,7 @@ class BackendClient {
       '/api/chat',
       body: <String, Object?>{
         'agent': agentKey,
+        'sessionId': sessionId,
         'prompt': prompt,
         'requestId': requestId,
       },
@@ -389,6 +436,7 @@ class BackendClient {
 
   Future<void> compressConversation({
     required String agentKey,
+    required String sessionId,
     required String requestId,
   }) async {
     await _requestJson(
@@ -396,6 +444,7 @@ class BackendClient {
       '/api/chat',
       body: <String, Object?>{
         'agent': agentKey,
+        'sessionId': sessionId,
         'prompt': '/compact',
         'requestId': requestId,
         'recordHistory': false,
@@ -406,6 +455,7 @@ class BackendClient {
 
   Future<ChatReply> _sendMessageStreamed({
     required String agentKey,
+    required String sessionId,
     required String prompt,
     required String requestId,
     required void Function(BackendEvent event) onEvent,
@@ -420,6 +470,7 @@ class BackendClient {
     );
     request.body = jsonEncode(<String, Object?>{
       'agent': agentKey,
+      'sessionId': sessionId,
       'prompt': prompt,
       'requestId': requestId,
     });
@@ -482,11 +533,68 @@ class BackendClient {
     return UsageReport.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// Fetches the stored conversation for one agent so the app can show the
-  /// previous chat on reopen without persisting anything locally.
-  Future<List<ChatMessage>> fetchHistory(String agentKey) async {
-    final Object? decoded =
-        await _requestJson('GET', '/api/history?agent=$agentKey');
+  Future<AgentSessionList> fetchSessions(String agentKey) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/sessions?agent=${Uri.encodeQueryComponent(agentKey)}',
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid sessions response.');
+    }
+    return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<AgentSessionList> createSession(String agentKey, String name) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions',
+      body: <String, Object?>{'agent': agentKey, 'name': name},
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid session creation response.');
+    }
+    return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<AgentSessionList> selectSession(
+    String agentKey,
+    String sessionId,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/active',
+      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid session selection response.');
+    }
+    return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<AgentSessionList> deleteSession(
+    String agentKey,
+    String sessionId,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/delete',
+      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid session delete response.');
+    }
+    return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Fetches the stored conversation for one agent session so the app can show
+  /// the previous chat on reopen without persisting anything locally.
+  Future<List<ChatMessage>> fetchHistory(
+    String agentKey, {
+    required String sessionId,
+  }) async {
+    final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
+        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
+    final Object? decoded = await _requestJson('GET', '/api/history?$query');
     if (decoded is! Map) {
       throw BackendException('历史响应格式不正确。');
     }
@@ -519,11 +627,11 @@ class BackendClient {
 
   /// Clears the backend-side session for one agent so the next message starts
   /// a new machine-side conversation after local history is cleared.
-  Future<void> clearSession(String agentKey) async {
+  Future<void> clearSession(String agentKey, String sessionId) async {
     await _requestJson(
       'POST',
       '/api/session/clear',
-      body: <String, Object?>{'agent': agentKey},
+      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
     );
   }
 

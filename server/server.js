@@ -48,6 +48,17 @@ const {
   finalizeAllStaleStreamingHistory,
   clearHistory,
 } = require('./lib/history');
+const {
+  LEGACY_SESSION_ID,
+  MAX_SESSIONS,
+  listChatSessions,
+  resolveChatSession,
+  createChatSession,
+  setActiveChatSession,
+  touchChatSession,
+  deleteChatSession,
+  sessionScopeKey,
+} = require('./lib/chat-sessions');
 const cards = require('./lib/cards');
 const { generateCardsForAllAgents } = require('./lib/chat-learner');
 
@@ -74,7 +85,7 @@ const MAX_UPLOAD_BYTES = parseInt(
 const app = express();
 const eventClients = new Set();
 const activeRequests = new Map();
-// Scopes currently executing an agent turn, keyed by `workdir\0agentKey`.
+// Scopes currently executing an agent turn, keyed by `workdir\0agentKey[\0sessionId]`.
 const runningScopes = new Set();
 // Per-scope serial execution chains. A new message on a busy scope waits for the
 // in-flight turn (the underlying `claude --resume` session cannot run two turns
@@ -306,13 +317,21 @@ function normalizeDeviceId(value) {
   return text;
 }
 
-// Session identity = work directory + agent. Two devices in the same path share
-// one conversation, resumable CLI session, and history. NUL separates the parts
-// so no real path can collide with the agent suffix.
+// Session context = work directory + agent. Individual chat sessions hang under
+// that context and each keeps its own history plus resumable CLI session. NUL
+// separates parts so no real path can collide with the agent/session suffix.
 const SCOPE_SEPARATOR = '\u0000';
 
-function scopeKeyFor(agentKey, workdir) {
+function sessionContextKeyFor(agentKey, workdir) {
   return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
+}
+
+function scopeKeyFor(agentKey, workdir, sessionId) {
+  return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
+}
+
+function sessionPayload(session) {
+  return session ? { id: session.id, name: session.name } : null;
 }
 
 // The work directory for a request: the device's x-workdir header, or the
@@ -360,12 +379,16 @@ function enqueueScope(scopeKey, taskFn) {
 // Broadcast a chat event to every device currently in the same work directory
 // (including the originator, which ignores its own requestId). This is what
 // makes a message sent on one device appear on the others in real time.
-function broadcastScope(type, { scopeWorkdir, agent, requestId, deviceId, ...rest }) {
+function broadcastScope(
+  type,
+  { scopeWorkdir, agent, session, requestId, deviceId, ...rest },
+) {
   sendEvent(type, {
     scopeWorkdir,
     deviceId,
     requestId,
     agent: agentPayload(agent),
+    ...(session ? { session: sessionPayload(session) } : {}),
     createdAt: new Date().toISOString(),
     ...rest,
   });
@@ -375,11 +398,12 @@ function agentPayload(agent) {
   return { key: agent.key, label: agent.label };
 }
 
-function emitAgentEvent(type, { requestId, agent, deviceId, ...payload }) {
+function emitAgentEvent(type, { requestId, agent, session, deviceId, ...payload }) {
   sendEvent(type, {
     requestId,
     deviceId,
     agent: agentPayload(agent),
+    ...(session ? { session: sessionPayload(session) } : {}),
     createdAt: new Date().toISOString(),
     ...payload,
   });
@@ -413,7 +437,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function streamTextFallback(res, requestId, agent, deviceId, text) {
+async function streamTextFallback(res, requestId, agent, session, deviceId, text) {
   const value = String(text || '');
   if (!value) return;
   const chunks = value.match(/[\s\S]{1,64}/g) || [];
@@ -422,6 +446,7 @@ async function streamTextFallback(res, requestId, agent, deviceId, text) {
       requestId,
       deviceId,
       agent: agentPayload(agent),
+      session: sessionPayload(session),
       text: chunk,
       createdAt: new Date().toISOString(),
     });
@@ -577,6 +602,7 @@ app.post('/api/chat', async (req, res) => {
   const agentKey = String(req.body.agent || DEFAULT_AGENT).trim();
   const requestId = String(req.body.requestId || randomUUID()).trim();
   const prompt = String(req.body.prompt || '').trim();
+  const requestedSessionId = String(req.body.sessionId || '').trim();
   const recordHistory = req.body.recordHistory !== false;
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
   if (!prompt) {
@@ -599,10 +625,15 @@ app.post('/api/chat', async (req, res) => {
   } catch (err) {
     return sendWorkdirError(res, err);
   }
-  // Session = workdir + agent. Concurrent turns on the same scope are serialized
-  // (see enqueueScope below) rather than rejected, so a second device's message
-  // queues behind the in-flight one instead of failing.
-  const scopeKey = scopeKeyFor(agent.key, workdir);
+  // Session = workdir + agent + chat session. Concurrent turns on the same
+  // session are serialized (see enqueueScope below) rather than rejected.
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const chatSession = resolveChatSession(contextKey, requestedSessionId);
+  if (!chatSession) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  touchChatSession(contextKey, chatSession.id);
 
   const abortController = new AbortController();
   const createdAt = new Date().toISOString();
@@ -612,10 +643,13 @@ app.post('/api/chat', async (req, res) => {
     requestId,
     agentKey: agent.key,
     agentLabel: agent.label,
+    sessionId: chatSession.id,
+    sessionName: chatSession.name,
   };
   const runState = {
     requestId,
     agent,
+    session: chatSession,
     deviceId,
     scopeKey,
     scopeWorkdir: workdir,
@@ -739,12 +773,20 @@ app.post('/api/chat', async (req, res) => {
       const line = event && event.line ? String(event.line) : '';
       if (!line) return;
       persistProgressLine(line);
-      const payload = { requestId, agent, deviceId, line };
+      const payload = {
+        scopeWorkdir: workdir,
+        requestId,
+        agent,
+        session: chatSession,
+        deviceId,
+        line,
+      };
       if (streaming) {
         writeStreamEvent(res, 'agent_progress', {
           requestId,
           deviceId,
           agent: agentPayload(agent),
+          session: sessionPayload(chatSession),
           line,
           createdAt: new Date().toISOString(),
         });
@@ -758,12 +800,20 @@ app.post('/api/chat', async (req, res) => {
       if (!text) return;
       streamedText += text;
       persistDelta(text);
-      const payload = { requestId, agent, deviceId, text };
+      const payload = {
+        scopeWorkdir: workdir,
+        requestId,
+        agent,
+        session: chatSession,
+        deviceId,
+        text,
+      };
       if (streaming) {
         writeStreamEvent(res, 'agent_delta', {
           requestId,
           deviceId,
           agent: agentPayload(agent),
+          session: sessionPayload(chatSession),
           text,
           createdAt: new Date().toISOString(),
         });
@@ -776,15 +826,28 @@ app.post('/api/chat', async (req, res) => {
   // Other devices in this workdir learn a turn started and begin mirroring from
   // persisted history. The originator ignores its own requestId. If the scope is
   // already busy this turn will queue behind the in-flight one.
-  broadcastScope('agent_start', { scopeWorkdir: workdir, agent, requestId, deviceId });
+  broadcastScope('agent_start', {
+    scopeWorkdir: workdir,
+    agent,
+    session: chatSession,
+    requestId,
+    deviceId,
+  });
   const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
   if (willQueue) {
-    broadcastScope('agent_queued', { scopeWorkdir: workdir, agent, requestId, deviceId });
+    broadcastScope('agent_queued', {
+      scopeWorkdir: workdir,
+      agent,
+      session: chatSession,
+      requestId,
+      deviceId,
+    });
     if (streaming) {
       writeStreamEvent(res, 'agent_queued', {
         requestId,
         deviceId,
         agent: agentPayload(agent),
+        session: sessionPayload(chatSession),
         createdAt: new Date().toISOString(),
       });
     }
@@ -806,14 +869,22 @@ app.post('/api/chat', async (req, res) => {
       }
     });
     if (streaming && !streamedText.trim()) {
-      await streamTextFallback(res, requestId, agent, deviceId, content);
+      await streamTextFallback(res, requestId, agent, chatSession, deviceId, content);
     }
-    broadcastScope('agent_done', { scopeWorkdir: workdir, agent, requestId, deviceId });
+    touchChatSession(contextKey, chatSession.id);
+    broadcastScope('agent_done', {
+      scopeWorkdir: workdir,
+      agent,
+      session: chatSession,
+      requestId,
+      deviceId,
+    });
     finalizeAssistantHistory(content);
     const completedAt = new Date().toISOString();
     const reply = {
       requestId,
       agent: agentPayload(agent),
+      session: sessionPayload(chatSession),
       message: {
         role: 'assistant',
         content,
@@ -834,6 +905,7 @@ app.post('/api/chat', async (req, res) => {
         broadcastScope('agent_cancelled', {
           scopeWorkdir: workdir,
           agent,
+          session: chatSession,
           requestId,
           deviceId,
         });
@@ -843,6 +915,7 @@ app.post('/api/chat', async (req, res) => {
           requestId,
           deviceId,
           agent: agentPayload(agent),
+          session: sessionPayload(chatSession),
           createdAt: new Date().toISOString(),
         });
         endStream(res);
@@ -864,6 +937,7 @@ app.post('/api/chat', async (req, res) => {
       broadcastScope('agent_error', {
         scopeWorkdir: workdir,
         agent,
+        session: chatSession,
         requestId,
         deviceId,
         error: message,
@@ -874,6 +948,7 @@ app.post('/api/chat', async (req, res) => {
           requestId,
           deviceId,
           agent: agentPayload(agent),
+          session: sessionPayload(chatSession),
           error: message,
           code: 'NOT_LOGGED_IN',
           createdAt: new Date().toISOString(),
@@ -897,6 +972,7 @@ app.post('/api/chat', async (req, res) => {
     broadcastScope('agent_error', {
       scopeWorkdir: workdir,
       agent,
+      session: chatSession,
       requestId,
       deviceId,
       error: errorMessage,
@@ -907,6 +983,7 @@ app.post('/api/chat', async (req, res) => {
         requestId,
         deviceId,
         agent: agentPayload(agent),
+        session: sessionPayload(chatSession),
         error: errorMessage,
         code: err.code,
         createdAt: new Date().toISOString(),
@@ -955,6 +1032,7 @@ app.post('/api/chat/cancel', (req, res) => {
     broadcastScope('agent_cancelled', {
       scopeWorkdir: runState.scopeWorkdir,
       agent: runState.agent,
+      session: runState.session,
       requestId,
       deviceId: runState.deviceId,
     });
@@ -963,10 +1041,137 @@ app.post('/api/chat/cancel', (req, res) => {
   return res.json({ ok: true, requestId });
 });
 
-// Return the stored conversation for this work directory + agent so any device
-// in the same path shows the same chat, without persisting anything locally.
+app.get('/api/sessions', (req, res) => {
+  const agentKey = String(req.query.agent || '').trim();
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  return res.json({
+    ok: true,
+    agent: agentPayload(agent),
+    workdir,
+    ...listChatSessions(contextKey),
+  });
+});
+
+app.post('/api/sessions', (req, res) => {
+  const agentKey = String(req.body.agent || '').trim();
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const created = createChatSession(contextKey, req.body.name);
+  if (!created) {
+    return res.status(409).json({
+      error: `session limit reached (max ${MAX_SESSIONS})`,
+      code: 'SESSION_LIMIT_REACHED',
+    });
+  }
+  return res.json({
+    ok: true,
+    agent: agentPayload(agent),
+    workdir,
+    ...created,
+  });
+});
+
+app.post('/api/sessions/active', (req, res) => {
+  const agentKey = String(req.body.agent || '').trim();
+  const sessionId = String(req.body.sessionId || '').trim();
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
+  }
+  if (!sessionId) {
+    return res.status(400).json({ error: 'sessionId is required' });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const result = setActiveChatSession(contextKey, sessionId);
+  if (!result) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  return res.json({
+    ok: true,
+    agent: agentPayload(agent),
+    workdir,
+    ...result,
+  });
+});
+
+app.post('/api/sessions/delete', (req, res) => {
+  const agentKey = String(req.body.agent || '').trim();
+  const sessionId = String(req.body.sessionId || '').trim();
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
+  }
+  if (!sessionId) {
+    return res.status(400).json({ error: 'sessionId is required' });
+  }
+  if (sessionId === LEGACY_SESSION_ID) {
+    return res.status(400).json({
+      error: 'the default session cannot be deleted',
+      code: 'SESSION_PROTECTED',
+    });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const existing = listChatSessions(contextKey).sessions.find(
+    (session) => session.id === sessionId,
+  );
+  if (!existing) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir, sessionId);
+  if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
+    return res.status(409).json({
+      error: 'session has a running turn',
+      code: 'SESSION_BUSY',
+    });
+  }
+  const result = deleteChatSession(contextKey, sessionId);
+  clearSession(scopeKey);
+  clearHistory(scopeKey);
+  return res.json({
+    ok: true,
+    agent: agentPayload(agent),
+    workdir,
+    deletedSessionId: sessionId,
+    ...result,
+  });
+});
+
+// Return the stored conversation for this work directory + agent + chat session
+// so any device in the same path/session shows the same chat.
 app.get('/api/history', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
+  const requestedSessionId = String(req.query.sessionId || '').trim();
   if (!agentKey) {
     return res.status(400).json({ error: 'agent is required' });
   }
@@ -980,7 +1185,12 @@ app.get('/api/history', (req, res) => {
   } catch (err) {
     return sendWorkdirError(res, err);
   }
-  const scopeKey = scopeKeyFor(agent.key, workdir);
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const chatSession = resolveChatSession(contextKey, requestedSessionId);
+  if (!chatSession) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
   // Only finalize a streaming bubble as stale when nothing is running OR queued
   // for this scope; a queued turn has a persisted awaiting bubble that is not
   // yet in runningScopes and must not be prematurely marked cancelled.
@@ -990,6 +1200,7 @@ app.get('/api/history', (req, res) => {
   return res.json({
     agent: agent.key,
     workdir,
+    session: sessionPayload(chatSession),
     messages: readHistory(scopeKey),
   });
 });
@@ -1003,12 +1214,11 @@ app.get('/api/usage', async (_req, res) => {
   }
 });
 
-// Clear one agent's persistent session so the next message starts a new
-// machine-side conversation. Scoped to the requesting device's work directory,
-// so it only resets the shared conversation for that path. Without an agent,
-// clear every agent in that path. This does not touch files on disk.
+// Clear one chat session's history plus resumable CLI session so the next message
+// starts a new machine-side conversation. This does not touch files on disk.
 app.post('/api/session/clear', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
+  const requestedSessionId = String(req.body.sessionId || '').trim();
   let workdir;
   try {
     workdir = requestWorkdir(req);
@@ -1020,16 +1230,40 @@ app.post('/api/session/clear', (req, res) => {
     if (!agent) {
       return res.status(400).json({ error: `unknown agent: ${agentKey}` });
     }
-    const scopeKey = scopeKeyFor(agent.key, workdir);
+    const contextKey = sessionContextKeyFor(agent.key, workdir);
+    const sessions = listChatSessions(contextKey).sessions;
+    const chatSession = requestedSessionId
+      ? sessions.find((session) => session.id === requestedSessionId)
+      : resolveChatSession(contextKey, '');
+    if (!chatSession) {
+      return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+    }
+    const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+    if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
+      return res.status(409).json({
+        error: 'session has a running turn',
+        code: 'SESSION_BUSY',
+      });
+    }
     const cleared = clearSession(scopeKey);
     clearHistory(scopeKey);
-    return res.json({ ok: true, agent: agentKey, workdir, cleared });
+    touchChatSession(contextKey, chatSession.id);
+    return res.json({
+      ok: true,
+      agent: agentKey,
+      workdir,
+      session: sessionPayload(chatSession),
+      cleared,
+    });
   }
   let cleared = 0;
   for (const agent of listAgents()) {
-    const scopeKey = scopeKeyFor(agent.key, workdir);
-    if (clearSession(scopeKey)) cleared += 1;
-    clearHistory(scopeKey);
+    const contextKey = sessionContextKeyFor(agent.key, workdir);
+    for (const chatSession of listChatSessions(contextKey).sessions) {
+      const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+      if (clearSession(scopeKey)) cleared += 1;
+      clearHistory(scopeKey);
+    }
   }
   return res.json({ ok: true, workdir, cleared });
 });
