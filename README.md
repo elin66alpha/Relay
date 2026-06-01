@@ -1,6 +1,6 @@
 # AgentDeck
 
-[中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md)
+[中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md) | [Production hardening](docs/production-hardening.md)
 
 AgentDeck is a private control surface for local CLI agents. A Flutter client connects to a small Node backend running on your own machine, then lets you switch between:
 
@@ -34,8 +34,9 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
   output shortcuts such as `###Title` without a space and legacy inline
   `##text##` emphasis; user-authored messages remain plain text.
 - Long-running turns can be cancelled from the app.
-- Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
-- Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
+- Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet. From the same dialog, the user can draft a message that is sent automatically to the selected agent session after the next 5-hour quota reset is detected. Only one scheduled message can be pending per source (Claude / Codex) at a time — the button is disabled while one is queued — since a reset is a single host-wide event. An interrupted scheduled message (server stopped mid-send) is marked failed on next startup rather than left stuck, and old finished records are pruned so the store stays bounded.
+- Quota-reset alerts and scheduled-message results are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
+- The machine status dialog uses `GET /api/diagnostics` for a fuller backend check: public URL, listener, token counts, CLI availability/login status, workdir access, storage files, web build, active requests, queues, and SSE clients.
 - The **File system** drawer entry is the single place to browse files and set the work directory (the separate Work directory screen was merged into it). It opens at the current work path and browses by absolute path, so the parent button walks all the way up to the filesystem root, not just the workdir. Folders can be opened; **Set as work path** makes the current folder this device's work directory — each device holds its own path locally (sent via `X-Workdir`), and switching paths loads that path's saved agent sessions. It supports file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Downloads stream with a progress bar, save straight to the system Downloads folder (Android via MediaStore, the browser's downloads folder on Web), show where the file landed, and raise a completion notification even after you leave the screen. A download is capped at 300 MB (a folder by its uncompressed total) and a single upload at 100 MB. Dotfiles are hidden by default with a show/hide toggle. File browse/download/upload accept any path the browser can reach and are gated only by the bearer token, consistent with the agents' own full-filesystem access on the host.
 - Protected backend APIs stay closed until at least one credential token has been generated.
 - The same Flutter client runs on mobile (Android / iOS), Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
@@ -56,10 +57,11 @@ AgentDeck/
 │   ├── core/storage/     secure storage and device identity
 │   └── features/         chat, drawer, credentials, settings, file system,
 │                         cards
+├── docs/                 production hardening notes
 └── server/               local Node backend
     ├── server.js         HTTP API + SSE events
     └── lib/              agents, tokens, workdir, usage, quota-watch, credentials,
-                          cards + chat-learner (Card Mode)
+                          diagnostics, quota schedules, cards + chat-learner
 ```
 
 ## Backend Quick Start
@@ -207,9 +209,13 @@ release keystore before any public/Play Store distribution.
 
 - `GET /api/health`
 - `GET /api/status`
+- `GET /api/diagnostics`
 - `GET /api/agents`
 - `GET /api/auth/status`
 - `GET /api/usage`
+- `GET /api/quota-schedules`
+- `POST /api/quota-schedules`
+- `POST /api/quota-schedules/cancel`
 - `GET /api/workdir`
 - `GET /api/workdir/browse`
 - `POST /api/workdir`

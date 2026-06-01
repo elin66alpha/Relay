@@ -40,6 +40,7 @@ const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { authStatus } = require('./lib/auth-status');
+const { buildDiagnostics } = require('./lib/diagnostics');
 const {
   readHistory,
   upsertHistoryMessage,
@@ -59,6 +60,16 @@ const {
   deleteChatSession,
   sessionScopeKey,
 } = require('./lib/chat-sessions');
+const {
+  cancelQuotaSchedule,
+  createQuotaSchedule,
+  dueQuotaSchedulesForReset,
+  listQuotaSchedules,
+  markQuotaScheduleFailed,
+  markQuotaScheduleRunning,
+  markQuotaScheduleSent,
+  reconcileRunningSchedules,
+} = require('./lib/quota-schedules');
 const cards = require('./lib/cards');
 const { generateCardsForAllAgents } = require('./lib/chat-learner');
 
@@ -454,6 +465,255 @@ async function streamTextFallback(res, requestId, agent, session, deviceId, text
   }
 }
 
+async function runScheduledQuotaMessage(schedule) {
+  const agent = getAgent(schedule.agentKey);
+  if (!agent) {
+    markQuotaScheduleFailed(schedule.id, `unknown agent: ${schedule.agentKey}`);
+    return;
+  }
+
+  const contextKey = sessionContextKeyFor(agent.key, schedule.workdir);
+  const chatSession = resolveChatSession(contextKey, schedule.sessionId);
+  if (!chatSession) {
+    markQuotaScheduleFailed(schedule.id, 'scheduled chat session was deleted');
+    return;
+  }
+
+  const runningSchedule = markQuotaScheduleRunning(schedule.id) || schedule;
+  const requestId = `quota.${schedule.id}`;
+  const deviceId = 'quota-scheduler';
+  const scopeKey = scopeKeyFor(agent.key, schedule.workdir, chatSession.id);
+  const createdAt = new Date().toISOString();
+  const historyUserId = `${requestId}:user`;
+  const historyAssistantId = `${requestId}:assistant`;
+  const baseHistoryMetadata = {
+    requestId,
+    agentKey: agent.key,
+    agentLabel: agent.label,
+    sessionId: chatSession.id,
+    sessionName: chatSession.name,
+    scheduledQuotaMessageId: schedule.id,
+    quotaSourceKey: schedule.sourceKey,
+  };
+
+  upsertHistoryMessage(scopeKey, {
+    id: historyUserId,
+    role: 'user',
+    content: schedule.prompt,
+    agent: agent.key,
+    createdAt,
+    metadata: baseHistoryMetadata,
+  });
+  upsertHistoryMessage(scopeKey, {
+    id: historyAssistantId,
+    role: 'assistant',
+    content: '',
+    agent: agent.key,
+    createdAt,
+    metadata: {
+      ...baseHistoryMetadata,
+      streaming: true,
+      awaitingFirstToken: true,
+      progressLines: ['Scheduled after quota reset.'],
+    },
+  });
+
+  const updateAssistantHistory = (updater) => {
+    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
+      const currentMetadata =
+        message &&
+        typeof message.metadata === 'object' &&
+        !Array.isArray(message.metadata)
+          ? message.metadata
+          : {};
+      return updater({
+        ...message,
+        content: typeof message.content === 'string' ? message.content : '',
+        metadata: currentMetadata,
+      });
+    });
+  };
+
+  const persistProgressLine = (line) => {
+    updateAssistantHistory((message) => {
+      const lines = Array.isArray(message.metadata.progressLines)
+        ? message.metadata.progressLines.filter((item) => typeof item === 'string')
+        : [];
+      if (lines.length === 0 || lines[lines.length - 1] !== line) {
+        lines.push(line);
+      }
+      while (lines.length > 6) lines.shift();
+      return {
+        ...message,
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          ...message.metadata,
+          ...baseHistoryMetadata,
+          streaming: true,
+          progressLines: lines,
+        },
+      };
+    });
+  };
+
+  const persistDelta = (text) => {
+    updateAssistantHistory((message) => ({
+      ...message,
+      content: `${message.content}${text}`,
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        ...message.metadata,
+        ...baseHistoryMetadata,
+        streaming: true,
+        awaitingFirstToken: false,
+      },
+    }));
+  };
+
+  const finalizeAssistantHistory = (content, metadata = {}) => {
+    updateAssistantHistory((message) => ({
+      ...message,
+      content,
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        ...message.metadata,
+        ...baseHistoryMetadata,
+        ...metadata,
+        streaming: false,
+        awaitingFirstToken: false,
+        progressLines: [],
+      },
+    }));
+  };
+
+  let streamedText = '';
+  const emitRunEvent = (event) => {
+    if (!event || event.type === 'progress') {
+      const line = event && event.line ? String(event.line) : '';
+      if (!line) return;
+      persistProgressLine(line);
+      broadcastScope('agent_progress', {
+        scopeWorkdir: schedule.workdir,
+        agent,
+        session: chatSession,
+        requestId,
+        deviceId,
+        line,
+      });
+      return;
+    }
+    if (event.type === 'delta') {
+      const text = String(event.text || '');
+      if (!text) return;
+      streamedText += text;
+      persistDelta(text);
+      broadcastScope('agent_delta', {
+        scopeWorkdir: schedule.workdir,
+        agent,
+        session: chatSession,
+        requestId,
+        deviceId,
+        text,
+      });
+    }
+  };
+
+  broadcastScope('agent_start', {
+    scopeWorkdir: schedule.workdir,
+    agent,
+    session: chatSession,
+    requestId,
+    deviceId,
+  });
+  if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
+    broadcastScope('agent_queued', {
+      scopeWorkdir: schedule.workdir,
+      agent,
+      session: chatSession,
+      requestId,
+      deviceId,
+    });
+  }
+
+  try {
+    const content = await enqueueScope(scopeKey, async () => {
+      runningScopes.add(scopeKey);
+      try {
+        return await runAgent(agent.key, schedule.prompt, emitRunEvent, {
+          sessionKey: scopeKey,
+          workdir: schedule.workdir,
+        });
+      } finally {
+        runningScopes.delete(scopeKey);
+      }
+    });
+    const finalContent = String(content || streamedText || '').trim();
+    touchChatSession(contextKey, chatSession.id);
+    finalizeAssistantHistory(finalContent);
+    markQuotaScheduleSent(schedule.id);
+    broadcastScope('agent_done', {
+      scopeWorkdir: schedule.workdir,
+      agent,
+      session: chatSession,
+      requestId,
+      deviceId,
+    });
+    sendEvent('quota_schedule_sent', {
+      schedule: {
+        ...runningSchedule,
+        status: 'sent',
+        sentAt: new Date().toISOString(),
+      },
+      message: `Scheduled ${agent.label} message was sent after quota reset.`,
+      messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    const errorMessage =
+      err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN'
+        ? `${agent.label} is not logged in on the backend host. Log in there, then try again.`
+        : err.message || 'scheduled message failed';
+    finalizeAssistantHistory(errorMessage, {
+      errorCode: err.code || 'SCHEDULED_AGENT_ERROR',
+    });
+    markQuotaScheduleFailed(schedule.id, errorMessage);
+    broadcastScope('agent_error', {
+      scopeWorkdir: schedule.workdir,
+      agent,
+      session: chatSession,
+      requestId,
+      deviceId,
+      error: errorMessage,
+      code: err.code,
+    });
+    sendEvent('quota_schedule_failed', {
+      schedule: {
+        ...runningSchedule,
+        status: 'failed',
+        error: errorMessage,
+      },
+      message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
+      messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+
+async function processDueQuotaSchedules(info) {
+  const sourceKey = info && info.key;
+  const due = dueQuotaSchedulesForReset(sourceKey);
+  for (const schedule of due) {
+    try {
+      await runScheduledQuotaMessage(schedule);
+    } catch (err) {
+      console.error(
+        `[quota:${sourceKey}] scheduled message ${schedule.id} failed: ${err.message}`,
+      );
+      markQuotaScheduleFailed(schedule.id, err.message);
+    }
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
@@ -487,6 +747,31 @@ app.get('/api/status', (req, res) => {
     quotaWatch: ENABLE_QUOTA_WATCH,
     publicBaseUrl: PUBLIC_BASE_URL,
   });
+});
+
+app.get('/api/diagnostics', (req, res) => {
+  const workdir = eventWorkdir(req);
+  res.json(
+    buildDiagnostics({
+      workdir,
+      defaultWorkdir: getDefaultWorkdir(),
+      publicBaseUrl: PUBLIC_BASE_URL,
+      host: HOST,
+      port: PORT,
+      quotaWatch: ENABLE_QUOTA_WATCH,
+      agentTimeoutMs: TIMEOUT_MS,
+      maxUploadBytes: MAX_UPLOAD_BYTES,
+      maxDownloadBytes: MAX_DOWNLOAD_BYTES,
+      webBuildDir: WEB_BUILD_DIR,
+      agents: listAgents(),
+      runtime: {
+        sseClients: eventClients.size,
+        activeRequests: activeRequests.size,
+        runningScopes: runningScopes.size,
+        queuedScopes: scopeChains.size,
+      },
+    }),
+  );
 });
 
 app.get('/api/workdir', (req, res) => {
@@ -1214,6 +1499,79 @@ app.get('/api/usage', async (_req, res) => {
   }
 });
 
+app.get('/api/quota-schedules', (req, res) => {
+  const workdir = eventWorkdir(req);
+  return res.json({ workdir, schedules: listQuotaSchedules({ workdir }) });
+});
+
+app.post('/api/quota-schedules', (req, res) => {
+  const sourceKey = String(req.body.sourceKey || '').trim();
+  const agentKey = String(req.body.agent || req.body.agentKey || '').trim();
+  const requestedSessionId = String(req.body.sessionId || '').trim();
+  const agent = getAgent(agentKey);
+  if (!['claude', 'codex'].includes(sourceKey)) {
+    return res.status(400).json({
+      error: 'sourceKey must be claude or codex',
+      code: 'INVALID_QUOTA_SOURCE',
+    });
+  }
+  if (!agent) {
+    return res.status(400).json({
+      error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required',
+    });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const chatSession = resolveChatSession(contextKey, requestedSessionId);
+  if (!chatSession) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  try {
+    const schedule = createQuotaSchedule({
+      sourceKey,
+      agentKey: agent.key,
+      sessionId: chatSession.id,
+      sessionName: chatSession.name,
+      workdir,
+      prompt: req.body.prompt,
+      targetResetsAt: req.body.targetResetsAt,
+    });
+    return res.json({ ok: true, schedule });
+  } catch (err) {
+    return res.status(err.code === 'SCHEDULE_EXISTS' ? 409 : 400).json({
+      error: err.message,
+      code: err.code || 'SCHEDULE_CREATE_FAILED',
+    });
+  }
+});
+
+app.post('/api/quota-schedules/cancel', (req, res) => {
+  const id = String(req.body.id || '').trim();
+  if (!id) {
+    return res.status(400).json({ error: 'id is required' });
+  }
+  try {
+    const schedule = cancelQuotaSchedule(id);
+    if (!schedule) {
+      return res.status(404).json({
+        error: 'scheduled message not found',
+        code: 'SCHEDULE_NOT_FOUND',
+      });
+    }
+    return res.json({ ok: true, schedule });
+  } catch (err) {
+    return res.status(409).json({
+      error: err.message,
+      code: err.code || 'SCHEDULE_CANCEL_FAILED',
+    });
+  }
+});
+
 // Clear one chat session's history plus resumable CLI session so the next message
 // starts a new machine-side conversation. This does not touch files on disk.
 app.post('/api/session/clear', (req, res) => {
@@ -1370,6 +1728,14 @@ app.listen(PORT, HOST, () => {
   if (!hasConfiguredToken()) {
     console.warn('No app token is configured. Create a credential before exposing this server.');
   }
+  try {
+    const recovered = reconcileRunningSchedules();
+    if (recovered > 0) {
+      console.warn(`Marked ${recovered} interrupted scheduled message(s) as failed.`);
+    }
+  } catch (err) {
+    console.error(`Failed to reconcile scheduled messages: ${err.message}`);
+  }
   if (ENABLE_QUOTA_WATCH) {
     startQuotaWatch({
       name: 'app',
@@ -1379,6 +1745,9 @@ app.listen(PORT, HOST, () => {
           messageZh: info && info.messageZh,
           info,
           createdAt: new Date().toISOString(),
+        });
+        processDueQuotaSchedules(info).catch((err) => {
+          console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);
         });
       },
     });

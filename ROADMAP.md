@@ -17,6 +17,13 @@
 - Drawer cleanup, machine status, and About dialog.
 - Quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
+- Scheduled quota-ready messages: the quota dialog can store a prompt for the
+  next Claude Code or Codex 5-hour reset, and the backend sends it after the
+  reset is detected.
+- More detailed backend diagnostics through `GET /api/diagnostics` and the
+  machine status dialog.
+- Named-domain / direct-mode production hardening guide for stable public
+  deployments beyond quick tunnels.
 - Work directory management from the app, stored per device and sent to the
   backend on each request.
 - Workdir-scoped file browsing, upload, and download from the app/Web client.
@@ -48,9 +55,4 @@ Reuse boundaries:
 
 ### Later Improvements
 
-- Named-domain / direct-mode hardening guide for production use beyond quick tunnels.
-- More detailed backend diagnostics.
-- Scheduled quota-ready messages: let the user draft a message tied to the next
-  quota reset time, then automatically send it immediately after quota refresh
-  so refreshed capacity is not wasted while the user is away.
 - Better Antigravity quota support when an API or reliable CLI source is available.

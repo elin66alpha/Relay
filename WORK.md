@@ -17,6 +17,23 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
+## 2026-06-01 - Multi-session, diagnostics, and scheduled quota messages
+
+- Named chat sessions per `workdir + agent`: scope key is now
+  `workdir\0agent\0sessionId`; the default `Main` session reuses the legacy
+  context key (no history migration). Capped at 8 sessions per context; `Main`
+  cannot be deleted (`server/lib/chat-sessions.js`, `cli_agents_drawer.dart`).
+- `GET /api/diagnostics` (`server/lib/diagnostics.js`) backs a fuller machine
+  status dialog: listener, public URL, token counts, CLI availability/login,
+  workdir access, storage files, web build, and live request/queue/SSE counts.
+- Scheduled quota messages (`server/lib/quota-schedules.js`): draft a message in
+  the quota dialog; the watcher auto-sends it after the next 5-hour reset for
+  that source. Hardening applied here — **one pending schedule per source**
+  (a reset is one host-wide event; backend returns `409 SCHEDULE_EXISTS`, the
+  button disables), interrupted `running` schedules are reconciled to `failed`
+  on startup, and the JSON store prunes finished records to `MAX_FINISHED` (50).
+  `quota-schedules.json` is secret/gitignored.
+
 ## 2026-06-01 - Unified File System, Downloads, and Cleanup
 
 - The Work directory screen was merged into the **File system** screen. One

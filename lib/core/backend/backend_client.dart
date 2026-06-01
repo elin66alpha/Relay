@@ -66,6 +66,134 @@ class BackendStatus {
   }
 }
 
+class BackendDiagnostics {
+  const BackendDiagnostics(this.json);
+
+  factory BackendDiagnostics.fromJson(Map<String, Object?> json) {
+    return BackendDiagnostics(json);
+  }
+
+  final Map<String, Object?> json;
+
+  Map<String, Object?> _map(String key) =>
+      (json[key] as Map?)?.cast<String, Object?>() ?? const <String, Object?>{};
+
+  String _string(Map<String, Object?> map, String key) =>
+      map[key]?.toString() ?? '';
+
+  int _int(Map<String, Object?> map, String key) =>
+      (map[key] as num?)?.toInt() ?? 0;
+
+  bool _bool(Map<String, Object?> map, String key) =>
+      map[key] as bool? ?? false;
+
+  String toDisplayText(AppStrings strings) {
+    final Map<String, Object?> server = _map('server');
+    final Map<String, Object?> runtime = _map('runtime');
+    final Map<String, Object?> auth = _map('auth');
+    final Map<String, Object?> workdir = _map('workdir');
+    final Map<String, Object?> currentWorkdir =
+        (workdir['current'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final Map<String, Object?> defaultWorkdir =
+        (workdir['default'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final List<Object?> agents =
+        json['agents'] is List ? (json['agents'] as List).cast<Object?>() : [];
+    final List<Object?> storage = json['storage'] is List
+        ? (json['storage'] as List).cast<Object?>()
+        : [];
+
+    final int timeoutMinutes = (_int(server, 'agentTimeoutMs') / 60000).round();
+    final List<String> lines = <String>[
+      strings.backendOnline,
+      strings.diagnosticsGeneratedLine(json['createdAt']?.toString() ?? ''),
+      strings.diagnosticsRuntimeLine(
+        _string(server, 'platform'),
+        _string(server, 'arch'),
+        _string(server, 'node'),
+      ),
+      strings.diagnosticsListenLine(
+        _string(server, 'host'),
+        _int(server, 'port'),
+      ),
+      if (_string(server, 'publicBaseUrl').isNotEmpty)
+        strings.publicBaseUrlLine(_string(server, 'publicBaseUrl')),
+      strings.workDirectoryLine(_string(currentWorkdir, 'dir')),
+      strings.diagnosticsWorkdirLine(
+        exists: _bool(currentWorkdir, 'exists'),
+        writable: _bool(currentWorkdir, 'writable'),
+      ),
+      strings.diagnosticsDefaultWorkdirLine(_string(defaultWorkdir, 'dir')),
+      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
+      strings.quotaWatchLine(_bool(server, 'quotaWatch')),
+      strings.diagnosticsTransferLimitLine(
+        _formatBytes(_int(server, 'maxUploadBytes')),
+        _formatBytes(_int(server, 'maxDownloadBytes')),
+      ),
+      strings.diagnosticsTokenLine(
+        configured: _bool(auth, 'configured'),
+        active: _int(auth, 'active'),
+        total: _int(auth, 'total'),
+      ),
+      strings.diagnosticsRequestLine(
+        active: _int(runtime, 'activeRequests'),
+        running: _int(runtime, 'runningScopes'),
+        queued: _int(runtime, 'queuedScopes'),
+        sse: _int(runtime, 'sseClients'),
+      ),
+      strings.diagnosticsWebBuildLine(
+        ((server['webBuild'] as Map?)?.cast<String, Object?>() ??
+                const <String, Object?>{})['indexExists'] ==
+            true,
+      ),
+      '',
+      strings.diagnosticsAgentsHeader,
+      for (final Object? item in agents)
+        _agentLine(strings, (item as Map?)?.cast<String, Object?>()),
+      '',
+      strings.diagnosticsStorageHeader,
+      for (final Object? item in storage)
+        _storageLine(strings, (item as Map?)?.cast<String, Object?>()),
+    ];
+    return lines.where((String line) => line.trim().isNotEmpty).join('\n');
+  }
+
+  String _agentLine(AppStrings strings, Map<String, Object?>? item) {
+    final Map<String, Object?> agent = item ?? const <String, Object?>{};
+    final Map<String, Object?> cli =
+        (agent['cli'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    return strings.diagnosticsAgentLine(
+      agent['label']?.toString() ?? agent['key']?.toString() ?? '',
+      available: cli['available'] == true,
+      loggedIn: agent['loggedIn'] as bool?,
+      path: cli['path']?.toString() ?? '',
+    );
+  }
+
+  String _storageLine(AppStrings strings, Map<String, Object?>? item) {
+    final Map<String, Object?> file = item ?? const <String, Object?>{};
+    return strings.diagnosticsStorageLine(
+      file['name']?.toString() ?? '',
+      exists: file['exists'] == true,
+      writable: file['writable'] == true,
+      size: _formatBytes((file['sizeBytes'] as num?)?.toInt() ?? 0),
+    );
+  }
+
+  static String _formatBytes(int value) {
+    if (value <= 0) return '0 B';
+    if (value >= 1024 * 1024) {
+      return '${(value / (1024 * 1024)).round()} MB';
+    }
+    if (value >= 1024) {
+      return '${(value / 1024).round()} KB';
+    }
+    return '$value B';
+  }
+}
+
 class ChatReply {
   const ChatReply({
     required this.requestId,
@@ -317,6 +445,58 @@ class UsageReport {
   final List<UsageAgent> agents;
 }
 
+class QuotaSchedule {
+  const QuotaSchedule({
+    required this.id,
+    required this.sourceKey,
+    required this.agentKey,
+    required this.sessionId,
+    required this.workdir,
+    required this.prompt,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    this.sessionName = '',
+    this.targetResetsAt,
+    this.sentAt,
+    this.error,
+  });
+
+  factory QuotaSchedule.fromJson(Map<String, Object?> json) {
+    return QuotaSchedule(
+      id: json['id'] as String? ?? '',
+      sourceKey: json['sourceKey'] as String? ?? '',
+      agentKey: json['agentKey'] as String? ?? '',
+      sessionId: json['sessionId'] as String? ?? '',
+      sessionName: json['sessionName'] as String? ?? '',
+      workdir: json['workdir'] as String? ?? '',
+      prompt: json['prompt'] as String? ?? '',
+      targetResetsAt: json['targetResetsAt'] as String?,
+      status: json['status'] as String? ?? 'pending',
+      createdAt: json['createdAt'] as String? ?? '',
+      updatedAt: json['updatedAt'] as String? ?? '',
+      sentAt: json['sentAt'] as String?,
+      error: json['error'] as String?,
+    );
+  }
+
+  final String id;
+  final String sourceKey;
+  final String agentKey;
+  final String sessionId;
+  final String sessionName;
+  final String workdir;
+  final String prompt;
+  final String? targetResetsAt;
+  final String status;
+  final String createdAt;
+  final String updatedAt;
+  final String? sentAt;
+  final String? error;
+
+  bool get canCancel => status == 'pending';
+}
+
 class BackendEvent {
   const BackendEvent({
     required this.type,
@@ -387,6 +567,20 @@ class BackendClient {
       throw BackendException('Invalid backend status response.');
     }
     return BackendStatus.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<BackendDiagnostics> diagnostics({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/diagnostics',
+      timeout: timeout,
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid backend diagnostics response.');
+    }
+    return BackendDiagnostics.fromJson(decoded.cast<String, Object?>());
   }
 
   Future<ChatReply> sendMessage({
@@ -531,6 +725,60 @@ class BackendClient {
       throw BackendException('Invalid usage response.');
     }
     return UsageReport.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<List<QuotaSchedule>> quotaSchedules() async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/quota-schedules',
+      timeout: const Duration(seconds: 20),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid quota schedules response.');
+    }
+    final List<Object?> raw = decoded['schedules'] is List
+        ? (decoded['schedules'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => QuotaSchedule.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+  }
+
+  Future<QuotaSchedule> createQuotaSchedule({
+    required String sourceKey,
+    required String agentKey,
+    required String sessionId,
+    required String prompt,
+    String? targetResetsAt,
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/quota-schedules',
+      body: <String, Object?>{
+        'sourceKey': sourceKey,
+        'agent': agentKey,
+        'sessionId': sessionId,
+        'prompt': prompt,
+        if (targetResetsAt != null) 'targetResetsAt': targetResetsAt,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    if (decoded is! Map || decoded['schedule'] is! Map) {
+      throw BackendException('Invalid quota schedule response.');
+    }
+    return QuotaSchedule.fromJson(
+      (decoded['schedule'] as Map).cast<String, Object?>(),
+    );
+  }
+
+  Future<void> cancelQuotaSchedule(String id) async {
+    await _requestJson(
+      'POST',
+      '/api/quota-schedules/cancel',
+      body: <String, Object?>{'id': id},
+      timeout: const Duration(seconds: 20),
+    );
   }
 
   Future<AgentSessionList> fetchSessions(String agentKey) async {

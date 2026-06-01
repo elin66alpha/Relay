@@ -43,6 +43,44 @@ class AppStrings {
   String get weeklyQuota => isZh ? '本周' : 'This week';
   String get remaining => isZh ? '剩余' : 'remaining';
   String get refreshAt => isZh ? '刷新' : 'Refresh';
+  String get scheduleMessage => isZh ? '预设消息' : 'Schedule message';
+  String get scheduleAlreadyPending =>
+      isZh ? '已有待发送的预设消息' : 'A scheduled message is already pending';
+  String get scheduleQuotaMessageTitle =>
+      isZh ? '额度刷新后发送' : 'Send after quota refresh';
+  String scheduleQuotaMessageBody(String agent) => isZh
+      ? '这条消息会在下一次 $agent 5 小时额度刷新后自动发送到当前会话。'
+      : 'This message will be sent to the current session after the next $agent 5-hour quota refresh.';
+  String get scheduledMessages => isZh ? '预设消息' : 'Scheduled messages';
+  String get noScheduledMessages =>
+      isZh ? '暂无待发送的预设消息。' : 'No pending scheduled messages.';
+  String get prompt => isZh ? '消息内容' : 'Message';
+  String get cancelSchedule => isZh ? '取消预设' : 'Cancel schedule';
+  String scheduleCreated(String agent) =>
+      isZh ? '已为 $agent 创建预设消息。' : 'Scheduled message for $agent.';
+  String scheduleFailed(Object err) =>
+      isZh ? '预设消息失败：$err' : 'Scheduled message failed: $err';
+  String scheduleStatus(String status) {
+    if (isZh) {
+      return switch (status) {
+        'pending' => '等待额度刷新',
+        'running' => '正在发送',
+        'sent' => '已发送',
+        'failed' => '失败',
+        'cancelled' => '已取消',
+        _ => status,
+      };
+    }
+    return switch (status) {
+      'pending' => 'pending reset',
+      'running' => 'sending',
+      'sent' => 'sent',
+      'failed' => 'failed',
+      'cancelled' => 'cancelled',
+      _ => status,
+    };
+  }
+
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
@@ -60,6 +98,72 @@ class AppStrings {
   String quotaWatchLine(bool enabled) => isZh
       ? '额度监听：${enabled ? '开启' : '关闭'}'
       : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
+  String diagnosticsGeneratedLine(String value) =>
+      isZh ? '诊断时间：$value' : 'Diagnostics time: $value';
+  String diagnosticsRuntimeLine(String platform, String arch, String node) =>
+      isZh ? '运行环境：$platform/$arch，$node' : 'Runtime: $platform/$arch, $node';
+  String diagnosticsListenLine(String host, int port) =>
+      isZh ? '监听地址：$host:$port' : 'Listening on: $host:$port';
+  String diagnosticsWorkdirLine({
+    required bool exists,
+    required bool writable,
+  }) =>
+      isZh
+          ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
+          : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
+  String diagnosticsDefaultWorkdirLine(String value) =>
+      isZh ? '默认工作目录：$value' : 'Default workdir: $value';
+  String diagnosticsTransferLimitLine(String upload, String download) => isZh
+      ? '传输上限：上传 $upload，下载 $download'
+      : 'Transfer limits: upload $upload, download $download';
+  String diagnosticsTokenLine({
+    required bool configured,
+    required int active,
+    required int total,
+  }) =>
+      isZh
+          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
+          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
+  String diagnosticsRequestLine({
+    required int active,
+    required int running,
+    required int queued,
+    required int sse,
+  }) =>
+      isZh
+          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
+          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
+  String diagnosticsWebBuildLine(bool exists) => isZh
+      ? 'Web 构建：${exists ? '存在' : '缺失'}'
+      : 'Web build: ${exists ? 'present' : 'missing'}';
+  String get diagnosticsAgentsHeader => isZh ? 'CLI 检查：' : 'CLI checks:';
+  String diagnosticsAgentLine(
+    String label, {
+    required bool available,
+    required bool? loggedIn,
+    required String path,
+  }) {
+    final String login = loggedIn == null
+        ? (isZh ? '登录未知' : 'login unknown')
+        : (loggedIn
+            ? (isZh ? '已登录' : 'logged in')
+            : (isZh ? '未登录' : 'not logged in'));
+    final String cli =
+        available ? (isZh ? '可执行' : 'available') : (isZh ? '未找到' : 'not found');
+    final String suffix = path.isEmpty ? '' : ' ($path)';
+    return '- $label: $cli, $login$suffix';
+  }
+
+  String get diagnosticsStorageHeader => isZh ? '存储文件：' : 'Storage files:';
+  String diagnosticsStorageLine(
+    String name, {
+    required bool exists,
+    required bool writable,
+    required String size,
+  }) =>
+      isZh
+          ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
+          : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
   String get fileSystem => isZh ? '文件系统' : 'File system';
   String get currentFolder => isZh ? '当前文件夹' : 'Current folder';
   String get parentFolder => isZh ? '上一级' : 'Parent folder';

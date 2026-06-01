@@ -359,11 +359,42 @@ class BotChatController extends ChangeNotifier {
     AppStrings strings, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
-    final BackendStatus status = await _backendClient.status(timeout: timeout);
-    return status.toDisplayText(strings);
+    try {
+      final BackendDiagnostics diagnostics =
+          await _backendClient.diagnostics(timeout: timeout);
+      return diagnostics.toDisplayText(strings);
+    } on BackendException catch (err) {
+      if (err.status != 404) rethrow;
+      final BackendStatus status =
+          await _backendClient.status(timeout: timeout);
+      return status.toDisplayText(strings);
+    }
   }
 
   Future<UsageReport> usageReport() => _backendClient.usageReport();
+
+  Future<List<QuotaSchedule>> quotaSchedules() =>
+      _backendClient.quotaSchedules();
+
+  Future<QuotaSchedule> createQuotaSchedule({
+    required String sourceKey,
+    required String agentKey,
+    required String prompt,
+    String? targetResetsAt,
+  }) async {
+    final CliAgent agent = cliAgentByKey(agentKey);
+    final String sessionId = await _ensureActiveSessionId(agent);
+    return _backendClient.createQuotaSchedule(
+      sourceKey: sourceKey,
+      agentKey: agent.key,
+      sessionId: sessionId,
+      prompt: prompt,
+      targetResetsAt: targetResetsAt,
+    );
+  }
+
+  Future<void> cancelQuotaSchedule(String id) =>
+      _backendClient.cancelQuotaSchedule(id);
 
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
 
@@ -884,6 +915,17 @@ class BotChatController extends ChangeNotifier {
       if (message.isEmpty) return;
       // Quota alerts prefer a system/browser notification. If the platform
       // denies it, fall back to an in-page system message for Web users.
+      unawaited(_showQuotaNotification(message));
+      return;
+    }
+    if (event.type == 'quota_schedule_sent' ||
+        event.type == 'quota_schedule_failed') {
+      final String message = _strings.isZh
+          ? event.data['messageZh'] as String? ??
+              event.data['message'] as String? ??
+              ''
+          : event.data['message'] as String? ?? '';
+      if (message.isEmpty) return;
       unawaited(_showQuotaNotification(message));
       return;
     }
