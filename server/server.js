@@ -5,8 +5,10 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
+const compression = require('compression');
 
 const {
   AgentCancelledError,
@@ -20,10 +22,22 @@ const {
 } = require('./lib/agents');
 const {
   WorkdirError,
-  getWorkdir,
+  resolveWorkdir,
+  getDefaultWorkdir,
+  resolveRequestWorkdir,
   inspectWorkdir,
-  setWorkdir,
+  validateWorkdir,
 } = require('./lib/workdir');
+const {
+  FilesystemError,
+  listAbsoluteDirectory,
+  listDirectory,
+  prepareDownload,
+  prepareDownloadAbsolute,
+  resolveUploadTarget,
+  resolveAbsoluteUploadTarget,
+  uploadedEntry,
+} = require('./lib/filesystem');
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
 const { startQuotaWatch } = require('./lib/quota-watch');
@@ -44,19 +58,72 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
+// Hard cap on a single download (file, or the uncompressed total behind a zip).
+// Public tunnels can relay slowly or enforce throughput limits, so we refuse
+// oversized downloads up front instead of letting the user wait on a transfer
+// that will stall. Override with DOWNLOAD_MAX_BYTES if your network allows more.
+const MAX_DOWNLOAD_BYTES = parseInt(
+  process.env.DOWNLOAD_MAX_BYTES || String(300 * 1024 * 1024),
+  10,
+);
+// Cap a single uploaded file. Some tunnels limit request bodies, so we refuse
+// oversized uploads (the app also pre-checks before sending).
+const MAX_UPLOAD_BYTES = parseInt(
+  process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
+  10,
+);
 
 const app = express();
 const eventClients = new Set();
 const activeRequests = new Map();
+// Scopes currently executing an agent turn, keyed by `workdir\0agentKey`.
 const runningScopes = new Set();
+// Per-scope serial execution chains. A new message on a busy scope waits for the
+// in-flight turn (the underlying `claude --resume` session cannot run two turns
+// at once), then runs automatically. Maps scopeKey -> tail Promise.
+const scopeChains = new Map();
+const rawUpload = express.raw({
+  type: 'application/octet-stream',
+  // A hair above MAX_UPLOAD_BYTES so the handler returns our own clean JSON for
+  // at-cap files; anything well over the cap is rejected by the parser below.
+  limit: process.env.FILE_UPLOAD_LIMIT || '101mb',
+});
+
+// Turns the body-parser's "payload too large" (and any upstream error) into the
+// same JSON shape the app understands, instead of Express's default HTML 413.
+function uploadErrorHandler(err, req, res, next) {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      error: 'upload exceeds the size limit',
+      code: 'FS_UPLOAD_TOO_LARGE',
+    });
+  }
+  return next(err);
+}
+
+// Compress responses before they cross the tunnel. The web bundle is the bulk of
+// first-load bytes (main.dart.js ~3.6MB + canvaskit.wasm ~7MB); gzip cuts it ~60%,
+// turning a multi-minute first load into seconds. `compressible` does not flag
+// application/wasm, so allow it explicitly. Streaming/SSE responses set
+// `Cache-Control: no-transform`, which compression honors by skipping them.
+app.use(
+  compression({
+    filter(req, res) {
+      const type = String(res.getHeader('Content-Type') || '');
+      if (/application\/wasm/i.test(type)) return true;
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 app.use(express.json({ limit: '16mb' }));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Device-Id',
+    'Content-Type, Authorization, X-Device-Id, X-Workdir',
   );
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   return next();
@@ -87,16 +154,6 @@ function formatUptime(seconds) {
   return `${d}d ${h}h ${m}m ${s}s`;
 }
 
-function clearWorkdir() {
-  const dir = getWorkdir();
-  let count = 0;
-  for (const entry of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
-    count += 1;
-  }
-  return { dir, count };
-}
-
 function sendWorkdirError(res, err) {
   if (err instanceof WorkdirError) {
     return res.status(err.status || 400).json({
@@ -108,13 +165,136 @@ function sendWorkdirError(res, err) {
   return res.status(500).json({ error: err.message });
 }
 
+function sendFilesystemError(res, err) {
+  if (err instanceof FilesystemError) {
+    return res.status(err.status || 400).json({
+      error: err.message,
+      code: err.code,
+    });
+  }
+  return res.status(500).json({ error: err.message });
+}
+
+function queryBool(value) {
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
+function attachmentHeader(filename) {
+  const fallback = String(filename || 'download')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function cleanupTempZip(zipPath) {
+  fs.unlink(zipPath, () => {
+    fs.rm(path.dirname(zipPath), { recursive: true, force: true }, () => {});
+  });
+}
+
+function sendWindowsDirectoryZip(download, res) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-zip-'));
+  const tempZip = path.join(tempDir, `${randomUUID()}.zip`);
+  const sourcePath = path.join(download.zipCwd, download.zipEntryName);
+  const powershell = process.env.POWERSHELL_BIN || 'powershell.exe';
+  const child = spawn(
+    powershell,
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
+      sourcePath,
+      tempZip,
+    ],
+    { windowsHide: true },
+  );
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    cleanupTempZip(tempZip);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0) {
+      cleanupTempZip(tempZip);
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return res.download(tempZip, download.filename, (err) => {
+      cleanupTempZip(tempZip);
+      if (err && !res.headersSent) {
+        return sendFilesystemError(res, err);
+      }
+      return undefined;
+    });
+  });
+}
+
+function sendUnixDirectoryZip(download, res) {
+  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
+    cwd: download.zipCwd,
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0 && !res.destroyed) {
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return undefined;
+  });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
+  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
+  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
+  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
+  let sentBytes = 0;
+  child.stdout.on('data', (chunk) => {
+    sentBytes += chunk.length;
+    if (sentBytes > MAX_DOWNLOAD_BYTES) {
+      child.kill('SIGKILL');
+      res.destroy();
+    }
+  });
+  return child.stdout.pipe(res);
+}
+
+function sendDirectoryZip(download, res) {
+  if (process.platform === 'win32') {
+    return sendWindowsDirectoryZip(download, res);
+  }
+  return sendUnixDirectoryZip(download, res);
+}
+
 function sendEvent(type, payload) {
   const packet = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
-  const targetDeviceId = normalizeDeviceId(payload && payload.deviceId);
+  const scopeWorkdir = payload && payload.scopeWorkdir;
   for (const client of eventClients) {
-    // Targeted events carry a deviceId and are only delivered to that device.
-    // Broadcast events without a deviceId, such as quota_reset, reach everyone.
-    if (targetDeviceId && client.deviceId !== targetDeviceId) {
+    // Scope events carry a scopeWorkdir and only reach devices currently in that
+    // work directory, so a conversation is shared across same-path devices.
+    // Events without a scopeWorkdir (such as quota_reset) reach everyone.
+    if (scopeWorkdir && client.workdir !== scopeWorkdir) {
       continue;
     }
     client.res.write(packet);
@@ -128,8 +308,69 @@ function normalizeDeviceId(value) {
   return text;
 }
 
-function sessionKeyFor(agentKey, deviceId) {
-  return deviceId ? `${deviceId}:${agentKey}` : agentKey;
+// Session identity = work directory + agent. Two devices in the same path share
+// one conversation, resumable CLI session, and history. NUL separates the parts
+// so no real path can collide with the agent suffix.
+const SCOPE_SEPARATOR = '\u0000';
+
+function scopeKeyFor(agentKey, workdir) {
+  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
+}
+
+// The work directory for a request: the device's x-workdir header, or the
+// default for a device that has not chosen one yet. The path is created if
+// missing. Throws WorkdirError for an invalid header, handled by the caller.
+function requestWorkdir(req) {
+  return resolveRequestWorkdir(req.get('x-workdir'));
+}
+
+// Resolve a workdir for read-only contexts (SSE subscription, status) without
+// creating it; fall back to the default if the header is missing or invalid.
+function eventWorkdir(req) {
+  const raw = String(req.get('x-workdir') || '').trim();
+  if (!raw) return getDefaultWorkdir();
+  try {
+    return resolveWorkdir(raw);
+  } catch (_err) {
+    return getDefaultWorkdir();
+  }
+}
+
+// True when an agent turn is currently executing anywhere under this workdir.
+function workdirBusy(workdir) {
+  const prefix = `${workdir}${SCOPE_SEPARATOR}`;
+  for (const key of runningScopes) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+// Run taskFn after any in-flight turn on the same scope completes, so turns on a
+// shared conversation execute one at a time. The returned promise settles with
+// taskFn's result/error; the chain itself never rejects so later turns proceed.
+function enqueueScope(scopeKey, taskFn) {
+  const prev = scopeChains.get(scopeKey) || Promise.resolve();
+  const run = prev.then(() => taskFn());
+  const tail = run.catch(() => {});
+  scopeChains.set(scopeKey, tail);
+  tail.then(() => {
+    if (scopeChains.get(scopeKey) === tail) scopeChains.delete(scopeKey);
+  });
+  return run;
+}
+
+// Broadcast a chat event to every device currently in the same work directory
+// (including the originator, which ignores its own requestId). This is what
+// makes a message sent on one device appear on the others in real time.
+function broadcastScope(type, { scopeWorkdir, agent, requestId, deviceId, ...rest }) {
+  sendEvent(type, {
+    scopeWorkdir,
+    deviceId,
+    requestId,
+    agent: agentPayload(agent),
+    createdAt: new Date().toISOString(),
+    ...rest,
+  });
 }
 
 function agentPayload(agent) {
@@ -211,11 +452,12 @@ app.get('/api/auth/status', (_req, res) => {
   });
 });
 
-app.get('/api/status', (_req, res) => {
+app.get('/api/status', (req, res) => {
   res.json({
     ok: true,
     defaultAgent: DEFAULT_AGENT,
-    workdir: getWorkdir(),
+    workdir: eventWorkdir(req),
+    defaultWorkdir: getDefaultWorkdir(),
     systemUptime: formatUptime(os.uptime()),
     processUptime: formatUptime(process.uptime()),
     agentTimeoutMs: TIMEOUT_MS,
@@ -224,12 +466,10 @@ app.get('/api/status', (_req, res) => {
   });
 });
 
-app.get('/api/workdir', (_req, res) => {
+app.get('/api/workdir', (req, res) => {
   try {
-    return res.json({
-      dir: getWorkdir(),
-      busy: activeRequests.size > 0 || runningScopes.size > 0,
-    });
+    const dir = requestWorkdir(req);
+    return res.json({ dir, busy: workdirBusy(dir) });
   } catch (err) {
     return sendWorkdirError(res, err);
   }
@@ -244,15 +484,12 @@ app.post('/api/workdir/check', (req, res) => {
   }
 });
 
+// Validate (and optionally create) a path the device wants to switch to. With
+// per-device workdirs there is no global state to change here: the client
+// stores the returned canonical path locally and sends it back via x-workdir.
 app.post('/api/workdir', (req, res) => {
-  if (activeRequests.size > 0 || runningScopes.size > 0) {
-    return res.status(409).json({
-      error: 'agent task is running',
-      code: 'WORKDIR_BUSY',
-    });
-  }
   try {
-    const result = setWorkdir(req.body && req.body.path, {
+    const result = validateWorkdir(req.body && req.body.path, {
       create: req.body && req.body.create === true,
     });
     return res.json({
@@ -262,6 +499,101 @@ app.post('/api/workdir', (req, res) => {
     });
   } catch (err) {
     return sendWorkdirError(res, err);
+  }
+});
+
+app.get('/api/workdir/browse', (req, res) => {
+  try {
+    return res.json(
+      listAbsoluteDirectory(req.query.path, {
+        showHidden: queryBool(req.query.showHidden),
+        fallbackDir: eventWorkdir(req),
+      }),
+    );
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+});
+
+app.get('/api/fs/list', (req, res) => {
+  try {
+    return res.json(
+      listDirectory(req.query.path, {
+        showHidden: queryBool(req.query.showHidden),
+        workdir: requestWorkdir(req),
+      }),
+    );
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+});
+
+app.get('/api/fs/download', (req, res) => {
+  let download;
+  try {
+    // The unified file browser sends absolute paths (it can reach anywhere up to
+    // root); older relative paths stay confined to the workdir. Both enforce the
+    // size cap so an oversized transfer is refused before it starts.
+    if (req.query.path && path.isAbsolute(String(req.query.path))) {
+      download = prepareDownloadAbsolute(req.query.path, {
+        maxBytes: MAX_DOWNLOAD_BYTES,
+      });
+    } else {
+      download = prepareDownload(req.query.path, requestWorkdir(req));
+    }
+  } catch (err) {
+    return sendFilesystemError(res, err);
+  }
+
+  if (!download.isDirectory) {
+    return res.download(download.target, download.filename, (err) => {
+      if (err && !res.headersSent) {
+        return sendFilesystemError(res, err);
+      }
+      return undefined;
+    });
+  }
+
+  return sendDirectoryZip(download, res);
+});
+
+app.post('/api/fs/upload', rawUpload, uploadErrorHandler, (req, res) => {
+  if (Buffer.isBuffer(req.body) && req.body.length > MAX_UPLOAD_BYTES) {
+    return res.status(413).json({
+      error: 'upload exceeds the size limit',
+      code: 'FS_UPLOAD_TOO_LARGE',
+    });
+  }
+  let target;
+  try {
+    // Absolute target from the unified browser, or workdir-relative (legacy).
+    if (req.query.path && path.isAbsolute(String(req.query.path))) {
+      target = resolveAbsoluteUploadTarget(req.query.path, req.query.name);
+    } else {
+      target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
+    }
+    if (fs.existsSync(target.target)) {
+      const realTarget = fs.realpathSync(target.target);
+      if (
+        realTarget !== target.realRoot &&
+        !realTarget.startsWith(`${target.realRoot}${path.sep}`)
+      ) {
+        return res.status(403).json({
+          error: 'path is outside the work directory',
+          code: 'FS_PATH_OUTSIDE_WORKDIR',
+        });
+      }
+    }
+    fs.writeFileSync(
+      target.target,
+      Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+    );
+    return res.json({
+      ok: true,
+      entry: uploadedEntry(target.root, target.target),
+    });
+  } catch (err) {
+    return sendFilesystemError(res, err);
   }
 });
 
@@ -285,13 +617,16 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const scopeKey = sessionKeyFor(agent.key, deviceId);
-  if (runningScopes.has(scopeKey)) {
-    return res.status(409).json({
-      error: 'agent is already handling a message',
-      code: 'AGENT_BUSY',
-    });
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
   }
+  // Session = workdir + agent. Concurrent turns on the same scope are serialized
+  // (see enqueueScope below) rather than rejected, so a second device's message
+  // queues behind the in-flight one instead of failing.
+  const scopeKey = scopeKeyFor(agent.key, workdir);
 
   const abortController = new AbortController();
   const createdAt = new Date().toISOString();
@@ -307,6 +642,7 @@ app.post('/api/chat', async (req, res) => {
     agent,
     deviceId,
     scopeKey,
+    scopeWorkdir: workdir,
     recordHistory,
     historyAssistantId,
     cancelled: false,
@@ -314,7 +650,6 @@ app.post('/api/chat', async (req, res) => {
     abortController,
   };
   activeRequests.set(requestId, runState);
-  runningScopes.add(scopeKey);
 
   const streaming = wantsChatStream(req);
   let streamedText = '';
@@ -409,6 +744,7 @@ app.post('/api/chat', async (req, res) => {
         ...metadata,
         streaming: false,
         awaitingFirstToken: false,
+        progressLines: [],
       },
     }));
   };
@@ -461,28 +797,42 @@ app.post('/api/chat', async (req, res) => {
     }
   };
 
-  try {
-    if (!streaming) {
-      emitAgentEvent('agent_start', {
+  // Other devices in this workdir learn a turn started and begin mirroring from
+  // persisted history. The originator ignores its own requestId. If the scope is
+  // already busy this turn will queue behind the in-flight one.
+  broadcastScope('agent_start', { scopeWorkdir: workdir, agent, requestId, deviceId });
+  const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
+  if (willQueue) {
+    broadcastScope('agent_queued', { scopeWorkdir: workdir, agent, requestId, deviceId });
+    if (streaming) {
+      writeStreamEvent(res, 'agent_queued', {
         requestId,
-        agent,
         deviceId,
+        agent: agentPayload(agent),
+        createdAt: new Date().toISOString(),
       });
     }
-    const content = await runAgent(agentKey, prompt, emitRunEvent, {
-      sessionKey: scopeKey,
-      signal: abortController.signal,
+  }
+
+  try {
+    const content = await enqueueScope(scopeKey, async () => {
+      // The turn may have been cancelled while waiting its turn in the queue.
+      if (runState.cancelled) throw new AgentCancelledError();
+      runningScopes.add(scopeKey);
+      try {
+        return await runAgent(agentKey, prompt, emitRunEvent, {
+          sessionKey: scopeKey,
+          signal: abortController.signal,
+          workdir,
+        });
+      } finally {
+        runningScopes.delete(scopeKey);
+      }
     });
     if (streaming && !streamedText.trim()) {
       await streamTextFallback(res, requestId, agent, deviceId, content);
     }
-    if (!streaming) {
-      emitAgentEvent('agent_done', {
-        requestId,
-        agent,
-        deviceId,
-      });
-    }
+    broadcastScope('agent_done', { scopeWorkdir: workdir, agent, requestId, deviceId });
     finalizeAssistantHistory(content);
     const completedAt = new Date().toISOString();
     const reply = {
@@ -505,13 +855,12 @@ app.post('/api/chat', async (req, res) => {
       finalizeAssistantHistory(streamedText, { cancelled: true });
       if (!runState.cancelEventSent) {
         runState.cancelEventSent = true;
-        if (!streaming) {
-          emitAgentEvent('agent_cancelled', {
-            requestId,
-            agent,
-            deviceId,
-          });
-        }
+        broadcastScope('agent_cancelled', {
+          scopeWorkdir: workdir,
+          agent,
+          requestId,
+          deviceId,
+        });
       }
       if (streaming) {
         writeStreamEvent(res, 'agent_cancelled', {
@@ -536,6 +885,14 @@ app.post('/api/chat', async (req, res) => {
         `${agentPayload(agent).label} is not logged in on the backend host. ` +
         'Log in there, then try again.';
       finalizeAssistantHistory(message, { errorCode: 'NOT_LOGGED_IN' });
+      broadcastScope('agent_error', {
+        scopeWorkdir: workdir,
+        agent,
+        requestId,
+        deviceId,
+        error: message,
+        code: 'NOT_LOGGED_IN',
+      });
       if (streaming) {
         writeStreamEvent(res, 'agent_error', {
           requestId,
@@ -561,6 +918,14 @@ app.post('/api/chat', async (req, res) => {
     finalizeAssistantHistory(errorMessage, {
       errorCode: err.code || 'AGENT_ERROR',
     });
+    broadcastScope('agent_error', {
+      scopeWorkdir: workdir,
+      agent,
+      requestId,
+      deviceId,
+      error: errorMessage,
+      code: err.code,
+    });
     if (streaming) {
       writeStreamEvent(res, 'agent_error', {
         requestId,
@@ -573,16 +938,9 @@ app.post('/api/chat', async (req, res) => {
       endStream(res);
       return;
     }
-    emitAgentEvent('agent_error', {
-      requestId,
-      agent,
-      deviceId,
-      error: errorMessage,
-    });
     return res.status(500).json({ error: errorMessage });
   } finally {
     activeRequests.delete(requestId);
-    runningScopes.delete(scopeKey);
   }
 });
 
@@ -600,7 +958,15 @@ app.post('/api/chat/cancel', (req, res) => {
       code: 'REQUEST_NOT_FOUND',
     });
   }
-  if (deviceId && runState.deviceId && deviceId !== runState.deviceId) {
+  // Shared sessions: any device currently in the same work directory may cancel
+  // the turn, not just the device that started it.
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  if (runState.scopeWorkdir && runState.scopeWorkdir !== workdir) {
     return res.status(404).json({
       error: 'request not found',
       code: 'REQUEST_NOT_FOUND',
@@ -610,9 +976,10 @@ app.post('/api/chat/cancel', (req, res) => {
   runState.cancelled = true;
   if (!runState.cancelEventSent) {
     runState.cancelEventSent = true;
-    emitAgentEvent('agent_cancelled', {
-      requestId,
+    broadcastScope('agent_cancelled', {
+      scopeWorkdir: runState.scopeWorkdir,
       agent: runState.agent,
+      requestId,
       deviceId: runState.deviceId,
     });
   }
@@ -620,11 +987,10 @@ app.post('/api/chat/cancel', (req, res) => {
   return res.json({ ok: true, requestId });
 });
 
-// Return the stored conversation for this device + agent so the app can show
-// the previous chat on reopen without persisting anything locally.
+// Return the stored conversation for this work directory + agent so any device
+// in the same path shows the same chat, without persisting anything locally.
 app.get('/api/history', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
   if (!agentKey) {
     return res.status(400).json({ error: 'agent is required' });
   }
@@ -632,13 +998,22 @@ app.get('/api/history', (req, res) => {
   if (!agent) {
     return res.status(400).json({ error: `unknown agent: ${agentKey}` });
   }
-  const scopeKey = sessionKeyFor(agent.key, deviceId);
-  if (!runningScopes.has(scopeKey)) {
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir);
+  // Only finalize a streaming bubble as stale when nothing is running OR queued
+  // for this scope; a queued turn has a persisted awaiting bubble that is not
+  // yet in runningScopes and must not be prematurely marked cancelled.
+  if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
     finalizeStaleStreamingHistory(scopeKey);
   }
   return res.json({
     agent: agent.key,
-    deviceId,
+    workdir,
     messages: readHistory(scopeKey),
   });
 });
@@ -653,48 +1028,49 @@ app.get('/api/usage', async (_req, res) => {
 });
 
 // Clear one agent's persistent session so the next message starts a new
-// machine-side conversation. Without an agent, clear every agent for the
-// current device. This does not touch files in the work directory.
+// machine-side conversation. Scoped to the requesting device's work directory,
+// so it only resets the shared conversation for that path. Without an agent,
+// clear every agent in that path. This does not touch files on disk.
 app.post('/api/session/clear', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
   if (agentKey) {
     const agent = getAgent(agentKey);
     if (!agent) {
       return res.status(400).json({ error: `unknown agent: ${agentKey}` });
     }
-    const sessionKey = sessionKeyFor(agent.key, deviceId);
-    const cleared = clearSession(sessionKey);
-    clearHistory(sessionKey);
-    return res.json({ ok: true, agent: agentKey, deviceId, cleared });
+    const scopeKey = scopeKeyFor(agent.key, workdir);
+    const cleared = clearSession(scopeKey);
+    clearHistory(scopeKey);
+    return res.json({ ok: true, agent: agentKey, workdir, cleared });
   }
   let cleared = 0;
   for (const agent of listAgents()) {
-    const sessionKey = sessionKeyFor(agent.key, deviceId);
-    if (clearSession(sessionKey)) cleared += 1;
-    clearHistory(sessionKey);
+    const scopeKey = scopeKeyFor(agent.key, workdir);
+    if (clearSession(scopeKey)) cleared += 1;
+    clearHistory(scopeKey);
   }
-  return res.json({ ok: true, deviceId, cleared });
-});
-
-app.post('/api/workdir/reset', (_req, res) => {
-  try {
-    const result = clearWorkdir();
-    return res.json(result);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
+  return res.json({ ok: true, workdir, cleared });
 });
 
 app.get('/api/events', (req, res) => {
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
+  // Scope this subscription to the device's current work directory so it only
+  // receives chat events for the conversation it is viewing. The client
+  // reconnects with a new x-workdir header when the user switches paths.
+  const workdir = eventWorkdir(req);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
-  const client = { res, deviceId };
+  const client = { res, deviceId, workdir };
   eventClients.add(client);
   res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
@@ -732,11 +1108,30 @@ app.post('/api/cards/refresh', (_req, res) => {
 });
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
-  app.use(express.static(WEB_BUILD_DIR));
+  app.use(express.static(WEB_BUILD_DIR, {
+    etag: true,
+    lastModified: true,
+    setHeaders(res, filePath) {
+      const rel = path.relative(WEB_BUILD_DIR, filePath);
+      // CanvasKit is pinned to the Flutter engine revision and is effectively
+      // immutable between SDK upgrades; cache the 7MB wasm hard so it downloads
+      // once and is then served from the browser cache with no request at all.
+      if (rel.split(path.sep)[0] === 'canvaskit') {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return;
+      }
+      // Other files (index.html, *.js, assets) keep their filenames across builds,
+      // so allow caching but always revalidate: a matching ETag returns a tiny 304
+      // instead of re-sending the bytes. Never `no-store` — that re-downloaded the
+      // whole ~11MB bundle on every load, which is what made the web take minutes.
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'not found' });
     }
+    res.setHeader('Cache-Control', 'no-cache');
     return res.sendFile(path.join(WEB_BUILD_DIR, 'index.html'));
   });
 }
@@ -746,7 +1141,7 @@ app.listen(PORT, HOST, () => {
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }
-  console.log(`workdir: ${getWorkdir()}`);
+  console.log(`default workdir: ${getDefaultWorkdir()}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);

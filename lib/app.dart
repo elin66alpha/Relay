@@ -71,12 +71,17 @@ class _BotAppState extends State<BotApp> {
   Future<bool> _activeMachineIsAuthorized(MachineCredential machine) async {
     final BackendClient client = BackendClient();
     try {
-      return await client.health();
+      return await client.health(timeout: const Duration(seconds: 5));
     } on BackendException catch (error) {
       if (error.status == 401) {
         await widget.machinesController.delete(machine.id);
         return false;
       }
+      return true;
+    } catch (_) {
+      // Offline or unreachable machines should not trap startup on a splash
+      // screen or delete credentials. The chat surface will show connection
+      // errors when the user tries to use the backend.
       return true;
     } finally {
       await client.close();

@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { getWorkdir } = require('./workdir');
+const { getDefaultWorkdir } = require('./workdir');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
@@ -257,8 +257,8 @@ function toolBrief(name, input) {
   return `${name}${detail ? `: ${oneLine(detail, 80)}` : ''}`;
 }
 
-function runClaude(prompt, onEvent, sessionKey, signal) {
-  const cwd = getWorkdir();
+function runClaude(prompt, onEvent, sessionKey, signal, workdir) {
+  const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
   // Resume reuses the saved session ID; new conversations use our UUID as
@@ -335,7 +335,7 @@ function runClaude(prompt, onEvent, sessionKey, signal) {
   }).then((result) => {
     if (result && result.__retry) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runClaude(prompt, onEvent, sessionKey, signal);
+      return runClaude(prompt, onEvent, sessionKey, signal, workdir);
     }
     if (result && result.__authError) throw new AgentAuthError('claude');
     return result;
@@ -363,8 +363,8 @@ function codexItemLabel(item) {
   return null;
 }
 
-function runCodex(prompt, onEvent, sessionKey, signal) {
-  const cwd = getWorkdir();
+function runCodex(prompt, onEvent, sessionKey, signal, workdir) {
+  const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
   const lastMsg = path.join(
@@ -457,7 +457,7 @@ function runCodex(prompt, onEvent, sessionKey, signal) {
   }).then((result) => {
     if (result && result.__retry) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runCodex(prompt, onEvent, sessionKey, signal);
+      return runCodex(prompt, onEvent, sessionKey, signal, workdir);
     }
     if (result && result.__authError) throw new AgentAuthError('codex');
     return result;
@@ -475,8 +475,8 @@ const AGY_LAST_CONV = path.join(
   'last_conversations.json',
 );
 
-function runAgy(prompt, onEvent, sessionKey, signal) {
-  const cwd = getWorkdir();
+function runAgy(prompt, onEvent, sessionKey, signal, workdir) {
+  const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   emit(onEvent, 'Antigravity is working...');
   const args = [
@@ -605,7 +605,7 @@ async function runAgent(agentKey, prompt, onEvent, options = {}) {
     throw new Error(`Unknown agent: ${agentKey}`);
   }
   const sessionKey = options.sessionKey || agent.key;
-  return agent.run(prompt, onEvent, sessionKey, options.signal);
+  return agent.run(prompt, onEvent, sessionKey, options.signal, options.workdir);
 }
 
 module.exports = {

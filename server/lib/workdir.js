@@ -4,8 +4,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Shared work directory for every CLI agent. Agent execution lives in
-// lib/agents.js; this module validates, persists, and creates the path.
+// Per-device work directory. Each client carries its own current path via the
+// `x-workdir` request header, so two devices can work in different paths at the
+// same time. This module only validates, resolves, and creates paths; there is
+// no shared "current workdir" state anymore. The `.env` AGENTDECK_DEFAULT_DIR is
+// kept solely as the default a brand-new device starts from. Session identity
+// is keyed by workdir + agent in server.js, so two devices in the same path
+// share one conversation.
 const ENV_PATH = path.join(__dirname, '..', '.env');
 
 class WorkdirError extends Error {
@@ -50,23 +55,29 @@ function resolveWorkdir(value) {
   return resolved;
 }
 
-function readConfiguredWorkdir() {
-  return process.env.BOTS_SESSION_DIR
-    ? resolveWorkdir(process.env.BOTS_SESSION_DIR)
-    : expandWorkdir('');
+// The path a brand-new device (one that has not chosen a workdir yet) starts
+// from. Comes from AGENTDECK_DEFAULT_DIR when set, otherwise ~/agent_deck.
+function getDefaultWorkdir() {
+  return process.env.AGENTDECK_DEFAULT_DIR
+    ? resolveWorkdir(process.env.AGENTDECK_DEFAULT_DIR)
+    : resolveWorkdir(expandWorkdir(''));
 }
 
-let currentWorkdir = readConfiguredWorkdir();
-
-function ensureWorkdir() {
-  if (!fs.existsSync(currentWorkdir)) {
-    fs.mkdirSync(currentWorkdir, { recursive: true });
+function ensureWorkdirExists(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
-  return currentWorkdir;
+  return dir;
 }
 
-function getWorkdir() {
-  return ensureWorkdir();
+// Resolve the workdir for a request: the device's `x-workdir` header when
+// present, otherwise the default. The path is created if missing so agent
+// execution and file browsing always have a real cwd. Returns the canonical
+// absolute path, which is also the basis of the session scope key.
+function resolveRequestWorkdir(value) {
+  const raw = String(value || '').trim();
+  const dir = raw ? resolveWorkdir(raw) : getDefaultWorkdir();
+  return ensureWorkdirExists(dir);
 }
 
 function inspectWorkdir(value) {
@@ -83,26 +94,11 @@ function inspectWorkdir(value) {
   return { dir, exists, isDirectory };
 }
 
-function setEnvValue(content, key, value) {
-  const escaped = String(value).replace(/\n/g, '');
-  const line = `${key}=${escaped}`;
-  const re = new RegExp(`^${key}=.*$`, 'm');
-  if (re.test(content)) return content.replace(re, line);
-  const suffix = content.endsWith('\n') || content.length === 0 ? '' : '\n';
-  return `${content}${suffix}${line}\n`;
-}
-
-function persistWorkdir(dir) {
-  let content = '';
-  try {
-    content = fs.readFileSync(ENV_PATH, 'utf8');
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-  }
-  fs.writeFileSync(ENV_PATH, setEnvValue(content, 'BOTS_SESSION_DIR', dir));
-}
-
-function setWorkdir(value, { create = false } = {}) {
+// Validate a path the user wants to switch to, optionally creating it. Unlike
+// the old setWorkdir this persists no global state: the client stores its own
+// choice locally and sends it back via the x-workdir header. Returns the
+// canonical path so the client can persist exactly what the backend resolved.
+function validateWorkdir(value, { create = false } = {}) {
   const info = inspectWorkdir(value);
   if (info.exists && !info.isDirectory) {
     throw new WorkdirError('workdir path exists but is not a directory', {
@@ -123,16 +119,16 @@ function setWorkdir(value, { create = false } = {}) {
     fs.mkdirSync(info.dir, { recursive: true });
     created = true;
   }
-  persistWorkdir(info.dir);
-  process.env.BOTS_SESSION_DIR = info.dir;
-  currentWorkdir = info.dir;
-  return { dir: currentWorkdir, created };
+  return { dir: info.dir, created };
 }
 
 module.exports = {
-  getWorkdir,
-  ensureWorkdir,
-  inspectWorkdir,
-  setWorkdir,
   WorkdirError,
+  resolveWorkdir,
+  getDefaultWorkdir,
+  ensureWorkdirExists,
+  resolveRequestWorkdir,
+  inspectWorkdir,
+  validateWorkdir,
+  ENV_PATH,
 };

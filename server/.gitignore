@@ -2,9 +2,14 @@ node_modules/
 .env
 agent-sessions.json
 chat-history.json
+chat-history.*.json
 cards.json
 quota-state-*.json
 tokens.json
+cloudflared/
+cloudflared-config/
 credentials/*.agentdeck
+credentials/*.agentdeck.json
+credentials/*.json
 credentials/*.png
 credentials/*.passphrase.txt

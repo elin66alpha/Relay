@@ -134,7 +134,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
       _autoScrollQueued = false;
       if (!_scroll.hasClients) return;
       final ScrollPosition pos = _scroll.position;
-      final int count = widget.chatController.messages.length;
+      final int count = widget.chatController.messageCount;
       final bool messageAdded = count != _lastMessageCount;
       _lastMessageCount = count;
       final bool nearBottom = pos.maxScrollExtent - pos.pixels < 280;
@@ -336,6 +336,8 @@ class _BotChatScreenState extends State<BotChatScreen> {
                 ]),
                 builder: (BuildContext context, Widget? _) {
                   final CliAgent agent = widget.agentsController.activeAgent;
+                  final List<ChatMessage> messages =
+                      widget.chatController.messages;
                   return Column(
                     children: <Widget>[
                       if (widget.chatController.agentLoggedIn(agent.key) ==
@@ -345,21 +347,22 @@ class _BotChatScreenState extends State<BotChatScreen> {
                           onRecheck: widget.chatController.refreshAuthStatus,
                         ),
                       Expanded(
-                        child: widget.chatController.messages.isEmpty
+                        child: messages.isEmpty
                             ? _EmptyChatPlaceholder(agentName: agent.label)
                             : ListView.builder(
                                 controller: _scroll,
                                 padding:
                                     const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                                itemCount:
-                                    widget.chatController.messages.length,
+                                itemCount: messages.length,
                                 itemBuilder: (BuildContext context, int index) {
-                                  final ChatMessage message =
-                                      widget.chatController.messages[index];
+                                  final ChatMessage message = messages[index];
                                   return _MessageBubble(
+                                    key: ValueKey<String>(message.id),
                                     message: message,
                                     retryable: widget.chatController
                                         .isRetryable(message),
+                                    streaming: widget.chatController
+                                        .isStreaming(message),
                                     awaitingFirstToken: widget.chatController
                                         .isAwaitingFirstToken(message),
                                     errorDetail: widget.chatController
@@ -714,16 +717,19 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.retryable,
+    required this.streaming,
     required this.awaitingFirstToken,
     required this.errorDetail,
     required this.system,
     required this.cancelled,
     required this.progressLines,
     required this.onRetry,
+    super.key,
   });
 
   final ChatMessage message;
   final bool retryable;
+  final bool streaming;
   final bool awaitingFirstToken;
   final String? errorDetail;
   final bool system;
@@ -775,7 +781,7 @@ class _MessageBubble extends StatelessWidget {
                   _MessageText(
                     text: message.content,
                     color: textColor,
-                    formatInlineEmphasis: !isUser,
+                    formatInlineEmphasis: !isUser && !streaming,
                   ),
                 if (progressLines.isNotEmpty) ...<Widget>[
                   if (message.content.isNotEmpty) const SizedBox(height: 8),
