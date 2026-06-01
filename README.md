@@ -36,8 +36,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Quota-reset alerts are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
-- The work directory can be changed from the app. Each device holds its own current path locally; the backend validates it and optionally creates it after user confirmation. Switching paths switches the device to the shared conversation for that path. The Work directory screen also shows directories like `ls`: folders can be opened to select a nested directory, the fixed parent button can browse upward to the filesystem root, and files are visible but not selectable there.
-- The File system drawer entry opens a browser rooted at the current workdir. It supports folder navigation, file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Backend file APIs are confined to the configured workdir. Both directory browsers hide dotfiles by default and provide a show/hide hidden files toggle.
+- The **File system** drawer entry is the single place to browse files and set the work directory (the separate Work directory screen was merged into it). It opens at the current work path and browses by absolute path, so the parent button walks all the way up to the filesystem root, not just the workdir. Folders can be opened; **Set as work path** makes the current folder this device's work directory — each device holds its own path locally (sent via `X-Workdir`), and switching paths switches to that path's shared conversation. It supports file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Downloads stream with a progress bar, save straight to the system Downloads folder (Android via MediaStore, the browser's downloads folder on Web), show where the file landed, and raise a completion notification even after you leave the screen. A download is capped at 300 MB (a folder by its uncompressed total) and a single upload at 100 MB. Dotfiles are hidden by default with a show/hide toggle. File browse/download/upload accept any path the browser can reach and are gated only by the bearer token, consistent with the agents' own full-filesystem access on the host.
 - Protected backend APIs stay closed until at least one credential token has been generated.
 - The same Flutter client runs on mobile (Android / iOS), Web, and native desktop (Windows / macOS / Linux). Narrow Web viewports keep the mobile drawer layout; wide viewports use a permanent sidebar. See [DESKTOP.md](DESKTOP.md) for desktop build & packaging.
 - The compress button runs the agent compaction command silently. It does not add `/compact` or the agent's compaction reply to visible or reloaded chat history.
@@ -55,8 +54,8 @@ AgentDeck/
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
 │   ├── core/storage/     secure storage and device identity
-│   └── features/         chat, drawer, credentials, settings, work directory,
-│                         file system, cards
+│   └── features/         chat, drawer, credentials, settings, file system,
+│                         cards
 └── server/               local Node backend
     ├── server.js         HTTP API + SSE events
     └── lib/              agents, tokens, workdir, usage, quota-watch, credentials,
@@ -142,7 +141,7 @@ ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
 ```
 
-`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
+`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the File system screen. Work directories must be absolute paths; plain relative paths are rejected.
 
 ## Credential QR
 
@@ -213,10 +212,7 @@ release keystore before any public/Play Store distribution.
 - `GET /api/usage`
 - `GET /api/workdir`
 - `GET /api/workdir/browse`
-- `POST /api/workdir/check`
 - `POST /api/workdir`
-- `POST /api/workdir/reset`
-- `GET /api/fs/list`
 - `GET /api/fs/download`
 - `POST /api/fs/upload`
 - `POST /api/chat`

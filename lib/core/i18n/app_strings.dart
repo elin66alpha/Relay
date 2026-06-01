@@ -31,7 +31,6 @@ class AppStrings {
 
   String get appName => 'AgentDeck';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
-  String get machines => isZh ? '机器' : 'Machines';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get cardMode => isZh ? '卡片模式' : 'Card Mode';
@@ -160,7 +159,6 @@ class AppStrings {
       isZh ? '连接失败：$err' : 'Connection failed: $err';
   String get noStatus => isZh ? '未获取到状态' : 'No status received';
   String get refresh => isZh ? '刷新' : 'Refresh';
-  String get chooseCredential => isZh ? '选择凭证' : 'Choose credential';
   String get importMachineCredential =>
       isZh ? '导入机器凭证' : 'Import machine credential';
   String get emptyCredentialText => isZh
@@ -194,13 +192,10 @@ class AppStrings {
   String get systemTheme => isZh ? '跟随系统' : 'System';
   String get lightTheme => isZh ? '白天' : 'Light';
   String get darkTheme => isZh ? '黑夜' : 'Dark';
-  String get selectBotcred =>
-      isZh ? '请选择有效的 AgentDeck 凭证。' : 'Choose a valid AgentDeck credential.';
   String get fileUnreadable =>
       isZh ? '无法读取凭证。' : 'Unable to read the credential.';
   String imported(String name) => isZh ? '已导入：$name' : 'Imported: $name';
   String get importFailedTitle => isZh ? '导入失败' : 'Import failed';
-  String importFailed(Object err) => isZh ? '导入失败：$err' : 'Import failed: $err';
   String get credentialDecryptFailed => isZh
       ? '凭证解密失败。请确认二维码和密码是否正确。'
       : 'Credential decryption failed. Check the QR code and password.';
@@ -250,8 +245,4 @@ class AppStrings {
   String get clearChatBody => isZh
       ? '删除本地历史消息，并在机器上为当前 agent 开启新会话（不影响工作目录里的文件）。'
       : 'Delete local history and start a new machine-side session for this agent. Files in the workdir are not changed.';
-  String get resetWorkdirTitle => isZh ? '清空工作目录？' : 'Reset workdir?';
-  String get resetWorkdirBody => isZh
-      ? '机器端配置的工作目录内文件会被删除。'
-      : 'Files under the configured machine workdir will be deleted.';
 }

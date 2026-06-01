@@ -117,32 +117,6 @@ function sortEntries(entries) {
   });
 }
 
-function listDirectory(relativePath, { showHidden = false, workdir } = {}) {
-  const resolved = resolveExisting(relativePath, workdir);
-  if (!resolved.stat.isDirectory()) {
-    throw new FilesystemError('path is not a directory', {
-      status: 400,
-      code: 'FS_PATH_NOT_DIRECTORY',
-    });
-  }
-  const entries = sortEntries(
-    visibleDirents(resolved.target, { showHidden }).map((dirent) =>
-      entryFor(resolved.root, path.join(resolved.target, dirent.name), dirent),
-    ),
-  );
-  const parentPath =
-    resolved.target === resolved.root
-      ? null
-      : toApiPath(resolved.root, path.dirname(resolved.target));
-  return {
-    root: resolved.root,
-    path: resolved.relative,
-    absolutePath: resolved.target,
-    parentPath,
-    entries,
-  };
-}
-
 function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) {
   const raw = String(value || '').trim();
   if (raw && !path.isAbsolute(raw)) {
@@ -377,7 +351,6 @@ function uploadedEntry(root, target) {
 
 module.exports = {
   FilesystemError,
-  listDirectory,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,

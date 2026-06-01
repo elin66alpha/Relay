@@ -17,6 +17,26 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
+## 2026-06-01 - Unified File System, Downloads, and Cleanup
+
+- The Work directory screen was merged into the **File system** screen. One
+  drawer entry now browses by absolute path (up to filesystem root), sets the
+  work path via **Set as work path**, and uploads/downloads. The old
+  `work_directory_screen.dart` was removed.
+- Downloads stream with a progress bar driven by an app-level `DownloadManager`
+  so progress and the completion notification survive leaving the screen. Files
+  save to the system Downloads folder with no picker (Android via a MediaStore
+  platform channel; desktop via `getDownloadsDirectory`; the browser folder on
+  Web) and the save location is shown on screen.
+- Size caps: a download is rejected above 300 MB (a folder by its uncompressed
+  total, `DOWNLOAD_MAX_BYTES`); a single upload above 100 MB (`UPLOAD_MAX_BYTES`),
+  pre-checked in the app and enforced on the server.
+- Removed dead code now that the screens merged: routes `/api/fs/list`,
+  `/api/workdir/check`, `/api/workdir/reset`; backend client `listFiles`,
+  `checkWorkdir`, `resetWorkdir`; `listDirectory` in `server/lib/filesystem.js`;
+  and several unused i18n strings. Docs realigned to the merged screen and the
+  current API surface.
+
 ## 2026-06-01 - Windows Backend Setup
 
 - Added `backends/windows/` PowerShell scripts for setup, start, stop, status,

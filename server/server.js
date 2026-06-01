@@ -25,13 +25,11 @@ const {
   resolveWorkdir,
   getDefaultWorkdir,
   resolveRequestWorkdir,
-  inspectWorkdir,
   validateWorkdir,
 } = require('./lib/workdir');
 const {
   FilesystemError,
   listAbsoluteDirectory,
-  listDirectory,
   prepareDownload,
   prepareDownloadAbsolute,
   resolveUploadTarget,
@@ -475,15 +473,6 @@ app.get('/api/workdir', (req, res) => {
   }
 });
 
-app.post('/api/workdir/check', (req, res) => {
-  try {
-    const info = inspectWorkdir(req.body && req.body.path);
-    return res.json(info);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-});
-
 // Validate (and optionally create) a path the device wants to switch to. With
 // per-device workdirs there is no global state to change here: the client
 // stores the returned canonical path locally and sends it back via x-workdir.
@@ -508,19 +497,6 @@ app.get('/api/workdir/browse', (req, res) => {
       listAbsoluteDirectory(req.query.path, {
         showHidden: queryBool(req.query.showHidden),
         fallbackDir: eventWorkdir(req),
-      }),
-    );
-  } catch (err) {
-    return sendFilesystemError(res, err);
-  }
-});
-
-app.get('/api/fs/list', (req, res) => {
-  try {
-    return res.json(
-      listDirectory(req.query.path, {
-        showHidden: queryBool(req.query.showHidden),
-        workdir: requestWorkdir(req),
       }),
     );
   } catch (err) {
