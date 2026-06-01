@@ -18,7 +18,7 @@
 - app 内管理工作路径；每台设备本地保存当前路径，并在每次请求时发给后端。
 - app/Web 端支持限定在当前 workdir 内的文件浏览、上传与下载。
 - 未生成 token 时，受保护 API 不再以未鉴权状态运行。
-- `backends/` 下区分平台后端安装入口：Linux 使用 PM2，macOS 使用 LaunchAgent。
+- `backends/` 下区分平台后端安装入口：Linux 使用 PM2，macOS 使用 LaunchAgent，Windows 使用 PowerShell/计划任务。
 - 跨设备事件按 workdir scope 镜像。
 
 ## 规划
@@ -28,8 +28,8 @@
 目标形态：
 
 1. Android / iOS 手机连接 Linux / macOS / Windows 后端。
-2. 用一套响应式 Web 前端作为所有平台的桌面客户端。Windows / macOS / Linux 桌面应用都是这套 Web 前端的套壳（webview 外壳），不再单独开发原生桌面 UI，三个平台共用同一份代码。
-3. 各后端平台提供服务安装、Cloudflare quick tunnel 联网、直连公网主机模式、CLI agent 检测与诊断。
+2. Windows / macOS / Linux 桌面前端全部使用 Flutter 原生桌面应用，桌面端与移动端、Web 端共享 Flutter 客户端代码。
+3. 各后端平台提供服务安装、正式 Cloudflare Tunnel、Cloudflare Quick Tunnel、直连公网主机模式、CLI agent 检测与诊断。
 
 复用边界：
 
@@ -43,5 +43,4 @@
 - **单工作路径多会话**: 支持在同一个工作路径下，为三个 AI agent 开启多个不同的 Session。切换到对应工作路径后，自动读取并恢复留存的 Session（包括名称和对话记忆）。在左侧栏 CLI 智能体位置增加一个“+”号按钮用于新建该 agent 的会话，并支持会话的删除功能。
 - 面向生产使用的自有域名 / 直连模式加固指南。
 - 更完整的后端诊断。
-- Windows 后端安装流程。
 - 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。

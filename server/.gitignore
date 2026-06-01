@@ -6,6 +6,8 @@ chat-history.*.json
 cards.json
 quota-state-*.json
 tokens.json
+cloudflared/
+cloudflared-config/
 credentials/*.agentdeck
 credentials/*.agentdeck.json
 credentials/*.json

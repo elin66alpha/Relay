@@ -7,9 +7,13 @@ cd /path/to/AgentDeck
 backends/linux/setup.sh
 ```
 
-This wrapper calls `./setup.sh`, which offers Cloudflare Quick Tunnel mode
-(default; `cloudflared tunnel --url http://localhost:8787`) or direct mode for
-a VPS/public host. Install `cloudflared` for tunnel mode.
+This wrapper calls `./setup.sh`, which offers three network modes:
+
+1. no tunnel / direct public address;
+2. named Cloudflare Tunnel for a stable hostname in your Cloudflare zone;
+3. Cloudflare Quick Tunnel for a temporary `trycloudflare.com` trial URL.
+
+Install `cloudflared` for either Cloudflare tunnel mode.
 
 Useful commands:
 

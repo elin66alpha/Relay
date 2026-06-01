@@ -17,8 +17,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
   and session model; OS-specific setup stays in adapters and scripts.
 - Protected backend APIs require a revocable device token generated through the
   encrypted credential QR.
-- Cloudflare Quick Tunnel is the default trial path. Direct public-host mode is
-  available for stable domains or VPS hosts.
+- Setup offers direct public-host mode, named Cloudflare Tunnel for stable
+  hostnames, and Cloudflare Quick Tunnel for fast trials.
 
 ## Current Scope
 
@@ -49,7 +49,8 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 AgentDeck/
 ├── backends/             OS-specific backend setup
 │   ├── linux/            PM2-based Linux setup wrapper
-│   └── macos/            LaunchAgent-based macOS setup
+│   ├── macos/            LaunchAgent-based macOS setup
+│   └── windows/          PowerShell/Scheduled Task Windows setup
 ├── lib/                  Flutter client
 │   ├── core/backend/     backend HTTP/SSE client
 │   ├── core/models/      chat, CLI agent, and machine models
@@ -76,26 +77,39 @@ macOS uses LaunchAgent services instead of PM2:
 ./backends/macos/setup.sh
 ```
 
-Both setup flows offer two networking modes.
+Windows uses PowerShell background processes plus a per-user Scheduled Task:
 
+```powershell
+.\backends\windows\setup.ps1
+```
+
+All setup flows offer three networking modes.
+
+- **No tunnel / direct mode**: for a VPS or any host with a reachable public
+  IP/domain. You enter the address the app should connect to; the server binds
+  to `0.0.0.0` and the QR points at that address. Put HTTPS in front
+  (nginx/Caddy) before exposing it to an untrusted network.
+- **Cloudflare Tunnel mode**: the standard named tunnel flow for a stable
+  hostname in your Cloudflare zone. The setup script can run
+  `cloudflared tunnel login`, create or reuse a named tunnel, run
+  `cloudflared tunnel route dns`, write a local tunnel config, and keep the
+  tunnel running under PM2/LaunchAgent. If an old A/AAAA/CNAME record already
+  uses that hostname, setup asks whether to overwrite it with the tunnel DNS
+  route. The credential QR points at
+  `https://your-hostname`.
 - **Cloudflare Quick Tunnel mode** (default): the backend keeps listening on
-  `127.0.0.1`, PM2 runs `cloudflared tunnel --url http://localhost:8787`, and
-  the credential QR points at the latest `https://*.trycloudflare.com` URL
-  printed by cloudflared. This is the fastest trial setup and works even when
-  the phone is not on the same network as the backend. Quick Tunnel URLs rotate
-  when the tunnel restarts, so regenerate and re-import the QR after a tunnel
-  URL change.
-- **Direct mode**: for a VPS or any host with a reachable public IP/domain.
-  You enter the address the app should connect to; the server binds to
-  `0.0.0.0` and the QR points at that address. Put HTTPS in front (nginx/Caddy)
-  before exposing it to an untrusted network.
+  `127.0.0.1`, cloudflared runs `tunnel --url http://localhost:8787`, and the
+  credential QR points at the latest `https://*.trycloudflare.com` URL printed
+  by cloudflared. This is the fastest trial setup and works even when the phone
+  is not on the same network as the backend. Quick Tunnel URLs rotate when the
+  tunnel restarts, so regenerate and re-import the QR after a tunnel URL change.
 
 Either way, set a credential password when prompted, then import the QR in the app.
 
-Prerequisites: Node.js ≥ 18, `cloudflared` for the default tunnel mode, and
-`pm2` on Linux (`npm install -g pm2`). Folder download uses the system `zip`
-command, which is normally present on Linux/macOS but should be installed if
-your host image omits it.
+Prerequisites: Node.js ≥ 18, `pm2` on Linux (`npm install -g pm2`), PowerShell
+on Windows, and `cloudflared` for either Cloudflare tunnel mode. Folder
+download uses the system `zip` command on Linux/macOS, and PowerShell
+`Compress-Archive` on Windows.
 
 The old repo-root `./setup.sh` remains as a Linux-compatible shortcut.
 
@@ -118,26 +132,32 @@ HOST=127.0.0.1
 MACHINE_ID=
 MACHINE_NAME=
 PUBLIC_BASE_URL=
+AGENTDECK_TUNNEL_MODE=
+CLOUDFLARED_BIN=
+CLOUDFLARED_ARGS=
 AGENTDECK_DEFAULT_DIR=
 AGENT_TIMEOUT_MS=3600000
+POWERSHELL_BIN=
 ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
 ```
 
-`HOST=127.0.0.1` is the default for Cloudflare Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
+`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the Work directory screen. Work directories must be absolute paths; plain relative paths are rejected.
 
 ## Credential QR
 
-`backends/*/setup.sh` generates the QR for you, so you rarely call this directly. To (re)generate it manually from `server/`:
+The platform setup scripts (`backends/*/setup.sh` on Unix-like hosts,
+`backends/windows/setup.ps1` on Windows) generate the QR for you, so you rarely
+call this directly. To (re)generate it manually from `server/`:
 
 ```bash
-npm run credential                                  # interactive; auto-detects the cloudflared tunnel URL
+npm run credential                                  # interactive; auto-detects quick-tunnel URL or uses PUBLIC_BASE_URL
 npm run credential -- --passphrase "pw"             # non-interactive (less private: pw visible in shell history)
 npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL (direct mode)
 npm run credential -- --json-out "credentials/machine.agentdeck.json"  # custom paste-file path
 ```
 
-This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.agentdeck.png` and `server/credentials/<machine>.agentdeck.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. In Quick Tunnel mode, the credential is tied to the current `trycloudflare.com` URL; regenerate it when the tunnel URL changes.
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.agentdeck.png` and `server/credentials/<machine>.agentdeck.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Named Cloudflare Tunnel and Direct mode use the stable URL in `PUBLIC_BASE_URL`; Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and must be regenerated when it changes.
 
 Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 

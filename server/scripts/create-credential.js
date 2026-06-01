@@ -41,10 +41,10 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(`Usage:
-  npm run credential                 # Auto-detect the cloudflared tunnel URL, prompt for a password, print the credential QR
+  npm run credential                 # Use PUBLIC_BASE_URL or detect Quick Tunnel URL, prompt for a password, print the credential QR
 
 Options:
-  --url <url>          Public URL (default: auto-detected from the cloudflared tunnel log)
+  --url <url>          Public URL (default: stable PUBLIC_BASE_URL, then Quick Tunnel log)
   --name <name>        Machine name shown in the app (default: hostname)
   --label <label>      Token label (default: machine name)
   --qr-out <path>      Output path for the QR PNG
@@ -59,9 +59,10 @@ does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
 `);
 }
 
-// Auto-detect the Cloudflare quick-tunnel public URL. cloudflared prints the URL
-// to stderr, which PM2 captures in per-process logs. Quick-tunnel URLs rotate
-// on every restart, so use the newest matching URL in the newest known log.
+// Auto-detect the Cloudflare Quick Tunnel public URL. cloudflared prints the URL
+// to stderr, which PM2 captures in per-process logs. Quick Tunnel URLs rotate
+// on every restart, so use the newest matching URL in the newest known log. A
+// named Cloudflare Tunnel normally uses PUBLIC_BASE_URL instead.
 const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
 const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 
@@ -98,14 +99,18 @@ function detectTunnelUrl(args) {
 function resolvePublicBaseUrl(args) {
   const explicit = String(args.url || '').trim();
   if (explicit) return { url: explicit, source: 'command line (--url)' };
+  const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
+  if (envUrl && !TRYCLOUDFLARE_RE.test(envUrl)) {
+    return { url: envUrl, source: '.env PUBLIC_BASE_URL' };
+  }
+  TRYCLOUDFLARE_RE.lastIndex = 0;
   const detected = detectTunnelUrl(args);
   if (detected) return { url: detected, source: 'cloudflared tunnel log' };
-  const envUrl = String(process.env.PUBLIC_BASE_URL || '').trim();
   if (envUrl) {
     return { url: envUrl, source: '.env PUBLIC_BASE_URL (may be stale)' };
   }
   throw new Error(
-    'Could not determine the public URL. Make sure the cloudflared tunnel is running (pm2 status), or pass --url explicitly.',
+    'Could not determine the public URL. Make sure the tunnel is running and PUBLIC_BASE_URL is set, or pass --url explicitly.',
   );
 }
 

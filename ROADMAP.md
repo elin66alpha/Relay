@@ -20,7 +20,8 @@
   backend on each request.
 - Workdir-scoped file browsing, upload, and download from the app/Web client.
 - Protected APIs reject requests when no token has been generated yet.
-- Platform-separated backend setup under `backends/`, with Linux PM2 setup and macOS LaunchAgent setup.
+- Platform-separated backend setup under `backends/`, with Linux PM2 setup,
+  macOS LaunchAgent setup, and Windows PowerShell/Scheduled Task setup.
 - Cross-device event mirroring by workdir scope.
 
 ## Planned
@@ -30,8 +31,11 @@
 Target shape:
 
 1. Android / iOS clients connect to Linux / macOS / Windows backends.
-2. A single responsive Web frontend is the desktop client for every platform. The Windows / macOS / Linux desktop apps are thin wrappers (a webview shell) around that Web frontend rather than separately built native desktop UIs, so there is one codebase to maintain across all three.
-3. Each backend platform supports service installation, Cloudflare quick-tunnel networking, direct public-host mode, CLI agent detection, and diagnostics.
+2. Windows / macOS / Linux desktop frontends are native Flutter desktop apps
+   that share Flutter client code with mobile and Web.
+3. Each backend platform supports service installation, named Cloudflare
+   Tunnel, Cloudflare Quick Tunnel, direct public-host mode, CLI agent
+   detection, and diagnostics.
 
 Reuse boundaries:
 
@@ -45,5 +49,4 @@ Reuse boundaries:
 - **Multiple Agent Sessions per Workdir**: Allow multiple concurrent sessions for each AI agent within the same working directory. Upon switching to a work directory, automatically load previously saved sessions (including names and conversation history/memory). Add a "New Session" (+) button in the left drawer next to the CLI agents, along with the ability to delete specific sessions.
 - Named-domain / direct-mode hardening guide for production use beyond quick tunnels.
 - More detailed backend diagnostics.
-- Windows backend setup.
 - Better Antigravity quota support when an API or reliable CLI source is available.

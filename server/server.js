@@ -59,15 +59,15 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
 // Hard cap on a single download (file, or the uncompressed total behind a zip).
-// The public quick tunnel relays slowly and has limited throughput, so we refuse
+// Public tunnels can relay slowly or enforce throughput limits, so we refuse
 // oversized downloads up front instead of letting the user wait on a transfer
-// that will stall. Override with DOWNLOAD_MAX_BYTES if a different tunnel allows.
+// that will stall. Override with DOWNLOAD_MAX_BYTES if your network allows more.
 const MAX_DOWNLOAD_BYTES = parseInt(
   process.env.DOWNLOAD_MAX_BYTES || String(300 * 1024 * 1024),
   10,
 );
-// Cap a single uploaded file. The quick tunnel limits request bodies, so we
-// refuse oversized uploads (the app also pre-checks before sending).
+// Cap a single uploaded file. Some tunnels limit request bodies, so we refuse
+// oversized uploads (the app also pre-checks before sending).
 const MAX_UPLOAD_BYTES = parseInt(
   process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
   10,
@@ -184,6 +184,107 @@ function attachmentHeader(filename) {
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/["\\]/g, '_');
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function cleanupTempZip(zipPath) {
+  fs.unlink(zipPath, () => {
+    fs.rm(path.dirname(zipPath), { recursive: true, force: true }, () => {});
+  });
+}
+
+function sendWindowsDirectoryZip(download, res) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-zip-'));
+  const tempZip = path.join(tempDir, `${randomUUID()}.zip`);
+  const sourcePath = path.join(download.zipCwd, download.zipEntryName);
+  const powershell = process.env.POWERSHELL_BIN || 'powershell.exe';
+  const child = spawn(
+    powershell,
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
+      sourcePath,
+      tempZip,
+    ],
+    { windowsHide: true },
+  );
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    cleanupTempZip(tempZip);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0) {
+      cleanupTempZip(tempZip);
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return res.download(tempZip, download.filename, (err) => {
+      cleanupTempZip(tempZip);
+      if (err && !res.headersSent) {
+        return sendFilesystemError(res, err);
+      }
+      return undefined;
+    });
+  });
+}
+
+function sendUnixDirectoryZip(download, res) {
+  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
+    cwd: download.zipCwd,
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0 && !res.destroyed) {
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return undefined;
+  });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
+  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
+  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
+  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
+  let sentBytes = 0;
+  child.stdout.on('data', (chunk) => {
+    sentBytes += chunk.length;
+    if (sentBytes > MAX_DOWNLOAD_BYTES) {
+      child.kill('SIGKILL');
+      res.destroy();
+    }
+  });
+  return child.stdout.pipe(res);
+}
+
+function sendDirectoryZip(download, res) {
+  if (process.platform === 'win32') {
+    return sendWindowsDirectoryZip(download, res);
+  }
+  return sendUnixDirectoryZip(download, res);
 }
 
 function sendEvent(type, payload) {
@@ -453,43 +554,7 @@ app.get('/api/fs/download', (req, res) => {
     });
   }
 
-  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
-    cwd: download.zipCwd,
-  });
-  let stderr = '';
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-  });
-  child.on('error', (err) => {
-    if (!res.headersSent) {
-      return res.status(500).json({ error: `zip failed: ${err.message}` });
-    }
-    return res.destroy(err);
-  });
-  child.on('close', (code) => {
-    if (code !== 0 && !res.destroyed) {
-      const message = stderr.trim() || `zip exited with code ${code}`;
-      if (!res.headersSent) {
-        return res.status(500).json({ error: message });
-      }
-      return res.destroy(new Error(message));
-    }
-    return undefined;
-  });
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
-  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
-  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
-  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
-  let sentBytes = 0;
-  child.stdout.on('data', (chunk) => {
-    sentBytes += chunk.length;
-    if (sentBytes > MAX_DOWNLOAD_BYTES) {
-      child.kill('SIGKILL');
-      res.destroy();
-    }
-  });
-  return child.stdout.pipe(res);
+  return sendDirectoryZip(download, res);
 });
 
 app.post('/api/fs/upload', rawUpload, uploadErrorHandler, (req, res) => {

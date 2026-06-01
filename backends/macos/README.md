@@ -7,7 +7,7 @@ LaunchAgent services under `~/Library/LaunchAgents`.
 
 - macOS with Node.js 18 or newer.
 - Claude Code / Codex / Antigravity CLIs installed and logged in on the Mac.
-- `cloudflared` for the default quick-tunnel networking mode:
+- `cloudflared` for Cloudflare Tunnel or Quick Tunnel mode:
 
 ```bash
 brew install node
@@ -26,10 +26,11 @@ The setup script:
 - creates `server/.env` from `server/.env.example` when needed;
 - installs backend npm dependencies;
 - creates a LaunchAgent for the backend (`dev.agentdeck.backend`);
-- in tunnel mode, creates a LaunchAgent for cloudflared (`dev.agentdeck.tunnel`);
-- reads the latest `trycloudflare.com` URL from the tunnel logs;
+- offers direct mode, named Cloudflare Tunnel mode, or Quick Tunnel mode;
+- in either tunnel mode, creates a LaunchAgent for cloudflared (`dev.agentdeck.tunnel`);
+- for Quick Tunnel, reads the latest `trycloudflare.com` URL from the tunnel logs;
 - runs `npm run credential` so the terminal shows and saves the encrypted
-  credential QR pointing at that address.
+  credential QR pointing at the chosen public URL.
 
 ## Service Commands
 
@@ -55,7 +56,7 @@ LaunchAgent services do not inherit your interactive shell PATH. The generated
 plist sets a PATH that includes common Homebrew and user-bin locations so
 `claude`, `codex`, and `agy` can be found when launched by macOS.
 
-In quick-tunnel mode the backend binds to `127.0.0.1`, and cloudflared reaches
-it locally. For direct mode (public IP/domain), bind to `0.0.0.0` and put a
-reverse proxy with HTTPS in front of it before exposing it beyond a trusted
-network.
+In Cloudflare Tunnel and Quick Tunnel modes the backend binds to `127.0.0.1`,
+and cloudflared reaches it locally. For direct mode (public IP/domain), bind to
+`0.0.0.0` and put a reverse proxy with HTTPS in front of it before exposing it
+beyond a trusted network.

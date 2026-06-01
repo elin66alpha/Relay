@@ -6,17 +6,40 @@ current, factual, and free of secrets. Detailed history lives in git.
 ## Current Project Shape
 
 - Flutter client for Android, iOS, Web, and desktop runner projects.
-- Node.js backend in `server/`; OS setup lives in `backends/`.
+- Node.js backend in `server/`; OS setup lives in `backends/` (Linux PM2,
+  macOS LaunchAgent, Windows PowerShell/Scheduled Task).
 - Supported CLI agents: Claude Code, Codex, and Antigravity (`agy`).
 - Clients connect by importing an encrypted credential QR / payload and entering
   the user-chosen password.
 - All protected APIs require a revocable bearer token from `server/tokens.json`.
 - Sessions are keyed by `workdir + agent`; devices in the same path share chat
   history, the resumable CLI session, and in-flight progress.
-- Cloudflare Quick Tunnel is the default trial networking mode. Direct public
-  host mode is still available.
+- Setup offers three network modes: no tunnel/direct public address, named
+  Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
-## 2026-05-31 - Web Performance and Documentation Cleanup [Uncommitted]
+## 2026-06-01 - Windows Backend Setup
+
+- Added `backends/windows/` PowerShell scripts for setup, start, stop, status,
+  and uninstall.
+- Windows setup supports direct mode, named Cloudflare Tunnel, and Cloudflare
+  Quick Tunnel, then generates the encrypted credential QR.
+- Windows services run as background processes and are restored at login by a
+  per-user Scheduled Task named `AgentDeck Backend`.
+
+## 2026-05-31 - Named Cloudflare Tunnel Setup
+
+- Linux `setup.sh` and macOS `backends/macos/setup.sh` now prompt for three
+  network modes: direct/no tunnel, named Cloudflare Tunnel, or Quick Tunnel.
+- Named Cloudflare Tunnel mode creates/reuses a tunnel, routes DNS, writes a
+  local config under `server/cloudflared-config/`, and runs cloudflared under
+  PM2/LaunchAgent.
+- `server/ecosystem.config.js` reads `AGENTDECK_TUNNEL_MODE`,
+  `CLOUDFLARED_BIN`, and `CLOUDFLARED_ARGS` from `.env` so PM2 can omit the
+  tunnel app, run named tunnel args, or run Quick Tunnel args.
+- `server/scripts/create-credential.js` prefers stable `PUBLIC_BASE_URL` for
+  named/direct mode, then falls back to Quick Tunnel log detection.
+
+## 2026-05-31 - Web Performance and Documentation Cleanup
 
 - Throttled high-frequency streaming assistant updates in
   `lib/features/chat/bot_chat_controller.dart` to reduce Web rebuild pressure.
@@ -31,7 +54,7 @@ current, factual, and free of secrets. Detailed history lives in git.
   shared-session model.
 - Removed the old Card Mode implementation prompt document.
 
-## 2026-05-31 - Credential JSON and Cloudflare Quick Tunnel [Uncommitted]
+## 2026-05-31 - Credential JSON and Cloudflare Quick Tunnel
 
 - `server/scripts/create-credential.js` generates both
   `server/credentials/<machine>.agentdeck.png` and
@@ -42,7 +65,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Generating a new credential removes old credential files, but does not revoke
   existing device tokens.
 
-## 2026-05-31 - Shared Sessions by Workdir [Uncommitted]
+## 2026-05-31 - Shared Sessions by Workdir
 
 - Backend session scope is `workdir + agent`, not `deviceId + agent`.
 - Each client stores its current workdir locally and sends it with `X-Workdir`.
@@ -53,7 +76,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - The client mirrors remote in-flight work by polling backend history snapshots
   when another device starts a turn in the same scope.
 
-## 2026-05-31 - File Browsing and Workdir UI [Uncommitted]
+## 2026-05-31 - File Browsing and Workdir UI
 
 - Work directory screen can browse folders upward/downward and hides dotfiles by
   default.
@@ -61,7 +84,7 @@ current, factual, and free of secrets. Detailed history lives in git.
   download files, and download folders as zip archives.
 - Web supports drag-and-drop upload.
 
-## 2026-05-30 - Agent Markdown Rendering [Uncommitted]
+## 2026-05-30 - Agent Markdown Rendering
 
 - Assistant chat bubbles render Markdown for headings, emphasis, lists, quotes,
   code blocks, and dividers.
@@ -77,4 +100,3 @@ Use `./scripts/build_flow.sh` for the local full build flow:
 2. Node syntax checks.
 3. Web build and PM2 backend restart.
 4. Android debug APK build and `adb install -r`.
-

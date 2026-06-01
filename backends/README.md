@@ -5,11 +5,12 @@ in this directory.
 
 - `linux/`: Linux backend entrypoint. It wraps the existing PM2-based setup.
 - `macos/`: macOS backend setup using LaunchAgent services for the Node backend.
+- `windows/`: Windows backend setup using PowerShell background processes and
+  a per-user Scheduled Task.
 
-Networking defaults to Cloudflare Quick Tunnel: the backend listens on
-localhost, `cloudflared` exposes a temporary `https://*.trycloudflare.com` URL,
-and the credential QR points at that URL. A direct mode is available for hosts
-that already have a public IP/domain.
+Setup scripts offer three network modes: no tunnel/direct public address,
+named Cloudflare Tunnel for a stable hostname in your Cloudflare zone, or
+Cloudflare Quick Tunnel for a temporary `https://*.trycloudflare.com` trial URL.
 
 The Flutter app talks to the same HTTP/SSE API on every backend platform. The
 platform folders only handle installation, service management, logs, PATH, and
