@@ -5,11 +5,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/download/download_manager.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/platform/file_drop.dart';
-import '../../core/platform/file_saver.dart';
 import '../chat/bot_chat_controller.dart';
 
+/// Unified file browser: browse the whole filesystem (up to root), set the work
+/// path from here, upload into the current folder, and download files/folders to
+/// the system Downloads folder. Download progress lives in [DownloadManager] so
+/// it survives leaving and re-entering this screen.
 class FileSystemScreen extends StatefulWidget {
   const FileSystemScreen({
     required this.chatController,
@@ -23,6 +27,10 @@ class FileSystemScreen extends StatefulWidget {
 }
 
 class _FileSystemScreenState extends State<FileSystemScreen> {
+  static const int _maxUploadBytes = 100 * 1024 * 1024;
+
+  final DownloadManager _downloads = DownloadManager.instance;
+
   FsListing? _listing;
   FileDropController? _dropController;
   bool _isLoading = true;
@@ -30,27 +38,67 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   bool _showHidden = false;
   String? _error;
   String? _operationText;
+  String? _workPath;
+  late int _seenDownloadTick;
 
   @override
   void initState() {
     super.initState();
+    _seenDownloadTick = _downloads.completedTick;
+    _downloads.addListener(_onDownloadChanged);
     _dropController = registerFileDrop(_uploadDroppedFiles);
-    _load('');
+    _loadInitial();
   }
 
   @override
   void dispose() {
+    _downloads.removeListener(_onDownloadChanged);
     _dropController?.dispose();
     super.dispose();
   }
 
-  Future<void> _load(String path) async {
+  void _onDownloadChanged() {
+    if (!mounted) return;
+    // Show a one-shot snackbar when a download settles while we're on screen.
+    if (_downloads.completedTick != _seenDownloadTick) {
+      _seenDownloadTick = _downloads.completedTick;
+      final String? message = _downloads.stage == DownloadStage.done
+          ? _downloads.savedLocation
+          : _downloads.errorText;
+      if (message != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    }
+    setState(() {});
+  }
+
+  Future<void> _loadInitial() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
     try {
-      final FsListing listing = await widget.chatController.listFiles(
+      final WorkdirInfo info = await widget.chatController.workdir();
+      _workPath = info.dir;
+      await _browse(info.dir);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _browse(String path) async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final FsListing listing = await widget.chatController.browseWorkdir(
         path,
         showHidden: _showHidden,
       );
@@ -69,9 +117,40 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   }
 
   Future<void> _toggleHiddenFiles() async {
-    final String path = _listing?.path ?? '';
+    final String path = _listing?.absolutePath ?? _workPath ?? '';
     setState(() => _showHidden = !_showHidden);
-    await _load(path);
+    if (path.isNotEmpty) await _browse(path);
+  }
+
+  Future<void> _setAsWorkPath() async {
+    final FsListing? listing = _listing;
+    if (listing == null) return;
+    final String target = listing.absolutePath;
+    if (_workPath == target) return;
+    final String? previous = _workPath;
+    // Update the label immediately and keep the browser fully usable. The backend
+    // sync (events reconnect + conversation reload, which fetches history over the
+    // slow tunnel) runs in the background instead of freezing the file list.
+    setState(() {
+      _error = null;
+      _workPath = target;
+    });
+    try {
+      final WorkdirInfo info = await widget.chatController.setWorkdir(target);
+      if (!mounted) return;
+      setState(() => _workPath = info.dir);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.workdirUpdated)),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _workPath = previous; // revert the optimistic update on failure
+        _error = err is BackendException && err.code == 'WORKDIR_BUSY'
+            ? context.l10n.workdirBusy
+            : err.toString();
+      });
+    }
   }
 
   Future<void> _pickUpload() async {
@@ -105,18 +184,33 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   Future<void> _uploadFiles(List<_UploadFile> files) async {
     final FsListing? listing = _listing;
     if (listing == null || files.isEmpty || _isBusy) return;
+    // Reject oversized files up front so we never push them over the tunnel; the
+    // backend enforces the same cap as a safety net.
+    final List<_UploadFile> tooBig =
+        files.where((_UploadFile f) => f.bytes.length > _maxUploadBytes).toList();
+    final List<_UploadFile> toUpload =
+        files.where((_UploadFile f) => f.bytes.length <= _maxUploadBytes).toList();
+    if (tooBig.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text(context.l10n.uploadTooLarge(tooBig.first.name, '100 MB')),
+        ),
+      );
+    }
+    if (toUpload.isEmpty) return;
     setState(() {
       _isBusy = true;
-      _operationText = context.l10n.uploadingFile(files.first.name);
+      _operationText = context.l10n.uploadingFile(toUpload.first.name);
       _error = null;
     });
     try {
       int uploaded = 0;
-      for (final _UploadFile file in files) {
+      for (final _UploadFile file in toUpload) {
         if (!mounted) return;
         setState(() => _operationText = context.l10n.uploadingFile(file.name));
         await widget.chatController.uploadFile(
-          path: listing.path,
+          path: listing.absolutePath,
           name: file.name,
           bytes: file.bytes,
         );
@@ -126,7 +220,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.l10n.uploadComplete(uploaded))),
       );
-      await _load(listing.path);
+      await _browse(listing.absolutePath);
     } catch (err) {
       if (!mounted) return;
       setState(() => _error = context.l10n.uploadFailed(err));
@@ -140,42 +234,25 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     }
   }
 
-  Future<void> _download(FsEntry entry) async {
-    if (_isBusy) return;
-    setState(() {
-      _isBusy = true;
-      _operationText = context.l10n.downloadingFile(entry.name);
-      _error = null;
-    });
-    try {
-      final FsDownload download =
-          await widget.chatController.downloadFile(entry.path);
-      await saveDownloadedFile(
-        fileName: download.fileName,
-        bytes: download.bytes,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.downloadStarted(download.fileName)),
-        ),
-      );
-    } catch (err) {
-      if (!mounted) return;
-      setState(() => _error = context.l10n.downloadFailed(err));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isBusy = false;
-          _operationText = null;
-        });
-      }
-    }
+  void _download(FsEntry entry) {
+    if (_downloads.isActive) return;
+    // Fire-and-forget: the manager owns the lifecycle, so the transfer and its
+    // completion notification continue even if this screen is popped.
+    _downloads.startDownload(
+      fileName: entry.name,
+      strings: context.l10n,
+      fetch: (void Function(int, int?) onProgress) =>
+          widget.chatController.downloadFile(entry.path, onProgress: onProgress),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final FsListing? listing = _listing;
+    final bool atWorkPath = listing != null &&
+        _workPath != null &&
+        listing.absolutePath == _workPath;
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n.fileSystem)),
       body: SafeArea(
@@ -187,6 +264,14 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
+                  if (_workPath != null)
+                    Text(
+                      context.l10n.currentWorkPath(_workPath!),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -198,13 +283,29 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                         label: Text(context.l10n.uploadFile),
                       ),
                       OutlinedButton.icon(
+                        onPressed: _isLoading || _isBusy || atWorkPath
+                            ? null
+                            : _setAsWorkPath,
+                        icon: const Icon(Icons.flag_outlined),
+                        label: Text(context.l10n.setAsWorkPath),
+                      ),
+                      OutlinedButton.icon(
                         onPressed: _isLoading || _isBusy
                             ? null
-                            : () => _load(_listing?.path ?? ''),
+                            : () => _browse(
+                                  _listing?.absolutePath ?? _workPath ?? '',
+                                ),
                         icon: const Icon(Icons.refresh_outlined),
                         label: Text(context.l10n.refresh),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    context.l10n.transferLimitHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
                   ),
                   if (kIsWeb) ...<Widget>[
                     const SizedBox(height: 12),
@@ -233,10 +334,24 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                     style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 6),
-                  if (_listing != null)
-                    SelectableText(
-                      _listing!.absolutePath,
-                      style: theme.textTheme.bodySmall,
+                  if (listing != null)
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: SelectableText(
+                            listing.absolutePath,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                        if (atWorkPath)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Chip(
+                              label: Text(context.l10n.workPathTag),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                      ],
                     ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -244,11 +359,11 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                     runSpacing: 8,
                     children: <Widget>[
                       OutlinedButton.icon(
-                        onPressed: _listing?.parentPath == null ||
+                        onPressed: listing?.parentPath == null ||
                                 _isLoading ||
                                 _isBusy
                             ? null
-                            : () => _load(_listing!.parentPath!),
+                            : () => _browse(listing!.parentPath!),
                         icon: const Icon(Icons.arrow_upward_outlined),
                         label: Text(context.l10n.parentFolder),
                       ),
@@ -268,6 +383,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                       ),
                     ],
                   ),
+                  _DownloadStatus(downloads: _downloads),
                   if (_operationText != null) ...<Widget>[
                     const SizedBox(height: 12),
                     Text(_operationText!),
@@ -281,12 +397,13 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                       _error!,
                       style: TextStyle(color: theme.colorScheme.error),
                     ),
-                  ] else if (_listing != null) ...<Widget>[
+                  ] else if (listing != null) ...<Widget>[
                     const SizedBox(height: 12),
                     _FileList(
-                      listing: _listing!,
+                      listing: listing,
                       isBusy: _isBusy,
-                      onOpen: (FsEntry entry) => _load(entry.path),
+                      downloadActive: _downloads.isActive,
+                      onOpen: (FsEntry entry) => _browse(entry.path),
                       onDownload: _download,
                     ),
                   ],
@@ -300,16 +417,122 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   }
 }
 
+/// Renders the current [DownloadManager] state inline: a live progress bar while
+/// downloading, or the saved location / error once it settles.
+class _DownloadStatus extends StatelessWidget {
+  const _DownloadStatus({required this.downloads});
+
+  final DownloadManager downloads;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    switch (downloads.stage) {
+      case DownloadStage.downloading:
+      case DownloadStage.saving:
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: _DownloadProgress(
+            name: downloads.fileName ?? '',
+            received: downloads.received,
+            total: downloads.total,
+            saving: downloads.stage == DownloadStage.saving,
+          ),
+        );
+      case DownloadStage.done:
+        final String text =
+            downloads.savedLocation ?? context.l10n.downloadComplete;
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.check_circle_outline,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SelectableText(text, style: theme.textTheme.bodySmall),
+              ),
+            ],
+          ),
+        );
+      case DownloadStage.failed:
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+            downloads.errorText ?? '',
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        );
+      case DownloadStage.idle:
+        return const SizedBox.shrink();
+    }
+  }
+}
+
+class _DownloadProgress extends StatelessWidget {
+  const _DownloadProgress({
+    required this.name,
+    required this.received,
+    required this.total,
+    required this.saving,
+  });
+
+  final String name;
+  final int received;
+  final int? total;
+  final bool saving;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool hasTotal = total != null && total! > 0;
+    // While saving to disk the byte stream is done; show a full, indeterminate bar.
+    final double? value =
+        saving ? null : (hasTotal ? (received / total!).clamp(0.0, 1.0) : null);
+    final int percent = hasTotal ? ((received / total!) * 100).round() : 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          hasTotal && !saving
+              ? context.l10n.downloadProgress(name, percent)
+              : context.l10n.downloadIndeterminate(name),
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(value: value, minHeight: 6),
+        ),
+        if (hasTotal && !saving) ...<Widget>[
+          const SizedBox(height: 4),
+          Text(
+            '${_formatBytes(received)} / ${_formatBytes(total!)}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _FileList extends StatelessWidget {
   const _FileList({
     required this.listing,
     required this.isBusy,
+    required this.downloadActive,
     required this.onOpen,
     required this.onDownload,
   });
 
   final FsListing listing;
   final bool isBusy;
+  final bool downloadActive;
   final ValueChanged<FsEntry> onOpen;
   final ValueChanged<FsEntry> onDownload;
 
@@ -338,7 +561,8 @@ class _FileList extends StatelessWidget {
               onTap: entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
               trailing: IconButton(
                 tooltip: context.l10n.download,
-                onPressed: isBusy ? null : () => onDownload(entry),
+                onPressed:
+                    isBusy || downloadActive ? null : () => onDownload(entry),
                 icon: const Icon(Icons.download_outlined),
               ),
             ),
@@ -369,15 +593,15 @@ class _FileList extends StatelessWidget {
     return '${local.year}-${two(local.month)}-${two(local.day)} '
         '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
   }
+}
 
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    final double kb = bytes / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-    final double mb = kb / 1024;
-    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-    return '${(mb / 1024).toStringAsFixed(1)} GB';
-  }
+String _formatBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  final double kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+  final double mb = kb / 1024;
+  if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+  return '${(mb / 1024).toStringAsFixed(1)} GB';
 }
 
 class _UploadFile {

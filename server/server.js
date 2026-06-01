@@ -33,7 +33,9 @@ const {
   listAbsoluteDirectory,
   listDirectory,
   prepareDownload,
+  prepareDownloadAbsolute,
   resolveUploadTarget,
+  resolveAbsoluteUploadTarget,
   uploadedEntry,
 } = require('./lib/filesystem');
 const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
@@ -56,6 +58,20 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
+// Hard cap on a single download (file, or the uncompressed total behind a zip).
+// The public quick tunnel relays slowly and has limited throughput, so we refuse
+// oversized downloads up front instead of letting the user wait on a transfer
+// that will stall. Override with DOWNLOAD_MAX_BYTES if a different tunnel allows.
+const MAX_DOWNLOAD_BYTES = parseInt(
+  process.env.DOWNLOAD_MAX_BYTES || String(300 * 1024 * 1024),
+  10,
+);
+// Cap a single uploaded file. The quick tunnel limits request bodies, so we
+// refuse oversized uploads (the app also pre-checks before sending).
+const MAX_UPLOAD_BYTES = parseInt(
+  process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
+  10,
+);
 
 const app = express();
 const eventClients = new Set();
@@ -68,8 +84,22 @@ const runningScopes = new Set();
 const scopeChains = new Map();
 const rawUpload = express.raw({
   type: 'application/octet-stream',
-  limit: process.env.FILE_UPLOAD_LIMIT || '256mb',
+  // A hair above MAX_UPLOAD_BYTES so the handler returns our own clean JSON for
+  // at-cap files; anything well over the cap is rejected by the parser below.
+  limit: process.env.FILE_UPLOAD_LIMIT || '101mb',
 });
+
+// Turns the body-parser's "payload too large" (and any upstream error) into the
+// same JSON shape the app understands, instead of Express's default HTML 413.
+function uploadErrorHandler(err, req, res, next) {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      error: 'upload exceeds the size limit',
+      code: 'FS_UPLOAD_TOO_LARGE',
+    });
+  }
+  return next(err);
+}
 
 // Compress responses before they cross the tunnel. The web bundle is the bulk of
 // first-load bytes (main.dart.js ~3.6MB + canvaskit.wasm ~7MB); gzip cuts it ~60%,
@@ -122,15 +152,6 @@ function formatUptime(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   return `${d}d ${h}h ${m}m ${s}s`;
-}
-
-function clearWorkdir(dir) {
-  let count = 0;
-  for (const entry of fs.readdirSync(dir)) {
-    fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
-    count += 1;
-  }
-  return { dir, count };
 }
 
 function sendWorkdirError(res, err) {
@@ -409,7 +430,16 @@ app.get('/api/fs/list', (req, res) => {
 app.get('/api/fs/download', (req, res) => {
   let download;
   try {
-    download = prepareDownload(req.query.path, requestWorkdir(req));
+    // The unified file browser sends absolute paths (it can reach anywhere up to
+    // root); older relative paths stay confined to the workdir. Both enforce the
+    // size cap so an oversized transfer is refused before it starts.
+    if (req.query.path && path.isAbsolute(String(req.query.path))) {
+      download = prepareDownloadAbsolute(req.query.path, {
+        maxBytes: MAX_DOWNLOAD_BYTES,
+      });
+    } else {
+      download = prepareDownload(req.query.path, requestWorkdir(req));
+    }
   } catch (err) {
     return sendFilesystemError(res, err);
   }
@@ -448,13 +478,35 @@ app.get('/api/fs/download', (req, res) => {
   });
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', attachmentHeader(download.filename));
+  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
+  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
+  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
+  let sentBytes = 0;
+  child.stdout.on('data', (chunk) => {
+    sentBytes += chunk.length;
+    if (sentBytes > MAX_DOWNLOAD_BYTES) {
+      child.kill('SIGKILL');
+      res.destroy();
+    }
+  });
   return child.stdout.pipe(res);
 });
 
-app.post('/api/fs/upload', rawUpload, (req, res) => {
+app.post('/api/fs/upload', rawUpload, uploadErrorHandler, (req, res) => {
+  if (Buffer.isBuffer(req.body) && req.body.length > MAX_UPLOAD_BYTES) {
+    return res.status(413).json({
+      error: 'upload exceeds the size limit',
+      code: 'FS_UPLOAD_TOO_LARGE',
+    });
+  }
   let target;
   try {
-    target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
+    // Absolute target from the unified browser, or workdir-relative (legacy).
+    if (req.query.path && path.isAbsolute(String(req.query.path))) {
+      target = resolveAbsoluteUploadTarget(req.query.path, req.query.name);
+    } else {
+      target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
+    }
     if (fs.existsSync(target.target)) {
       const realTarget = fs.realpathSync(target.target);
       if (
@@ -939,16 +991,6 @@ app.post('/api/session/clear', (req, res) => {
     clearHistory(scopeKey);
   }
   return res.json({ ok: true, workdir, cleared });
-});
-
-app.post('/api/workdir/reset', (req, res) => {
-  try {
-    const result = clearWorkdir(requestWorkdir(req));
-    return res.json(result);
-  } catch (err) {
-    if (err instanceof WorkdirError) return sendWorkdirError(res, err);
-    return res.status(500).json({ error: err.message });
-  }
 });
 
 app.get('/api/events', (req, res) => {

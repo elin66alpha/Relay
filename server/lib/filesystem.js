@@ -184,6 +184,135 @@ function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) 
   };
 }
 
+// Recursively sum the size of every regular file under `dir`. Symlinks are
+// skipped so the walk cannot loop or escape via a linked directory. Used to
+// reject directory (zip) downloads before we start streaming, since the tunnel
+// has a hard size budget and a half-sent zip cannot become a clean error.
+function directorySize(dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const current = stack.pop();
+    let dirents;
+    try {
+      dirents = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_err) {
+      continue;
+    }
+    for (const dirent of dirents) {
+      const full = path.join(current, dirent.name);
+      let stat;
+      try {
+        stat = fs.lstatSync(full);
+      } catch (_err) {
+        continue;
+      }
+      if (stat.isSymbolicLink()) continue;
+      if (stat.isDirectory()) {
+        stack.push(full);
+      } else if (stat.isFile()) {
+        total += stat.size;
+      }
+    }
+  }
+  return total;
+}
+
+// Download by absolute path so the unified file browser can fetch anything the
+// user can navigate to (the browser already exposes the whole filesystem up to
+// root). `maxBytes`, when set, caps the download: a single file by its size, a
+// directory by its uncompressed total (which is >= the resulting zip, so the
+// zip is guaranteed to fit). Over-limit throws before any bytes are streamed.
+function prepareDownloadAbsolute(value, { maxBytes } = {}) {
+  const raw = String(value || '').trim();
+  if (!raw || !path.isAbsolute(raw)) {
+    throw new FilesystemError('download path must be absolute', {
+      status: 400,
+      code: 'FS_PATH_MUST_BE_ABSOLUTE',
+    });
+  }
+  const target = path.resolve(raw);
+  let stat;
+  try {
+    stat = fs.statSync(target);
+  } catch (_err) {
+    throw new FilesystemError('path not found', {
+      status: 404,
+      code: 'FS_PATH_NOT_FOUND',
+    });
+  }
+  if (!stat.isFile() && !stat.isDirectory()) {
+    throw new FilesystemError('only files and directories can be downloaded', {
+      status: 400,
+      code: 'FS_UNSUPPORTED_DOWNLOAD',
+    });
+  }
+  const isDirectory = stat.isDirectory();
+  const totalBytes = isDirectory ? directorySize(target) : stat.size;
+  if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
+    throw new FilesystemError('download exceeds the size limit', {
+      status: 413,
+      code: 'FS_DOWNLOAD_TOO_LARGE',
+      meta: { totalBytes, maxBytes },
+    });
+  }
+  const basename = path.basename(target) || 'download';
+  return {
+    target,
+    isDirectory,
+    totalBytes,
+    filename: isDirectory ? `${basename}.zip` : basename,
+    zipCwd: path.dirname(target),
+    zipEntryName: basename,
+  };
+}
+
+// Upload into an absolute directory chosen in the unified file browser. Mirrors
+// resolveUploadTarget but without the workdir confinement, matching the
+// browser's whole-filesystem reach. The filename is still sanitised to a bare
+// basename so it cannot traverse out of the chosen directory.
+function resolveAbsoluteUploadTarget(value, filename) {
+  const raw = String(value || '').trim();
+  if (!raw || !path.isAbsolute(raw)) {
+    throw new FilesystemError('upload path must be absolute', {
+      status: 400,
+      code: 'FS_PATH_MUST_BE_ABSOLUTE',
+    });
+  }
+  const directory = path.resolve(raw);
+  let stat;
+  try {
+    stat = fs.statSync(directory);
+  } catch (_err) {
+    throw new FilesystemError('path not found', {
+      status: 404,
+      code: 'FS_PATH_NOT_FOUND',
+    });
+  }
+  if (!stat.isDirectory()) {
+    throw new FilesystemError('upload target is not a directory', {
+      status: 400,
+      code: 'FS_PATH_NOT_DIRECTORY',
+    });
+  }
+  const rawName = String(filename || '').trim();
+  const name = path.basename(rawName);
+  if (!name || name === '.' || name === '..' || rawName.includes('/') || rawName.includes('\\')) {
+    throw new FilesystemError('invalid upload file name', {
+      status: 400,
+      code: 'FS_INVALID_FILE_NAME',
+    });
+  }
+  const target = path.resolve(directory, name);
+  if (!isInside(directory, target)) {
+    throw new FilesystemError('path is outside the target directory', {
+      status: 403,
+      code: 'FS_PATH_OUTSIDE_WORKDIR',
+    });
+  }
+  return { directory, target, name, root: directory, realRoot: directory };
+}
+
 function prepareDownload(relativePath, workdir) {
   const resolved = resolveExisting(relativePath, workdir);
   if (!resolved.stat.isFile() && !resolved.stat.isDirectory()) {
@@ -251,6 +380,8 @@ module.exports = {
   listDirectory,
   listAbsoluteDirectory,
   prepareDownload,
+  prepareDownloadAbsolute,
   resolveUploadTarget,
+  resolveAbsoluteUploadTarget,
   uploadedEntry,
 };

@@ -10,7 +10,6 @@ import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
 import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
-import '../workdir/work_directory_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -133,20 +132,6 @@ class CliAgentsDrawer extends StatelessWidget {
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.folder_open_outlined),
-              title: Text(context.l10n.workDirectory),
-              onTap: () {
-                if (closeOnAction) Navigator.of(context).pop();
-                Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) => WorkDirectoryScreen(
-                      chatController: chatController,
-                    ),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.account_tree_outlined),
               title: Text(context.l10n.fileSystem),
               onTap: () {
                 if (closeOnAction) Navigator.of(context).pop();

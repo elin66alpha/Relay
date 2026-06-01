@@ -242,9 +242,6 @@ class BotChatController extends ChangeNotifier {
 
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
 
-  Future<WorkdirInfo> checkWorkdir(String path) =>
-      _backendClient.checkWorkdir(path);
-
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
     final WorkdirInfo info =
         await _backendClient.setWorkdir(path, create: create);
@@ -287,20 +284,17 @@ class BotChatController extends ChangeNotifier {
     }
   }
 
-  Future<FsListing> listFiles(
-    String path, {
-    bool showHidden = false,
-  }) =>
-      _backendClient.listFiles(path, showHidden: showHidden);
-
   Future<FsListing> browseWorkdir(
     String path, {
     bool showHidden = false,
   }) =>
       _backendClient.browseWorkdir(path, showHidden: showHidden);
 
-  Future<FsDownload> downloadFile(String path) =>
-      _backendClient.downloadFile(path);
+  Future<FsDownload> downloadFile(
+    String path, {
+    void Function(int received, int? total)? onProgress,
+  }) =>
+      _backendClient.downloadFile(path, onProgress: onProgress);
 
   Future<FsEntry> uploadFile({
     required String path,
@@ -308,25 +302,6 @@ class BotChatController extends ChangeNotifier {
     required Uint8List bytes,
   }) =>
       _backendClient.uploadFile(path: path, name: name, bytes: bytes);
-
-  Future<void> resetWorkdir() async {
-    if (_isThinking) return;
-    _isThinking = true;
-    _lastError = null;
-    notifyListeners();
-    try {
-      final WorkdirResetResult result = await _backendClient.resetWorkdir();
-      _appendSystemMessage(
-        _strings.workdirResetSuccess(result.count, result.dir),
-      );
-    } catch (err) {
-      _lastError = err.toString();
-      _appendSystemMessage(_strings.workdirResetFailed(err));
-    } finally {
-      _isThinking = false;
-      notifyListeners();
-    }
-  }
 
   void connectEvents() {
     _wantsEvents = true;

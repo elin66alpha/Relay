@@ -79,16 +79,6 @@ class ChatReply {
   final String content;
 }
 
-class WorkdirResetResult {
-  const WorkdirResetResult({
-    required this.dir,
-    required this.count,
-  });
-
-  final String dir;
-  final int count;
-}
-
 class WorkdirInfo {
   const WorkdirInfo({
     required this.dir,
@@ -529,33 +519,10 @@ class BackendClient {
     );
   }
 
-  Future<WorkdirResetResult> resetWorkdir() async {
-    final Object? decoded = await _requestJson('POST', '/api/workdir/reset');
-    if (decoded is! Map) {
-      throw BackendException('Invalid work directory reset response.');
-    }
-    return WorkdirResetResult(
-      dir: decoded['dir'] as String? ?? '',
-      count: decoded['count'] as int? ?? 0,
-    );
-  }
-
   Future<WorkdirInfo> workdir() async {
     final Object? decoded = await _requestJson('GET', '/api/workdir');
     if (decoded is! Map) {
       throw BackendException('Invalid work directory response.');
-    }
-    return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
-  }
-
-  Future<WorkdirInfo> checkWorkdir(String path) async {
-    final Object? decoded = await _requestJson(
-      'POST',
-      '/api/workdir/check',
-      body: <String, Object?>{'path': path},
-    );
-    if (decoded is! Map) {
-      throw BackendException('Invalid work directory check response.');
     }
     return WorkdirInfo.fromJson(decoded.cast<String, Object?>());
   }
@@ -579,21 +546,6 @@ class BackendClient {
     return info;
   }
 
-  Future<FsListing> listFiles(
-    String path, {
-    bool showHidden = false,
-  }) async {
-    final String queryPath = Uri.encodeQueryComponent(path);
-    final Object? decoded = await _requestJson(
-      'GET',
-      '/api/fs/list?path=$queryPath&showHidden=$showHidden',
-    );
-    if (decoded is! Map) {
-      throw BackendException('Invalid file listing response.');
-    }
-    return FsListing.fromJson(decoded.cast<String, Object?>());
-  }
-
   Future<FsListing> browseWorkdir(
     String path, {
     bool showHidden = false,
@@ -609,27 +561,44 @@ class BackendClient {
     return FsListing.fromJson(decoded.cast<String, Object?>());
   }
 
-  Future<FsDownload> downloadFile(String path) async {
+  /// Streams a download so the UI can show progress instead of freezing on a
+  /// large transfer. [onProgress] reports (receivedBytes, totalBytes); total is
+  /// null when the server can't announce a length up front (zipped folders).
+  Future<FsDownload> downloadFile(
+    String path, {
+    void Function(int received, int? total)? onProgress,
+  }) async {
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(
       credential,
       '/api/fs/download?path=${Uri.encodeQueryComponent(path)}',
     );
-    final http.Response response = await _httpClient
-        .get(
-          uri,
-          headers: await _headers(
-            credential,
-            accept: 'application/octet-stream',
-          ),
-        )
-        .timeout(const Duration(minutes: 10));
+    final http.Request request = http.Request('GET', uri);
+    request.headers.addAll(
+      await _headers(credential, accept: 'application/octet-stream'),
+    );
+    final http.StreamedResponse response =
+        await _httpClient.send(request).timeout(const Duration(minutes: 15));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _exceptionFor(response.statusCode, response.body);
+      final String text = await response.stream.bytesToString();
+      throw _exceptionFor(response.statusCode, text);
+    }
+    final int? total =
+        (response.contentLength != null && response.contentLength! > 0)
+            ? response.contentLength
+            : null;
+    final BytesBuilder builder = BytesBuilder(copy: false);
+    int received = 0;
+    onProgress?.call(0, total);
+    await for (final List<int> chunk
+        in response.stream.timeout(const Duration(minutes: 15))) {
+      builder.add(chunk);
+      received += chunk.length;
+      onProgress?.call(received, total);
     }
     return FsDownload(
       fileName: _downloadFileName(response.headers, path),
-      bytes: response.bodyBytes,
+      bytes: builder.takeBytes(),
     );
   }
 
