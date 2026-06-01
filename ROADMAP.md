@@ -49,4 +49,7 @@ Reuse boundaries:
 - **Multiple Agent Sessions per Workdir**: Allow multiple concurrent sessions for each AI agent within the same working directory. Upon switching to a work directory, automatically load previously saved sessions (including names and conversation history/memory). Add a "New Session" (+) button in the left drawer next to the CLI agents, along with the ability to delete specific sessions.
 - Named-domain / direct-mode hardening guide for production use beyond quick tunnels.
 - More detailed backend diagnostics.
+- Scheduled quota-ready messages: let the user draft a message tied to the next
+  quota reset time, then automatically send it immediately after quota refresh
+  so refreshed capacity is not wasted while the user is away.
 - Better Antigravity quota support when an API or reliable CLI source is available.
