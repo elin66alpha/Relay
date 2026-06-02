@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
@@ -10,6 +12,7 @@ import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
 import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
+import '../quota/quota_scheduler_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -34,6 +37,7 @@ class CliAgentsDrawer extends StatelessWidget {
       animation: Listenable.merge(<Listenable>[
         agentsController,
         machinesController,
+        chatController,
       ]),
       builder: (BuildContext context, Widget? _) {
         final String activeKey = agentsController.activeAgentKey;
@@ -75,6 +79,20 @@ class CliAgentsDrawer extends StatelessWidget {
                       );
                     },
                   ),
+                  ListTile(
+                    leading: const Icon(Icons.schedule_send_outlined),
+                    title: Text(context.l10n.quotaScheduler),
+                    onTap: () {
+                      if (closeOnAction) Navigator.of(context).pop();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => QuotaSchedulerScreen(
+                            chatController: chatController,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   const Divider(height: 16),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
@@ -88,21 +106,11 @@ class CliAgentsDrawer extends StatelessWidget {
                     ),
                   ),
                   for (final CliAgent agent in agentsController.agents)
-                    ListTile(
-                      leading: Icon(_iconFor(agent.key)),
-                      title: Text(agent.label),
-                      subtitle: Text(
-                        agent.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      selected: agent.key == activeKey,
-                      onTap: () async {
-                        await agentsController.setActive(agent.key);
-                        if (context.mounted && closeOnAction) {
-                          Navigator.of(context).pop();
-                        }
-                      },
+                    ..._agentTiles(
+                      context,
+                      agent,
+                      activeKey,
+                      activeMachine,
                     ),
                   const Divider(height: 16),
                   ListTile(
@@ -164,7 +172,184 @@ class CliAgentsDrawer extends StatelessWidget {
       },
     );
   }
+
+  List<Widget> _agentTiles(
+    BuildContext context,
+    CliAgent agent,
+    String activeKey,
+    MachineCredential? activeMachine,
+  ) {
+    final bool selectedAgent = agent.key == activeKey;
+    final List<AgentSession> sessions = chatController.sessionsFor(agent.key);
+    final String? activeSessionId = selectedAgent
+        ? chatController.activeSessionId
+        : sessions.isNotEmpty
+            ? sessions.first.id
+            : null;
+    return <Widget>[
+      ListTile(
+        leading: Icon(_iconFor(agent.key)),
+        title: Text(agent.label),
+        selected: selectedAgent,
+        trailing: IconButton(
+          icon: const Icon(Icons.add_rounded),
+          tooltip: context.l10n.newSession,
+          onPressed: chatController.isThinking ||
+                  sessions.length >= _maxSessionsPerAgent
+              ? null
+              : () => _createSession(context, agent, activeMachine),
+        ),
+        onTap: () async {
+          await agentsController.setActive(agent.key);
+          if (activeMachine != null) {
+            await chatController.loadFor(agent, activeMachine);
+          }
+          if (context.mounted && closeOnAction) {
+            Navigator.of(context).pop();
+          }
+        },
+      ),
+      if (selectedAgent && chatController.sessionsLoadingFor(agent.key))
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: LinearProgressIndicator(minHeight: 2),
+        ),
+      if (selectedAgent)
+        for (final AgentSession session in sessions)
+          Padding(
+            padding: const EdgeInsets.only(left: 28),
+            child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              leading: Icon(
+                session.id == activeSessionId
+                    ? Icons.chat_bubble
+                    : Icons.chat_bubble_outline,
+                size: 18,
+              ),
+              title: Text(
+                session.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              selected: session.id == activeSessionId,
+              // The default "Main" session can't be deleted — it holds the
+              // original, pre-multi-session conversation for this path.
+              trailing: session.isDefault
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: context.l10n.deleteSession,
+                      onPressed: chatController.isThinking
+                          ? null
+                          : () => _deleteSession(context, agent, session),
+                    ),
+              onTap: () async {
+                await agentsController.setActive(agent.key);
+                await chatController.selectSession(agent, session.id);
+                if (context.mounted && closeOnAction) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ),
+    ];
+  }
+
+  Future<void> _createSession(
+    BuildContext context,
+    CliAgent agent,
+    MachineCredential? activeMachine,
+  ) async {
+    if (activeMachine == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.importOrChooseMachine)),
+      );
+      return;
+    }
+    final int next = chatController.sessionsFor(agent.key).length + 1;
+    final TextEditingController controller = TextEditingController(
+      text: context.l10n.defaultSessionName(next),
+    );
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.newSession),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(labelText: context.l10n.sessionName),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (String value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: Text(context.l10n.create),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (name == null || !context.mounted) return;
+    try {
+      await agentsController.setActive(agent.key);
+      await chatController.createSessionFor(agent, name: name);
+    } catch (err) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
+      );
+    }
+  }
+
+  Future<void> _deleteSession(
+    BuildContext context,
+    CliAgent agent,
+    AgentSession session,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(context.l10n.deleteSessionTitle(session.name)),
+          content: Text(context.l10n.deleteSessionBody),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(context.l10n.delete),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await chatController.deleteSession(agent, session.id);
+    } catch (err) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
+      );
+    }
+  }
 }
+
+// Mirrors the backend cap (server/lib/chat-sessions.js MAX_SESSIONS) so the
+// "new session" button disables before the create call would be rejected.
+const int _maxSessionsPerAgent = 8;
 
 IconData _iconFor(String key) {
   return switch (key) {
@@ -292,23 +477,35 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                 ],
               ),
               content: Container(
-                constraints: const BoxConstraints(maxHeight: 250),
+                constraints: const BoxConstraints(maxHeight: 520),
                 width: double.maxFinite,
                 child: SingleChildScrollView(
-                  child: _isLoading
-                      ? const Center(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      if (_isLoading)
+                        const Center(
                           child: Padding(
                             padding: EdgeInsets.all(24.0),
                             child: CircularProgressIndicator(),
                           ),
                         )
-                      : SelectableText(
+                      else
+                        SelectableText(
                           _statusText ?? context.l10n.noStatus,
                           style: const TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 13,
                           ),
                         ),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1),
+                      const SizedBox(height: 12),
+                      _DeviceTokensPanel(
+                        chatController: widget.chatController,
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: <Widget>[
@@ -393,4 +590,295 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       ),
     );
   }
+}
+
+class _DeviceTokensPanel extends StatefulWidget {
+  const _DeviceTokensPanel({required this.chatController});
+
+  final BotChatController chatController;
+
+  @override
+  State<_DeviceTokensPanel> createState() => _DeviceTokensPanelState();
+}
+
+class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
+  late Future<List<DeviceToken>> _tokensFuture;
+  List<DeviceToken> _tokens = const <DeviceToken>[];
+  final Set<String> _revoking = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _tokensFuture = _loadTokens();
+  }
+
+  Future<List<DeviceToken>> _loadTokens() async {
+    final List<DeviceToken> tokens = await widget.chatController.deviceTokens();
+    _tokens = tokens;
+    return tokens;
+  }
+
+  void _refresh() {
+    setState(() {
+      _tokensFuture = _loadTokens();
+    });
+  }
+
+  Future<bool> _confirmCurrentRevoke(DeviceToken token) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(context.l10n.revokeCurrentTokenTitle),
+        content: Text(context.l10n.revokeCurrentTokenBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(context.l10n.revokeToken),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _revoke(DeviceToken token) async {
+    if (token.current && !await _confirmCurrentRevoke(token)) return;
+    if (!mounted) return;
+    setState(() {
+      _revoking.add(token.id);
+    });
+    try {
+      await widget.chatController.revokeDeviceToken(token.id);
+      if (!mounted) return;
+      final String now = DateTime.now().toUtc().toIso8601String();
+      final List<DeviceToken> next = _tokens
+          .map(
+            (DeviceToken item) => item.id == token.id
+                ? item.copyWith(revoked: true, revokedAt: now)
+                : item,
+          )
+          .toList(growable: false);
+      setState(() {
+        _tokens = next;
+        _tokensFuture = Future<List<DeviceToken>>.value(next);
+      });
+      final String label = token.label.isEmpty ? token.id : token.label;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tokenRevoked(label))),
+      );
+      if (!token.current) _refresh();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.tokenRevokeFailed(err)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _revoking.remove(token.id);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<DeviceToken>>(
+      future: _tokensFuture,
+      builder: (BuildContext context, AsyncSnapshot<List<DeviceToken>> snap) {
+        final ColorScheme colors = Theme.of(context).colorScheme;
+        final List<DeviceToken> tokens = snap.data ?? _tokens;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    context.l10n.deviceTokens,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: context.l10n.refresh,
+                  onPressed: snap.connectionState == ConnectionState.waiting
+                      ? null
+                      : _refresh,
+                ),
+              ],
+            ),
+            if (snap.connectionState == ConnectionState.waiting &&
+                tokens.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (snap.hasError && tokens.isEmpty)
+              Text(
+                snap.error.toString(),
+                style: TextStyle(color: colors.error),
+              )
+            else if (tokens.isEmpty)
+              Text(
+                context.l10n.noDeviceTokens,
+                style: TextStyle(color: colors.outline),
+              )
+            else
+              for (final DeviceToken token in tokens)
+                _DeviceTokenRow(
+                  token: token,
+                  revoking: _revoking.contains(token.id),
+                  onRevoke: () => _revoke(token),
+                ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DeviceTokenRow extends StatelessWidget {
+  const _DeviceTokenRow({
+    required this.token,
+    required this.revoking,
+    required this.onRevoke,
+  });
+
+  final DeviceToken token;
+  final bool revoking;
+  final VoidCallback onRevoke;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: colors.outlineVariant),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(
+                token.current
+                    ? Icons.phone_android_rounded
+                    : Icons.devices_other_rounded,
+                color: token.revoked ? colors.outline : colors.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Text(
+                          token.label.isEmpty ? token.id : token.label,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        if (token.current)
+                          _TokenBadge(
+                            label: context.l10n.currentDeviceToken,
+                            color: colors.primaryContainer,
+                            textColor: colors.onPrimaryContainer,
+                          ),
+                        if (token.revoked)
+                          _TokenBadge(
+                            label: context.l10n.revokedDeviceToken,
+                            color: colors.errorContainer,
+                            textColor: colors.onErrorContainer,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      context.l10n.tokenCreatedAt(
+                        _formatShortTime(context, token.createdAt),
+                      ),
+                      style: TextStyle(color: colors.outline, fontSize: 12),
+                    ),
+                    if (token.revokedAt != null)
+                      Text(
+                        context.l10n.tokenRevokedAt(
+                          _formatShortTime(context, token.revokedAt),
+                        ),
+                        style: TextStyle(color: colors.outline, fontSize: 12),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (revoking)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                TextButton(
+                  onPressed: token.revoked ? null : onRevoke,
+                  child: Text(context.l10n.revokeToken),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TokenBadge extends StatelessWidget {
+  const _TokenBadge({
+    required this.label,
+    required this.color,
+    required this.textColor,
+  });
+
+  final String label;
+  final Color color;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+String _formatShortTime(BuildContext context, String? iso) {
+  if (iso == null || iso.isEmpty) return context.l10n.unknown;
+  final DateTime? parsed = DateTime.tryParse(iso);
+  if (parsed == null) return context.l10n.unknown;
+  final DateTime local = parsed.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.month)}/${two(local.day)} '
+      '${two(local.hour)}:${two(local.minute)}';
 }

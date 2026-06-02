@@ -1,9 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The work directory this device is currently in. With shared sessions keyed by
-/// `workdir + agent`, each device holds its own current path locally and sends
-/// it back on every request (the `X-Workdir` header), so two devices can be in
-/// different paths at once and converge to one conversation when they match.
+/// The work directory this device is currently in. Sessions are scoped by
+/// `workdir + agent + session`, while each device holds its own current path
+/// locally and sends it back on every request (the `X-Workdir` header).
 class WorkdirStore {
   WorkdirStore({SharedPreferences? prefs}) : _prefs = prefs;
 

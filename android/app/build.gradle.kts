@@ -5,6 +5,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+if (project.layout.projectDirectory.file("google-services.json").asFile.exists()) {
+    pluginManager.apply("com.google.gms.google-services")
+}
+
 android {
     namespace = "dev.agentdeck.app"
     compileSdk = flutter.compileSdkVersion

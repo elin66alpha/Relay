@@ -28,19 +28,23 @@ class DownloadManager extends ChangeNotifier {
   /// show a one-shot snackbar without replaying it on every rebuild.
   int completedTick = 0;
 
+  // Progress can fire once per network chunk; coalesce notifications to ~10/s so
+  // listeners don't repaint on every chunk. Stage changes still notify instantly.
+  static const Duration _progressInterval = Duration(milliseconds: 100);
+  DateTime _lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
   bool get isActive =>
       stage == DownloadStage.downloading || stage == DownloadStage.saving;
 
-  /// Starts a download in the background. [fetch] streams the bytes and reports
-  /// progress; the result is saved to the system Downloads folder and a system
-  /// notification is shown on completion regardless of which screen is visible.
+  /// Starts a download in the background. [open] begins the transfer; the byte
+  /// stream is written straight to the system Downloads folder (to disk on
+  /// native, never buffered whole) while progress is reported, and a system
+  /// notification fires on completion regardless of which screen is visible.
   /// Only one download runs at a time.
   Future<void> startDownload({
     required String fileName,
     required AppStrings strings,
-    required Future<FsDownload> Function(
-      void Function(int received, int? total) onProgress,
-    ) fetch,
+    required Future<FsDownloadStream> Function() open,
   }) async {
     if (isActive) return;
     this.fileName = fileName;
@@ -49,18 +53,24 @@ class DownloadManager extends ChangeNotifier {
     savedLocation = null;
     errorText = null;
     stage = DownloadStage.downloading;
+    _lastProgressNotify = DateTime.now();
     notifyListeners();
     try {
-      final FsDownload download = await fetch((int r, int? t) {
-        received = r;
-        total = t;
-        if (stage == DownloadStage.downloading) notifyListeners();
-      });
-      stage = DownloadStage.saving;
-      notifyListeners();
-      final DownloadSaveResult saved = await saveDownloadedFile(
+      final FsDownloadStream download = await open();
+      final DownloadSaveResult saved = await saveDownloadStream(
         fileName: download.fileName,
+        total: download.total,
         bytes: download.bytes,
+        onProgress: (int r, int? t) {
+          received = r;
+          total = t;
+          if (stage != DownloadStage.downloading) return;
+          final DateTime now = DateTime.now();
+          if (now.difference(_lastProgressNotify) >= _progressInterval) {
+            _lastProgressNotify = now;
+            notifyListeners();
+          }
+        },
       );
       savedLocation = saved.isBrowserDownload
           ? strings.savedToBrowserDownloads

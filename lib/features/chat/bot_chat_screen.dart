@@ -1,14 +1,18 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
+import '../../core/platform/file_saver.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/cli_agents_controller.dart';
@@ -87,6 +91,11 @@ class _BotChatScreenState extends State<BotChatScreen> {
     } else {
       widget.chatController.connectEvents();
     }
+    // Register for Web Push so quota alerts arrive with the tab closed (web-only,
+    // best-effort, runs once). Permission was already requested at startup.
+    widget.chatController.syncPushSubscription();
+    // Register for FCM on mobile. Missing Firebase config is a graceful no-op.
+    widget.chatController.syncFcmRegistration();
   }
 
   Future<void> _send() async {
@@ -169,50 +178,64 @@ class _BotChatScreenState extends State<BotChatScreen> {
   }
 
   Future<void> _showUsageDialog() async {
-    final Future<UsageReport> usageFuture = widget.chatController.usageReport();
     await showDialog<void>(
       context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Text(context.l10n.usageTitle),
-          content: SizedBox(
-            width: 420,
-            child: FutureBuilder<UsageReport>(
-              future: usageFuture,
-              builder:
-                  (BuildContext context, AsyncSnapshot<UsageReport> snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return Text(context.l10n.loadingUsage);
-                }
-                if (snapshot.hasError) {
-                  return Text(
-                    snapshot.error.toString(),
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
-                  );
-                }
-                final UsageReport report = snapshot.data!;
-                return SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      for (final UsageAgent agent in report.agents)
-                        _UsageAgentPanel(agent: agent),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(context.l10n.close),
-            ),
-          ],
-        );
-      },
+      builder: (BuildContext dialogContext) =>
+          _UsageDialog(chatController: widget.chatController),
     );
+  }
+
+  Future<void> _showHistorySearch() async {
+    final ChatHistorySearchResult? result =
+        await showDialog<ChatHistorySearchResult>(
+      context: context,
+      builder: (BuildContext dialogContext) =>
+          _HistorySearchDialog(chatController: widget.chatController),
+    );
+    if (result == null) return;
+    try {
+      await widget.chatController.selectSession(
+        cliAgentByKey(result.agentKey),
+        result.sessionId,
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.searchFailed(err)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _exportMarkdown() async {
+    try {
+      final ConversationExport export =
+          await widget.chatController.exportCurrentSessionMarkdown();
+      final List<int> bytes = utf8.encode(export.markdown);
+      final DownloadSaveResult saved = await saveDownloadStream(
+        fileName: export.fileName,
+        total: bytes.length,
+        bytes: Stream<List<int>>.value(bytes),
+        onProgress: (_, __) {},
+      );
+      if (!mounted) return;
+      final String message = saved.isBrowserDownload
+          ? context.l10n.savedToBrowserDownloads
+          : context.l10n.savedTo(saved.path ?? export.fileName);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.exportFailed(err)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
   }
 
   @override
@@ -248,10 +271,16 @@ class _BotChatScreenState extends State<BotChatScreen> {
           animation: Listenable.merge(<Listenable>[
             widget.agentsController,
             widget.machinesController,
+            widget.chatController,
           ]),
           builder: (BuildContext context, Widget? _) {
             final MachineCredential? machine =
                 widget.machinesController.activeMachine;
+            final AgentSession? session = widget.chatController.activeSession;
+            final String subtitle = <String>[
+              if (machine != null) machine.displayName,
+              if (session != null) session.name,
+            ].join(' - ');
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -263,9 +292,9 @@ class _BotChatScreenState extends State<BotChatScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (machine != null)
+                if (subtitle.isNotEmpty)
                   Text(
-                    machine.displayName,
+                    subtitle,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.outline,
                       fontSize: 12,
@@ -296,6 +325,29 @@ class _BotChatScreenState extends State<BotChatScreen> {
                 tooltip: context.l10n.compress,
                 onPressed:
                     widget.chatController.isThinking ? null : _sendCompact,
+              );
+            },
+          ),
+          AnimatedBuilder(
+            animation: widget.chatController,
+            builder: (BuildContext context, Widget? _) {
+              return IconButton(
+                icon: const Icon(Icons.search_rounded),
+                tooltip: context.l10n.searchChats,
+                onPressed: widget.chatController.isThinking
+                    ? null
+                    : _showHistorySearch,
+              );
+            },
+          ),
+          AnimatedBuilder(
+            animation: widget.chatController,
+            builder: (BuildContext context, Widget? _) {
+              return IconButton(
+                icon: const Icon(Icons.download_outlined),
+                tooltip: context.l10n.exportMarkdown,
+                onPressed:
+                    widget.chatController.isThinking ? null : _exportMarkdown,
               );
             },
           ),
@@ -461,6 +513,237 @@ class _EmptyChatPlaceholder extends StatelessWidget {
   }
 }
 
+class _HistorySearchDialog extends StatefulWidget {
+  const _HistorySearchDialog({required this.chatController});
+
+  final BotChatController chatController;
+
+  @override
+  State<_HistorySearchDialog> createState() => _HistorySearchDialogState();
+}
+
+class _HistorySearchDialogState extends State<_HistorySearchDialog> {
+  final TextEditingController _query = TextEditingController();
+  Future<List<ChatHistorySearchResult>>? _future;
+  bool _currentAgentOnly = false;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _search() {
+    final String query = _query.text.trim();
+    if (query.isEmpty) return;
+    setState(() {
+      _future = widget.chatController.searchHistory(
+        query,
+        currentAgentOnly: _currentAgentOnly,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(context.l10n.searchChats),
+      content: SizedBox(
+        width: 560,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextField(
+                controller: _query,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: context.l10n.searchHint,
+                  prefixIcon: const Icon(Icons.search_rounded),
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) => _search(),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _currentAgentOnly,
+                title: Text(context.l10n.currentAgentOnly),
+                onChanged: (bool value) {
+                  setState(() {
+                    _currentAgentOnly = value;
+                  });
+                  if (_future != null) _search();
+                },
+              ),
+              SizedBox(
+                height: 320,
+                child: _HistorySearchResults(
+                  future: _future,
+                  onSelected: (ChatHistorySearchResult result) =>
+                      Navigator.of(context).pop(result),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _search,
+          child: Text(context.l10n.searchChats),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.l10n.close),
+        ),
+      ],
+    );
+  }
+}
+
+class _HistorySearchResults extends StatelessWidget {
+  const _HistorySearchResults({
+    required this.future,
+    required this.onSelected,
+  });
+
+  final Future<List<ChatHistorySearchResult>>? future;
+  final ValueChanged<ChatHistorySearchResult> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (future == null) {
+      return const SizedBox.shrink();
+    }
+    return FutureBuilder<List<ChatHistorySearchResult>>(
+      future: future,
+      builder: (
+        BuildContext context,
+        AsyncSnapshot<List<ChatHistorySearchResult>> snapshot,
+      ) {
+        final ColorScheme colors = Theme.of(context).colorScheme;
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Text(
+            context.l10n.searchFailed(snapshot.error!),
+            style: TextStyle(color: colors.error),
+          );
+        }
+        final List<ChatHistorySearchResult> results =
+            snapshot.data ?? const <ChatHistorySearchResult>[];
+        if (results.isEmpty) {
+          return Align(
+            alignment: Alignment.topLeft,
+            child: Text(
+              context.l10n.noSearchResults,
+              style: TextStyle(color: colors.outline),
+            ),
+          );
+        }
+        return ListView.separated(
+          shrinkWrap: true,
+          itemCount: results.length,
+          separatorBuilder: (BuildContext context, int index) =>
+              const Divider(height: 1),
+          itemBuilder: (BuildContext context, int index) {
+            final ChatHistorySearchResult result = results[index];
+            final CliAgent agent = cliAgentByKey(result.agentKey);
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('${agent.label} - ${result.sessionName}'),
+              subtitle: Text(
+                result.snippet,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => onSelected(result),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _UsageDialog extends StatefulWidget {
+  const _UsageDialog({required this.chatController});
+
+  final BotChatController chatController;
+
+  @override
+  State<_UsageDialog> createState() => _UsageDialogState();
+}
+
+class _UsageDialogState extends State<_UsageDialog> {
+  late Future<UsageReport> _usageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _usageFuture = widget.chatController.usageReport();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(context.l10n.usageTitle),
+      content: SizedBox(
+        width: 520,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 560),
+          child: SingleChildScrollView(
+            child: FutureBuilder<UsageReport>(
+              future: _usageFuture,
+              builder: (
+                BuildContext context,
+                AsyncSnapshot<UsageReport> snapshot,
+              ) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return Text(context.l10n.loadingUsage);
+                }
+                if (snapshot.hasError) {
+                  return Text(
+                    snapshot.error.toString(),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  );
+                }
+                final UsageReport report = snapshot.data!;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (final UsageAgent agent in report.agents)
+                      _UsageAgentPanel(agent: agent),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () {
+            setState(() {
+              _usageFuture = widget.chatController.usageReport();
+            });
+          },
+          child: Text(context.l10n.refresh),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.l10n.close),
+        ),
+      ],
+    );
+  }
+}
+
 class _UsageAgentPanel extends StatelessWidget {
   const _UsageAgentPanel({required this.agent});
 
@@ -497,6 +780,40 @@ class _UsageAgentPanel extends StatelessWidget {
                 ),
             ],
           ),
+          if (agent.asOf != null || agent.stale) ...<Widget>[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                if (agent.asOf != null)
+                  Text(
+                    context.l10n.usageAsOf(
+                      _formatUsageTime(context, agent.asOf),
+                    ),
+                    style: TextStyle(color: colors.outline, fontSize: 12),
+                  ),
+                if (agent.stale)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colors.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      context.l10n.usageStale,
+                      style: TextStyle(
+                        color: colors.onTertiaryContainer,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           if (!agent.available)
             Text(

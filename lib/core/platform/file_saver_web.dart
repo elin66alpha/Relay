@@ -5,14 +5,24 @@ import 'package:web/web.dart' as web;
 
 import 'download_save_result.dart';
 
-/// On web the browser saves to its own downloads folder; we can't choose the
-/// path. We trigger the download via an anchor click and report it as a browser
-/// download so the UI shows "saved to your browser's downloads folder".
-Future<DownloadSaveResult> saveDownloadedFile({
+/// On web the browser owns the save location; a Blob needs the full bytes, so we
+/// accumulate the stream (reporting progress) and then trigger an anchor
+/// download into the browser's downloads folder.
+Future<DownloadSaveResult> saveDownloadStream({
   required String fileName,
-  required Uint8List bytes,
+  required int? total,
+  required Stream<List<int>> bytes,
+  required void Function(int received, int? total) onProgress,
 }) async {
-  final web.Blob blob = web.Blob(<JSAny>[bytes.toJS].toJS);
+  final BytesBuilder builder = BytesBuilder(copy: false);
+  int received = 0;
+  onProgress(0, total);
+  await for (final List<int> chunk in bytes) {
+    builder.add(chunk);
+    received += chunk.length;
+    onProgress(received, total);
+  }
+  final web.Blob blob = web.Blob(<JSAny>[builder.takeBytes().toJS].toJS);
   final String url = web.URL.createObjectURL(blob);
   try {
     web.HTMLAnchorElement()

@@ -31,7 +31,6 @@ class AppStrings {
 
   String get appName => 'AgentDeck';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
-  String get machines => isZh ? '机器' : 'Machines';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get cardMode => isZh ? '卡片模式' : 'Card Mode';
@@ -44,6 +43,19 @@ class AppStrings {
   String get weeklyQuota => isZh ? '本周' : 'This week';
   String get remaining => isZh ? '剩余' : 'remaining';
   String get refreshAt => isZh ? '刷新' : 'Refresh';
+  String usageAsOf(String value) => isZh ? '截至 $value' : 'As of $value';
+  String get usageStale => isZh ? '上次成功结果' : 'Stale';
+  String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
+  String get prompt => isZh ? '消息内容' : 'Message';
+  String scheduleUpdated(String agent) =>
+      isZh ? '已更新 $agent 的预设消息。' : 'Updated scheduled message for $agent.';
+  String scheduleFailed(Object err) =>
+      isZh ? '预设消息失败：$err' : 'Scheduled message failed: $err';
+  String get messageRequired => isZh ? '请输入消息内容。' : 'Enter a message.';
+  String get clearSchedule => isZh ? '清除已排程' : 'Clear scheduled';
+  String scheduleCleared(String agent) =>
+      isZh ? '已清除 $agent 的预设消息。' : 'Cleared scheduled message for $agent.';
+
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
@@ -61,6 +73,87 @@ class AppStrings {
   String quotaWatchLine(bool enabled) => isZh
       ? '额度监听：${enabled ? '开启' : '关闭'}'
       : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
+  String diagnosticsGeneratedLine(String value) =>
+      isZh ? '诊断时间：$value' : 'Diagnostics time: $value';
+  String diagnosticsRuntimeLine(String platform, String arch, String node) =>
+      isZh ? '运行环境：$platform/$arch，$node' : 'Runtime: $platform/$arch, $node';
+  String diagnosticsListenLine(String host, int port) =>
+      isZh ? '监听地址：$host:$port' : 'Listening on: $host:$port';
+  String diagnosticsWorkdirLine({
+    required bool exists,
+    required bool writable,
+  }) =>
+      isZh
+          ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
+          : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
+  String diagnosticsDefaultWorkdirLine(String value) =>
+      isZh ? '默认工作目录：$value' : 'Default workdir: $value';
+  String diagnosticsTransferLimitLine(String upload, String download) => isZh
+      ? '传输上限：上传 $upload，下载 $download'
+      : 'Transfer limits: upload $upload, download $download';
+  String diagnosticsTokenLine({
+    required bool configured,
+    required int active,
+    required int total,
+  }) =>
+      isZh
+          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
+          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
+  String diagnosticsRequestLine({
+    required int active,
+    required int running,
+    required int queued,
+    required int sse,
+  }) =>
+      isZh
+          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
+          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
+  String diagnosticsWebBuildLine(bool exists) => isZh
+      ? 'Web 构建：${exists ? '存在' : '缺失'}'
+      : 'Web build: ${exists ? 'present' : 'missing'}';
+  String get diagnosticsAgentsHeader => isZh ? 'CLI 检查：' : 'CLI checks:';
+  String diagnosticsAgentLine(
+    String label, {
+    required bool available,
+    required bool? loggedIn,
+    required String path,
+  }) {
+    final String login = loggedIn == null
+        ? (isZh ? '登录未知' : 'login unknown')
+        : (loggedIn
+            ? (isZh ? '已登录' : 'logged in')
+            : (isZh ? '未登录' : 'not logged in'));
+    final String cli =
+        available ? (isZh ? '可执行' : 'available') : (isZh ? '未找到' : 'not found');
+    final String suffix = path.isEmpty ? '' : ' ($path)';
+    return '- $label: $cli, $login$suffix';
+  }
+
+  String get diagnosticsStorageHeader => isZh ? '存储文件：' : 'Storage files:';
+  String diagnosticsStorageLine(
+    String name, {
+    required bool exists,
+    required bool writable,
+    required String size,
+  }) =>
+      isZh
+          ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
+          : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
+  String get deviceTokens => isZh ? '设备 Token' : 'Device tokens';
+  String get noDeviceTokens => isZh ? '没有设备 Token。' : 'No device tokens.';
+  String get currentDeviceToken => isZh ? '当前设备' : 'Current device';
+  String get revokedDeviceToken => isZh ? '已吊销' : 'Revoked';
+  String tokenCreatedAt(String value) => isZh ? '创建：$value' : 'Created: $value';
+  String tokenRevokedAt(String value) => isZh ? '吊销：$value' : 'Revoked: $value';
+  String get revokeToken => isZh ? '吊销' : 'Revoke';
+  String get revokeCurrentTokenTitle =>
+      isZh ? '吊销当前设备 Token？' : 'Revoke this device token?';
+  String get revokeCurrentTokenBody => isZh
+      ? '这会让本设备的下一次 API 请求返回 401。继续后需要重新导入有效凭证。'
+      : 'The next API request from this device will return 401. You will need to import a valid credential again.';
+  String tokenRevoked(String label) => isZh ? '已吊销 $label。' : 'Revoked $label.';
+  String tokenRevokeFailed(Object err) =>
+      isZh ? '吊销 Token 失败：$err' : 'Token revoke failed: $err';
   String get fileSystem => isZh ? '文件系统' : 'File system';
   String get currentFolder => isZh ? '当前文件夹' : 'Current folder';
   String get parentFolder => isZh ? '上一级' : 'Parent folder';
@@ -79,18 +172,16 @@ class AppStrings {
   String uploadFailed(Object err) => isZh ? '上传失败：$err' : 'Upload failed: $err';
   String downloadFailed(Object err) =>
       isZh ? '下载失败：$err' : 'Download failed: $err';
-  String downloadProgress(String name, int percent) => isZh
-      ? '正在下载 $name（$percent%）'
-      : 'Downloading $name ($percent%)';
+  String downloadProgress(String name, int percent) =>
+      isZh ? '正在下载 $name（$percent%）' : 'Downloading $name ($percent%)';
   String downloadIndeterminate(String name) =>
       isZh ? '正在下载 $name…' : 'Downloading $name…';
   String get downloadComplete => isZh ? '下载完成' : 'Download complete';
   String get downloadFailedTitle => isZh ? '下载失败' : 'Download failed';
   String savedTo(String location) =>
       isZh ? '已保存到：$location' : 'Saved to: $location';
-  String get savedToBrowserDownloads => isZh
-      ? '已下载到浏览器的下载文件夹。'
-      : 'Saved to your browser’s downloads folder.';
+  String get savedToBrowserDownloads =>
+      isZh ? '已下载到浏览器的下载文件夹。' : 'Saved to your browser’s downloads folder.';
   String downloadTooLarge(String limit) => isZh
       ? '文件超过下载上限（$limit），无法下载。'
       : 'This download exceeds the size limit ($limit) and was blocked.';
@@ -138,11 +229,31 @@ class AppStrings {
       : 'Paste the QR payload or encrypted credential JSON generated on the machine';
   String get menu => isZh ? '菜单' : 'Menu';
   String get clearChat => isZh ? '清空当前对话' : 'Clear chat';
+  String get searchChats => isZh ? '搜索对话' : 'Search chats';
+  String get searchHint =>
+      isZh ? '搜索当前工作目录的历史消息' : 'Search history in this workdir';
+  String get currentAgentOnly => isZh ? '只搜索当前智能体' : 'Current agent only';
+  String get noSearchResults => isZh ? '没有匹配结果。' : 'No matches.';
+  String searchFailed(Object err) => isZh ? '搜索失败：$err' : 'Search failed: $err';
+  String get exportMarkdown => isZh ? '导出 Markdown' : 'Export Markdown';
+  String exportFailed(Object err) => isZh ? '导出失败：$err' : 'Export failed: $err';
   String get close => isZh ? '关闭' : 'Close';
   String get ok => isZh ? '确认' : 'OK';
   String get cancel => isZh ? '取消' : 'Cancel';
   String get clear => isZh ? '清空' : 'Clear';
+  String get create => isZh ? '创建' : 'Create';
   String get delete => isZh ? '删除' : 'Delete';
+  String get newSession => isZh ? '新建会话' : 'New session';
+  String get sessionName => isZh ? '会话名称' : 'Session name';
+  String defaultSessionName(int index) => isZh ? '会话 $index' : 'Session $index';
+  String get deleteSession => isZh ? '删除会话' : 'Delete session';
+  String deleteSessionTitle(String name) =>
+      isZh ? '删除 $name？' : 'Delete $name?';
+  String get deleteSessionBody => isZh
+      ? '这个会话的聊天记录和机器侧上下文都会被删除，工作目录里的文件不会受影响。'
+      : 'This deletes the chat history and machine-side context for this session. Files in the workdir are not changed.';
+  String sessionActionFailed(Object err) =>
+      isZh ? '会话操作失败：$err' : 'Session action failed: $err';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get retry => isZh ? '重试' : 'Retry';
@@ -160,7 +271,6 @@ class AppStrings {
       isZh ? '连接失败：$err' : 'Connection failed: $err';
   String get noStatus => isZh ? '未获取到状态' : 'No status received';
   String get refresh => isZh ? '刷新' : 'Refresh';
-  String get chooseCredential => isZh ? '选择凭证' : 'Choose credential';
   String get importMachineCredential =>
       isZh ? '导入机器凭证' : 'Import machine credential';
   String get emptyCredentialText => isZh
@@ -194,13 +304,10 @@ class AppStrings {
   String get systemTheme => isZh ? '跟随系统' : 'System';
   String get lightTheme => isZh ? '白天' : 'Light';
   String get darkTheme => isZh ? '黑夜' : 'Dark';
-  String get selectBotcred =>
-      isZh ? '请选择有效的 AgentDeck 凭证。' : 'Choose a valid AgentDeck credential.';
   String get fileUnreadable =>
       isZh ? '无法读取凭证。' : 'Unable to read the credential.';
   String imported(String name) => isZh ? '已导入：$name' : 'Imported: $name';
   String get importFailedTitle => isZh ? '导入失败' : 'Import failed';
-  String importFailed(Object err) => isZh ? '导入失败：$err' : 'Import failed: $err';
   String get credentialDecryptFailed => isZh
       ? '凭证解密失败。请确认二维码和密码是否正确。'
       : 'Credential decryption failed. Check the QR code and password.';
@@ -248,10 +355,6 @@ class AppStrings {
       : 'The QR code is not a valid AgentDeck credential.';
   String get clearChatTitle => isZh ? '清空当前对话？' : 'Clear this chat?';
   String get clearChatBody => isZh
-      ? '删除本地历史消息，并在机器上为当前 agent 开启新会话（不影响工作目录里的文件）。'
-      : 'Delete local history and start a new machine-side session for this agent. Files in the workdir are not changed.';
-  String get resetWorkdirTitle => isZh ? '清空工作目录？' : 'Reset workdir?';
-  String get resetWorkdirBody => isZh
-      ? '机器端配置的工作目录内文件会被删除。'
-      : 'Files under the configured machine workdir will be deleted.';
+      ? '删除当前会话的历史消息，并在机器上为这个会话开启新的上下文（不影响工作目录里的文件）。'
+      : 'Delete this session history and start a new machine-side context for it. Files in the workdir are not changed.';
 }

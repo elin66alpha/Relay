@@ -17,6 +17,79 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
+## 2026-06-02 - FCM Android offline push
+
+- Added Firebase Cloud Messaging as the native offline push path for Android
+  quota-reset and scheduled-message alerts. It mirrors Web Push scoping:
+  `quota_reset` reaches all registered devices, while `quota_schedule_sent`
+  targets devices registered under the schedule's `workdir`; each token stores
+  its language for English/Chinese message bodies.
+- FCM is gated everywhere. APKs build without Firebase config because
+  `com.google.gms.google-services` is applied only when
+  `android/app/google-services.json` exists; web/desktop use no-op Dart stubs
+  and do not initialize Firebase.
+- To activate FCM, drop the Android app config at
+  `android/app/google-services.json`, put a backend service account JSON on the
+  host (for example `server/fcm-service-account.json`), and set
+  `FCM_SERVICE_ACCOUNT_FILE=/absolute/path/to/server/fcm-service-account.json`
+  in `server/.env`. The service account and runtime token store
+  (`server/fcm-tokens.json`) are gitignored.
+
+## 2026-06-01 - Scheduled messages moved to a dedicated screen
+
+- Scheduling left the usage dialog and became its own left-drawer entry →
+  `lib/features/quota/quota_scheduler_screen.dart`: one row per claude/codex with
+  the agent name, its next 5-hour reset time, a message box, **Send**, and a
+  **Clear** button (only when a schedule is queued). The usage dialog is now
+  read-only (quota numbers + reset times). Cross-device: it re-syncs from
+  `quota_schedule_*` SSE events and preserves an unsent local draft on remote
+  sync (`_syncControllers`).
+- Pending uniqueness is now **per source per workdir** (each workspace keeps its
+  own pending draft); Send uses `replaceExisting: true` to overwrite in place
+  instead of hitting `409`. Note: since a reset is host-wide, all of a source's
+  per-workdir schedules fire on the same reset (intended trade-off).
+- Schedule events refetch only the schedule list, not `/api/usage` (quota
+  numbers don't change on a schedule edit), so the screen avoids the external
+  usage call on every save/event. `server/lib/usage.js` also parallelizes the
+  Claude+Codex providers and caches Claude usage for 60s.
+
+## 2026-06-01 - Multi-session, diagnostics, and scheduled quota messages
+
+- Named chat sessions per `workdir + agent`: scope key is now
+  `workdir\0agent\0sessionId`; the default `Main` session reuses the legacy
+  context key (no history migration). Capped at 8 sessions per context; `Main`
+  cannot be deleted (`server/lib/chat-sessions.js`, `cli_agents_drawer.dart`).
+- `GET /api/diagnostics` (`server/lib/diagnostics.js`) backs a fuller machine
+  status dialog: listener, public URL, token counts, CLI availability/login,
+  workdir access, storage files, web build, and live request/queue/SSE counts.
+- Scheduled quota messages (`server/lib/quota-schedules.js`): draft a message and
+  the watcher auto-sends it after the next 5-hour reset for that source.
+  (Entry point later moved to a dedicated screen — see the newer entry above.)
+  Hardening applied here — one pending schedule per source+workdir
+  (`409 SCHEDULE_EXISTS`), interrupted `running` schedules are reconciled to
+  `failed` on startup, and the JSON store prunes finished records to
+  `MAX_FINISHED` (50). `quota-schedules.json` is secret/gitignored.
+
+## 2026-06-01 - Unified File System, Downloads, and Cleanup
+
+- The Work directory screen was merged into the **File system** screen. One
+  drawer entry now browses by absolute path (up to filesystem root), sets the
+  work path via **Set as work path**, and uploads/downloads. The old
+  `work_directory_screen.dart` was removed.
+- Downloads stream with a progress bar driven by an app-level `DownloadManager`
+  so progress and the completion notification survive leaving the screen. Files
+  save to the system Downloads folder with no picker (Android via a MediaStore
+  platform channel; desktop via `getDownloadsDirectory`; the browser folder on
+  Web) and the save location is shown on screen.
+- Size caps: a download is rejected above 300 MB (a folder by its uncompressed
+  total, `DOWNLOAD_MAX_BYTES`); a single upload above 100 MB (`UPLOAD_MAX_BYTES`),
+  pre-checked in the app and enforced on the server.
+- Removed dead code now that the screens merged: routes `/api/fs/list`,
+  `/api/workdir/check`, `/api/workdir/reset`; backend client `listFiles`,
+  `checkWorkdir`, `resetWorkdir`; `listDirectory` in `server/lib/filesystem.js`;
+  and several unused i18n strings. Docs realigned to the merged screen and the
+  current API surface.
+
 ## 2026-06-01 - Windows Backend Setup
 
 - Added `backends/windows/` PowerShell scripts for setup, start, stop, status,

@@ -1,10 +1,12 @@
 node_modules/
 .env
 agent-sessions.json
+chat-sessions.json
 chat-history.json
 chat-history.*.json
 cards.json
 quota-state-*.json
+quota-schedules.json
 tokens.json
 cloudflared/
 cloudflared-config/
