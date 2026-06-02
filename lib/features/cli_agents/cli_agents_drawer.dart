@@ -11,6 +11,7 @@ import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
 import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
+import '../quota/quota_scheduler_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -72,6 +73,20 @@ class CliAgentsDrawer extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => MachineCredentialsScreen(
                             machinesController: machinesController,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.schedule_send_outlined),
+                    title: Text(context.l10n.quotaScheduler),
+                    onTap: () {
+                      if (closeOnAction) Navigator.of(context).pop();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => QuotaSchedulerScreen(
+                            chatController: chatController,
                           ),
                         ),
                       );
@@ -178,10 +193,10 @@ class CliAgentsDrawer extends StatelessWidget {
         trailing: IconButton(
           icon: const Icon(Icons.add_rounded),
           tooltip: context.l10n.newSession,
-          onPressed:
-              chatController.isThinking || sessions.length >= _maxSessionsPerAgent
-                  ? null
-                  : () => _createSession(context, agent, activeMachine),
+          onPressed: chatController.isThinking ||
+                  sessions.length >= _maxSessionsPerAgent
+              ? null
+              : () => _createSession(context, agent, activeMachine),
         ),
         onTap: () async {
           await agentsController.setActive(agent.key);

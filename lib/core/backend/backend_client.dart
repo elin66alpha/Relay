@@ -751,6 +751,7 @@ class BackendClient {
     required String sessionId,
     required String prompt,
     String? targetResetsAt,
+    bool replaceExisting = false,
   }) async {
     final Object? decoded = await _requestJson(
       'POST',
@@ -760,6 +761,7 @@ class BackendClient {
         'agent': agentKey,
         'sessionId': sessionId,
         'prompt': prompt,
+        if (replaceExisting) 'replaceExisting': true,
         if (targetResetsAt != null) 'targetResetsAt': targetResetsAt,
       },
       timeout: const Duration(seconds: 20),

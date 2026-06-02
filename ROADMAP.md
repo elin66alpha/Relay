@@ -15,11 +15,12 @@
 - Theme and language switching.
 - English-first active app flow with Chinese toggle.
 - Drawer cleanup, machine status, and About dialog.
-- Quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
+- Read-only quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
-- Scheduled quota-ready messages: the quota dialog can store a prompt for the
-  next Claude Code or Codex 5-hour reset, and the backend sends it after the
-  reset is detected.
+- Scheduled quota-ready messages on a dedicated **Scheduled messages** drawer
+  screen: per workspace, store a prompt for the next Claude Code or Codex 5-hour
+  reset; the backend sends it after the reset is detected. Syncs across devices
+  in the same workspace, with a Clear action to cancel a queued message.
 - More detailed backend diagnostics through `GET /api/diagnostics` and the
   machine status dialog.
 - Named-domain / direct-mode production hardening guide for stable public

@@ -43,43 +43,16 @@ class AppStrings {
   String get weeklyQuota => isZh ? '本周' : 'This week';
   String get remaining => isZh ? '剩余' : 'remaining';
   String get refreshAt => isZh ? '刷新' : 'Refresh';
-  String get scheduleMessage => isZh ? '预设消息' : 'Schedule message';
-  String get scheduleAlreadyPending =>
-      isZh ? '已有待发送的预设消息' : 'A scheduled message is already pending';
-  String get scheduleQuotaMessageTitle =>
-      isZh ? '额度刷新后发送' : 'Send after quota refresh';
-  String scheduleQuotaMessageBody(String agent) => isZh
-      ? '这条消息会在下一次 $agent 5 小时额度刷新后自动发送到当前会话。'
-      : 'This message will be sent to the current session after the next $agent 5-hour quota refresh.';
-  String get scheduledMessages => isZh ? '预设消息' : 'Scheduled messages';
-  String get noScheduledMessages =>
-      isZh ? '暂无待发送的预设消息。' : 'No pending scheduled messages.';
+  String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
   String get prompt => isZh ? '消息内容' : 'Message';
-  String get cancelSchedule => isZh ? '取消预设' : 'Cancel schedule';
-  String scheduleCreated(String agent) =>
-      isZh ? '已为 $agent 创建预设消息。' : 'Scheduled message for $agent.';
+  String scheduleUpdated(String agent) =>
+      isZh ? '已更新 $agent 的预设消息。' : 'Updated scheduled message for $agent.';
   String scheduleFailed(Object err) =>
       isZh ? '预设消息失败：$err' : 'Scheduled message failed: $err';
-  String scheduleStatus(String status) {
-    if (isZh) {
-      return switch (status) {
-        'pending' => '等待额度刷新',
-        'running' => '正在发送',
-        'sent' => '已发送',
-        'failed' => '失败',
-        'cancelled' => '已取消',
-        _ => status,
-      };
-    }
-    return switch (status) {
-      'pending' => 'pending reset',
-      'running' => 'sending',
-      'sent' => 'sent',
-      'failed' => 'failed',
-      'cancelled' => 'cancelled',
-      _ => status,
-    };
-  }
+  String get messageRequired => isZh ? '请输入消息内容。' : 'Enter a message.';
+  String get clearSchedule => isZh ? '清除已排程' : 'Clear scheduled';
+  String scheduleCleared(String agent) =>
+      isZh ? '已清除 $agent 的预设消息。' : 'Cleared scheduled message for $agent.';
 
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';

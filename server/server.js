@@ -659,6 +659,7 @@ async function runScheduledQuotaMessage(schedule) {
       deviceId,
     });
     sendEvent('quota_schedule_sent', {
+      scopeWorkdir: schedule.workdir,
       schedule: {
         ...runningSchedule,
         status: 'sent',
@@ -687,6 +688,7 @@ async function runScheduledQuotaMessage(schedule) {
       code: err.code,
     });
     sendEvent('quota_schedule_failed', {
+      scopeWorkdir: schedule.workdir,
       schedule: {
         ...runningSchedule,
         status: 'failed',
@@ -1540,6 +1542,13 @@ app.post('/api/quota-schedules', (req, res) => {
       workdir,
       prompt: req.body.prompt,
       targetResetsAt: req.body.targetResetsAt,
+      replaceExisting: req.body.replaceExisting === true,
+    });
+    sendEvent('quota_schedule_changed', {
+      scopeWorkdir: workdir,
+      action: req.body.replaceExisting === true ? 'replace' : 'create',
+      schedule,
+      createdAt: new Date().toISOString(),
     });
     return res.json({ ok: true, schedule });
   } catch (err) {
@@ -1563,6 +1572,12 @@ app.post('/api/quota-schedules/cancel', (req, res) => {
         code: 'SCHEDULE_NOT_FOUND',
       });
     }
+    sendEvent('quota_schedule_changed', {
+      scopeWorkdir: schedule.workdir,
+      action: 'cancel',
+      schedule,
+      createdAt: new Date().toISOString(),
+    });
     return res.json({ ok: true, schedule });
   } catch (err) {
     return res.status(409).json({

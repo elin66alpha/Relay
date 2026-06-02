@@ -107,6 +107,7 @@ function createQuotaSchedule({
   workdir,
   prompt,
   targetResetsAt,
+  replaceExisting = false,
 }) {
   const now = new Date().toISOString();
   const schedule = {
@@ -124,19 +125,35 @@ function createQuotaSchedule({
   };
   const schedules = readQuotaSchedules();
   // One pending message per quota source: a 5-hour reset is a single host-wide
-  // event, so several pending schedules for the same source would all fire on
-  // that one reset and burn quota back-to-back. Require the existing one be
-  // sent or cancelled first.
-  if (
-    schedules.some(
-      (item) => item.status === 'pending' && item.sourceKey === schedule.sourceKey,
-    )
-  ) {
+  // event. Scope it by workdir so all devices in the same workspace see and
+  // replace the same scheduled message, while unrelated workspaces don't leak
+  // into each other's schedule UI.
+  const existingIndex = schedules.findIndex(
+    (item) =>
+      item.status === 'pending' &&
+      item.sourceKey === schedule.sourceKey &&
+      item.workdir === schedule.workdir,
+  );
+  if (existingIndex !== -1 && !replaceExisting) {
     const err = new Error(
       `a pending ${schedule.sourceKey} scheduled message already exists`,
     );
     err.code = 'SCHEDULE_EXISTS';
     throw err;
+  }
+  if (existingIndex !== -1) {
+    schedules[existingIndex] = {
+      ...schedules[existingIndex],
+      agentKey: schedule.agentKey,
+      sessionId: schedule.sessionId,
+      sessionName: schedule.sessionName,
+      prompt: schedule.prompt,
+      targetResetsAt: schedule.targetResetsAt,
+      error: null,
+      updatedAt: now,
+    };
+    writeQuotaSchedules(schedules);
+    return publicSchedule(schedules[existingIndex]);
   }
   schedules.push(schedule);
   writeQuotaSchedules(schedules);

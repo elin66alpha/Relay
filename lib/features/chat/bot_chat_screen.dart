@@ -440,130 +440,11 @@ class _UsageDialog extends StatefulWidget {
 
 class _UsageDialogState extends State<_UsageDialog> {
   late Future<UsageReport> _usageFuture;
-  late Future<List<QuotaSchedule>> _schedulesFuture;
-  // Sources (claude/codex) that already have a live schedule; the backend caps
-  // these at one pending per source, so the schedule button is disabled here.
-  Set<String> _pendingSources = <String>{};
 
   @override
   void initState() {
     super.initState();
-    _reloadAll();
-  }
-
-  void _reloadAll() {
     _usageFuture = widget.chatController.usageReport();
-    _schedulesFuture = widget.chatController.quotaSchedules();
-    _trackPendingSources(_schedulesFuture);
-  }
-
-  void _reloadSchedules() {
-    setState(() {
-      _schedulesFuture = widget.chatController.quotaSchedules();
-    });
-    _trackPendingSources(_schedulesFuture);
-  }
-
-  void _trackPendingSources(Future<List<QuotaSchedule>> future) {
-    future.then((List<QuotaSchedule> schedules) {
-      if (!mounted) return;
-      final Set<String> sources = schedules
-          .where(
-            (QuotaSchedule s) =>
-                s.status == 'pending' || s.status == 'running',
-          )
-          .map((QuotaSchedule s) => s.sourceKey)
-          .toSet();
-      setState(() => _pendingSources = sources);
-    }).catchError((Object _) {});
-  }
-
-  Future<void> _scheduleMessage(UsageAgent agent, UsageQuota quota) async {
-    if (_pendingSources.contains(agent.key)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.scheduleAlreadyPending)),
-      );
-      return;
-    }
-    final TextEditingController controller = TextEditingController();
-    final String? prompt = await showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Text(context.l10n.scheduleQuotaMessageTitle),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(context.l10n.scheduleQuotaMessageBody(agent.label)),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  minLines: 3,
-                  maxLines: 6,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.prompt,
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(context.l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () {
-                final String value = controller.text.trim();
-                if (value.isEmpty) return;
-                Navigator.of(dialogContext).pop(value);
-              },
-              child: Text(context.l10n.create),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-    if (prompt == null || prompt.trim().isEmpty) return;
-    try {
-      await widget.chatController.createQuotaSchedule(
-        sourceKey: agent.key,
-        agentKey: agent.key,
-        prompt: prompt,
-        targetResetsAt: quota.resetsAt,
-      );
-      _reloadSchedules();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.scheduleCreated(agent.label))),
-        );
-      }
-    } catch (err) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.scheduleFailed(err))),
-        );
-      }
-    }
-  }
-
-  Future<void> _cancelSchedule(QuotaSchedule schedule) async {
-    try {
-      await widget.chatController.cancelQuotaSchedule(schedule.id);
-      _reloadSchedules();
-    } catch (err) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.scheduleFailed(err))),
-        );
-      }
-    }
   }
 
   @override
@@ -575,94 +456,33 @@ class _UsageDialogState extends State<_UsageDialog> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 560),
           child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                FutureBuilder<UsageReport>(
-                  future: _usageFuture,
-                  builder: (
-                    BuildContext context,
-                    AsyncSnapshot<UsageReport> snapshot,
-                  ) {
-                    if (snapshot.connectionState != ConnectionState.done) {
-                      return Text(context.l10n.loadingUsage);
-                    }
-                    if (snapshot.hasError) {
-                      return Text(
-                        snapshot.error.toString(),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      );
-                    }
-                    final UsageReport report = snapshot.data!;
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        for (final UsageAgent agent in report.agents)
-                          _UsageAgentPanel(
-                            agent: agent,
-                            onSchedule: _scheduleMessage,
-                            alreadyScheduled:
-                                _pendingSources.contains(agent.key),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 4),
-                Divider(color: Theme.of(context).colorScheme.outlineVariant),
-                const SizedBox(height: 4),
-                Text(
-                  context.l10n.scheduledMessages,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                FutureBuilder<List<QuotaSchedule>>(
-                  future: _schedulesFuture,
-                  builder: (
-                    BuildContext context,
-                    AsyncSnapshot<List<QuotaSchedule>> snapshot,
-                  ) {
-                    if (snapshot.connectionState != ConnectionState.done) {
-                      return const LinearProgressIndicator();
-                    }
-                    if (snapshot.hasError) {
-                      return Text(
-                        snapshot.error.toString(),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      );
-                    }
-                    final List<QuotaSchedule> schedules = snapshot.data!
-                        .where(
-                          (QuotaSchedule schedule) =>
-                              schedule.status == 'pending' ||
-                              schedule.status == 'running',
-                        )
-                        .toList(growable: false);
-                    if (schedules.isEmpty) {
-                      return Text(
-                        context.l10n.noScheduledMessages,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                      );
-                    }
-                    return Column(
-                      children: <Widget>[
-                        for (final QuotaSchedule schedule in schedules)
-                          _QuotaScheduleTile(
-                            schedule: schedule,
-                            onCancel: () => _cancelSchedule(schedule),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-              ],
+            child: FutureBuilder<UsageReport>(
+              future: _usageFuture,
+              builder: (
+                BuildContext context,
+                AsyncSnapshot<UsageReport> snapshot,
+              ) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return Text(context.l10n.loadingUsage);
+                }
+                if (snapshot.hasError) {
+                  return Text(
+                    snapshot.error.toString(),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  );
+                }
+                final UsageReport report = snapshot.data!;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (final UsageAgent agent in report.agents)
+                      _UsageAgentPanel(agent: agent),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -670,7 +490,9 @@ class _UsageDialogState extends State<_UsageDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () {
-            setState(_reloadAll);
+            setState(() {
+              _usageFuture = widget.chatController.usageReport();
+            });
           },
           child: Text(context.l10n.refresh),
         ),
@@ -683,75 +505,10 @@ class _UsageDialogState extends State<_UsageDialog> {
   }
 }
 
-class _QuotaScheduleTile extends StatelessWidget {
-  const _QuotaScheduleTile({
-    required this.schedule,
-    required this.onCancel,
-  });
-
-  final QuotaSchedule schedule;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final String agentLabel = cliAgentByKey(schedule.agentKey).label;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Icon(Icons.schedule_send_outlined, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  '$agentLabel · ${context.l10n.scheduleStatus(schedule.status)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  schedule.prompt,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _formatUsageTime(context, schedule.targetResetsAt),
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: context.l10n.cancelSchedule,
-            onPressed: schedule.canCancel ? onCancel : null,
-            icon: const Icon(Icons.close_rounded),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _UsageAgentPanel extends StatelessWidget {
-  const _UsageAgentPanel({
-    required this.agent,
-    required this.onSchedule,
-    required this.alreadyScheduled,
-  });
+  const _UsageAgentPanel({required this.agent});
 
   final UsageAgent agent;
-  final Future<void> Function(UsageAgent agent, UsageQuota quota) onSchedule;
-  final bool alreadyScheduled;
 
   @override
   Widget build(BuildContext context) {
@@ -797,12 +554,7 @@ class _UsageAgentPanel extends StatelessWidget {
             )
           else
             for (final UsageQuota quota in agent.quotas)
-              _UsageQuotaRow(
-                agent: agent,
-                quota: quota,
-                onSchedule: onSchedule,
-                alreadyScheduled: alreadyScheduled,
-              ),
+              _UsageQuotaRow(quota: quota),
         ],
       ),
     );
@@ -810,23 +562,13 @@ class _UsageAgentPanel extends StatelessWidget {
 }
 
 class _UsageQuotaRow extends StatelessWidget {
-  const _UsageQuotaRow({
-    required this.agent,
-    required this.quota,
-    required this.onSchedule,
-    required this.alreadyScheduled,
-  });
+  const _UsageQuotaRow({required this.quota});
 
-  final UsageAgent agent;
   final UsageQuota quota;
-  final Future<void> Function(UsageAgent agent, UsageQuota quota) onSchedule;
-  final bool alreadyScheduled;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final bool canSchedule = quota.key == 'five_hour' &&
-        (agent.key == 'claude' || agent.key == 'codex');
     final String label = switch (quota.key) {
       'five_hour' => context.l10n.fiveHourQuota,
       'seven_day' => context.l10n.weeklyQuota,
@@ -857,21 +599,6 @@ class _UsageQuotaRow extends StatelessWidget {
                   '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
                   style: TextStyle(color: colors.outline, fontSize: 12),
                 ),
-                if (canSchedule)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: alreadyScheduled
-                          ? null
-                          : () => onSchedule(agent, quota),
-                      icon: const Icon(Icons.schedule_send_outlined, size: 18),
-                      label: Text(
-                        alreadyScheduled
-                            ? context.l10n.scheduleAlreadyPending
-                            : context.l10n.scheduleMessage,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),

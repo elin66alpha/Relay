@@ -52,6 +52,7 @@ class BotChatController extends ChangeNotifier {
   // authoritative history rather than replaying its deltas, which keeps the two
   // views identical without delta/snapshot races.
   bool _remoteActive = false;
+  int _quotaScheduleRevision = 0;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   int get messageCount => _messages.length;
@@ -62,6 +63,7 @@ class BotChatController extends ChangeNotifier {
   MachineCredential? get machine => _machine;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
+  int get quotaScheduleRevision => _quotaScheduleRevision;
   AppStrings get _strings => AppStrings(_language);
 
   String? activeSessionIdFor(String agentKey) =>
@@ -381,6 +383,7 @@ class BotChatController extends ChangeNotifier {
     required String agentKey,
     required String prompt,
     String? targetResetsAt,
+    bool replaceExisting = false,
   }) async {
     final CliAgent agent = cliAgentByKey(agentKey);
     final String sessionId = await _ensureActiveSessionId(agent);
@@ -390,6 +393,7 @@ class BotChatController extends ChangeNotifier {
       sessionId: sessionId,
       prompt: prompt,
       targetResetsAt: targetResetsAt,
+      replaceExisting: replaceExisting,
     );
   }
 
@@ -920,6 +924,8 @@ class BotChatController extends ChangeNotifier {
     }
     if (event.type == 'quota_schedule_sent' ||
         event.type == 'quota_schedule_failed') {
+      _quotaScheduleRevision += 1;
+      notifyListeners();
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
               event.data['message'] as String? ??
@@ -927,6 +933,11 @@ class BotChatController extends ChangeNotifier {
           : event.data['message'] as String? ?? '';
       if (message.isEmpty) return;
       unawaited(_showQuotaNotification(message));
+      return;
+    }
+    if (event.type == 'quota_schedule_changed') {
+      _quotaScheduleRevision += 1;
+      notifyListeners();
       return;
     }
 

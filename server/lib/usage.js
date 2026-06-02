@@ -15,8 +15,10 @@ const CODEX_AUTH = path.join(os.homedir(), '.codex', 'auth.json');
 const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
 const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const CODEX_CACHE_MS = 60_000;
+const CLAUDE_CACHE_MS = 60_000;
 
 let codexCache = { at: 0, value: null };
+let claudeCache = { at: 0, value: null };
 
 function readClaudeCreds() {
   const raw = fs.readFileSync(CLAUDE_CREDS_PATH, 'utf-8');
@@ -101,6 +103,9 @@ async function callClaudeUsage(token) {
 }
 
 async function getClaudeUsage() {
+  if (claudeCache.value && Date.now() - claudeCache.at < CLAUDE_CACHE_MS) {
+    return claudeCache.value;
+  }
   let token = await getValidClaudeToken();
   let res = await callClaudeUsage(token);
   if (res.status === 401) {
@@ -110,10 +115,12 @@ async function getClaudeUsage() {
   if (res.status !== 200 || !res.body) {
     throw new Error(`Claude usage query failed (HTTP ${res.status}).`);
   }
-  return {
+  const value = {
     data: res.body,
     subscriptionType: (readClaudeCreds().claudeAiOauth || {}).subscriptionType,
   };
+  claudeCache = { at: Date.now(), value };
+  return value;
 }
 
 function httpHeadersOnly(url, headers, bodyStr) {
@@ -250,11 +257,10 @@ function quotaItem(key, label, block) {
   };
 }
 
-async function buildUsageReport() {
-  const agents = [];
+async function buildClaudeAgent() {
   try {
     const { data, subscriptionType } = await getClaudeUsage();
-    agents.push({
+    return {
       key: 'claude',
       label: 'Claude Code',
       available: true,
@@ -263,20 +269,22 @@ async function buildUsageReport() {
         quotaItem('five_hour', '5 hour quota', data.five_hour),
         quotaItem('seven_day', 'Weekly quota', data.seven_day),
       ],
-    });
+    };
   } catch (err) {
-    agents.push({
+    return {
       key: 'claude',
       label: 'Claude Code',
       available: true,
       error: err.message,
       quotas: [],
-    });
+    };
   }
+}
 
+async function buildCodexAgent() {
   try {
     const usage = await getCodexUsage();
-    agents.push({
+    return {
       key: 'codex',
       label: 'Codex',
       available: true,
@@ -285,16 +293,22 @@ async function buildUsageReport() {
         quotaItem('five_hour', '5 hour quota', usage.five_hour),
         quotaItem('seven_day', 'Weekly quota', usage.seven_day),
       ],
-    });
+    };
   } catch (err) {
-    agents.push({
+    return {
       key: 'codex',
       label: 'Codex',
       available: true,
       error: err.message,
       quotas: [],
-    });
+    };
   }
+}
+
+async function buildUsageReport() {
+  // Claude and Codex are independent network round-trips; fetch them together
+  // so the dialog waits for the slower one, not the sum of both.
+  const agents = await Promise.all([buildClaudeAgent(), buildCodexAgent()]);
 
   agents.push({
     key: 'agy',
