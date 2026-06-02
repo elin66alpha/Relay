@@ -56,4 +56,9 @@ Reuse boundaries:
 
 ### Later Improvements
 
+- Offline remote push (FCM / APNs) for quota-reset alerts and scheduled-message
+  results, so they arrive even when the app is fully killed. Today these rely on
+  the app process being alive with the SSE stream connected; true offline push
+  needs Firebase Cloud Messaging (Android) / Apple Push Notification service
+  (iOS) plus a backend push sender.
 - Better Antigravity quota support when an API or reliable CLI source is available.
