@@ -43,6 +43,8 @@ class AppStrings {
   String get weeklyQuota => isZh ? '本周' : 'This week';
   String get remaining => isZh ? '剩余' : 'remaining';
   String get refreshAt => isZh ? '刷新' : 'Refresh';
+  String usageAsOf(String value) => isZh ? '截至 $value' : 'As of $value';
+  String get usageStale => isZh ? '上次成功结果' : 'Stale';
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
@@ -137,6 +139,21 @@ class AppStrings {
       isZh
           ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
           : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
+  String get deviceTokens => isZh ? '设备 Token' : 'Device tokens';
+  String get noDeviceTokens => isZh ? '没有设备 Token。' : 'No device tokens.';
+  String get currentDeviceToken => isZh ? '当前设备' : 'Current device';
+  String get revokedDeviceToken => isZh ? '已吊销' : 'Revoked';
+  String tokenCreatedAt(String value) => isZh ? '创建：$value' : 'Created: $value';
+  String tokenRevokedAt(String value) => isZh ? '吊销：$value' : 'Revoked: $value';
+  String get revokeToken => isZh ? '吊销' : 'Revoke';
+  String get revokeCurrentTokenTitle =>
+      isZh ? '吊销当前设备 Token？' : 'Revoke this device token?';
+  String get revokeCurrentTokenBody => isZh
+      ? '这会让本设备的下一次 API 请求返回 401。继续后需要重新导入有效凭证。'
+      : 'The next API request from this device will return 401. You will need to import a valid credential again.';
+  String tokenRevoked(String label) => isZh ? '已吊销 $label。' : 'Revoked $label.';
+  String tokenRevokeFailed(Object err) =>
+      isZh ? '吊销 Token 失败：$err' : 'Token revoke failed: $err';
   String get fileSystem => isZh ? '文件系统' : 'File system';
   String get currentFolder => isZh ? '当前文件夹' : 'Current folder';
   String get parentFolder => isZh ? '上一级' : 'Parent folder';
@@ -212,6 +229,14 @@ class AppStrings {
       : 'Paste the QR payload or encrypted credential JSON generated on the machine';
   String get menu => isZh ? '菜单' : 'Menu';
   String get clearChat => isZh ? '清空当前对话' : 'Clear chat';
+  String get searchChats => isZh ? '搜索对话' : 'Search chats';
+  String get searchHint =>
+      isZh ? '搜索当前工作目录的历史消息' : 'Search history in this workdir';
+  String get currentAgentOnly => isZh ? '只搜索当前智能体' : 'Current agent only';
+  String get noSearchResults => isZh ? '没有匹配结果。' : 'No matches.';
+  String searchFailed(Object err) => isZh ? '搜索失败：$err' : 'Search failed: $err';
+  String get exportMarkdown => isZh ? '导出 Markdown' : 'Export Markdown';
+  String exportFailed(Object err) => isZh ? '导出失败：$err' : 'Export failed: $err';
   String get close => isZh ? '关闭' : 'Close';
   String get ok => isZh ? '确认' : 'OK';
   String get cancel => isZh ? '取消' : 'Cancel';

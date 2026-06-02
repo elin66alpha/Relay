@@ -16,9 +16,174 @@ const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
 const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const CODEX_CACHE_MS = 60_000;
 const CLAUDE_CACHE_MS = 60_000;
+const USAGE_CACHE_FILE = path.join(__dirname, '..', 'usage-cache.json');
+const USAGE_BACKOFF_BASE_MS = parseInt(
+  process.env.USAGE_BACKOFF_BASE_MS || '30000',
+  10,
+);
+const USAGE_BACKOFF_MAX_MS = parseInt(
+  process.env.USAGE_BACKOFF_MAX_MS || '900000',
+  10,
+);
 
-let codexCache = { at: 0, value: null };
-let claudeCache = { at: 0, value: null };
+let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
+let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
+let persistedUsageCache = null;
+const usageBackoff = {
+  claude: { until: 0, delayMs: 0, refreshPromise: null },
+  codex: { until: 0, delayMs: 0, refreshPromise: null },
+};
+
+class UsageQueryError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function loadUsageCache() {
+  if (persistedUsageCache) return persistedUsageCache;
+  try {
+    const decoded = JSON.parse(fs.readFileSync(USAGE_CACHE_FILE, 'utf-8'));
+    persistedUsageCache = decoded && typeof decoded === 'object' ? decoded : {};
+  } catch (_err) {
+    persistedUsageCache = {};
+  }
+  return persistedUsageCache;
+}
+
+function saveUsageCache() {
+  const tmp = `${USAGE_CACHE_FILE}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(loadUsageCache(), null, 2)}\n`, {
+    mode: 0o600,
+  });
+  fs.renameSync(tmp, USAGE_CACHE_FILE);
+}
+
+function persistedRecord(key) {
+  const record = loadUsageCache()[key];
+  if (!record || typeof record !== 'object' || !record.value) return null;
+  return {
+    fetchedAt: String(record.fetchedAt || record.savedAt || ''),
+    value: record.value,
+  };
+}
+
+function stripUsageMetadata(value) {
+  const { fetchedAt: _fetchedAt, stale: _stale, ...clean } = value || {};
+  return clean;
+}
+
+function withUsageMetadata(record, stale) {
+  return {
+    ...record.value,
+    fetchedAt: record.fetchedAt,
+    stale,
+  };
+}
+
+function rememberUsageSuccess(key, value, setMemoryCache) {
+  const fetchedAt = new Date().toISOString();
+  const record = {
+    fetchedAt,
+    value: stripUsageMetadata(value),
+  };
+  loadUsageCache()[key] = record;
+  saveUsageCache();
+  setMemoryCache({
+    at: Date.now(),
+    fetchedAt,
+    value: record.value,
+    stale: false,
+  });
+  usageBackoff[key].delayMs = 0;
+  usageBackoff[key].until = 0;
+  return withUsageMetadata(record, false);
+}
+
+function rememberBackoff(key, err) {
+  const state = usageBackoff[key];
+  const previous = state.delayMs > 0 ? state.delayMs : USAGE_BACKOFF_BASE_MS / 2;
+  const delayMs = Math.min(
+    USAGE_BACKOFF_MAX_MS,
+    Math.max(1000, previous * 2),
+  );
+  state.delayMs = delayMs;
+  state.until = Date.now() + delayMs;
+  const status = err && err.status ? ` HTTP ${err.status}` : '';
+  console.warn(
+    `[usage:${key}] query failed${status}; backing off for ` +
+      `${Math.round(delayMs / 1000)}s: ${err.message}`,
+  );
+}
+
+function memoryRecord(cache) {
+  if (!cache.value) return null;
+  return {
+    fetchedAt: cache.fetchedAt,
+    value: cache.value,
+  };
+}
+
+function fallbackRecord(key, cache) {
+  return persistedRecord(key) || memoryRecord(cache);
+}
+
+function scheduleRefresh({ key, fetcher, setMemoryCache }) {
+  const state = usageBackoff[key];
+  if (state.refreshPromise) return;
+  state.refreshPromise = (async () => {
+    try {
+      const value = await fetcher();
+      rememberUsageSuccess(key, value, setMemoryCache);
+    } catch (err) {
+      rememberBackoff(key, err);
+    } finally {
+      state.refreshPromise = null;
+    }
+  })();
+}
+
+async function cachedUsage({
+  key,
+  ttlMs,
+  getMemoryCache,
+  setMemoryCache,
+  fetcher,
+}) {
+  const now = Date.now();
+  const cache = getMemoryCache();
+  if (cache.value && !cache.stale && now - cache.at < ttlMs) {
+    return withUsageMetadata(memoryRecord(cache), false);
+  }
+
+  const fallback = fallbackRecord(key, cache);
+  if (!cache.value && fallback) {
+    setMemoryCache({
+      at: now,
+      fetchedAt: fallback.fetchedAt,
+      value: fallback.value,
+      stale: true,
+    });
+    scheduleRefresh({ key, fetcher, setMemoryCache });
+    return withUsageMetadata(fallback, true);
+  }
+
+  const state = usageBackoff[key];
+  if (state.until > now && fallback) {
+    return withUsageMetadata(fallback, true);
+  }
+
+  try {
+    const value = await fetcher();
+    return rememberUsageSuccess(key, value, setMemoryCache);
+  } catch (err) {
+    rememberBackoff(key, err);
+    const latestFallback = fallbackRecord(key, getMemoryCache());
+    if (latestFallback) return withUsageMetadata(latestFallback, true);
+    throw err;
+  }
+}
 
 function readClaudeCreds() {
   const raw = fs.readFileSync(CLAUDE_CREDS_PATH, 'utf-8');
@@ -102,10 +267,7 @@ async function callClaudeUsage(token) {
   });
 }
 
-async function getClaudeUsage() {
-  if (claudeCache.value && Date.now() - claudeCache.at < CLAUDE_CACHE_MS) {
-    return claudeCache.value;
-  }
+async function fetchClaudeUsage() {
   let token = await getValidClaudeToken();
   let res = await callClaudeUsage(token);
   if (res.status === 401) {
@@ -113,14 +275,27 @@ async function getClaudeUsage() {
     res = await callClaudeUsage(token);
   }
   if (res.status !== 200 || !res.body) {
-    throw new Error(`Claude usage query failed (HTTP ${res.status}).`);
+    throw new UsageQueryError(
+      `Claude usage query failed (HTTP ${res.status}).`,
+      res.status,
+    );
   }
-  const value = {
+  return {
     data: res.body,
     subscriptionType: (readClaudeCreds().claudeAiOauth || {}).subscriptionType,
   };
-  claudeCache = { at: Date.now(), value };
-  return value;
+}
+
+async function getClaudeUsage() {
+  return cachedUsage({
+    key: 'claude',
+    ttlMs: CLAUDE_CACHE_MS,
+    getMemoryCache: () => claudeCache,
+    setMemoryCache: (cache) => {
+      claudeCache = cache;
+    },
+    fetcher: fetchClaudeUsage,
+  });
 }
 
 function httpHeadersOnly(url, headers, bodyStr) {
@@ -156,11 +331,7 @@ function readCodexModel() {
   return 'gpt-5.5';
 }
 
-async function getCodexUsage() {
-  if (codexCache.value && Date.now() - codexCache.at < CODEX_CACHE_MS) {
-    return codexCache.value;
-  }
-
+async function fetchCodexUsage() {
   const auth = JSON.parse(fs.readFileSync(CODEX_AUTH, 'utf-8'));
   const token = auth.tokens && auth.tokens.access_token;
   const accountId = (auth.tokens && auth.tokens.account_id) || '';
@@ -205,8 +376,8 @@ async function getCodexUsage() {
       firstHeader(headers, 'x-codex-primary-reset-at') ||
       firstHeader(headers, 'x-codex-secondary-reset-at'),
   );
-  if (status !== 200 && status !== 429 && !hasQuotaHeaders) {
-    throw new Error(`Codex usage query failed (HTTP ${status}).`);
+  if (status !== 200 && !hasQuotaHeaders) {
+    throw new UsageQueryError(`Codex usage query failed (HTTP ${status}).`, status);
   }
 
   const num = (key) => {
@@ -220,7 +391,7 @@ async function getCodexUsage() {
   const activeLimit = String(firstHeader(headers, 'x-codex-active-limit') || '');
   const primaryUsed = num('x-codex-primary-used-percent');
   const secondaryUsed = num('x-codex-secondary-used-percent');
-  const value = {
+  return {
     plan: firstHeader(headers, 'x-codex-plan-type') || activeLimit || 'Unknown',
     five_hour: {
       utilization:
@@ -237,8 +408,18 @@ async function getCodexUsage() {
       resets_at: iso('x-codex-secondary-reset-at'),
     },
   };
-  codexCache = { at: Date.now(), value };
-  return value;
+}
+
+async function getCodexUsage() {
+  return cachedUsage({
+    key: 'codex',
+    ttlMs: CODEX_CACHE_MS,
+    getMemoryCache: () => codexCache,
+    setMemoryCache: (cache) => {
+      codexCache = cache;
+    },
+    fetcher: fetchCodexUsage,
+  });
 }
 
 function clampPercent(value) {
@@ -259,12 +440,14 @@ function quotaItem(key, label, block) {
 
 async function buildClaudeAgent() {
   try {
-    const { data, subscriptionType } = await getClaudeUsage();
+    const { data, subscriptionType, fetchedAt, stale } = await getClaudeUsage();
     return {
       key: 'claude',
       label: 'Claude Code',
       available: true,
       detail: subscriptionType || '',
+      asOf: fetchedAt || null,
+      stale: !!stale,
       quotas: [
         quotaItem('five_hour', '5 hour quota', data.five_hour),
         quotaItem('seven_day', 'Weekly quota', data.seven_day),
@@ -289,6 +472,8 @@ async function buildCodexAgent() {
       label: 'Codex',
       available: true,
       detail: usage.plan || '',
+      asOf: usage.fetchedAt || null,
+      stale: !!usage.stale,
       quotas: [
         quotaItem('five_hour', '5 hour quota', usage.five_hour),
         quotaItem('seven_day', 'Weekly quota', usage.seven_day),
@@ -321,6 +506,7 @@ async function buildUsageReport() {
   return {
     createdAt: new Date().toISOString(),
     mode: 'remaining',
+    hasStale: agents.some((agent) => agent.stale === true),
     agents,
   };
 }

@@ -17,6 +17,24 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
+## 2026-06-02 - FCM Android offline push
+
+- Added Firebase Cloud Messaging as the native offline push path for Android
+  quota-reset and scheduled-message alerts. It mirrors Web Push scoping:
+  `quota_reset` reaches all registered devices, while `quota_schedule_sent`
+  targets devices registered under the schedule's `workdir`; each token stores
+  its language for English/Chinese message bodies.
+- FCM is gated everywhere. APKs build without Firebase config because
+  `com.google.gms.google-services` is applied only when
+  `android/app/google-services.json` exists; web/desktop use no-op Dart stubs
+  and do not initialize Firebase.
+- To activate FCM, drop the Android app config at
+  `android/app/google-services.json`, put a backend service account JSON on the
+  host (for example `server/fcm-service-account.json`), and set
+  `FCM_SERVICE_ACCOUNT_FILE=/absolute/path/to/server/fcm-service-account.json`
+  in `server/.env`. The service account and runtime token store
+  (`server/fcm-tokens.json`) are gitignored.
+
 ## 2026-06-01 - Scheduled messages moved to a dedicated screen
 
 - Scheduling left the usage dialog and became its own left-drawer entry →

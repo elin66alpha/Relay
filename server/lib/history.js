@@ -9,6 +9,8 @@ const path = require('path');
 // agents.js, so history and the resumable CLI session are cleared together.
 const HISTORY_FILE = path.join(__dirname, '..', 'chat-history.json');
 const MAX_PER_SCOPE = 200; // Cap per conversation so the file can't grow forever.
+const SCOPE_SEPARATOR = '\u0000';
+const LEGACY_SESSION_ID = 'default';
 
 function loadAll() {
   try {
@@ -145,6 +147,114 @@ function clearHistory(scopeKey) {
   return true;
 }
 
+function scopeInfo(scopeKey) {
+  const parts = String(scopeKey || '').split(SCOPE_SEPARATOR);
+  if (parts.length < 2) return null;
+  return {
+    workdir: parts[0],
+    agentKey: parts[1],
+    sessionId: parts[2] || LEGACY_SESSION_ID,
+  };
+}
+
+function textForMessage(message) {
+  return typeof (message && message.content) === 'string'
+    ? message.content
+    : '';
+}
+
+function redactSensitiveText(value) {
+  return String(value || '')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-=]{20,}/gi, 'Bearer [redacted]')
+    .replace(
+      /\b(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/-=]{20,}/gi,
+      '$1[redacted]',
+    )
+    .replace(
+      /\b((?:accessToken|refreshToken|token|api[_-]?key|secret|password)\s*[:=]\s*["']?)[^"'\s,}]{8,}/gi,
+      '$1[redacted]',
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{32,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/g,
+      '[redacted-token]',
+    );
+}
+
+function snippetFor(text, query) {
+  const compact = redactSensitiveText(text).replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  const lower = compact.toLowerCase();
+  const needle = String(query || '').toLowerCase();
+  const index = lower.indexOf(needle);
+  const start = Math.max(0, index === -1 ? 0 : index - 80);
+  const end = Math.min(compact.length, (index === -1 ? 0 : index) + needle.length + 120);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < compact.length ? '...' : '';
+  return `${prefix}${compact.slice(start, end)}${suffix}`;
+}
+
+function historyScopesFor({ workdir, agentKey }) {
+  const all = loadAll();
+  const scopes = [];
+  for (const [scopeKey, messages] of Object.entries(all)) {
+    const info = scopeInfo(scopeKey);
+    if (!info || info.workdir !== workdir) continue;
+    if (agentKey && info.agentKey !== agentKey) continue;
+    scopes.push({
+      ...info,
+      scopeKey,
+      messages: Array.isArray(messages) ? messages : [],
+    });
+  }
+  return scopes;
+}
+
+function searchHistory({ workdir, query, agentKey = '', sessionNameFor, limit = 50 }) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return [];
+  const matches = [];
+  for (const scope of historyScopesFor({ workdir, agentKey })) {
+    for (const message of scope.messages) {
+      const content = textForMessage(message);
+      if (!content.toLowerCase().includes(needle)) continue;
+      matches.push({
+        agentKey: scope.agentKey,
+        sessionId: scope.sessionId,
+        sessionName:
+          typeof sessionNameFor === 'function'
+            ? sessionNameFor(scope.agentKey, scope.sessionId)
+            : scope.sessionId,
+        snippet: snippetFor(content, needle),
+        messageId: String((message && message.id) || ''),
+      });
+      if (matches.length >= limit) return matches;
+    }
+  }
+  return matches;
+}
+
+function markdownForConversation({ agentLabel, sessionName, messages, exportedAt }) {
+  const lines = [
+    '# AgentDeck Conversation Export',
+    '',
+    `- Agent: ${agentLabel || 'Unknown'}`,
+    `- Session: ${sessionName || 'Main'}`,
+    `- Exported: ${exportedAt}`,
+    '',
+  ];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const role = String((message && message.role) || 'message');
+    const createdAt = String((message && message.createdAt) || '');
+    const title = `${role.slice(0, 1).toUpperCase()}${role.slice(1)}`;
+    lines.push(`## ${title}${createdAt ? ` - ${createdAt}` : ''}`);
+    lines.push('');
+    const content = redactSensitiveText(textForMessage(message)).trim();
+    lines.push(content || '_No content_');
+    lines.push('');
+  }
+  return `${lines.join('\n').trim()}\n`;
+}
+
 module.exports = {
   readHistory,
   appendHistory,
@@ -153,4 +263,6 @@ module.exports = {
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
   clearHistory,
+  searchHistory,
+  markdownForConversation,
 };

@@ -37,6 +37,12 @@ function isTokenAllowed(token) {
   return activeTokenRecords().some((record) => clean === String(record.token));
 }
 
+function tokenRecordForToken(token) {
+  const clean = String(token || '').trim();
+  if (!clean) return null;
+  return readTokenRecords().find((record) => clean === String(record.token)) || null;
+}
+
 function createToken({ label }) {
   const token = crypto.randomBytes(32).toString('base64url');
   const record = {
@@ -52,13 +58,33 @@ function createToken({ label }) {
   return record;
 }
 
-function listTokenSummaries() {
+function listTokenSummaries({ currentToken } = {}) {
+  const current = tokenRecordForToken(currentToken);
   return readTokenRecords().map((record) => ({
     id: record.id || '',
     label: record.label || '',
     createdAt: record.createdAt || '',
     revoked: !!record.revoked,
+    revokedAt: record.revokedAt || '',
+    current: !!(current && current.id && record.id === current.id),
   }));
+}
+
+function revokeTokenById(id) {
+  const target = String(id || '').trim();
+  if (!target) return null;
+
+  const records = readTokenRecords();
+  const index = records.findIndex((record) => record.id === target);
+  if (index === -1) return null;
+
+  records[index] = {
+    ...records[index],
+    revoked: true,
+    revokedAt: new Date().toISOString(),
+  };
+  writeTokenRecords(records);
+  return records[index];
 }
 
 function revokeToken(idOrToken) {
@@ -86,4 +112,6 @@ module.exports = {
   isTokenAllowed,
   listTokenSummaries,
   revokeToken,
+  revokeTokenById,
+  tokenRecordForToken,
 };

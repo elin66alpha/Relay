@@ -44,3 +44,17 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/app/google-services.json
+
+# AgentDeck backend local state and secrets
+/server/.env
+/server/tokens.json
+/server/chat-history*.json
+/server/chat-sessions.json
+/server/quota-schedules.json
+/server/quota-state-*.json
+/server/usage-cache.json
+/server/push-subscriptions.json
+/server/fcm-service-account.json
+/server/fcm-tokens.json
+/server/credentials/

@@ -66,6 +66,50 @@ class BackendStatus {
   }
 }
 
+class DeviceToken {
+  const DeviceToken({
+    required this.id,
+    required this.label,
+    required this.createdAt,
+    required this.revoked,
+    required this.current,
+    this.revokedAt,
+  });
+
+  factory DeviceToken.fromJson(Map<String, Object?> json) {
+    final String revokedAt = json['revokedAt'] as String? ?? '';
+    return DeviceToken(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      createdAt: json['createdAt'] as String? ?? '',
+      revoked: json['revoked'] as bool? ?? false,
+      current: json['current'] as bool? ?? false,
+      revokedAt: revokedAt.isEmpty ? null : revokedAt,
+    );
+  }
+
+  final String id;
+  final String label;
+  final String createdAt;
+  final bool revoked;
+  final bool current;
+  final String? revokedAt;
+
+  DeviceToken copyWith({
+    bool? revoked,
+    String? revokedAt,
+  }) {
+    return DeviceToken(
+      id: id,
+      label: label,
+      createdAt: createdAt,
+      revoked: revoked ?? this.revoked,
+      current: current,
+      revokedAt: revokedAt ?? this.revokedAt,
+    );
+  }
+}
+
 class BackendDiagnostics {
   const BackendDiagnostics(this.json);
 
@@ -359,6 +403,63 @@ class FsDownloadStream {
   final Stream<List<int>> bytes;
 }
 
+class ChatHistorySearchResult {
+  const ChatHistorySearchResult({
+    required this.agentKey,
+    required this.sessionId,
+    required this.sessionName,
+    required this.snippet,
+    required this.messageId,
+  });
+
+  factory ChatHistorySearchResult.fromJson(Map<String, Object?> json) {
+    return ChatHistorySearchResult(
+      agentKey: json['agentKey'] as String? ?? '',
+      sessionId: json['sessionId'] as String? ?? '',
+      sessionName: json['sessionName'] as String? ?? '',
+      snippet: json['snippet'] as String? ?? '',
+      messageId: json['messageId'] as String? ?? '',
+    );
+  }
+
+  final String agentKey;
+  final String sessionId;
+  final String sessionName;
+  final String snippet;
+  final String messageId;
+}
+
+class ConversationExport {
+  const ConversationExport({
+    required this.fileName,
+    required this.markdown,
+  });
+
+  factory ConversationExport.fromJson(Map<String, Object?> json) {
+    return ConversationExport(
+      fileName: json['fileName'] as String? ?? 'agentdeck-conversation.md',
+      markdown: json['markdown'] as String? ?? '',
+    );
+  }
+
+  final String fileName;
+  final String markdown;
+}
+
+class PushConfig {
+  const PushConfig({required this.enabled, required this.publicKey});
+
+  factory PushConfig.fromJson(Map<String, Object?> json) {
+    return PushConfig(
+      enabled: json['enabled'] as bool? ?? false,
+      publicKey: json['publicKey'] as String? ?? '',
+    );
+  }
+
+  final bool enabled;
+  final String publicKey;
+}
+
 class UsageQuota {
   const UsageQuota({
     required this.key,
@@ -387,8 +488,10 @@ class UsageAgent {
     required this.key,
     required this.label,
     required this.available,
+    required this.stale,
     required this.quotas,
     this.detail = '',
+    this.asOf,
     this.error,
     this.unavailableReason,
   });
@@ -401,7 +504,9 @@ class UsageAgent {
       key: json['key'] as String? ?? '',
       label: json['label'] as String? ?? '',
       available: json['available'] as bool? ?? false,
+      stale: json['stale'] as bool? ?? false,
       detail: json['detail'] as String? ?? '',
+      asOf: json['asOf'] as String?,
       error: json['error'] as String?,
       unavailableReason: json['unavailableReason'] as String?,
       quotas: rawQuotas
@@ -414,7 +519,9 @@ class UsageAgent {
   final String key;
   final String label;
   final bool available;
+  final bool stale;
   final String detail;
+  final String? asOf;
   final String? error;
   final String? unavailableReason;
   final List<UsageQuota> quotas;
@@ -424,6 +531,7 @@ class UsageReport {
   const UsageReport({
     required this.createdAt,
     required this.agents,
+    required this.hasStale,
   });
 
   factory UsageReport.fromJson(Map<String, Object?> json) {
@@ -432,6 +540,7 @@ class UsageReport {
         : const <Object?>[];
     return UsageReport(
       createdAt: json['createdAt'] as String? ?? '',
+      hasStale: json['hasStale'] as bool? ?? false,
       agents: rawAgents
           .whereType<Map>()
           .map(
@@ -443,6 +552,7 @@ class UsageReport {
 
   final String createdAt;
   final List<UsageAgent> agents;
+  final bool hasStale;
 }
 
 class QuotaSchedule {
@@ -581,6 +691,81 @@ class BackendClient {
       throw BackendException('Invalid backend diagnostics response.');
     }
     return BackendDiagnostics.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<List<DeviceToken>> deviceTokens() async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/tokens',
+      timeout: const Duration(seconds: 20),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid token list response.');
+    }
+    final List<Object?> raw = decoded['tokens'] is List
+        ? (decoded['tokens'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => DeviceToken.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+  }
+
+  Future<void> revokeDeviceToken(String id) async {
+    await _requestJson(
+      'POST',
+      '/api/tokens/${Uri.encodeComponent(id)}/revoke',
+      timeout: const Duration(seconds: 20),
+    );
+  }
+
+  Future<PushConfig> pushConfig() async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/push/config',
+      timeout: const Duration(seconds: 15),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid push config response.');
+    }
+    return PushConfig.fromJson(decoded.cast<String, Object?>());
+  }
+
+  Future<void> subscribePush(String subscriptionJson, String lang) async {
+    final Object? subscription = jsonDecode(subscriptionJson);
+    await _requestJson(
+      'POST',
+      '/api/push/subscribe',
+      body: <String, Object?>{'subscription': subscription, 'lang': lang},
+      timeout: const Duration(seconds: 15),
+    );
+  }
+
+  Future<void> unsubscribePush(String endpoint) async {
+    await _requestJson(
+      'POST',
+      '/api/push/unsubscribe',
+      body: <String, Object?>{'endpoint': endpoint},
+      timeout: const Duration(seconds: 15),
+    );
+  }
+
+  Future<void> registerFcmToken(String token, String lang) async {
+    await _requestJson(
+      'POST',
+      '/api/push/fcm/register',
+      body: <String, Object?>{'token': token, 'lang': lang},
+      timeout: const Duration(seconds: 15),
+    );
+  }
+
+  Future<void> unregisterFcmToken(String token) async {
+    await _requestJson(
+      'POST',
+      '/api/push/fcm/unregister',
+      body: <String, Object?>{'token': token},
+      timeout: const Duration(seconds: 15),
+    );
   }
 
   Future<ChatReply> sendMessage({
@@ -855,6 +1040,44 @@ class BackendClient {
         .whereType<Map>()
         .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
         .toList(growable: false);
+  }
+
+  Future<List<ChatHistorySearchResult>> searchHistory(
+    String query, {
+    String? agentKey,
+  }) async {
+    final String trimmed = query.trim();
+    final String path =
+        '/api/history/search?q=${Uri.encodeQueryComponent(trimmed)}'
+        '${agentKey == null || agentKey.isEmpty ? '' : '&agent=${Uri.encodeQueryComponent(agentKey)}'}';
+    final Object? decoded = await _requestJson('GET', path);
+    if (decoded is! Map) {
+      throw BackendException('Invalid search response.');
+    }
+    final List<Object?> raw = decoded['matches'] is List
+        ? (decoded['matches'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map(
+          (Map item) =>
+              ChatHistorySearchResult.fromJson(item.cast<String, Object?>()),
+        )
+        .toList(growable: false);
+  }
+
+  Future<ConversationExport> exportHistory(
+    String agentKey, {
+    required String sessionId,
+  }) async {
+    final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
+        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
+    final Object? decoded =
+        await _requestJson('GET', '/api/history/export?$query');
+    if (decoded is! Map) {
+      throw BackendException('Invalid history export response.');
+    }
+    return ConversationExport.fromJson(decoded.cast<String, Object?>());
   }
 
   /// Best-effort login state per agent so the app can warn before sending a

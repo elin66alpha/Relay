@@ -36,8 +36,15 @@ const {
   resolveAbsoluteUploadTarget,
   uploadedEntry,
 } = require('./lib/filesystem');
-const { hasConfiguredToken, isTokenAllowed } = require('./lib/tokens');
+const {
+  hasConfiguredToken,
+  isTokenAllowed,
+  listTokenSummaries,
+  revokeTokenById,
+} = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
+const push = require('./lib/push');
+const fcm = require('./lib/fcm');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { authStatus } = require('./lib/auth-status');
 const { buildDiagnostics } = require('./lib/diagnostics');
@@ -48,6 +55,8 @@ const {
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
   clearHistory,
+  searchHistory,
+  markdownForConversation,
 } = require('./lib/history');
 const {
   LEGACY_SESSION_ID,
@@ -166,6 +175,11 @@ function requireAuth(req, res, next) {
 
 app.use('/api', requireAuth);
 
+function bearerToken(req) {
+  const header = String(req.get('authorization') || '');
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+}
+
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -204,6 +218,14 @@ function attachmentHeader(filename) {
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/["\\]/g, '_');
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function safeDownloadName(value, fallback = 'download') {
+  const cleaned = String(value || '')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return cleaned || fallback;
 }
 
 function cleanupTempZip(zipPath) {
@@ -669,6 +691,20 @@ async function runScheduledQuotaMessage(schedule) {
       messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
       createdAt: new Date().toISOString(),
     });
+    push
+      .notify({
+        message: `Scheduled ${agent.label} message was sent after quota reset.`,
+        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+        scopeWorkdir: schedule.workdir,
+      })
+      .catch((err) => console.warn(`[push] quota_schedule_sent: ${err.message}`));
+    fcm
+      .notify({
+        message: `Scheduled ${agent.label} message was sent after quota reset.`,
+        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+        scopeWorkdir: schedule.workdir,
+      })
+      .catch((err) => console.warn(`[fcm] quota_schedule_sent: ${err.message}`));
   } catch (err) {
     const errorMessage =
       err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN'
@@ -735,6 +771,84 @@ app.get('/api/auth/status', (_req, res) => {
       loggedIn: authStatus(agent.key),
     })),
   });
+});
+
+app.get('/api/tokens', (req, res) => {
+  res.json({
+    tokens: listTokenSummaries({ currentToken: bearerToken(req) }),
+  });
+});
+
+app.post('/api/tokens/:id/revoke', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  const revoked = revokeTokenById(id);
+  if (!revoked) {
+    return res.status(404).json({ error: 'token not found' });
+  }
+  res.json({
+    token: {
+      id: revoked.id || '',
+      label: revoked.label || '',
+      createdAt: revoked.createdAt || '',
+      revoked: true,
+      revokedAt: revoked.revokedAt || '',
+      current: String(revoked.token || '') === bearerToken(req),
+    },
+  });
+});
+
+app.get('/api/push/config', (_req, res) => {
+  res.json({ enabled: push.isEnabled(), publicKey: push.publicKey() });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  const subscription = req.body && req.body.subscription;
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'subscription is required' });
+  }
+  let workdir = '';
+  try {
+    workdir = requestWorkdir(req);
+  } catch (_err) {
+    workdir = '';
+  }
+  push.addSubscription({
+    subscription,
+    workdir,
+    lang: req.body && req.body.lang,
+  });
+  res.json({ ok: true });
+});
+
+app.post('/api/push/unsubscribe', (req, res) => {
+  const endpoint = req.body && req.body.endpoint;
+  push.removeSubscription(endpoint);
+  res.json({ ok: true });
+});
+
+app.post('/api/push/fcm/register', (req, res) => {
+  const token = req.body && req.body.token;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'token is required' });
+  }
+  let workdir = '';
+  try {
+    workdir = requestWorkdir(req);
+  } catch (_err) {
+    workdir = '';
+  }
+  fcm.addToken({
+    token,
+    workdir,
+    lang: req.body && req.body.lang,
+  });
+  return res.json({ ok: true, enabled: fcm.isEnabled() });
+});
+
+app.post('/api/push/fcm/unregister', (req, res) => {
+  const token = req.body && req.body.token;
+  fcm.removeToken(token);
+  res.json({ ok: true, enabled: fcm.isEnabled() });
 });
 
 app.get('/api/status', (req, res) => {
@@ -1492,6 +1606,78 @@ app.get('/api/history', (req, res) => {
   });
 });
 
+app.get('/api/history/search', (req, res) => {
+  const query = String(req.query.q || '').trim();
+  const agentKey = String(req.query.agent || '').trim();
+  if (!query) {
+    return res.status(400).json({ error: 'q is required' });
+  }
+  if (agentKey && !getAgent(agentKey)) {
+    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const sessionNameFor = (matchAgentKey, sessionId) => {
+    const contextKey = sessionContextKeyFor(matchAgentKey, workdir);
+    const session = listChatSessions(contextKey).sessions.find(
+      (item) => item.id === sessionId,
+    );
+    return session ? session.name : sessionId;
+  };
+  const matches = searchHistory({
+    workdir,
+    query,
+    agentKey,
+    sessionNameFor,
+  });
+  return res.json({ workdir, query, matches });
+});
+
+app.get('/api/history/export', (req, res) => {
+  const agentKey = String(req.query.agent || '').trim();
+  const requestedSessionId = String(req.query.sessionId || '').trim();
+  if (!agentKey) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  const agent = getAgent(agentKey);
+  if (!agent) {
+    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const chatSession = resolveChatSession(contextKey, requestedSessionId);
+  if (!chatSession) {
+    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+  }
+  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
+    finalizeStaleStreamingHistory(scopeKey);
+  }
+  const exportedAt = new Date().toISOString();
+  const markdown = markdownForConversation({
+    agentLabel: agent.label,
+    sessionName: chatSession.name,
+    messages: readHistory(scopeKey),
+    exportedAt,
+  });
+  const fileName = `${safeDownloadName(agent.key)}-${safeDownloadName(chatSession.name, 'session')}.md`;
+  return res.json({
+    agent: agent.key,
+    session: sessionPayload(chatSession),
+    fileName,
+    markdown,
+  });
+});
+
 app.get('/api/usage', async (_req, res) => {
   try {
     const report = await buildUsageReport();
@@ -1761,6 +1947,13 @@ app.listen(PORT, HOST, () => {
           info,
           createdAt: new Date().toISOString(),
         });
+        // Reach offline clients; SSE only covers open app sessions.
+        push
+          .notify({ message, messageZh: info && info.messageZh })
+          .catch((err) => console.warn(`[push] quota_reset: ${err.message}`));
+        fcm
+          .notify({ message, messageZh: info && info.messageZh })
+          .catch((err) => console.warn(`[fcm] quota_reset: ${err.message}`));
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);
         });

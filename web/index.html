@@ -42,9 +42,16 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script>
+    // Remove any stale Flutter PWA service worker (the build uses
+    // --pwa-strategy=none) and drop all caches so the app shell is never served
+    // stale. The push-only worker (push_sw.js) is deliberately preserved: it
+    // caches nothing and only exists to deliver Web Push notifications.
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations()
-        .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+        .then((registrations) => registrations.forEach((registration) => {
+          const url = (registration.active && registration.active.scriptURL) || '';
+          if (!url.endsWith('/push_sw.js')) registration.unregister();
+        }))
         .catch(() => {});
     }
     if ('caches' in window) {
@@ -53,6 +60,7 @@
         .catch(() => {});
     }
   </script>
+  <script src="push_interop.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
