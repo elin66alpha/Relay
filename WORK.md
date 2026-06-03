@@ -17,6 +17,47 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 
+## 2026-06-03 - Per-agent Model / Effort / Permission controls
+
+- New composer "+" drawer controls let the user pick, per chat, the agent's
+  model, reasoning effort, and permission mode. Capability-aware: agy exposes no
+  model/effort in its CLI, so only Permission shows for it; Claude and Codex show
+  all three.
+- Single source of truth: `server/lib/agent-options.js` maps every option to the
+  exact CLI argv. `buildArgs(agentKey, settings)` is spliced into each spawn in
+  `agents.js`. **Defaults reproduce the old always-bypass / no-model / no-effort
+  behavior**, so unconfigured scopes are byte-for-byte unchanged. Flag specifics:
+  Claude `--model` / `--effort` (native, low|medium|high|xhigh|max) /
+  `--permission-mode`; Codex `-m` / `-c model_reasoning_effort=` / permission via
+  `-c sandbox_mode=` + `-c approval_policy=never` (NOT `-s` — `codex exec resume`
+  rejects it; and exec is non-interactive so approvals must be `never` or it
+  hangs); agy permission only (`--dangerously-skip-permissions` vs `--sandbox`).
+- Selections persist per `workdir + agent` in `agent-settings.json` (gitignored),
+  shared across devices in the scope. server.js loads them at spawn time for both
+  live chat and scheduled messages.
+- Endpoints (all bearer-protected): `GET /api/agent-options`, `GET`+`POST
+  /api/agent-settings`, `GET /api/agent-version`, `POST /api/agent-update`. The
+  update endpoint runs `<cli> update` so a user who doesn't see the newest model
+  can pull it in from the model picker's "Update CLI" button (confirm + version
+  echo). Brand-new pinned models can be added with no code change via
+  `server/models-extra.json` (gitignored).
+- Client: `lib/features/chat/agent_controls.dart` (controls row + option sheet),
+  `lib/core/models/agent_options.dart`, new BackendClient methods, l10n strings.
+- Verified: flutter analyze clean, flutter test passes, node --check green, the
+  built flag combos accepted live by `claude` and `codex`, endpoints round-trip
+  on localhost, web rebuilt + served (200, <title>Relay</title>), debug APK
+  installed.
+- ENVIRONMENT GOTCHA (not caused by this work): the host PM2 God daemon's
+  restart/reload action RPC is broken — `pm2 restart`/`reload` fail with
+  "Process N not found" for EVERY app (old id 2 and a fresh id 4 alike) while
+  reads (list/describe/save) work. Workaround used to load new server code
+  without touching the unrelated `claude-discord` / `claude-quota-watch` apps:
+  `pm2 delete relay-server && pm2 start ecosystem.config.js --only relay-server`
+  (delete/start use different RPCs that still work), then `pm2 save`. A full fix
+  is `pm2 update` (respawns the daemon) but it cycles ALL apps, so leave that to
+  the user. `build_flow.sh`'s `pm2 restart` step will fail until the daemon is
+  repaired.
+
 ## 2026-06-02 - Rebrand AgentDeck -> Relay (clean public identity)
 
 - Full rebrand for public release. Two passes, both via scripted

@@ -1,0 +1,473 @@
+import 'package:flutter/material.dart';
+
+import '../../core/backend/backend_client.dart';
+import '../../core/i18n/app_strings.dart';
+import '../../core/models/agent_options.dart';
+
+/// Per-agent Model / Effort / Permission controls shown in the chat composer's
+/// "+" drawer. Capability-aware: only groups the agent supports are rendered
+/// (agy has no model/effort). Selections persist to the backend keyed by the
+/// current workdir+agent scope, so every device in that scope shares them.
+
+const List<String> _groupOrder = <String>['model', 'effort', 'permission'];
+
+IconData _groupIcon(String group) {
+  switch (group) {
+    case 'model':
+      return Icons.auto_awesome_outlined;
+    case 'effort':
+      return Icons.psychology_outlined;
+    case 'permission':
+      return Icons.shield_outlined;
+    default:
+      return Icons.tune_rounded;
+  }
+}
+
+String _groupLabel(AppStrings l10n, String group) {
+  switch (group) {
+    case 'model':
+      return l10n.agentModel;
+    case 'effort':
+      return l10n.agentEffort;
+    case 'permission':
+      return l10n.agentPermission;
+    default:
+      return group;
+  }
+}
+
+String _groupTitle(AppStrings l10n, String group) {
+  switch (group) {
+    case 'model':
+      return l10n.agentModelTitle;
+    case 'effort':
+      return l10n.agentEffortTitle;
+    case 'permission':
+      return l10n.agentPermissionTitle;
+    default:
+      return group;
+  }
+}
+
+class AgentControlsRow extends StatefulWidget {
+  const AgentControlsRow({
+    required this.backend,
+    required this.agentKey,
+    super.key,
+  });
+
+  final BackendClient backend;
+  final String agentKey;
+
+  @override
+  State<AgentControlsRow> createState() => _AgentControlsRowState();
+}
+
+class _AgentControlsRowState extends State<AgentControlsRow> {
+  AgentOptionsCatalog? _catalog;
+  AgentSettings _settings = AgentSettings.empty;
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(AgentControlsRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.agentKey != widget.agentKey) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final List<Object> results = await Future.wait(<Future<Object>>[
+        widget.backend.fetchAgentOptions(widget.agentKey),
+        widget.backend.fetchAgentSettings(widget.agentKey),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _catalog = results[0] as AgentOptionsCatalog;
+        _settings = results[1] as AgentSettings;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    }
+  }
+
+  AgentOption? _selectedOption(String group) {
+    final AgentOptionsCatalog? catalog = _catalog;
+    if (catalog == null) return null;
+    final String? id = _settings[group] ?? catalog.defaults[group];
+    for (final AgentOption option in catalog.optionsFor(group)) {
+      if (option.id == id) return option;
+    }
+    final List<AgentOption> options = catalog.optionsFor(group);
+    return options.isNotEmpty ? options.first : null;
+  }
+
+  Future<void> _openGroup(String group) async {
+    final AgentOptionsCatalog? catalog = _catalog;
+    if (catalog == null) return;
+    final AgentSettings? result = await showModalBottomSheet<AgentSettings>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (BuildContext ctx) => _AgentOptionSheet(
+        backend: widget.backend,
+        agentKey: widget.agentKey,
+        group: group,
+        catalog: catalog,
+        current: _settings[group] ?? catalog.defaults[group] ?? '',
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => _settings = result);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: SizedBox(
+          height: 18,
+          width: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    if (_failed) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _load,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: Text(context.l10n.agentControlsLoadFailed),
+        ),
+      );
+    }
+    final AgentOptionsCatalog? catalog = _catalog;
+    if (catalog == null) return const SizedBox.shrink();
+    final List<String> groups = _groupOrder
+        .where((String group) => catalog.supportsGroup(group))
+        .toList(growable: false);
+    if (groups.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: <Widget>[
+          for (int i = 0; i < groups.length; i++) ...<Widget>[
+            if (i > 0) Divider(height: 1, color: colors.outlineVariant),
+            _ControlRow(
+              icon: _groupIcon(groups[i]),
+              label: _groupLabel(context.l10n, groups[i]),
+              value: _selectedOption(groups[i])?.label ?? '',
+              onTap: () => _openGroup(groups[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ControlRow extends StatelessWidget {
+  const _ControlRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: 20, color: colors.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                color: colors.onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: colors.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet listing the choices for one control group. For the `model`
+/// group it also shows the installed CLI version and an "Update CLI" button so a
+/// user who doesn't see the newest model can pull it in. Saves on selection and
+/// pops with the new AgentSettings.
+class _AgentOptionSheet extends StatefulWidget {
+  const _AgentOptionSheet({
+    required this.backend,
+    required this.agentKey,
+    required this.group,
+    required this.catalog,
+    required this.current,
+  });
+
+  final BackendClient backend;
+  final String agentKey;
+  final String group;
+  final AgentOptionsCatalog catalog;
+  final String current;
+
+  @override
+  State<_AgentOptionSheet> createState() => _AgentOptionSheetState();
+}
+
+class _AgentOptionSheetState extends State<_AgentOptionSheet> {
+  late AgentOptionsCatalog _catalog;
+  late String _current;
+  bool _saving = false;
+  bool _updating = false;
+  String _version = '';
+
+  bool get _isModel => widget.group == 'model';
+
+  @override
+  void initState() {
+    super.initState();
+    _catalog = widget.catalog;
+    _current = widget.current;
+    if (_isModel) _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final String version =
+          await widget.backend.fetchAgentVersion(widget.agentKey);
+      if (!mounted) return;
+      setState(() => _version = version);
+    } catch (_) {
+      // Version label is best-effort.
+    }
+  }
+
+  Future<void> _select(String id) async {
+    if (_saving || _updating) return;
+    setState(() {
+      _saving = true;
+      _current = id;
+    });
+    try {
+      final AgentSettings settings = await widget.backend
+          .updateAgentSetting(widget.agentKey, widget.group, id);
+      if (!mounted) return;
+      Navigator.of(context).pop(settings);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.agentSettingSaveFailed(err))),
+      );
+    }
+  }
+
+  Future<void> _update() async {
+    final AppStrings l10n = context.l10n;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(l10n.agentUpdateConfirmTitle(widget.agentKey)),
+        content: Text(l10n.agentUpdateConfirmBody),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(l10n.agentUpdateCli),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _updating = true);
+    try {
+      final AgentUpdateResult result =
+          await widget.backend.updateAgentCli(widget.agentKey);
+      final AgentOptionsCatalog options =
+          await widget.backend.fetchAgentOptions(widget.agentKey);
+      if (!mounted) return;
+      setState(() {
+        _catalog = options;
+        _version = result.after.isNotEmpty ? result.after : _version;
+        _updating = false;
+      });
+      final String message = result.changed
+          ? l10n.agentUpdateDone(result.before, result.after)
+          : l10n.agentUpdateNoChange;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _updating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.agentUpdateFailed(err))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings l10n = context.l10n;
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final List<AgentOption> options = _catalog.optionsFor(widget.group);
+    final double maxHeight = MediaQuery.of(context).size.height * 0.7;
+
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _groupTitle(l10n, widget.group),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: colors.onSurface,
+                  ),
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (BuildContext ctx, int index) {
+                  final AgentOption option = options[index];
+                  final bool selected = option.id == _current;
+                  return ListTile(
+                    onTap: _saving || _updating ? null : () => _select(option.id),
+                    leading: Icon(
+                      selected
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      color: selected ? colors.primary : colors.onSurfaceVariant,
+                    ),
+                    title: Text(option.label),
+                    subtitle: option.description == null
+                        ? null
+                        : Text(option.description!),
+                  );
+                },
+              ),
+            ),
+            if (_isModel) _buildUpdateFooter(l10n, colors),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpdateFooter(AppStrings l10n, ColorScheme colors) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: colors.outlineVariant)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            l10n.agentUpdateMissingModel,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              FilledButton.tonalIcon(
+                onPressed: _updating ? null : _update,
+                icon: _updating
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.system_update_alt_rounded, size: 18),
+                label: Text(_updating ? l10n.agentUpdating : l10n.agentUpdateCli),
+              ),
+              const SizedBox(width: 12),
+              if (_version.isNotEmpty)
+                Expanded(
+                  child: Text(
+                    l10n.agentCliVersion(_version),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

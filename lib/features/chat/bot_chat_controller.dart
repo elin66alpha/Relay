@@ -63,6 +63,9 @@ class BotChatController extends ChangeNotifier {
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
+  // Exposed so the composer's per-agent Model/Effort/Permission controls can
+  // reach the same backend client (and thus the same workdir scope).
+  BackendClient get backend => _backendClient;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
   int get quotaScheduleRevision => _quotaScheduleRevision;

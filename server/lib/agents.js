@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const { getDefaultWorkdir } = require('./workdir');
+const { buildArgs } = require('./agent-options');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
@@ -256,7 +257,7 @@ function toolBrief(name, input) {
   return `${name}${detail ? `: ${oneLine(detail, 80)}` : ''}`;
 }
 
-function runClaude(prompt, onEvent, sessionKey, signal, workdir) {
+function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
@@ -267,13 +268,16 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir) {
   let isError = false;
   const emitDelta = makeDeltaEmitter(onEvent);
 
+  // model / effort / permission for this scope. buildArgs supplies the
+  // permission flag too (default = --dangerously-skip-permissions), so the
+  // previous always-bypass behavior is unchanged when nothing is configured.
   const args = [
     '--print',
     '--output-format',
     'stream-json',
     '--include-partial-messages',
     '--verbose',
-    '--dangerously-skip-permissions',
+    ...buildArgs('claude', settings),
   ];
   if (resuming) args.push('--resume', sessionId);
   else args.push('--session-id', sessionId);
@@ -334,7 +338,7 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir) {
   }).then((result) => {
     if (result && result.__retry) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runClaude(prompt, onEvent, sessionKey, signal, workdir);
+      return runClaude(prompt, onEvent, sessionKey, signal, workdir, settings);
     }
     if (result && result.__authError) throw new AgentAuthError('claude');
     return result;
@@ -362,7 +366,7 @@ function codexItemLabel(item) {
   return null;
 }
 
-function runCodex(prompt, onEvent, sessionKey, signal, workdir) {
+function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
@@ -371,9 +375,12 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir) {
     `codex-last-${process.pid}-${Date.now()}.txt`,
   );
 
+  // buildArgs supplies model (-m), effort (-c model_reasoning_effort=) and
+  // permission (default = --dangerously-bypass-approvals-and-sandbox). The `-c`
+  // forms work for both `exec` and `exec resume`.
   const common = [
     '--json',
-    '--dangerously-bypass-approvals-and-sandbox',
+    ...buildArgs('codex', settings),
     '--skip-git-repo-check',
     '-o',
     lastMsg,
@@ -456,7 +463,7 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir) {
   }).then((result) => {
     if (result && result.__retry) {
       emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runCodex(prompt, onEvent, sessionKey, signal, workdir);
+      return runCodex(prompt, onEvent, sessionKey, signal, workdir, settings);
     }
     if (result && result.__authError) throw new AgentAuthError('codex');
     return result;
@@ -474,14 +481,16 @@ const AGY_LAST_CONV = path.join(
   'last_conversations.json',
 );
 
-function runAgy(prompt, onEvent, sessionKey, signal, workdir) {
+function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   emit(onEvent, 'Antigravity is working...');
+  // agy exposes no model/effort; buildArgs only yields the permission flag
+  // (default = --dangerously-skip-permissions).
   const args = [
     '--print',
     String(prompt),
-    '--dangerously-skip-permissions',
+    ...buildArgs('agy', settings),
     '--add-dir',
     cwd,
   ];
@@ -604,7 +613,14 @@ async function runAgent(agentKey, prompt, onEvent, options = {}) {
     throw new Error(`Unknown agent: ${agentKey}`);
   }
   const sessionKey = options.sessionKey || agent.key;
-  return agent.run(prompt, onEvent, sessionKey, options.signal, options.workdir);
+  return agent.run(
+    prompt,
+    onEvent,
+    sessionKey,
+    options.signal,
+    options.workdir,
+    options.settings,
+  );
 }
 
 module.exports = {

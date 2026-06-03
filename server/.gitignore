@@ -15,3 +15,5 @@ credentials/*.relay.json
 credentials/*.json
 credentials/*.png
 credentials/*.passphrase.txt
+agent-settings.json
+models-extra.json

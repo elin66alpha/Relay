@@ -258,6 +258,39 @@ class AppStrings {
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get moreChatActions => isZh ? '更多操作' : 'More actions';
+
+  // Per-agent Model / Effort / Permission controls (composer "+" drawer).
+  String get agentModel => isZh ? '模型' : 'Model';
+  String get agentEffort => isZh ? '思考' : 'Effort';
+  String get agentPermission => isZh ? '权限' : 'Permission';
+  String get agentModelTitle => isZh ? '选择模型' : 'Select model';
+  String get agentEffortTitle => isZh ? '思考能力' : 'Effort level';
+  String get agentPermissionTitle => isZh ? '权限模式' : 'Permission mode';
+  String get agentControlsUnsupported =>
+      isZh ? '该智能体不支持此项' : 'Not supported by this agent';
+  String get agentControlsLoadFailed =>
+      isZh ? '加载失败,点按重试' : 'Failed to load — tap to retry';
+  String agentSettingSaveFailed(Object err) =>
+      isZh ? '保存失败:$err' : 'Save failed: $err';
+  String agentCliVersion(String version) =>
+      isZh ? '当前版本 $version' : 'Version $version';
+  String get agentUpdateCli => isZh ? '更新 CLI' : 'Update CLI';
+  String get agentUpdateMissingModel =>
+      isZh ? '没看到最新模型?' : "Don't see the latest model?";
+  String agentUpdateConfirmTitle(String agent) =>
+      isZh ? '更新 $agent?' : 'Update $agent?';
+  String get agentUpdateConfirmBody => isZh
+      ? '将在后端主机上运行 CLI 自更新,可能耗时一两分钟。完成后新模型会出现在列表里。'
+      : 'Runs the CLI self-update on the backend host. This can take a minute or two; new models appear afterward.';
+  String get agentUpdating => isZh ? '正在更新…' : 'Updating…';
+  String agentUpdateDone(String before, String after) => isZh
+      ? '更新完成:$before → $after'
+      : 'Updated: $before → $after';
+  String get agentUpdateNoChange =>
+      isZh ? '已是最新版本' : 'Already up to date';
+  String agentUpdateFailed(Object err) =>
+      isZh ? '更新失败:$err' : 'Update failed: $err';
+
   String get retry => isZh ? '重试' : 'Retry';
   String get cancelled => isZh ? '已取消' : 'Cancelled';
   String get inputHint => isZh ? '输入消息' : 'Message';

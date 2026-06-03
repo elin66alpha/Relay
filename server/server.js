@@ -5,7 +5,7 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
 const compression = require('compression');
@@ -43,6 +43,8 @@ const {
   revokeTokenById,
 } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
+const { describeAgent, CLI } = require('./lib/agent-options');
+const { getSettings, setSettings } = require('./lib/agent-settings');
 const push = require('./lib/push');
 const fcm = require('./lib/fcm');
 const { startQuotaWatch } = require('./lib/quota-watch');
@@ -664,6 +666,7 @@ async function runScheduledQuotaMessage(schedule) {
         return await runAgent(agent.key, schedule.prompt, emitRunEvent, {
           sessionKey: scopeKey,
           workdir: schedule.workdir,
+          settings: getSettings(agent.key, contextKey),
         });
       } finally {
         runningScopes.delete(scopeKey);
@@ -758,6 +761,129 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/agents', (_req, res) => {
   res.json({ defaultAgent: DEFAULT_AGENT, agents: listAgents() });
+});
+
+// Run a CLI binary with fixed argv (no user-controlled tokens) and resolve with
+// its trimmed output. Used for `<cli> --version` and `<cli> update`.
+function runCliCommand(bin, args, timeoutMs) {
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      args,
+      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const out = String(stdout || '').trim();
+        const errOut = String(stderr || '').trim();
+        resolve({
+          ok: !err,
+          code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
+          stdout: out,
+          stderr: errOut,
+          text: out || errOut,
+          timedOut: !!(err && err.killed),
+        });
+      },
+    );
+  });
+}
+
+async function cliVersion(agentKey) {
+  const cli = CLI[agentKey];
+  if (!cli) return '';
+  const result = await runCliCommand(cli.bin, cli.versionArgs, 15000);
+  // Versions print as e.g. "2.1.161 (Claude Code)" / "codex-cli 0.132.0".
+  return result.ok ? result.text.split('\n')[0].trim() : '';
+}
+
+// Catalog of selectable model/effort/permission options for one agent
+// (capability-aware; agy has no model/effort). Static, so no workdir needed.
+app.get('/api/agent-options', (req, res) => {
+  const agent = getAgent(String(req.query.agent || '').trim());
+  if (!agent) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  return res.json({ ok: true, ...describeAgent(agent.key) });
+});
+
+// Current model/effort/permission selection for the request's workdir+agent
+// scope (shared by every device in that scope).
+app.get('/api/agent-settings', (req, res) => {
+  const agent = getAgent(String(req.query.agent || '').trim());
+  if (!agent) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  return res.json({
+    ok: true,
+    agent: agent.key,
+    workdir,
+    settings: getSettings(agent.key, contextKey),
+  });
+});
+
+// Update the selection for a scope. Body: { agent, model?, effort?, permission? }.
+// Only provided groups change; invalid ids fall back to the agent default.
+app.post('/api/agent-settings', (req, res) => {
+  const body = req.body || {};
+  const agent = getAgent(String(body.agent || '').trim());
+  if (!agent) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  let workdir;
+  try {
+    workdir = requestWorkdir(req);
+  } catch (err) {
+    return sendWorkdirError(res, err);
+  }
+  const partial = {};
+  for (const group of ['model', 'effort', 'permission']) {
+    if (typeof body[group] === 'string') partial[group] = body[group];
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const settings = setSettings(agent.key, contextKey, partial);
+  return res.json({ ok: true, agent: agent.key, workdir, settings });
+});
+
+// Installed CLI version for the agent (for the model page's version label).
+app.get('/api/agent-version', async (req, res) => {
+  const agent = getAgent(String(req.query.agent || '').trim());
+  if (!agent) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  const version = await cliVersion(agent.key);
+  return res.json({ ok: true, agent: agent.key, version });
+});
+
+// Update the agent's CLI binary so newly shipped models become selectable.
+// Runs `<cli> update` (fixed argv); returns the before/after version. Protected
+// by the same bearer-token middleware as every other /api/* route.
+app.post('/api/agent-update', async (req, res) => {
+  const agent = getAgent(String((req.body || {}).agent || '').trim());
+  if (!agent) {
+    return res.status(400).json({ error: 'agent is required' });
+  }
+  const cli = CLI[agent.key];
+  if (!cli) {
+    return res.status(400).json({ error: `no updater for ${agent.key}` });
+  }
+  const before = await cliVersion(agent.key);
+  const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
+  const after = await cliVersion(agent.key);
+  return res.json({
+    ok: result.ok,
+    agent: agent.key,
+    before,
+    after,
+    changed: !!after && after !== before,
+    timedOut: result.timedOut,
+    output: result.text.slice(0, 4000),
+  });
 });
 
 // Best-effort login state per agent so the app can warn before sending a
@@ -1264,6 +1390,7 @@ app.post('/api/chat', async (req, res) => {
           sessionKey: scopeKey,
           signal: abortController.signal,
           workdir,
+          settings: getSettings(agentKey, contextKey),
         });
       } finally {
         runningScopes.delete(scopeKey);

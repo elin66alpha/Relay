@@ -18,6 +18,7 @@ import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
+import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
 
 class BotChatScreen extends StatefulWidget {
@@ -380,6 +381,8 @@ class _BotChatScreenState extends State<BotChatScreen> {
                       ),
                       _InputBar(
                         controller: _input,
+                        backend: widget.chatController.backend,
+                        agentKey: widget.agentsController.activeAgent.key,
                         isThinking: widget.chatController.isThinking,
                         isCancelling: widget.chatController.isCancelling,
                         onSend: _send,
@@ -621,6 +624,8 @@ class _HistorySearchResults extends StatelessWidget {
 class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
+    required this.backend,
+    required this.agentKey,
     required this.isThinking,
     required this.isCancelling,
     required this.onSend,
@@ -631,6 +636,8 @@ class _InputBar extends StatefulWidget {
   });
 
   final TextEditingController controller;
+  final BackendClient backend;
+  final String agentKey;
   final bool isThinking;
   final bool isCancelling;
   final VoidCallback onSend;
@@ -790,6 +797,8 @@ class _InputBarState extends State<_InputBar> {
               curve: Curves.easeOutCubic,
               child: _actionsOpen
                   ? _ComposerActionPanel(
+                      backend: widget.backend,
+                      agentKey: widget.agentKey,
                       onClear: () => _runAction(widget.onClear),
                       onCompress: () => _runAction(widget.onCompress),
                       onExportMarkdown: () =>
@@ -855,11 +864,15 @@ class _MessageTextField extends StatelessWidget {
 
 class _ComposerActionPanel extends StatelessWidget {
   const _ComposerActionPanel({
+    required this.backend,
+    required this.agentKey,
     required this.onClear,
     required this.onCompress,
     required this.onExportMarkdown,
   });
 
+  final BackendClient backend;
+  final String agentKey;
   final VoidCallback onClear;
   final VoidCallback onCompress;
   final VoidCallback onExportMarkdown;
@@ -868,29 +881,33 @@ class _ComposerActionPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 14),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          children: <Widget>[
-            _ComposerActionButton(
-              icon: Icons.refresh_rounded,
-              label: context.l10n.clearChat,
-              onPressed: onClear,
-            ),
-            _ComposerActionButton(
-              icon: Icons.compress,
-              label: context.l10n.compress,
-              onPressed: onCompress,
-            ),
-            _ComposerActionButton(
-              icon: Icons.download_outlined,
-              label: context.l10n.exportMarkdown,
-              onPressed: onExportMarkdown,
-            ),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // Per-agent Model / Effort / Permission controls for this scope.
+          AgentControlsRow(backend: backend, agentKey: agentKey),
+          Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: <Widget>[
+              _ComposerActionButton(
+                icon: Icons.refresh_rounded,
+                label: context.l10n.clearChat,
+                onPressed: onClear,
+              ),
+              _ComposerActionButton(
+                icon: Icons.compress,
+                label: context.l10n.compress,
+                onPressed: onCompress,
+              ),
+              _ComposerActionButton(
+                icon: Icons.download_outlined,
+                label: context.l10n.exportMarkdown,
+                onPressed: onExportMarkdown,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../i18n/app_strings.dart';
+import '../models/agent_options.dart';
 import '../models/agent_session.dart';
 import '../models/chat_message.dart';
 import '../models/machine_credential.dart';
@@ -1096,6 +1097,80 @@ class BackendClient {
       }
     }
     return result;
+  }
+
+  /// Catalog of selectable model/effort/permission options for an agent
+  /// (capability-aware; agy reports no model/effort).
+  Future<AgentOptionsCatalog> fetchAgentOptions(String agentKey) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/agent-options?agent=${Uri.encodeQueryComponent(agentKey)}',
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid agent options response.');
+    }
+    return AgentOptionsCatalog.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Current model/effort/permission selection for the request's workdir+agent
+  /// scope.
+  Future<AgentSettings> fetchAgentSettings(String agentKey) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/agent-settings?agent=${Uri.encodeQueryComponent(agentKey)}',
+    );
+    if (decoded is! Map || decoded['settings'] is! Map) {
+      throw BackendException('Invalid agent settings response.');
+    }
+    return AgentSettings.fromJson(
+      (decoded['settings'] as Map).cast<String, Object?>(),
+    );
+  }
+
+  /// Persist one group's selection (model/effort/permission) for the scope.
+  Future<AgentSettings> updateAgentSetting(
+    String agentKey,
+    String group,
+    String optionId,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/agent-settings',
+      body: <String, Object?>{'agent': agentKey, group: optionId},
+    );
+    if (decoded is! Map || decoded['settings'] is! Map) {
+      throw BackendException('Invalid agent settings response.');
+    }
+    return AgentSettings.fromJson(
+      (decoded['settings'] as Map).cast<String, Object?>(),
+    );
+  }
+
+  /// Installed CLI version string for the agent (for the model page label).
+  Future<String> fetchAgentVersion(String agentKey) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/agent-version?agent=${Uri.encodeQueryComponent(agentKey)}',
+    );
+    if (decoded is Map && decoded['version'] is String) {
+      return (decoded['version'] as String).trim();
+    }
+    return '';
+  }
+
+  /// Update the agent's CLI binary so newly shipped models become selectable.
+  /// Slow (network install), so it uses a long timeout.
+  Future<AgentUpdateResult> updateAgentCli(String agentKey) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/agent-update',
+      body: <String, Object?>{'agent': agentKey},
+      timeout: const Duration(seconds: 200),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid agent update response.');
+    }
+    return AgentUpdateResult.fromJson(decoded.cast<String, Object?>());
   }
 
   /// Clears the backend-side session for one agent so the next message starts
