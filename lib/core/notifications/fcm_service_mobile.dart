@@ -8,7 +8,7 @@ import '../backend/backend_client.dart';
 import 'notification_service.dart';
 
 @pragma('vm:entry-point')
-Future<void> agentDeckFcmBackgroundHandler(RemoteMessage message) async {
+Future<void> relayFcmBackgroundHandler(RemoteMessage message) async {
   try {
     await Firebase.initializeApp();
   } catch (_) {
@@ -80,7 +80,7 @@ class FcmService {
 
   void _registerBackgroundHandler() {
     if (_backgroundHandlerRegistered) return;
-    FirebaseMessaging.onBackgroundMessage(agentDeckFcmBackgroundHandler);
+    FirebaseMessaging.onBackgroundMessage(relayFcmBackgroundHandler);
     _backgroundHandlerRegistered = true;
   }
 
@@ -117,7 +117,7 @@ class FcmService {
       final RemoteNotification? notification = message.notification;
       final String title = notification?.title ??
           message.data['title']?.toString() ??
-          'AgentDeck';
+          'Relay';
       final String body =
           notification?.body ?? message.data['body']?.toString() ?? '';
       if (body.isEmpty) return;

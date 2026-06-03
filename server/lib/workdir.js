@@ -7,7 +7,7 @@ const path = require('path');
 // Per-device work directory. Each client carries its own current path via the
 // `x-workdir` request header, so two devices can work in different paths at the
 // same time. This module only validates, resolves, and creates paths; there is
-// no shared "current workdir" state anymore. The `.env` AGENTDECK_DEFAULT_DIR is
+// no shared "current workdir" state anymore. The `.env` RELAY_DEFAULT_DIR is
 // kept solely as the default a brand-new device starts from. Session identity
 // is keyed by workdir + agent + chat session in server.js.
 const ENV_PATH = path.join(__dirname, '..', '.env');
@@ -55,10 +55,10 @@ function resolveWorkdir(value) {
 }
 
 // The path a brand-new device (one that has not chosen a workdir yet) starts
-// from. Comes from AGENTDECK_DEFAULT_DIR when set, otherwise ~/agent_deck.
+// from. Comes from RELAY_DEFAULT_DIR when set, otherwise ~/agent_deck.
 function getDefaultWorkdir() {
-  return process.env.AGENTDECK_DEFAULT_DIR
-    ? resolveWorkdir(process.env.AGENTDECK_DEFAULT_DIR)
+  return process.env.RELAY_DEFAULT_DIR
+    ? resolveWorkdir(process.env.RELAY_DEFAULT_DIR)
     : resolveWorkdir(expandWorkdir(''));
 }
 

@@ -17,7 +17,7 @@ brew install cloudflared
 ## Setup
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 backends/macos/setup.sh
 ```
 
@@ -25,9 +25,9 @@ The setup script:
 
 - creates `server/.env` from `server/.env.example` when needed;
 - installs backend npm dependencies;
-- creates a LaunchAgent for the backend (`dev.agentdeck.backend`);
+- creates a LaunchAgent for the backend (`dev.relay.app.backend`);
 - offers direct mode, named Cloudflare Tunnel mode, or Quick Tunnel mode;
-- in either tunnel mode, creates a LaunchAgent for cloudflared (`dev.agentdeck.tunnel`);
+- in either tunnel mode, creates a LaunchAgent for cloudflared (`dev.relay.app.tunnel`);
 - for Quick Tunnel, reads the latest `trycloudflare.com` URL from the tunnel logs;
 - runs `npm run credential` so the terminal shows and saves the encrypted
   credential QR pointing at the chosen public URL.
@@ -44,10 +44,10 @@ backends/macos/uninstall.sh
 Logs:
 
 ```text
-~/Library/Logs/AgentDeck/backend.out.log
-~/Library/Logs/AgentDeck/backend.err.log
-~/Library/Logs/AgentDeck/tunnel.out.log
-~/Library/Logs/AgentDeck/tunnel.err.log
+~/Library/Logs/Relay/backend.out.log
+~/Library/Logs/Relay/backend.err.log
+~/Library/Logs/Relay/tunnel.out.log
+~/Library/Logs/Relay/tunnel.err.log
 ```
 
 ## Notes

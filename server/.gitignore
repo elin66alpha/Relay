@@ -10,8 +10,8 @@ quota-schedules.json
 tokens.json
 cloudflared/
 cloudflared-config/
-credentials/*.agentdeck
-credentials/*.agentdeck.json
+credentials/*.relay
+credentials/*.relay.json
 credentials/*.json
 credentials/*.png
 credentials/*.passphrase.txt

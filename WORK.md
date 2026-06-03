@@ -1,6 +1,6 @@
 # WORK.md - Shared Agent Notes
 
-This file is a short handoff log for agents working on AgentDeck. Keep it
+This file is a short handoff log for agents working on Relay. Keep it
 current, factual, and free of secrets. Detailed history lives in git.
 
 ## Current Project Shape
@@ -16,6 +16,48 @@ current, factual, and free of secrets. Detailed history lives in git.
   history, the resumable CLI session, and in-flight progress.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
+
+## 2026-06-02 - Rebrand AgentDeck -> Relay (clean public identity)
+
+- Full rebrand for public release. Two passes, both via scripted
+  case-sensitive/ordered `sed` over `git ls-files` (so node_modules/, build/, and
+  gitignored secrets are untouched): `scripts/rename_to_relay.sh` swept the
+  PascalCase brand `AgentDeck -> Relay` (display text + docs only), then
+  `scripts/migrate_identity_to_relay.sh` migrated every functional identifier off
+  the old brand.
+- New app identity: bundle id / applicationId / namespace `dev.agentdeck.app ->
+  dev.relay.app` (chosen to mirror the old `dev.*.app` shape; verify it's free on
+  the Play Store before first publish). The kotlin
+  source dir moved `dev/agentdeck/app/ -> dev/relay/app/`; the download
+  `MethodChannel` (Kotlin + `file_saver_stub.dart`) tracks it. iOS/macOS/Linux
+  bundle ids, macOS LaunchAgent labels (`dev.relay.app.backend/.tunnel`), and
+  copyright/company strings updated too.
+- Other identifiers (all consistent across their paired sites): Dart package
+  `agentdeck -> relay` (only `package:` user was the codec test; lib/ uses
+  relative imports), PM2 names `relay-server`/`relay-tunnel`, SharedPreferences
+  keys `relay.*.v1`, credential format `relay.credentials.v1` + file ext
+  `*.relay.json/png`, env vars `RELAY_*`, web-push JS global `window.relayPush`
+  (interop JS + `@JS` annotations), FCM Firebase app name `relay-fcm` +
+  `relayFcmBackgroundHandler`, desktop binary `relay`.
+- Verified: `flutter analyze` clean, credential codec test passes (after
+  `flutter pub get` rebuilt the package graph for the new name), `node --check`
+  green on backend.
+- CUTOVER DONE (2026-06-03): a fresh Firebase project `relay-93917` was created;
+  `android/app/google-services.json` (package `dev.relay.app`) and the backend
+  service account `server/fcm-service-account.json` are in place (both gitignored),
+  with `FCM_SERVICE_ACCOUNT_FILE` pointing at the latter. PM2 was re-registered as
+  `relay-server` / `relay-tunnel` (the unrelated `claude-*` apps were left
+  running). Web + debug APK were rebuilt — note `flutter clean` was required first,
+  because the cached web entrypoint still imported `package:agentdeck/main.dart`.
+  The credential was regenerated and re-imported; FCM offline push was verified
+  end-to-end on the `dev.relay.app` build (stale old-project tokens self-prune with
+  a `SenderId mismatch`).
+- PM2 gotcha learned here: `server/ecosystem.config.js` `envValue()` reads
+  `process.env` before `.env`, and the long-lived PM2 daemon had stale
+  `CLOUDFLARED_ARGS` / `FCM_SERVICE_ACCOUNT_FILE` from the old names. Start/restart
+  relay apps with the corrected values exported in the shell (or inline before
+  `build_flow.sh`) so `--update-env` injects them; `pm2 save` then persists a
+  correct dump for reboots without needing a daemon `pm2 kill`.
 
 ## 2026-06-02 - FCM Android offline push
 
@@ -97,7 +139,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Windows setup supports direct mode, named Cloudflare Tunnel, and Cloudflare
   Quick Tunnel, then generates the encrypted credential QR.
 - Windows services run as background processes and are restored at login by a
-  per-user Scheduled Task named `AgentDeck Backend`.
+  per-user Scheduled Task named `Relay Backend`.
 
 ## 2026-05-31 - Named Cloudflare Tunnel Setup
 
@@ -106,7 +148,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Named Cloudflare Tunnel mode creates/reuses a tunnel, routes DNS, writes a
   local config under `server/cloudflared-config/`, and runs cloudflared under
   PM2/LaunchAgent.
-- `server/ecosystem.config.js` reads `AGENTDECK_TUNNEL_MODE`,
+- `server/ecosystem.config.js` reads `RELAY_TUNNEL_MODE`,
   `CLOUDFLARED_BIN`, and `CLOUDFLARED_ARGS` from `.env` so PM2 can omit the
   tunnel app, run named tunnel args, or run Quick Tunnel args.
 - `server/scripts/create-credential.js` prefers stable `PUBLIC_BASE_URL` for
@@ -130,8 +172,8 @@ current, factual, and free of secrets. Detailed history lives in git.
 ## 2026-05-31 - Credential JSON and Cloudflare Quick Tunnel
 
 - `server/scripts/create-credential.js` generates both
-  `server/credentials/<machine>.agentdeck.png` and
-  `server/credentials/<machine>.agentdeck.json`.
+  `server/credentials/<machine>.relay.png` and
+  `server/credentials/<machine>.relay.json`.
 - The JSON file is for paste import; credential files remain git-ignored.
 - Credential creation auto-detects the current Cloudflare quick-tunnel URL from
   PM2 logs unless `--url` is passed.

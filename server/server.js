@@ -235,7 +235,7 @@ function cleanupTempZip(zipPath) {
 }
 
 function sendWindowsDirectoryZip(download, res) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentdeck-zip-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-zip-'));
   const tempZip = path.join(tempDir, `${randomUUID()}.zip`);
   const sourcePath = path.join(download.zipCwd, download.zipEntryName);
   const powershell = process.env.POWERSHELL_BIN || 'powershell.exe';
@@ -1906,7 +1906,7 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
 }
 
 app.listen(PORT, HOST, () => {
-  console.log(`AgentDeck server listening on http://${HOST}:${PORT}`);
+  console.log(`Relay server listening on http://${HOST}:${PORT}`);
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }

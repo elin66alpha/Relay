@@ -4,4 +4,4 @@ Set-StrictMode -Version 2.0
 Require-Windows
 Require-Node
 Ensure-EnvFile
-Start-AgentDeckServices
+Start-RelayServices

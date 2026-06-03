@@ -10,8 +10,8 @@ class MachineCredentialsStore {
     FlutterSecureStorage? secureStorage,
   }) : _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
-  static const String _credentialsKey = 'agentdeck.machine_credentials.v1';
-  static const String _activeMachineKey = 'agentdeck.active_machine_id.v1';
+  static const String _credentialsKey = 'relay.machine_credentials.v1';
+  static const String _activeMachineKey = 'relay.active_machine_id.v1';
 
   final FlutterSecureStorage _secureStorage;
 

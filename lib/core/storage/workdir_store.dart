@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class WorkdirStore {
   WorkdirStore({SharedPreferences? prefs}) : _prefs = prefs;
 
-  static const String _key = 'agentdeck.workdir.v1';
+  static const String _key = 'relay.workdir.v1';
 
   SharedPreferences? _prefs;
 

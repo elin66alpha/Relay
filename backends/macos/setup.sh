@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 require_macos
 
-c_info "AgentDeck macOS backend setup"
+c_info "Relay macOS backend setup"
 
 require_node
 ensure_env_file
@@ -39,7 +39,7 @@ case "$NETWORK_MODE" in
     esac
     set_env HOST 0.0.0.0
     set_env PUBLIC_BASE_URL "$PUBLIC_URL"
-    set_env AGENTDECK_TUNNEL_MODE none
+    set_env RELAY_TUNNEL_MODE none
     set_env CLOUDFLARED_BIN ""
     stop_agent "$TUNNEL_LABEL"
     rm -f "$TUNNEL_PLIST"
@@ -65,7 +65,7 @@ case "$NETWORK_MODE" in
     write_named_tunnel_config "$TUNNEL_ID" "$PUBLIC_HOSTNAME" "$PORT_NUM" "$CONFIG_FILE"
     set_env HOST 127.0.0.1
     set_env PUBLIC_BASE_URL "$PUBLIC_URL"
-    set_env AGENTDECK_TUNNEL_MODE cloudflare
+    set_env RELAY_TUNNEL_MODE cloudflare
     set_env CLOUDFLARED_BIN "$(command -v cloudflared)"
     rm -f "$LOG_DIR/tunnel.out.log" "$LOG_DIR/tunnel.err.log"
     ;;
@@ -76,7 +76,7 @@ case "$NETWORK_MODE" in
     }
     c_info "Quick Tunnel mode"
     set_env HOST 127.0.0.1
-    set_env AGENTDECK_TUNNEL_MODE quick
+    set_env RELAY_TUNNEL_MODE quick
     set_env CLOUDFLARED_BIN "$(command -v cloudflared)"
     rm -f "$LOG_DIR/tunnel.out.log" "$LOG_DIR/tunnel.err.log"
     ;;

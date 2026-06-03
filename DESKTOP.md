@@ -1,6 +1,6 @@
-# AgentDeck Desktop (Windows / macOS / Linux)
+# Relay Desktop (Windows / macOS / Linux)
 
-AgentDeck's client is a **Flutter** app, so the desktop builds are **native** —
+Relay's client is a **Flutter** app, so the desktop builds are **native** —
 there is no Electron/web wrapper. The same `lib/` code runs on mobile, Web, and
 all three desktop targets; `windows/`, `macos/`, and `linux/` are the standard
 Flutter desktop runner projects.
@@ -54,10 +54,10 @@ flutter build linux --release
 ```
 
 Artifacts:
-- **Windows:** `build/windows/x64/runner/Release/` — `AgentDeck.exe` plus DLLs
+- **Windows:** `build/windows/x64/runner/Release/` — `Relay.exe` plus DLLs
   and a `data/` folder. The whole folder is portable; zip it to share.
-- **macOS:** `build/macos/Build/Products/Release/AgentDeck.app`
-- **Linux:** `build/linux/x64/release/bundle/` — `agentdeck` plus `lib/` and
+- **macOS:** `build/macos/Build/Products/Release/Relay.app`
+- **Linux:** `build/linux/x64/release/bundle/` — `relay` plus `lib/` and
   `data/`.
 
 ## Connecting on desktop
@@ -93,11 +93,11 @@ Artifacts:
 
 - **Local / personal use:** an unsigned `.app` runs, but Gatekeeper warns on
   first launch. Right-click → **Open**, or strip quarantine:
-  `xattr -dr com.apple.quarantine AgentDeck.app`.
+  `xattr -dr com.apple.quarantine Relay.app`.
 - **Distribution:** requires an Apple **Developer ID** signature + **notarization**.
   Open `macos/Runner.xcworkspace` in Xcode, set the signing team, then archive,
   or sign/notarize the built `.app` with `codesign` + `notarytool`.
-- Bundle id: `dev.agentdeck.app` (in `macos/Runner/Configs/AppInfo.xcconfig`).
+- Bundle id: `dev.relay.app` (in `macos/Runner/Configs/AppInfo.xcconfig`).
 
 ## Windows packaging
 
@@ -108,8 +108,8 @@ Artifacts:
 
 ## What is configured in-repo
 
-- **Windows:** product/window title "AgentDeck", company `dev.agentdeck`,
-  icon `windows/runner/resources/app_icon.ico`, binary `agentdeck.exe`.
-- **macOS:** `PRODUCT_NAME = AgentDeck`, bundle id `dev.agentdeck.app`, copyright,
+- **Windows:** product/window title "Relay", company `Relay`,
+  icon `windows/runner/resources/app_icon.ico`, binary `relay.exe`.
+- **macOS:** `PRODUCT_NAME = Relay`, bundle id `dev.relay.app`, copyright,
   app icon, sandbox entitlements with network client, ATS local networking.
-- **Linux:** standard GTK runner; binary `agentdeck`.
+- **Linux:** standard GTK runner; binary `relay`.

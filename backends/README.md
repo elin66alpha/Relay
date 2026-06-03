@@ -1,6 +1,6 @@
-# AgentDeck Backend Targets
+# Relay Backend Targets
 
-AgentDeck keeps the backend core in `server/` and puts operating-system setup
+Relay keeps the backend core in `server/` and puts operating-system setup
 in this directory.
 
 - `linux/`: Linux backend entrypoint. It wraps the existing PM2-based setup.

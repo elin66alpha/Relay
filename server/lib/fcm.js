@@ -35,7 +35,7 @@ if (admin && SERVICE_ACCOUNT_FILE) {
       {
         credential: admin.credential.cert(serviceAccount),
       },
-      'agentdeck-fcm',
+      'relay-fcm',
     );
     configured = true;
   } catch (err) {
@@ -126,7 +126,7 @@ async function notify({ title, message, messageZh, scopeWorkdir }) {
       if (!token) return;
       const body =
         record.lang === 'zh' && messageZh ? messageZh : message || messageZh || '';
-      const notificationTitle = title || 'AgentDeck';
+      const notificationTitle = title || 'Relay';
       try {
         await messaging.send({
           token,
@@ -137,13 +137,13 @@ async function notify({ title, message, messageZh, scopeWorkdir }) {
           data: {
             title: notificationTitle,
             body,
-            tag: 'agentdeck',
+            tag: 'relay',
           },
           android: {
             priority: 'high',
             notification: {
               channelId: 'quota_alerts',
-              tag: 'agentdeck',
+              tag: 'relay',
             },
           },
           apns: {

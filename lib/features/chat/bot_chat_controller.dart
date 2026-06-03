@@ -1048,7 +1048,7 @@ class BotChatController extends ChangeNotifier {
   Future<void> _showQuotaNotification(String message) async {
     try {
       final bool shown = await NotificationService.instance.show(
-        title: 'AgentDeck',
+        title: 'Relay',
         body: message,
       );
       if (!shown) _appendSystemMessage(message);

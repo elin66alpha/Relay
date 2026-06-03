@@ -437,7 +437,7 @@ class ConversationExport {
 
   factory ConversationExport.fromJson(Map<String, Object?> json) {
     return ConversationExport(
-      fileName: json['fileName'] as String? ?? 'agentdeck-conversation.md',
+      fileName: json['fileName'] as String? ?? 'relay-conversation.md',
       markdown: json['markdown'] as String? ?? '',
     );
   }

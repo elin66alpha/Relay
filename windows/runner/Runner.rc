@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.agentdeck" "\0"
-            VALUE "FileDescription", "AgentDeck" "\0"
+            VALUE "CompanyName", "Relay" "\0"
+            VALUE "FileDescription", "Relay" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "agentdeck" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.agentdeck. All rights reserved." "\0"
-            VALUE "OriginalFilename", "AgentDeck.exe" "\0"
-            VALUE "ProductName", "AgentDeck" "\0"
+            VALUE "InternalName", "relay" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Relay. All rights reserved." "\0"
+            VALUE "OriginalFilename", "Relay.exe" "\0"
+            VALUE "ProductName", "Relay" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

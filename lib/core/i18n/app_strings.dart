@@ -29,7 +29,7 @@ class AppStrings {
   final AppLanguage appLanguage;
   bool get isZh => appLanguage == AppLanguage.zh;
 
-  String get appName => 'AgentDeck';
+  String get appName => 'Relay';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
@@ -289,7 +289,7 @@ class AppStrings {
   String get version => isZh ? '版本' : 'Version';
   String get license => isZh ? '许可' : 'License';
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
-  String get copyright => isZh ? '© 2026 AgentDeck' : '© 2026 AgentDeck';
+  String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
       ? '用于连接本机 Claude Code、Codex 与 Antigravity CLI 智能体的私有控制台。'
       : 'Private control surface for local Claude Code, Codex, and Antigravity CLI agents.';
@@ -323,8 +323,8 @@ class AppStrings {
       ? '无法解析 $host。请确认二维码里的地址仍然有效；如果使用 Cloudflare quick tunnel，请在后端重新生成二维码。'
       : 'Cannot resolve $host. Make sure the QR URL is still valid. If you use Cloudflare quick tunnel, regenerate the QR on the backend.';
   String credentialConnectionRefused(String host) => isZh
-      ? '能找到 $host，但后端端口拒绝连接。请确认 AgentDeck 后端正在运行，并监听二维码里的端口。'
-      : '$host resolved, but the backend port refused the connection. Make sure the AgentDeck backend is running and listening on the QR port.';
+      ? '能找到 $host，但后端端口拒绝连接。请确认 Relay 后端正在运行，并监听二维码里的端口。'
+      : '$host resolved, but the backend port refused the connection. Make sure the Relay backend is running and listening on the QR port.';
   String credentialNetworkUnreachable(String host) => isZh
       ? '无法连接到 $host。请确认网络可用、后端在线，或 Cloudflare quick tunnel 仍在运行。'
       : 'Cannot reach $host. Make sure the network is available, the backend is online, or the Cloudflare quick tunnel is still running.';
@@ -353,8 +353,8 @@ class AppStrings {
   String get scanQrHint =>
       isZh ? '对准终端或图片里的凭证二维码。' : 'Point the camera at the credential QR code.';
   String get invalidQr => isZh
-      ? '二维码不是有效的 AgentDeck 凭证。'
-      : 'The QR code is not a valid AgentDeck credential.';
+      ? '二维码不是有效的 Relay 凭证。'
+      : 'The QR code is not a valid Relay credential.';
   String get clearChatTitle => isZh ? '清空当前对话？' : 'Clear this chat?';
   String get clearChatBody => isZh
       ? '删除当前会话的历史消息，并在机器上为这个会话开启新的上下文（不影响工作目录里的文件）。'

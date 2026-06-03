@@ -2,7 +2,7 @@
 
 The Windows backend reuses the shared Node server in `server/` and manages the
 backend processes with PowerShell plus a per-user Scheduled Task that starts
-AgentDeck at login.
+Relay at login.
 
 ## Requirements
 
@@ -35,7 +35,7 @@ The setup script:
 - installs backend npm dependencies;
 - offers direct mode, named Cloudflare Tunnel mode, or Quick Tunnel mode;
 - starts the backend and optional tunnel as background processes;
-- registers a per-user Scheduled Task named `AgentDeck Backend` so the backend
+- registers a per-user Scheduled Task named `Relay Backend` so the backend
   starts again after login;
 - for Quick Tunnel, reads the latest `trycloudflare.com` URL from the tunnel
   logs;
@@ -54,8 +54,8 @@ The setup script:
 Logs and PID files live under:
 
 ```text
-%LOCALAPPDATA%\AgentDeck\logs\
-%LOCALAPPDATA%\AgentDeck\runtime\
+%LOCALAPPDATA%\Relay\logs\
+%LOCALAPPDATA%\Relay\runtime\
 ```
 
 ## Notes

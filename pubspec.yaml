@@ -1,4 +1,4 @@
-name: agentdeck
+name: relay
 description: "A dedicated Flutter chat client for local Claude Code, Codex, and Antigravity CLI agents."
 publish_to: "none"
 

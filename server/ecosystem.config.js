@@ -1,4 +1,4 @@
-// AgentDeck backend + optional cloudflared tunnel, managed by PM2.
+// Relay backend + optional cloudflared tunnel, managed by PM2.
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -30,11 +30,11 @@ function commandPath(command) {
 const cloudflaredArgs =
   envValue('CLOUDFLARED_ARGS') || 'tunnel --url http://localhost:8787';
 const cloudflaredBin = envValue('CLOUDFLARED_BIN') || commandPath('cloudflared') || 'cloudflared';
-const tunnelMode = envValue('AGENTDECK_TUNNEL_MODE') || 'quick';
+const tunnelMode = envValue('RELAY_TUNNEL_MODE') || 'quick';
 
 const apps = [
   {
-    name: 'agentdeck-server',
+    name: 'relay-server',
     script: 'server.js',
     env_file: '.env',
     restart_delay: 5000,
@@ -45,7 +45,7 @@ const apps = [
 if (tunnelMode !== 'none') {
   apps.push(
     {
-      name: 'agentdeck-tunnel',
+      name: 'relay-tunnel',
       script: cloudflaredBin,
       interpreter: 'none',
       env_file: '.env',

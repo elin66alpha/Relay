@@ -3,7 +3,7 @@
 Linux currently uses the existing PM2-based setup from the repository root.
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 backends/linux/setup.sh
 ```
 
@@ -19,7 +19,7 @@ Useful commands:
 
 ```bash
 pm2 list
-pm2 logs agentdeck-server
-pm2 restart agentdeck-server
-pm2 logs agentdeck-tunnel
+pm2 logs relay-server
+pm2 restart relay-server
+pm2 logs relay-tunnel
 ```

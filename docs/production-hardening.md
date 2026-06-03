@@ -2,7 +2,7 @@
 
 [中文](production-hardening.zh-CN.md) | [README](../README.md)
 
-AgentDeck can run behind a named Cloudflare Tunnel, or directly on a public
+Relay can run behind a named Cloudflare Tunnel, or directly on a public
 host. Quick Tunnel is useful for trials, but production use should have a
 stable URL, a small attack surface, and a clear recovery path.
 
@@ -10,8 +10,8 @@ stable URL, a small attack surface, and a clear recovery path.
 
 - Use HTTPS only. For a named Cloudflare Tunnel, terminate HTTPS at Cloudflare.
   For direct public-host mode, put Nginx, Caddy, or another reverse proxy in
-  front of AgentDeck and terminate TLS there.
-- Keep AgentDeck bound to localhost unless the reverse proxy or tunnel runs on
+  front of Relay and terminate TLS there.
+- Keep Relay bound to localhost unless the reverse proxy or tunnel runs on
   another host. Prefer `HOST=127.0.0.1` with a proxy/tunnel to `HOST=0.0.0.0`.
 - Set `PUBLIC_BASE_URL` to the exact stable URL users import into the app, for
   example `https://agent.example.com`. Regenerate credentials after changing it.
@@ -30,7 +30,7 @@ stable URL, a small attack surface, and a clear recovery path.
 - Set upload and download caps deliberately. Defaults are 100 MB upload and
   300 MB download; tune `FILE_UPLOAD_LIMIT`, `DOWNLOAD_MAX_BYTES`, and
   `DOWNLOAD_MAX_BYTES` only if the proxy and network can handle them.
-- Avoid broad CORS exposure at the proxy layer. AgentDeck's device token is the
+- Avoid broad CORS exposure at the proxy layer. Relay's device token is the
   real API gate, but a narrow proxy configuration reduces accidental exposure.
 
 ## Direct Public Host Checklist

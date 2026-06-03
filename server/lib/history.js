@@ -235,7 +235,7 @@ function searchHistory({ workdir, query, agentKey = '', sessionNameFor, limit = 
 
 function markdownForConversation({ agentLabel, sessionName, messages, exportedAt }) {
   const lines = [
-    '# AgentDeck Conversation Export',
+    '# Relay Conversation Export',
     '',
     `- Agent: ${agentLabel || 'Unknown'}`,
     `- Session: ${sessionName || 'Main'}`,

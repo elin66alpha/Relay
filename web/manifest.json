@@ -1,6 +1,6 @@
 {
-    "name": "AgentDeck",
-    "short_name": "AgentDeck",
+    "name": "Relay",
+    "short_name": "Relay",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#071019",

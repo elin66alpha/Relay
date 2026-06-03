@@ -1,6 +1,6 @@
 # Windows 后端
 
-Windows 后端复用 `server/` 中的共享 Node 后端，通过 PowerShell 管理后台进程，并创建一个当前用户的计划任务，让 AgentDeck 在用户登录后自动启动。
+Windows 后端复用 `server/` 中的共享 Node 后端，通过 PowerShell 管理后台进程，并创建一个当前用户的计划任务，让 Relay 在用户登录后自动启动。
 
 ## 前置要求
 
@@ -31,7 +31,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 - 安装后端 npm 依赖；
 - 提供直连模式、正式 Cloudflare Tunnel 模式、Quick Tunnel 模式；
 - 以后台进程启动后端和可选隧道；
-- 注册名为 `AgentDeck Backend` 的当前用户计划任务，用户下次登录后自动启动后端；
+- 注册名为 `Relay Backend` 的当前用户计划任务，用户下次登录后自动启动后端；
 - Quick Tunnel 下从隧道日志读取最新的 `trycloudflare.com` 地址；
 - 运行 `npm run credential`，在终端显示并保存指向当前公网地址的加密凭证二维码。
 
@@ -47,8 +47,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 日志和 PID 文件位置：
 
 ```text
-%LOCALAPPDATA%\AgentDeck\logs\
-%LOCALAPPDATA%\AgentDeck\runtime\
+%LOCALAPPDATA%\Relay\logs\
+%LOCALAPPDATA%\Relay\runtime\
 ```
 
 ## 说明

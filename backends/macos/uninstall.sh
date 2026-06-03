@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/lib/common.sh"
 
 require_macos
-c_info "Removing AgentDeck macOS LaunchAgent"
+c_info "Removing Relay macOS LaunchAgent"
 stop_agent "$TUNNEL_LABEL"
 rm -f "$TUNNEL_PLIST"
 stop_agent "$SERVER_LABEL"

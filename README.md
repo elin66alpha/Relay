@@ -1,8 +1,8 @@
-# AgentDeck
+# Relay
 
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md) | [Production hardening](docs/production-hardening.md)
 
-AgentDeck is a private control surface for local CLI agents. A Flutter client connects to a small Node backend running on your own machine, then lets you switch between:
+Relay is a private control surface for local CLI agents. A Flutter client connects to a small Node backend running on your own machine, then lets you switch between:
 
 - Claude Code CLI
 - Codex CLI
@@ -47,7 +47,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 ## Repository Layout
 
 ```text
-AgentDeck/
+Relay/
 ├── backends/             OS-specific backend setup
 │   ├── linux/            PM2-based Linux setup wrapper
 │   ├── macos/            LaunchAgent-based macOS setup
@@ -120,7 +120,7 @@ The old repo-root `./setup.sh` remains as a Linux-compatible shortcut.
 If you prefer to run the steps yourself instead of `setup.sh`:
 
 ```bash
-cd /path/to/AgentDeck/server
+cd /path/to/Relay/server
 npm install
 cp .env.example .env
 npm start
@@ -134,17 +134,17 @@ HOST=127.0.0.1
 MACHINE_ID=
 MACHINE_NAME=
 PUBLIC_BASE_URL=
-AGENTDECK_TUNNEL_MODE=
+RELAY_TUNNEL_MODE=
 CLOUDFLARED_BIN=
 CLOUDFLARED_ARGS=
-AGENTDECK_DEFAULT_DIR=
+RELAY_DEFAULT_DIR=
 AGENT_TIMEOUT_MS=3600000
 POWERSHELL_BIN=
 ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
 ```
 
-`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the File system screen. Work directories must be absolute paths; plain relative paths are rejected.
+`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `RELAY_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the File system screen. Work directories must be absolute paths; plain relative paths are rejected.
 
 ## Credential QR
 
@@ -156,17 +156,17 @@ call this directly. To (re)generate it manually from `server/`:
 npm run credential                                  # interactive; auto-detects quick-tunnel URL or uses PUBLIC_BASE_URL
 npm run credential -- --passphrase "pw"             # non-interactive (less private: pw visible in shell history)
 npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL (direct mode)
-npm run credential -- --json-out "credentials/machine.agentdeck.json"  # custom paste-file path
+npm run credential -- --json-out "credentials/machine.relay.json"  # custom paste-file path
 ```
 
-This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.agentdeck.png` and `server/credentials/<machine>.agentdeck.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Named Cloudflare Tunnel and Direct mode use the stable URL in `PUBLIC_BASE_URL`; Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and must be regenerated when it changes.
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.relay.png` and `server/credentials/<machine>.relay.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Named Cloudflare Tunnel and Direct mode use the stable URL in `PUBLIC_BASE_URL`; Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and must be regenerated when it changes.
 
 Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 
 ## Flutter Client
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 flutter pub get
 flutter run
 ```
@@ -178,7 +178,7 @@ Web credentials persist in browser local storage through Flutter's Web secure-st
 To build the Web frontend and let the Node backend serve it:
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 flutter build web --pwa-strategy=none
 cd server
 npm start
@@ -203,7 +203,7 @@ debug signing config, so **every APK we build — `flutter build apk` (release) 
 `--debug` — is debug-signed**. This keeps the dev flow simple, but means an APK
 built on one machine cannot update an install signed by a different machine's
 `debug.keystore`; in that case uninstall the old app first
-(`adb uninstall dev.agentdeck.app`), which clears its local data. Set up a proper
+(`adb uninstall dev.relay.app`), which clears its local data. Set up a proper
 release keystore before any public/Play Store distribution.
 
 ## API Overview
