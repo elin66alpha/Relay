@@ -799,6 +799,7 @@ class _InputBarState extends State<_InputBar> {
                   ? _ComposerActionPanel(
                       backend: widget.backend,
                       agentKey: widget.agentKey,
+                      onOpenSettingsPage: _closeActions,
                       onClear: () => _runAction(widget.onClear),
                       onCompress: () => _runAction(widget.onCompress),
                       onExportMarkdown: () =>
@@ -866,6 +867,7 @@ class _ComposerActionPanel extends StatelessWidget {
   const _ComposerActionPanel({
     required this.backend,
     required this.agentKey,
+    required this.onOpenSettingsPage,
     required this.onClear,
     required this.onCompress,
     required this.onExportMarkdown,
@@ -873,6 +875,7 @@ class _ComposerActionPanel extends StatelessWidget {
 
   final BackendClient backend;
   final String agentKey;
+  final VoidCallback onOpenSettingsPage;
   final VoidCallback onClear;
   final VoidCallback onCompress;
   final VoidCallback onExportMarkdown;
@@ -884,23 +887,27 @@ class _ComposerActionPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          // Per-agent Model / Effort / Permission controls for this scope.
-          AgentControlsRow(backend: backend, agentKey: agentKey),
+          AgentControlsButtons(
+            backend: backend,
+            agentKey: agentKey,
+            onOpenPage: onOpenSettingsPage,
+          ),
+          const SizedBox(height: 14),
           Wrap(
             spacing: 14,
             runSpacing: 14,
             children: <Widget>[
-              _ComposerActionButton(
+              ComposerActionButton(
                 icon: Icons.refresh_rounded,
                 label: context.l10n.clearChat,
                 onPressed: onClear,
               ),
-              _ComposerActionButton(
+              ComposerActionButton(
                 icon: Icons.compress,
                 label: context.l10n.compress,
                 onPressed: onCompress,
               ),
-              _ComposerActionButton(
+              ComposerActionButton(
                 icon: Icons.download_outlined,
                 label: context.l10n.exportMarkdown,
                 onPressed: onExportMarkdown,
@@ -908,60 +915,6 @@ class _ComposerActionPanel extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ComposerActionButton extends StatelessWidget {
-  const _ComposerActionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 92,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: colors.surface,
-                  border: Border.all(color: colors.outlineVariant),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: colors.onSurfaceVariant),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: colors.onSurfaceVariant,
-                  fontSize: 12,
-                  height: 1.15,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

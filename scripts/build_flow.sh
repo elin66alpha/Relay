@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PM2_APP_NAME="${PM2_APP_NAME:-relay-server}"
+PM2_ECOSYSTEM="${PM2_ECOSYSTEM:-server/ecosystem.config.js}"
 WEB_URL="${WEB_URL:-http://127.0.0.1:8787/}"
 APK_PATH="${APK_PATH:-build/app/outputs/flutter-apk/app-debug.apk}"
 
@@ -23,6 +24,17 @@ wait_for_web() {
     sleep 1
   done
   curl -sS -I "$WEB_URL"
+}
+
+restart_pm2_app() {
+  printf '\n==> pm2 restart %s --update-env\n' "$PM2_APP_NAME"
+  if pm2 restart "$PM2_APP_NAME" --update-env; then
+    return 0
+  fi
+
+  printf 'pm2 restart failed; recreating %s from %s\n' "$PM2_APP_NAME" "$PM2_ECOSYSTEM"
+  pm2 delete "$PM2_APP_NAME" >/dev/null 2>&1 || true
+  pm2 start "$PM2_ECOSYSTEM" --only "$PM2_APP_NAME" --update-env
 }
 
 run flutter pub get
@@ -44,7 +56,7 @@ done
 # which leaves the app loaded-but-blank. Serving it from our own backend over
 # the tunnel keeps the web app fully self-hosted with zero external deps.
 run flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
-run pm2 restart "$PM2_APP_NAME" --update-env
+restart_pm2_app
 wait_for_web
 
 run flutter build apk --debug --no-pub

@@ -15,11 +15,12 @@
 const fs = require('fs');
 const path = require('path');
 
-// Curated model catalog. Alias entries (opus/sonnet/haiku, gpt-5-codex) always
-// resolve to the latest model the installed CLI ships, so a `claude update` /
-// `codex update` makes the newest model usable with no catalog change. Brand-new
-// PINNED model ids can be added without a code change via models-extra.json
-// (see mergeExtraModels) — { "claude": [{ "id": "...", "label": "..." }], ... }.
+// Curated model catalog. Claude alias entries (opus/sonnet/haiku) resolve to the
+// latest model the installed CLI ships, so `claude update` can expose newer
+// versions with no catalog change. Codex model ids are pinned to the public
+// Codex model catalog; keep `default` for the CLI's recommended default.
+// Brand-new pinned model ids can be added without a code change via
+// models-extra.json (see mergeExtraModels).
 const BASE_MODELS = {
   claude: [
     { id: 'default', label: 'Default (account)', args: [] },
@@ -28,9 +29,30 @@ const BASE_MODELS = {
     { id: 'haiku', label: 'Haiku (latest)', args: ['--model', 'haiku'] },
   ],
   codex: [
-    { id: 'default', label: 'Default', args: [] },
-    { id: 'gpt-5-codex', label: 'gpt-5-codex (latest)', args: ['-m', 'gpt-5-codex'] },
-    { id: 'gpt-5', label: 'gpt-5', args: ['-m', 'gpt-5'] },
+    {
+      id: 'default',
+      label: 'Default',
+      description: 'Let Codex use its recommended model.',
+      args: [],
+    },
+    {
+      id: 'gpt-5.5',
+      label: 'GPT-5.5 (recommended)',
+      description: 'Strongest option for complex coding and agentic work.',
+      args: ['-m', 'gpt-5.5'],
+    },
+    {
+      id: 'gpt-5.4',
+      label: 'GPT-5.4',
+      description: 'Strong coding and reasoning for pinned GPT-5.4 workflows.',
+      args: ['-m', 'gpt-5.4'],
+    },
+    {
+      id: 'gpt-5.4-mini',
+      label: 'GPT-5.4 Mini (fast)',
+      description: 'Faster, lower-cost option for lighter coding tasks.',
+      args: ['-m', 'gpt-5.4-mini'],
+    },
   ],
   agy: [],
 };

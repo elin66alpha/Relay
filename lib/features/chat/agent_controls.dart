@@ -50,21 +50,23 @@ String _groupTitle(AppStrings l10n, String group) {
   }
 }
 
-class AgentControlsRow extends StatefulWidget {
-  const AgentControlsRow({
+class AgentControlsButtons extends StatefulWidget {
+  const AgentControlsButtons({
     required this.backend,
     required this.agentKey,
+    this.onOpenPage,
     super.key,
   });
 
   final BackendClient backend;
   final String agentKey;
+  final VoidCallback? onOpenPage;
 
   @override
-  State<AgentControlsRow> createState() => _AgentControlsRowState();
+  State<AgentControlsButtons> createState() => _AgentControlsButtonsState();
 }
 
-class _AgentControlsRowState extends State<AgentControlsRow> {
+class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   AgentOptionsCatalog? _catalog;
   AgentSettings _settings = AgentSettings.empty;
   bool _loading = true;
@@ -77,7 +79,7 @@ class _AgentControlsRowState extends State<AgentControlsRow> {
   }
 
   @override
-  void didUpdateWidget(AgentControlsRow oldWidget) {
+  void didUpdateWidget(AgentControlsButtons oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.agentKey != widget.agentKey) {
       _load();
@@ -109,30 +111,20 @@ class _AgentControlsRowState extends State<AgentControlsRow> {
     }
   }
 
-  AgentOption? _selectedOption(String group) {
-    final AgentOptionsCatalog? catalog = _catalog;
-    if (catalog == null) return null;
-    final String? id = _settings[group] ?? catalog.defaults[group];
-    for (final AgentOption option in catalog.optionsFor(group)) {
-      if (option.id == id) return option;
-    }
-    final List<AgentOption> options = catalog.optionsFor(group);
-    return options.isNotEmpty ? options.first : null;
-  }
-
   Future<void> _openGroup(String group) async {
     final AgentOptionsCatalog? catalog = _catalog;
     if (catalog == null) return;
-    final AgentSettings? result = await showModalBottomSheet<AgentSettings>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (BuildContext ctx) => _AgentOptionSheet(
-        backend: widget.backend,
-        agentKey: widget.agentKey,
-        group: group,
-        catalog: catalog,
-        current: _settings[group] ?? catalog.defaults[group] ?? '',
+    final NavigatorState navigator = Navigator.of(context);
+    widget.onOpenPage?.call();
+    final AgentSettings? result = await navigator.push<AgentSettings>(
+      MaterialPageRoute<AgentSettings>(
+        builder: (BuildContext ctx) => _AgentOptionPage(
+          backend: widget.backend,
+          agentKey: widget.agentKey,
+          group: group,
+          catalog: catalog,
+          current: _settings[group] ?? catalog.defaults[group] ?? '',
+        ),
       ),
     );
     if (result != null && mounted) {
@@ -142,10 +134,9 @@ class _AgentControlsRowState extends State<AgentControlsRow> {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
     if (_loading) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
+        padding: EdgeInsets.symmetric(vertical: 18),
         child: SizedBox(
           height: 18,
           width: 18,
@@ -170,94 +161,82 @@ class _AgentControlsRowState extends State<AgentControlsRow> {
         .toList(growable: false);
     if (groups.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: <Widget>[
-          for (int i = 0; i < groups.length; i++) ...<Widget>[
-            if (i > 0) Divider(height: 1, color: colors.outlineVariant),
-            _ControlRow(
-              icon: _groupIcon(groups[i]),
-              label: _groupLabel(context.l10n, groups[i]),
-              value: _selectedOption(groups[i])?.label ?? '',
-              onTap: () => _openGroup(groups[i]),
-            ),
-          ],
-        ],
-      ),
+    return Wrap(
+      spacing: 14,
+      runSpacing: 14,
+      children: <Widget>[
+        for (final String group in groups)
+          ComposerActionButton(
+            icon: _groupIcon(group),
+            label: _groupLabel(context.l10n, group),
+            onPressed: () => _openGroup(group),
+          ),
+      ],
     );
   }
 }
 
-class _ControlRow extends StatelessWidget {
-  const _ControlRow({
+class ComposerActionButton extends StatelessWidget {
+  const ComposerActionButton({
     required this.icon,
     required this.label,
-    required this.value,
-    required this.onTap,
+    required this.onPressed,
+    super.key,
   });
 
   final IconData icon;
   final String label;
-  final String value;
-  final VoidCallback onTap;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: <Widget>[
-            Icon(icon, size: 20, color: colors.onSurfaceVariant),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                color: colors.onSurface,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+    return SizedBox(
+      width: 92,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  border: Border.all(color: colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: colors.onSurfaceVariant),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                value,
-                textAlign: TextAlign.right,
-                maxLines: 1,
+              const SizedBox(height: 7),
+              Text(
+                label,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: colors.onSurfaceVariant,
-                  fontSize: 14,
+                  fontSize: 12,
+                  height: 1.15,
                 ),
               ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 20,
-              color: colors.onSurfaceVariant,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Bottom sheet listing the choices for one control group. For the `model`
-/// group it also shows the installed CLI version and an "Update CLI" button so a
-/// user who doesn't see the newest model can pull it in. Saves on selection and
-/// pops with the new AgentSettings.
-class _AgentOptionSheet extends StatefulWidget {
-  const _AgentOptionSheet({
+/// Page listing the choices for one control group. For the `model` group it also
+/// shows the installed CLI version and an "Update CLI" button so a user who
+/// doesn't see the newest model can pull it in. Saves on selection and pops with
+/// the new AgentSettings.
+class _AgentOptionPage extends StatefulWidget {
+  const _AgentOptionPage({
     required this.backend,
     required this.agentKey,
     required this.group,
@@ -272,10 +251,10 @@ class _AgentOptionSheet extends StatefulWidget {
   final String current;
 
   @override
-  State<_AgentOptionSheet> createState() => _AgentOptionSheetState();
+  State<_AgentOptionPage> createState() => _AgentOptionPageState();
 }
 
-class _AgentOptionSheetState extends State<_AgentOptionSheet> {
+class _AgentOptionPageState extends State<_AgentOptionPage> {
   late AgentOptionsCatalog _catalog;
   late String _current;
   bool _saving = false;
@@ -358,7 +337,8 @@ class _AgentOptionSheetState extends State<_AgentOptionSheet> {
       final String message = result.changed
           ? l10n.agentUpdateDone(result.before, result.after)
           : l10n.agentUpdateNoChange;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     } catch (err) {
       if (!mounted) return;
       setState(() => _updating = false);
@@ -373,42 +353,35 @@ class _AgentOptionSheetState extends State<_AgentOptionSheet> {
     final AppStrings l10n = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
     final List<AgentOption> options = _catalog.optionsFor(widget.group);
-    final double maxHeight = MediaQuery.of(context).size.height * 0.7;
 
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_groupTitle(l10n, widget.group)),
+      ),
+      body: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _groupTitle(l10n, widget.group),
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: colors.onSurface,
-                  ),
-                ),
-              ),
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
+            Expanded(
+              child: ListView.separated(
                 itemCount: options.length,
+                separatorBuilder: (BuildContext context, int index) =>
+                    Divider(height: 1, color: colors.outlineVariant),
                 itemBuilder: (BuildContext ctx, int index) {
                   final AgentOption option = options[index];
                   final bool selected = option.id == _current;
                   return ListTile(
-                    onTap: _saving || _updating ? null : () => _select(option.id),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 4,
+                    ),
+                    onTap:
+                        _saving || _updating ? null : () => _select(option.id),
                     leading: Icon(
                       selected
                           ? Icons.radio_button_checked_rounded
                           : Icons.radio_button_unchecked_rounded,
-                      color: selected ? colors.primary : colors.onSurfaceVariant,
+                      color:
+                          selected ? colors.primary : colors.onSurfaceVariant,
                     ),
                     title: Text(option.label),
                     subtitle: option.description == null
@@ -430,6 +403,7 @@ class _AgentOptionSheetState extends State<_AgentOptionSheet> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       decoration: BoxDecoration(
+        color: colors.surface,
         border: Border(top: BorderSide(color: colors.outlineVariant)),
       ),
       child: Column(
@@ -451,7 +425,8 @@ class _AgentOptionSheetState extends State<_AgentOptionSheet> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.system_update_alt_rounded, size: 18),
-                label: Text(_updating ? l10n.agentUpdating : l10n.agentUpdateCli),
+                label:
+                    Text(_updating ? l10n.agentUpdating : l10n.agentUpdateCli),
               ),
               const SizedBox(width: 12),
               if (_version.isNotEmpty)

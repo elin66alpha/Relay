@@ -275,19 +275,16 @@ class AppStrings {
   String agentCliVersion(String version) =>
       isZh ? '当前版本 $version' : 'Version $version';
   String get agentUpdateCli => isZh ? '更新 CLI' : 'Update CLI';
-  String get agentUpdateMissingModel =>
-      isZh ? '没看到最新模型?' : "Don't see the latest model?";
+  String get agentUpdateMissingModel => isZh ? '模型不可用?' : 'Model unavailable?';
   String agentUpdateConfirmTitle(String agent) =>
       isZh ? '更新 $agent?' : 'Update $agent?';
   String get agentUpdateConfirmBody => isZh
-      ? '将在后端主机上运行 CLI 自更新,可能耗时一两分钟。完成后新模型会出现在列表里。'
-      : 'Runs the CLI self-update on the backend host. This can take a minute or two; new models appear afterward.';
+      ? '将在后端主机上运行 CLI 自更新,可能耗时一两分钟。完成后已列出的新模型会用更新后的 CLI 运行。'
+      : 'Runs the CLI self-update on the backend host. This can take a minute or two; listed newer models will then run with the updated CLI.';
   String get agentUpdating => isZh ? '正在更新…' : 'Updating…';
-  String agentUpdateDone(String before, String after) => isZh
-      ? '更新完成:$before → $after'
-      : 'Updated: $before → $after';
-  String get agentUpdateNoChange =>
-      isZh ? '已是最新版本' : 'Already up to date';
+  String agentUpdateDone(String before, String after) =>
+      isZh ? '更新完成:$before → $after' : 'Updated: $before → $after';
+  String get agentUpdateNoChange => isZh ? '已是最新版本' : 'Already up to date';
   String agentUpdateFailed(Object err) =>
       isZh ? '更新失败:$err' : 'Update failed: $err';
 
