@@ -37,6 +37,7 @@ class AppStrings {
   String get cardModeSubtitle =>
       isZh ? '基于对话历史的行动建议' : 'Suggested actions from your chats';
   String get usage => isZh ? '额度' : 'Usage';
+  String get usageQuery => isZh ? '额度查询' : 'Quota usage';
   String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
   String get loadingUsage => isZh ? '正在查询额度...' : 'Loading quota...';
   String get fiveHourQuota => isZh ? '5 小时' : '5 hours';
@@ -256,6 +257,7 @@ class AppStrings {
       isZh ? '会话操作失败：$err' : 'Session action failed: $err';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
+  String get moreChatActions => isZh ? '更多操作' : 'More actions';
   String get retry => isZh ? '重试' : 'Retry';
   String get cancelled => isZh ? '已取消' : 'Cancelled';
   String get inputHint => isZh ? '输入消息' : 'Message';

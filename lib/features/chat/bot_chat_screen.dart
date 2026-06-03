@@ -177,14 +177,6 @@ class _BotChatScreenState extends State<BotChatScreen> {
     }
   }
 
-  Future<void> _showUsageDialog() async {
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) =>
-          _UsageDialog(chatController: widget.chatController),
-    );
-  }
-
   Future<void> _showHistorySearch() async {
     final ChatHistorySearchResult? result =
         await showDialog<ChatHistorySearchResult>(
@@ -309,56 +301,11 @@ class _BotChatScreenState extends State<BotChatScreen> {
             animation: widget.chatController,
             builder: (BuildContext context, Widget? _) {
               return IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                tooltip: context.l10n.clearChat,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : _confirmClearHistory,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.compress),
-                tooltip: context.l10n.compress,
-                onPressed:
-                    widget.chatController.isThinking ? null : _sendCompact,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
                 icon: const Icon(Icons.search_rounded),
                 tooltip: context.l10n.searchChats,
                 onPressed: widget.chatController.isThinking
                     ? null
                     : _showHistorySearch,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.download_outlined),
-                tooltip: context.l10n.exportMarkdown,
-                onPressed:
-                    widget.chatController.isThinking ? null : _exportMarkdown,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.query_stats_outlined),
-                tooltip: context.l10n.usage,
-                onPressed:
-                    widget.chatController.isThinking ? null : _showUsageDialog,
               );
             },
           ),
@@ -437,6 +384,9 @@ class _BotChatScreenState extends State<BotChatScreen> {
                         isCancelling: widget.chatController.isCancelling,
                         onSend: _send,
                         onCancel: widget.chatController.cancelActiveTurn,
+                        onClear: _confirmClearHistory,
+                        onCompress: _sendCompact,
+                        onExportMarkdown: _exportMarkdown,
                       ),
                     ],
                   );
@@ -668,228 +618,6 @@ class _HistorySearchResults extends StatelessWidget {
   }
 }
 
-class _UsageDialog extends StatefulWidget {
-  const _UsageDialog({required this.chatController});
-
-  final BotChatController chatController;
-
-  @override
-  State<_UsageDialog> createState() => _UsageDialogState();
-}
-
-class _UsageDialogState extends State<_UsageDialog> {
-  late Future<UsageReport> _usageFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _usageFuture = widget.chatController.usageReport();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(context.l10n.usageTitle),
-      content: SizedBox(
-        width: 520,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 560),
-          child: SingleChildScrollView(
-            child: FutureBuilder<UsageReport>(
-              future: _usageFuture,
-              builder: (
-                BuildContext context,
-                AsyncSnapshot<UsageReport> snapshot,
-              ) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return Text(context.l10n.loadingUsage);
-                }
-                if (snapshot.hasError) {
-                  return Text(
-                    snapshot.error.toString(),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  );
-                }
-                final UsageReport report = snapshot.data!;
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (final UsageAgent agent in report.agents)
-                      _UsageAgentPanel(agent: agent),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () {
-            setState(() {
-              _usageFuture = widget.chatController.usageReport();
-            });
-          },
-          child: Text(context.l10n.refresh),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(context.l10n.close),
-        ),
-      ],
-    );
-  }
-}
-
-class _UsageAgentPanel extends StatelessWidget {
-  const _UsageAgentPanel({required this.agent});
-
-  final UsageAgent agent;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  agent.label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              if (agent.detail.isNotEmpty)
-                Text(
-                  agent.detail,
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-            ],
-          ),
-          if (agent.asOf != null || agent.stale) ...<Widget>[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                if (agent.asOf != null)
-                  Text(
-                    context.l10n.usageAsOf(
-                      _formatUsageTime(context, agent.asOf),
-                    ),
-                    style: TextStyle(color: colors.outline, fontSize: 12),
-                  ),
-                if (agent.stale)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colors.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      context.l10n.usageStale,
-                      style: TextStyle(
-                        color: colors.onTertiaryContainer,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          if (!agent.available)
-            Text(
-              context.l10n.unavailable,
-              style: TextStyle(color: colors.outline),
-            )
-          else if (agent.error != null)
-            Text(
-              agent.error!,
-              style: TextStyle(color: colors.error),
-            )
-          else
-            for (final UsageQuota quota in agent.quotas)
-              _UsageQuotaRow(quota: quota),
-        ],
-      ),
-    );
-  }
-}
-
-class _UsageQuotaRow extends StatelessWidget {
-  const _UsageQuotaRow({required this.quota});
-
-  final UsageQuota quota;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final String label = switch (quota.key) {
-      'five_hour' => context.l10n.fiveHourQuota,
-      'seven_day' => context.l10n.weeklyQuota,
-      _ => quota.label,
-    };
-    final String percent = quota.remainingPercent == null
-        ? context.l10n.unknown
-        : '${quota.remainingPercent!.round()}%';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SizedBox(
-            width: 76,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('$percent ${context.l10n.remaining}'),
-                const SizedBox(height: 2),
-                Text(
-                  '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _formatUsageTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
-}
-
 class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
@@ -897,6 +625,9 @@ class _InputBar extends StatefulWidget {
     required this.isCancelling,
     required this.onSend,
     required this.onCancel,
+    required this.onClear,
+    required this.onCompress,
+    required this.onExportMarkdown,
   });
 
   final TextEditingController controller;
@@ -904,6 +635,9 @@ class _InputBar extends StatefulWidget {
   final bool isCancelling;
   final VoidCallback onSend;
   final VoidCallback onCancel;
+  final VoidCallback onClear;
+  final VoidCallback onCompress;
+  final VoidCallback onExportMarkdown;
 
   @override
   State<_InputBar> createState() => _InputBarState();
@@ -911,10 +645,28 @@ class _InputBar extends StatefulWidget {
 
 class _InputBarState extends State<_InputBar> {
   final FocusNode _inputFocus = FocusNode();
+  bool _actionsOpen = false;
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasText = widget.controller.text.trim().isNotEmpty;
+    widget.controller.addListener(_onTextChanged);
+    _inputFocus.addListener(_onFocusChanged);
+  }
 
   @override
   void didUpdateWidget(_InputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onTextChanged);
+      _hasText = widget.controller.text.trim().isNotEmpty;
+      widget.controller.addListener(_onTextChanged);
+    }
+    if (widget.isThinking && _actionsOpen) {
+      _actionsOpen = false;
+    }
     // On web the text field loses focus once a reply finishes, forcing the user
     // to click back into it. Refocus when the turn ends. On mobile we leave
     // focus alone so we don't pop the soft keyboard open after every reply.
@@ -925,22 +677,63 @@ class _InputBarState extends State<_InputBar> {
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    _inputFocus.removeListener(_onFocusChanged);
     _inputFocus.dispose();
     super.dispose();
   }
 
+  void _onTextChanged() {
+    final bool nextHasText = widget.controller.text.trim().isNotEmpty;
+    if (nextHasText == _hasText && !(nextHasText && _actionsOpen)) return;
+    setState(() {
+      _hasText = nextHasText;
+      if (nextHasText) _actionsOpen = false;
+    });
+  }
+
+  void _onFocusChanged() {
+    if (!_inputFocus.hasFocus || !_actionsOpen) return;
+    setState(() => _actionsOpen = false);
+  }
+
+  void _toggleActions() {
+    if (widget.isThinking || _hasText) return;
+    _inputFocus.unfocus();
+    setState(() => _actionsOpen = !_actionsOpen);
+  }
+
+  void _closeActions() {
+    if (!_actionsOpen) return;
+    setState(() => _actionsOpen = false);
+  }
+
+  void _sendText() {
+    if (widget.isThinking || !_hasText) return;
+    _closeActions();
+    widget.onSend();
+  }
+
+  void _runAction(VoidCallback action) {
+    _closeActions();
+    action();
+  }
+
   void _submitFromKeyboard() {
     if (!kIsWeb) return;
-    if (!widget.isThinking) {
-      widget.onSend();
-    }
+    _sendText();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool canSend = !widget.isThinking;
     final bool canCancel = widget.isThinking && !widget.isCancelling;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final Widget input = _MessageTextField(
+      focusNode: _inputFocus,
+      controller: widget.controller,
+      enabled: !widget.isThinking,
+      onTap: _closeActions,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainer,
@@ -961,36 +754,48 @@ class _InputBarState extends State<_InputBar> {
                             const SingleActivator(LogicalKeyboardKey.enter):
                                 _submitFromKeyboard,
                           },
-                          child: _MessageTextField(
-                            focusNode: _inputFocus,
-                            controller: widget.controller,
-                            enabled: canSend,
-                          ),
+                          child: input,
                         )
-                      : _MessageTextField(
-                          focusNode: _inputFocus,
-                          controller: widget.controller,
-                          enabled: canSend,
-                        ),
+                      : input,
                 ),
                 const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: widget.isThinking
-                      ? canCancel
-                          ? widget.onCancel
-                          : null
-                      : canSend
-                          ? widget.onSend
-                          : null,
-                  icon: Icon(
-                    widget.isThinking
-                        ? Icons.stop_rounded
-                        : Icons.arrow_upward_rounded,
+                SizedBox.square(
+                  dimension: 44,
+                  child: IconButton.filledTonal(
+                    onPressed: widget.isThinking
+                        ? canCancel
+                            ? widget.onCancel
+                            : null
+                        : _hasText
+                            ? _sendText
+                            : _toggleActions,
+                    icon: Icon(
+                      widget.isThinking
+                          ? Icons.stop_rounded
+                          : _hasText
+                              ? Icons.arrow_upward_rounded
+                              : Icons.add_rounded,
+                    ),
+                    tooltip: widget.isThinking
+                        ? context.l10n.stop
+                        : _hasText
+                            ? context.l10n.send
+                            : context.l10n.moreChatActions,
                   ),
-                  tooltip:
-                      widget.isThinking ? context.l10n.stop : context.l10n.send,
                 ),
               ],
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: _actionsOpen
+                  ? _ComposerActionPanel(
+                      onClear: () => _runAction(widget.onClear),
+                      onCompress: () => _runAction(widget.onCompress),
+                      onExportMarkdown: () =>
+                          _runAction(widget.onExportMarkdown),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ],
         ),
@@ -1004,26 +809,141 @@ class _MessageTextField extends StatelessWidget {
     required this.focusNode,
     required this.controller,
     required this.enabled,
+    required this.onTap,
   });
 
   final FocusNode focusNode;
   final TextEditingController controller;
   final bool enabled;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return TextField(
       focusNode: focusNode,
       controller: controller,
       enabled: enabled,
+      onTap: onTap,
       minLines: 1,
       maxLines: 6,
       textInputAction: TextInputAction.newline,
       decoration: InputDecoration(
         hintText: context.l10n.inputHint,
+        filled: true,
+        fillColor: colors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: colors.outlineVariant),
+        ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerActionPanel extends StatelessWidget {
+  const _ComposerActionPanel({
+    required this.onClear,
+    required this.onCompress,
+    required this.onExportMarkdown,
+  });
+
+  final VoidCallback onClear;
+  final VoidCallback onCompress;
+  final VoidCallback onExportMarkdown;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          children: <Widget>[
+            _ComposerActionButton(
+              icon: Icons.refresh_rounded,
+              label: context.l10n.clearChat,
+              onPressed: onClear,
+            ),
+            _ComposerActionButton(
+              icon: Icons.compress,
+              label: context.l10n.compress,
+              onPressed: onCompress,
+            ),
+            _ComposerActionButton(
+              icon: Icons.download_outlined,
+              label: context.l10n.exportMarkdown,
+              onPressed: onExportMarkdown,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerActionButton extends StatelessWidget {
+  const _ComposerActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 92,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  border: Border.all(color: colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: colors.onSurfaceVariant),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.15,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

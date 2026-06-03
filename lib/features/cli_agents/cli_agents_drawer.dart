@@ -13,6 +13,7 @@ import '../settings/app_settings_screen.dart';
 import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
 import '../quota/quota_scheduler_screen.dart';
+import '../quota/quota_usage_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -74,6 +75,20 @@ class CliAgentsDrawer extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => MachineCredentialsScreen(
                             machinesController: machinesController,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.query_stats_outlined),
+                    title: Text(context.l10n.usageQuery),
+                    onTap: () {
+                      if (closeOnAction) Navigator.of(context).pop();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => QuotaUsageScreen(
+                            chatController: chatController,
                           ),
                         ),
                       );
