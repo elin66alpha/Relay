@@ -2,7 +2,6 @@
 
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -13,6 +12,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/cli_agents_controller.dart';
@@ -263,10 +263,10 @@ class _BotChatScreenState extends State<BotChatScreen>
           : Drawer(
               child: SafeArea(child: sidebar),
             ),
-      appBar: AppBar(
-        leading: usePermanentSidebar
-            ? null
-            : Builder(
+      appBar: usePermanentSidebar
+          ? null
+          : AppBar(
+              leading: Builder(
                 builder: (BuildContext context) {
                   return IconButton(
                     icon: const Icon(Icons.menu),
@@ -275,58 +275,18 @@ class _BotChatScreenState extends State<BotChatScreen>
                   );
                 },
               ),
-        title: AnimatedBuilder(
-          animation: Listenable.merge(<Listenable>[
-            widget.agentsController,
-            widget.machinesController,
-            widget.chatController,
-          ]),
-          builder: (BuildContext context, Widget? _) {
-            final MachineCredential? machine =
-                widget.machinesController.activeMachine;
-            final AgentSession? session = widget.chatController.activeSession;
-            final String subtitle = <String>[
-              if (machine != null) machine.displayName,
-              if (session != null) session.name,
-            ].join(' - ');
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  widget.agentsController.activeAgent.label,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+              title: _ChatTitle(
+                agentsController: widget.agentsController,
+                machinesController: widget.machinesController,
+                chatController: widget.chatController,
+              ),
+              actions: <Widget>[
+                _SearchButton(
+                  chatController: widget.chatController,
+                  onPressed: _showHistorySearch,
                 ),
-                if (subtitle.isNotEmpty)
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.outline,
-                      fontSize: 12,
-                    ),
-                  ),
               ],
-            );
-          },
-        ),
-        actions: <Widget>[
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.search_rounded),
-                tooltip: context.l10n.searchChats,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : _showHistorySearch,
-              );
-            },
-          ),
-        ],
-      ),
+            ),
       body: SafeArea(
         child: Row(
           children: <Widget>[
@@ -355,6 +315,13 @@ class _BotChatScreenState extends State<BotChatScreen>
                       widget.chatController.messages;
                   return Column(
                     children: <Widget>[
+                      if (usePermanentSidebar)
+                        _DesktopChatHeader(
+                          agentsController: widget.agentsController,
+                          machinesController: widget.machinesController,
+                          chatController: widget.chatController,
+                          onSearch: _showHistorySearch,
+                        ),
                       if (widget.chatController.agentLoggedIn(agent.key) ==
                           false)
                         _NotLoggedInBanner(
@@ -414,6 +381,132 @@ class _BotChatScreenState extends State<BotChatScreen>
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DesktopChatHeader extends StatelessWidget {
+  const _DesktopChatHeader({
+    required this.agentsController,
+    required this.machinesController,
+    required this.chatController,
+    required this.onSearch,
+  });
+
+  final CliAgentsController agentsController;
+  final MachineCredentialsController machinesController;
+  final BotChatController chatController;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+      ),
+      child: SizedBox(
+        height: 64,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 10, 0),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: _ChatTitle(
+                  agentsController: agentsController,
+                  machinesController: machinesController,
+                  chatController: chatController,
+                ),
+              ),
+              _SearchButton(
+                chatController: chatController,
+                onPressed: onSearch,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatTitle extends StatelessWidget {
+  const _ChatTitle({
+    required this.agentsController,
+    required this.machinesController,
+    required this.chatController,
+  });
+
+  final CliAgentsController agentsController;
+  final MachineCredentialsController machinesController;
+  final BotChatController chatController;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[
+        agentsController,
+        machinesController,
+        chatController,
+      ]),
+      builder: (BuildContext context, Widget? _) {
+        final MachineCredential? machine = machinesController.activeMachine;
+        final AgentSession? session = chatController.activeSession;
+        final String subtitle = <String>[
+          if (machine != null) machine.displayName,
+          if (session != null) session.name,
+        ].join(' - ');
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              agentsController.activeAgent.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (subtitle.isNotEmpty)
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                  fontSize: 12,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SearchButton extends StatelessWidget {
+  const _SearchButton({
+    required this.chatController,
+    required this.onPressed,
+  });
+
+  final BotChatController chatController;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: chatController,
+      builder: (BuildContext context, Widget? _) {
+        return IconButton(
+          icon: const Icon(Icons.search_rounded),
+          tooltip: context.l10n.searchChats,
+          onPressed: chatController.isThinking ? null : onPressed,
+        );
+      },
     );
   }
 }
@@ -689,10 +782,10 @@ class _InputBarState extends State<_InputBar> {
     if (widget.isThinking && _actionsOpen) {
       _actionsOpen = false;
     }
-    // On web the text field loses focus once a reply finishes, forcing the user
-    // to click back into it. Refocus when the turn ends. On mobile we leave
-    // focus alone so we don't pop the soft keyboard open after every reply.
-    if (kIsWeb && oldWidget.isThinking && !widget.isThinking) {
+    // Hardware-keyboard targets should stay ready for the next prompt after a
+    // turn finishes. On mobile we leave focus alone so the soft keyboard does
+    // not reopen after every reply.
+    if (usesHardwareKeyboard && oldWidget.isThinking && !widget.isThinking) {
       _inputFocus.requestFocus();
     }
   }
@@ -742,7 +835,7 @@ class _InputBarState extends State<_InputBar> {
   }
 
   void _submitFromKeyboard() {
-    if (!kIsWeb) return;
+    if (!usesHardwareKeyboard) return;
     _sendText();
   }
 
@@ -763,66 +856,71 @@ class _InputBarState extends State<_InputBar> {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1024),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Expanded(
-                  child: kIsWeb
-                      ? CallbackShortcuts(
-                          bindings: <ShortcutActivator, VoidCallback>{
-                            const SingleActivator(LogicalKeyboardKey.enter):
-                                _submitFromKeyboard,
-                          },
-                          child: input,
-                        )
-                      : input,
-                ),
-                const SizedBox(width: 8),
-                SizedBox.square(
-                  dimension: 44,
-                  child: IconButton.filledTonal(
-                    onPressed: widget.isThinking
-                        ? canCancel
-                            ? widget.onCancel
-                            : null
-                        : _hasText
-                            ? _sendText
-                            : _toggleActions,
-                    icon: Icon(
-                      widget.isThinking
-                          ? Icons.stop_rounded
-                          : _hasText
-                              ? Icons.arrow_upward_rounded
-                              : Icons.add_rounded,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    Expanded(
+                      child: usesHardwareKeyboard
+                          ? CallbackShortcuts(
+                              bindings: <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(LogicalKeyboardKey.enter):
+                                    _submitFromKeyboard,
+                              },
+                              child: input,
+                            )
+                          : input,
                     ),
-                    tooltip: widget.isThinking
-                        ? context.l10n.stop
-                        : _hasText
-                            ? context.l10n.send
-                            : context.l10n.moreChatActions,
-                  ),
+                    const SizedBox(width: 8),
+                    SizedBox.square(
+                      dimension: 44,
+                      child: IconButton.filledTonal(
+                        onPressed: widget.isThinking
+                            ? canCancel
+                                ? widget.onCancel
+                                : null
+                            : _hasText
+                                ? _sendText
+                                : _toggleActions,
+                        icon: Icon(
+                          widget.isThinking
+                              ? Icons.stop_rounded
+                              : _hasText
+                                  ? Icons.arrow_upward_rounded
+                                  : Icons.add_rounded,
+                        ),
+                        tooltip: widget.isThinking
+                            ? context.l10n.stop
+                            : _hasText
+                                ? context.l10n.send
+                                : context.l10n.moreChatActions,
+                      ),
+                    ),
+                  ],
+                ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: _actionsOpen
+                      ? _ComposerActionPanel(
+                          backend: widget.backend,
+                          agentKey: widget.agentKey,
+                          onOpenSettingsPage: _closeActions,
+                          onClear: () => _runAction(widget.onClear),
+                          onCompress: () => _runAction(widget.onCompress),
+                          onExportMarkdown: () =>
+                              _runAction(widget.onExportMarkdown),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ],
             ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: _actionsOpen
-                  ? _ComposerActionPanel(
-                      backend: widget.backend,
-                      agentKey: widget.agentKey,
-                      onOpenSettingsPage: _closeActions,
-                      onClear: () => _runAction(widget.onClear),
-                      onCompress: () => _runAction(widget.onCompress),
-                      onExportMarkdown: () =>
-                          _runAction(widget.onExportMarkdown),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -963,6 +1061,8 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isUser = message.isUser;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final double maxBubbleWidth =
+        isDesktopTarget ? 760 : MediaQuery.sizeOf(context).width * 0.80;
     final Color bubbleColor = system
         ? colors.tertiaryContainer
         : isUser
@@ -984,7 +1084,7 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           Container(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.sizeOf(context).width * 0.80,
+              maxWidth: maxBubbleWidth,
             ),
             margin: const EdgeInsets.symmetric(vertical: 5),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),

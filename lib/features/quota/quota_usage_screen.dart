@@ -79,7 +79,13 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
                 itemCount: report.agents.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (BuildContext context, int index) {
-                  return _UsageAgentPanel(agent: report.agents[index]);
+                  return Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: _UsageAgentPanel(agent: report.agents[index]),
+                    ),
+                  );
                 },
               ),
             );

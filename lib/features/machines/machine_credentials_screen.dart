@@ -64,45 +64,50 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     children: <Widget>[
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 720),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-                              child: Text(
-                                context.l10n.currentMachine,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.outline,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
+                      Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 720),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(4, 4, 4, 12),
+                                child: Text(
+                                  context.l10n.currentMachine,
+                                  style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.outline,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                            ),
-                            for (final MachineCredential credential
-                                in credentials)
-                              _MachineTile(
-                                credential: credential,
-                                active: credential.id == active?.id,
-                                onSelect: () =>
-                                    widget.machinesController.setActive(
-                                  credential.id,
+                              for (final MachineCredential credential
+                                  in credentials)
+                                _MachineTile(
+                                  credential: credential,
+                                  active: credential.id == active?.id,
+                                  onSelect: () =>
+                                      widget.machinesController.setActive(
+                                    credential.id,
+                                  ),
+                                  onDelete: () => _confirmDelete(credential),
                                 ),
-                                onDelete: () => _confirmDelete(credential),
+                              const SizedBox(height: 16),
+                              _CredentialActionButtons(
+                                active: active,
+                                isImporting: _isImporting,
+                                isTesting: _isTesting,
+                                showCameraScan: showCameraScan,
+                                onScan: _scanCredential,
+                                onPaste: _pasteCredential,
+                                onUpload: _uploadCredentialQr,
+                                onTest: _testActive,
                               ),
-                            const SizedBox(height: 16),
-                            _CredentialActionButtons(
-                              active: active,
-                              isImporting: _isImporting,
-                              isTesting: _isTesting,
-                              showCameraScan: showCameraScan,
-                              onScan: _scanCredential,
-                              onPaste: _pasteCredential,
-                              onUpload: _uploadCredentialQr,
-                              onTest: _testActive,
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ],

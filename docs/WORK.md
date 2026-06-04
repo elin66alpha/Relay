@@ -58,6 +58,40 @@ current, factual, and free of secrets. Detailed history lives in git.
   the user. `build_flow.sh`'s `pm2 restart` step will fail until the daemon is
   repaired.
 
+## 2026-06-04 - Windows native Flutter frontend pass
+
+- Desktop chat shell now treats wide Windows/macOS/Linux layouts as a native
+  tool surface: permanent left sidebar fills the window height, the active
+  agent/session header sits in the main pane, composer width is capped on wide
+  monitors, and desktop/Web Enter sends while Shift+Enter still inserts a
+  newline through the text field.
+- Windows local notifications are initialized through
+  `flutter_local_notifications` with a Relay AppUserModelID, while init/show
+  failures degrade to the existing in-app fallback instead of blocking startup.
+- Windows runner starts at 1360x860 and enforces a 900x640 minimum logical
+  window size so desktop controls do not collapse into unusable layouts.
+- Secondary screens were desktop-constrained: settings, credentials, quota
+  usage, quota scheduler, file system, and Card Mode now use centered content
+  widths or mouse-friendly action buttons where appropriate.
+- **Windows release build verified** (`flutter build windows --release` →
+  `build/windows/x64/runner/Release/relay.exe`, ~792 KB + `flutter_windows.dll`
+  + plugin DLLs + `data/`). `dart analyze` is clean and `flutter test` is green.
+  The app launches and most features work in manual smoke testing. Two
+  environment workarounds were required to compile — see "Windows build
+  gotchas" in `docs/DESKTOP.md`:
+  1. **Non-ASCII project path breaks the Flutter/MSBuild toolchain.** When the
+     repo lives under a path with CJK characters, `flutter analyze` crashes in
+     the LSP channel and `flutter build windows` fails reading `app.dill` (the
+     path is mangled through the ANSI code page). Build from an ASCII-only path,
+     or use `dart analyze` (not `flutter analyze`) for static checks.
+  2. **VS 2026's MSVC 14.51 rejects `flutter_local_notifications_windows`.**
+     The plugin still includes `<experimental/coroutine>`, which the newest STL
+     turns into a hard error (`STL1011` / `C2338`). Set
+     `CL=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` in the build
+     environment to compile. A permanent fix is to add that define to the
+     plugin target in CMake or update the plugin once upstream migrates to
+     `<coroutine>`.
+
 ## 2026-06-02 - Rebrand AgentDeck -> Relay (clean public identity)
 
 - Full rebrand for public release. Two passes, both via scripted

@@ -265,159 +265,165 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: <Widget>[
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  if (_workPath != null)
-                    Text(
-                      context.l10n.currentWorkPath(_workPath!),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.primary,
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1040),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    if (_workPath != null)
+                      Text(
+                        context.l10n.currentWorkPath(_workPath!),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
-                    ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      FilledButton.icon(
-                        onPressed:
-                            _isLoading || _isBusy ? null : () => _pickUpload(),
-                        icon: const Icon(Icons.upload_file_outlined),
-                        label: Text(context.l10n.uploadFile),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _isLoading || _isBusy || atWorkPath
-                            ? null
-                            : _setAsWorkPath,
-                        icon: const Icon(Icons.flag_outlined),
-                        label: Text(context.l10n.setAsWorkPath),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _isLoading || _isBusy
-                            ? null
-                            : () => _browse(
-                                  _listing?.absolutePath ?? _workPath ?? '',
-                                ),
-                        icon: const Icon(Icons.refresh_outlined),
-                        label: Text(context.l10n.refresh),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    context.l10n.transferLimitHint,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.outline,
-                    ),
-                  ),
-                  if (kIsWeb) ...<Widget>[
                     const SizedBox(height: 12),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: <Widget>[
-                            const Icon(Icons.drive_folder_upload_outlined),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(context.l10n.dragDropUpload)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Text(
-                    context.l10n.currentFolder,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  if (listing != null)
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: <Widget>[
-                        Expanded(
-                          child: SelectableText(
-                            listing.absolutePath,
-                            style: theme.textTheme.bodySmall,
-                          ),
+                        FilledButton.icon(
+                          onPressed: _isLoading || _isBusy
+                              ? null
+                              : () => _pickUpload(),
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: Text(context.l10n.uploadFile),
                         ),
-                        if (atWorkPath)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: Chip(
-                              label: Text(context.l10n.workPathTag),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
+                        OutlinedButton.icon(
+                          onPressed: _isLoading || _isBusy || atWorkPath
+                              ? null
+                              : _setAsWorkPath,
+                          icon: const Icon(Icons.flag_outlined),
+                          label: Text(context.l10n.setAsWorkPath),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _isLoading || _isBusy
+                              ? null
+                              : () => _browse(
+                                    _listing?.absolutePath ?? _workPath ?? '',
+                                  ),
+                          icon: const Icon(Icons.refresh_outlined),
+                          label: Text(context.l10n.refresh),
+                        ),
                       ],
                     ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      OutlinedButton.icon(
-                        onPressed: listing?.parentPath == null ||
-                                _isLoading ||
-                                _isBusy
-                            ? null
-                            : () => _browse(listing!.parentPath!),
-                        icon: const Icon(Icons.arrow_upward_outlined),
-                        label: Text(context.l10n.parentFolder),
+                    const SizedBox(height: 6),
+                    Text(
+                      context.l10n.transferLimitHint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
                       ),
-                      OutlinedButton.icon(
-                        onPressed:
-                            _isLoading || _isBusy ? null : _toggleHiddenFiles,
-                        icon: Icon(
-                          _showHidden
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
+                    ),
+                    if (kIsWeb) ...<Widget>[
+                      const SizedBox(height: 12),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        label: Text(
-                          _showHidden
-                              ? context.l10n.hideHiddenFiles
-                              : context.l10n.showHiddenFiles,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: <Widget>[
+                              const Icon(Icons.drive_folder_upload_outlined),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(context.l10n.dragDropUpload),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                  ListenableBuilder(
-                    listenable: _downloads,
-                    builder: (BuildContext context, Widget? _) =>
-                        _DownloadStatus(downloads: _downloads),
-                  ),
-                  if (_operationText != null) ...<Widget>[
-                    const SizedBox(height: 12),
-                    Text(_operationText!),
-                  ],
-                  if (_isLoading) ...<Widget>[
-                    const SizedBox(height: 12),
-                    Text(context.l10n.loadingFiles),
-                  ] else if (_error != null) ...<Widget>[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 20),
                     Text(
-                      _error!,
-                      style: TextStyle(color: theme.colorScheme.error),
+                      context.l10n.currentFolder,
+                      style: theme.textTheme.titleMedium,
                     ),
-                  ] else if (listing != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    if (listing != null)
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: SelectableText(
+                              listing.absolutePath,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                          if (atWorkPath)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Chip(
+                                label: Text(context.l10n.workPathTag),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                        ],
+                      ),
                     const SizedBox(height: 12),
-                    _FileList(
-                      listing: listing,
-                      isBusy: _isBusy,
-                      downloadActive: _downloadActive,
-                      onOpen: (FsEntry entry) => _browse(entry.path),
-                      onDownload: _download,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        OutlinedButton.icon(
+                          onPressed: listing?.parentPath == null ||
+                                  _isLoading ||
+                                  _isBusy
+                              ? null
+                              : () => _browse(listing!.parentPath!),
+                          icon: const Icon(Icons.arrow_upward_outlined),
+                          label: Text(context.l10n.parentFolder),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _isLoading || _isBusy ? null : _toggleHiddenFiles,
+                          icon: Icon(
+                            _showHidden
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
+                          label: Text(
+                            _showHidden
+                                ? context.l10n.hideHiddenFiles
+                                : context.l10n.showHiddenFiles,
+                          ),
+                        ),
+                      ],
                     ),
+                    ListenableBuilder(
+                      listenable: _downloads,
+                      builder: (BuildContext context, Widget? _) =>
+                          _DownloadStatus(downloads: _downloads),
+                    ),
+                    if (_operationText != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Text(_operationText!),
+                    ],
+                    if (_isLoading) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Text(context.l10n.loadingFiles),
+                    ] else if (_error != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Text(
+                        _error!,
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    ] else if (listing != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      _FileList(
+                        listing: listing,
+                        isBusy: _isBusy,
+                        downloadActive: _downloadActive,
+                        onOpen: (FsEntry entry) => _browse(entry.path),
+                        onDownload: _download,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ],

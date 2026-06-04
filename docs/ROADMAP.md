@@ -16,7 +16,7 @@
 - English-first active app flow with Chinese toggle.
 - Drawer cleanup, machine status, and About dialog.
 - Read-only quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
-- Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list.
+- Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list on Android, iOS, macOS, and Windows.
 - Scheduled quota-ready messages on a dedicated **Scheduled messages** drawer
   screen: per workspace, store a prompt for the next Claude Code or Codex 5-hour
   reset; the backend sends it after the reset is detected. Syncs across devices

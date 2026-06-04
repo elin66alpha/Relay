@@ -187,6 +187,19 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_GETMINMAXINFO: {
+      if (min_width_ == 0 || min_height_ == 0) {
+        return DefWindowProc(hwnd, message, wparam, lparam);
+      }
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+      double scale_factor = dpi / 96.0;
+      info->ptMinTrackSize.x = Scale(min_width_, scale_factor);
+      info->ptMinTrackSize.y = Scale(min_height_, scale_factor);
+      return 0;
+    }
+
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
@@ -257,6 +270,11 @@ RECT Win32Window::GetClientArea() {
 
 HWND Win32Window::GetHandle() {
   return window_handle_;
+}
+
+void Win32Window::SetMinimumSize(const Size& size) {
+  min_width_ = size.width;
+  min_height_ = size.height;
 }
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
