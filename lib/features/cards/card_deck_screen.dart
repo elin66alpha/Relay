@@ -132,6 +132,26 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     }
   }
 
+  void _executeTopCard() {
+    if (_anim.isAnimating || _cards.isEmpty) return;
+    unawaited(_execute(_cards.first));
+  }
+
+  void _rejectTopCard() {
+    if (_anim.isAnimating || _cards.isEmpty) return;
+    _dismiss(_cards.first, 'reject', const Offset(-700, 0));
+  }
+
+  void _deferTopCard() {
+    if (_anim.isAnimating || _cards.isEmpty) return;
+    unawaited(_defer(_cards.first));
+  }
+
+  void _markTopCardIrrelevant() {
+    if (_anim.isAnimating || _cards.isEmpty) return;
+    _dismiss(_cards.first, 'irrelevant', const Offset(0, 700));
+  }
+
   void _flyTo(Offset target, {required bool removeTopCard}) {
     _pendingRemove = removeTopCard;
     _slide = Tween<Offset>(begin: _drag, end: target).animate(
@@ -158,7 +178,11 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     if (widget.agentsController.activeAgentKey != card.agentKey) {
       await widget.agentsController.setActive(card.agentKey);
     }
-    await widget.chatController.loadFor(cliAgentByKey(card.agentKey), machine);
+    final CliAgent agent = cliAgentByKey(card.agentKey);
+    await widget.chatController.loadFor(agent, machine);
+    if (card.sessionId.isNotEmpty) {
+      await widget.chatController.selectSession(agent, card.sessionId);
+    }
     if (!mounted) return;
     Navigator.of(context).pop();
     unawaited(widget.chatController.sendUserText(card.prompt));
@@ -254,16 +278,52 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     final List<CardModel> visible = _cards.take(3).toList();
 
     return Center(
-      child: SizedBox(
-        width: cardW,
-        height: cardH + 40,
-        child: Stack(
-          alignment: Alignment.topCenter,
-          children: <Widget>[
-            for (int i = visible.length - 1; i >= 0; i--)
-              _buildStackedCard(i, visible[i], cardW, cardH),
-          ],
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(
+            width: cardW,
+            height: cardH + 32,
+            child: Stack(
+              alignment: Alignment.topCenter,
+              children: <Widget>[
+                for (int i = visible.length - 1; i >= 0; i--)
+                  _buildStackedCard(i, visible[i], cardW, cardH),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 10,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: _executeTopCard,
+                  icon: const Icon(Icons.check_rounded),
+                  label: const Text('Execute'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _rejectTopCard,
+                  icon: const Icon(Icons.close_rounded),
+                  label: const Text('Reject'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _deferTopCard,
+                  icon: const Icon(Icons.pause_rounded),
+                  label: const Text('Defer'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _markTopCardIrrelevant,
+                  icon: const Icon(Icons.remove_rounded),
+                  label: const Text('Irrelevant'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

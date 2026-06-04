@@ -1,8 +1,8 @@
-# AgentDeck
+# Relay
 
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md) | [Production hardening](docs/production-hardening.md)
 
-AgentDeck is a private control surface for local CLI agents. A Flutter client connects to a small Node backend running on your own machine, then lets you switch between:
+Relay is a private control surface for local CLI agents. A Flutter client connects to a small Node backend running on your own machine, then lets you switch between:
 
 - Claude Code CLI
 - Codex CLI
@@ -36,7 +36,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 - Long-running turns can be cancelled from the app.
 - Quota lookup is shown in a read-only dialog, not in chat history. It shows remaining 5-hour and weekly quota for Claude Code and Codex; Antigravity is listed as not available yet.
 - Scheduled messages have their own **Scheduled messages** entry in the left drawer, opening a dedicated page: one row per Claude Code / Codex showing the agent, its next 5-hour reset time, a message box, a **Send** button, and a **Clear** button when a message is queued. The backend auto-sends the queued message to that agent's session once the next reset is detected. Each workspace (work directory) keeps its own pending message per source; sending replaces the existing one. The page syncs across devices in the same workspace, and preserves an unsent draft you are typing when a remote sync arrives. An interrupted scheduled message (server stopped mid-send) is marked failed on next startup rather than left stuck, and old finished records are pruned so the store stays bounded.
-- Quota-reset alerts and scheduled-message results are delivered as native OS notifications (Android / iOS / macOS) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
+- Quota-reset alerts and scheduled-message results are delivered as native OS notifications (Android / iOS / macOS / Windows) to the system tray rather than chat bubbles. This relies on the app process being alive with the SSE stream connected; it is not received when the app is fully killed (offline remote push would need FCM/APNs, which is intentionally not added).
 - The machine status dialog uses `GET /api/diagnostics` for a fuller backend check: public URL, listener, token counts, CLI availability/login status, workdir access, storage files, web build, active requests, queues, and SSE clients.
 - The **File system** drawer entry is the single place to browse files and set the work directory (the separate Work directory screen was merged into it). It opens at the current work path and browses by absolute path, so the parent button walks all the way up to the filesystem root, not just the workdir. Folders can be opened; **Set as work path** makes the current folder this device's work directory — each device holds its own path locally (sent via `X-Workdir`), and switching paths loads that path's saved agent sessions. It supports file download, folder download as `.zip`, file upload, and drag-and-drop upload on Web. Downloads stream with a progress bar, save straight to the system Downloads folder (Android via MediaStore, the browser's downloads folder on Web), show where the file landed, and raise a completion notification even after you leave the screen. A download is capped at 300 MB (a folder by its uncompressed total) and a single upload at 100 MB. Dotfiles are hidden by default with a show/hide toggle. File browse/download/upload accept any path the browser can reach and are gated only by the bearer token, consistent with the agents' own full-filesystem access on the host.
 - Protected backend APIs stay closed until at least one credential token has been generated.
@@ -47,7 +47,7 @@ The app ships with no built-in backend URL. A client must scan an encrypted cred
 ## Repository Layout
 
 ```text
-AgentDeck/
+Relay/
 ├── backends/             OS-specific backend setup
 │   ├── linux/            PM2-based Linux setup wrapper
 │   ├── macos/            LaunchAgent-based macOS setup
@@ -120,7 +120,7 @@ The old repo-root `./setup.sh` remains as a Linux-compatible shortcut.
 If you prefer to run the steps yourself instead of `setup.sh`:
 
 ```bash
-cd /path/to/AgentDeck/server
+cd /path/to/Relay/server
 npm install
 cp .env.example .env
 npm start
@@ -134,17 +134,17 @@ HOST=127.0.0.1
 MACHINE_ID=
 MACHINE_NAME=
 PUBLIC_BASE_URL=
-AGENTDECK_TUNNEL_MODE=
+RELAY_TUNNEL_MODE=
 CLOUDFLARED_BIN=
 CLOUDFLARED_ARGS=
-AGENTDECK_DEFAULT_DIR=
+RELAY_DEFAULT_DIR=
 AGENT_TIMEOUT_MS=3600000
 POWERSHELL_BIN=
 ENABLE_QUOTA_WATCH=true
 QUOTA_POLL_MS=300000
 ```
 
-`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `AGENTDECK_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the File system screen. Work directories must be absolute paths; plain relative paths are rejected.
+`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so your public IP/domain can reach the backend. `RELAY_DEFAULT_DIR` is only the default path a brand-new device starts from (empty ⇒ `~/agent_deck`); each device then holds its own current path locally and can change it from the File system screen. Work directories must be absolute paths; plain relative paths are rejected.
 
 ## Credential QR
 
@@ -156,17 +156,17 @@ call this directly. To (re)generate it manually from `server/`:
 npm run credential                                  # interactive; auto-detects quick-tunnel URL or uses PUBLIC_BASE_URL
 npm run credential -- --passphrase "pw"             # non-interactive (less private: pw visible in shell history)
 npm run credential -- --passphrase "pw" --url "https://your-domain"   # custom/stable URL (direct mode)
-npm run credential -- --json-out "credentials/machine.agentdeck.json"  # custom paste-file path
+npm run credential -- --json-out "credentials/machine.relay.json"  # custom paste-file path
 ```
 
-This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.agentdeck.png` and `server/credentials/<machine>.agentdeck.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Named Cloudflare Tunnel and Direct mode use the stable URL in `PUBLIC_BASE_URL`; Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and must be regenerated when it changes.
+This creates `MACHINE_ID` if missing, adds a revocable per-device token to `server/tokens.json`, prints the QR in the terminal, and saves both `server/credentials/<machine>.relay.png` and `server/credentials/<machine>.relay.json`. Upload/scan the PNG, or open the JSON file and copy the whole file content into the app's **Paste credential** dialog. Old credential files in `server/credentials/` are removed so the latest credential is unambiguous, but existing device tokens are **not** revoked automatically; otherwise generating a QR for one device could break another already-imported device. The payload is an encrypted envelope (PBKDF2-SHA256 + AES-256-GCM); your plaintext password is never written to disk. Named Cloudflare Tunnel and Direct mode use the stable URL in `PUBLIC_BASE_URL`; Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and must be regenerated when it changes.
 
 Manage tokens: `npm run credential -- --list-tokens` / `--revoke <token-id>`.
 
 ## Flutter Client
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 flutter pub get
 flutter run
 ```
@@ -178,7 +178,7 @@ Web credentials persist in browser local storage through Flutter's Web secure-st
 To build the Web frontend and let the Node backend serve it:
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 flutter build web --pwa-strategy=none
 cd server
 npm start
@@ -203,7 +203,7 @@ debug signing config, so **every APK we build — `flutter build apk` (release) 
 `--debug` — is debug-signed**. This keeps the dev flow simple, but means an APK
 built on one machine cannot update an install signed by a different machine's
 `debug.keystore`; in that case uninstall the old app first
-(`adb uninstall dev.agentdeck.app`), which clears its local data. Set up a proper
+(`adb uninstall dev.relay.app`), which clears its local data. Set up a proper
 release keystore before any public/Play Store distribution.
 
 ## API Overview

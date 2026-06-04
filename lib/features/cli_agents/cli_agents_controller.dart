@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/models/cli_agent.dart';
 
 class CliAgentsController extends ChangeNotifier {
-  static const String _activeAgentKey = 'agentdeck.active_cli_agent.v1';
+  static const String _activeAgentKey = 'relay.active_cli_agent.v1';
 
   final List<CliAgent> _agents = defaultCliAgents;
   String _activeAgentKeyValue = defaultCliAgents.first.key;

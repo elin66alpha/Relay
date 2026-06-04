@@ -6,7 +6,7 @@ import 'package:cryptography/cryptography.dart';
 import '../models/machine_credential.dart';
 
 class CredentialFileCodec {
-  static const String format = 'agentdeck.credentials.v1';
+  static const String format = 'relay.credentials.v1';
   static const String kdfName = 'pbkdf2-sha256';
   static const String cipherName = 'aes-256-gcm';
 
@@ -21,7 +21,7 @@ class CredentialFileCodec {
     final Map<String, Object?> envelope = _decodeJsonObject(bytes);
     if (envelope['format'] != format) {
       throw const MachineCredentialException(
-        'This is not an encrypted AgentDeck credential.',
+        'This is not an encrypted Relay credential.',
       );
     }
 

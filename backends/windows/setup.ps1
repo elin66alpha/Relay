@@ -3,7 +3,7 @@ Set-StrictMode -Version 2.0
 
 Require-Windows
 
-Write-Info 'AgentDeck Windows backend setup'
+Write-Info 'Relay Windows backend setup'
 Require-Node
 Ensure-EnvFile
 Install-ServerDeps
@@ -38,7 +38,7 @@ switch ($networkMode) {
     }
     Set-EnvValue -Key 'HOST' -Value '0.0.0.0'
     Set-EnvValue -Key 'PUBLIC_BASE_URL' -Value $publicUrl
-    Set-EnvValue -Key 'AGENTDECK_TUNNEL_MODE' -Value 'none'
+    Set-EnvValue -Key 'RELAY_TUNNEL_MODE' -Value 'none'
     Set-EnvValue -Key 'CLOUDFLARED_BIN' -Value ''
     Set-EnvValue -Key 'CLOUDFLARED_ARGS' -Value ''
   }
@@ -70,7 +70,7 @@ switch ($networkMode) {
 
     Set-EnvValue -Key 'HOST' -Value '127.0.0.1'
     Set-EnvValue -Key 'PUBLIC_BASE_URL' -Value $publicUrl
-    Set-EnvValue -Key 'AGENTDECK_TUNNEL_MODE' -Value 'cloudflare'
+    Set-EnvValue -Key 'RELAY_TUNNEL_MODE' -Value 'cloudflare'
     Set-EnvValue -Key 'CLOUDFLARED_BIN' -Value $cloudflaredBin
     Set-EnvValue -Key 'CLOUDFLARED_ARGS' -Value "tunnel --config `"$configFile`" run $tunnelId"
   }
@@ -81,7 +81,7 @@ switch ($networkMode) {
     Write-Info 'Quick Tunnel mode'
     $cloudflaredBin = (Get-Command 'cloudflared').Source
     Set-EnvValue -Key 'HOST' -Value '127.0.0.1'
-    Set-EnvValue -Key 'AGENTDECK_TUNNEL_MODE' -Value 'quick'
+    Set-EnvValue -Key 'RELAY_TUNNEL_MODE' -Value 'quick'
     Set-EnvValue -Key 'CLOUDFLARED_BIN' -Value $cloudflaredBin
     Set-EnvValue -Key 'CLOUDFLARED_ARGS' -Value "tunnel --url http://127.0.0.1:$port"
   }
@@ -90,9 +90,9 @@ switch ($networkMode) {
   }
 }
 
-Register-AgentDeckStartup
-Stop-AgentDeckServices
-Start-AgentDeckServices
+Register-RelayStartup
+Stop-RelayServices
+Start-RelayServices
 
 if ($networkMode -eq '3') {
   Write-Info 'Waiting for the tunnel URL...'
@@ -116,4 +116,4 @@ try {
   Pop-Location
 }
 
-Write-Info 'Done. Import the generated credential in AgentDeck and enter the password you just set.'
+Write-Info 'Done. Import the generated credential in Relay and enter the password you just set.'

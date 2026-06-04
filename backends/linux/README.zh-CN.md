@@ -3,7 +3,7 @@
 Linux 目前继续使用仓库根目录已有的 PM2 安装流程。
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 backends/linux/setup.sh
 ```
 
@@ -19,7 +19,7 @@ backends/linux/setup.sh
 
 ```bash
 pm2 list
-pm2 logs agentdeck-server
-pm2 restart agentdeck-server
-pm2 logs agentdeck-tunnel
+pm2 logs relay-server
+pm2 restart relay-server
+pm2 logs relay-tunnel
 ```

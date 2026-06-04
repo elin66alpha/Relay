@@ -23,103 +23,131 @@ class AppSettingsScreen extends StatelessWidget {
           appBar: AppBar(
             title: Text(context.l10n.settings),
           ),
-          body: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            children: <Widget>[
-              // Appearance Section
-              _buildSectionTitle(context, context.l10n.appearance),
-              Card(
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                margin: const EdgeInsets.only(bottom: 24),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SegmentedButton<ThemeMode>(
-                        segments: <ButtonSegment<ThemeMode>>[
-                          ButtonSegment<ThemeMode>(
-                            value: ThemeMode.system,
-                            icon: const Icon(Icons.settings_suggest_outlined),
-                            label: Text(context.l10n.systemTheme),
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              children: <Widget>[
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 720),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _buildSectionTitle(context, context.l10n.appearance),
+                        Card(
+                          elevation: 0,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerLow,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          ButtonSegment<ThemeMode>(
-                            value: ThemeMode.light,
-                            icon: const Icon(Icons.light_mode_outlined),
-                            label: Text(context.l10n.lightTheme),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SegmentedButton<ThemeMode>(
+                                  segments: <ButtonSegment<ThemeMode>>[
+                                    ButtonSegment<ThemeMode>(
+                                      value: ThemeMode.system,
+                                      icon: const Icon(
+                                        Icons.settings_suggest_outlined,
+                                      ),
+                                      label: Text(context.l10n.systemTheme),
+                                    ),
+                                    ButtonSegment<ThemeMode>(
+                                      value: ThemeMode.light,
+                                      icon: const Icon(
+                                        Icons.light_mode_outlined,
+                                      ),
+                                      label: Text(context.l10n.lightTheme),
+                                    ),
+                                    ButtonSegment<ThemeMode>(
+                                      value: ThemeMode.dark,
+                                      icon: const Icon(
+                                        Icons.dark_mode_outlined,
+                                      ),
+                                      label: Text(context.l10n.darkTheme),
+                                    ),
+                                  ],
+                                  selected: <ThemeMode>{currentThemeMode},
+                                  onSelectionChanged:
+                                      (Set<ThemeMode> selected) {
+                                    settingsController
+                                        .setThemeMode(selected.first);
+                                  },
+                                ),
+                              ),
+                            ),
                           ),
-                          ButtonSegment<ThemeMode>(
-                            value: ThemeMode.dark,
-                            icon: const Icon(Icons.dark_mode_outlined),
-                            label: Text(context.l10n.darkTheme),
+                        ),
+                        _buildSectionTitle(context, context.l10n.language),
+                        Card(
+                          elevation: 0,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerLow,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                        ],
-                        selected: <ThemeMode>{currentThemeMode},
-                        onSelectionChanged: (Set<ThemeMode> selected) {
-                          settingsController.setThemeMode(selected.first);
-                        },
-                      ),
-                    ],
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SegmentedButton<AppLanguage>(
+                                  segments: <ButtonSegment<AppLanguage>>[
+                                    ButtonSegment<AppLanguage>(
+                                      value: AppLanguage.en,
+                                      label: Text(context.l10n.english),
+                                    ),
+                                    ButtonSegment<AppLanguage>(
+                                      value: AppLanguage.zh,
+                                      label: Text(context.l10n.chinese),
+                                    ),
+                                  ],
+                                  selected: <AppLanguage>{currentLanguage},
+                                  onSelectionChanged:
+                                      (Set<AppLanguage> selected) {
+                                    settingsController
+                                        .setLanguage(selected.first);
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        _buildSectionTitle(context, context.l10n.about),
+                        Card(
+                          elevation: 0,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerLow,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            leading: const Icon(Icons.info_outline),
+                            title: Text(context.l10n.aboutApp),
+                            subtitle:
+                                Text('${context.l10n.version} 0.1.0+1'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _showAbout(context),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-
-              // Language Section
-              _buildSectionTitle(context, context.l10n.language),
-              Card(
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                margin: const EdgeInsets.only(bottom: 24),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SegmentedButton<AppLanguage>(
-                        segments: <ButtonSegment<AppLanguage>>[
-                          ButtonSegment<AppLanguage>(
-                            value: AppLanguage.en,
-                            label: Text(context.l10n.english),
-                          ),
-                          ButtonSegment<AppLanguage>(
-                            value: AppLanguage.zh,
-                            label: Text(context.l10n.chinese),
-                          ),
-                        ],
-                        selected: <AppLanguage>{currentLanguage},
-                        onSelectionChanged: (Set<AppLanguage> selected) {
-                          settingsController.setLanguage(selected.first);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              _buildSectionTitle(context, context.l10n.about),
-              Card(
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                margin: const EdgeInsets.only(bottom: 24),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ListTile(
-                  leading: const Icon(Icons.info_outline),
-                  title: Text(context.l10n.aboutApp),
-                  subtitle: Text('${context.l10n.version} 0.1.0+1'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showAbout(context),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -135,7 +163,7 @@ class AppSettingsScreen extends StatelessWidget {
           color: Theme.of(context).colorScheme.primary,
           fontSize: 13,
           fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
+          letterSpacing: 0,
         ),
       ),
     );

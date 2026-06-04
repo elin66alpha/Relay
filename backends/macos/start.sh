@@ -10,12 +10,12 @@ require_node
 ensure_env_file
 install_server_deps
 
-c_info "Starting AgentDeck backend LaunchAgent"
+c_info "Starting Relay backend LaunchAgent"
 write_server_plist
 start_agent "$SERVER_LABEL" "$SERVER_PLIST"
 
 if [ -f "$TUNNEL_PLIST" ]; then
-  c_info "Starting AgentDeck tunnel LaunchAgent"
+  c_info "Starting Relay tunnel LaunchAgent"
   start_agent "$TUNNEL_LABEL" "$TUNNEL_PLIST"
 fi
 

@@ -59,7 +59,7 @@ class _BotAppState extends State<BotApp> {
         FlutterErrorDetails(
           exception: error,
           stack: stackTrace,
-          library: 'agentdeck startup',
+          library: 'relay startup',
           context: ErrorDescription('loading agents'),
         ),
       );

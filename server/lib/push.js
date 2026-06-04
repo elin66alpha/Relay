@@ -1,7 +1,7 @@
 'use strict';
 
 // Web Push (VAPID) delivery. Lets quota-reset and scheduled-message alerts reach
-// a browser even when the AgentDeck tab is closed — the SSE stream only works
+// a browser even when the Relay tab is closed — the SSE stream only works
 // while a tab is open, so this is the offline path for Web clients.
 //
 // Graceful degradation: if VAPID keys are not configured the module reports
@@ -119,9 +119,9 @@ async function notify({ title, message, messageZh, scopeWorkdir }) {
       const body =
         record.lang === 'zh' && messageZh ? messageZh : message || messageZh || '';
       const payload = JSON.stringify({
-        title: title || 'AgentDeck',
+        title: title || 'Relay',
         body,
-        tag: 'agentdeck',
+        tag: 'relay',
       });
       try {
         await webpush.sendNotification(

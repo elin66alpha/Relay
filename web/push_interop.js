@@ -39,7 +39,7 @@
     }
   }
 
-  window.agentdeckPush = {
+  window.relayPush = {
     supported: supported,
     permission: function () {
       try {

@@ -50,7 +50,7 @@ Options:
   --qr-out <path>      Output path for the QR PNG
   --json-out <path>    Output path for the copy/paste credential JSON
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
-  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: agentdeck-tunnel, then bot-app-tunnel)
+  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: relay-tunnel, then bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
 
@@ -72,7 +72,7 @@ function detectTunnelUrl(args) {
     args['tunnel-name'] || process.env.TUNNEL_PM2_NAME || '',
   ).trim();
   if (override) names.push(override);
-  names.push('agentdeck-tunnel', 'bot-app-tunnel');
+  names.push('relay-tunnel', 'bot-app-tunnel');
 
   const files = [];
   for (const name of names) {
@@ -151,8 +151,8 @@ function updateEnv(values) {
 }
 
 async function readPassphrase(args) {
-  if (process.env.AGENTDECK_CREDENTIAL_PASSPHRASE) {
-    return validatePassphrase(process.env.AGENTDECK_CREDENTIAL_PASSPHRASE);
+  if (process.env.RELAY_CREDENTIAL_PASSPHRASE) {
+    return validatePassphrase(process.env.RELAY_CREDENTIAL_PASSPHRASE);
   }
   if (args.passphrase) return validatePassphrase(args.passphrase);
   const rl = readline.createInterface({
@@ -288,12 +288,12 @@ async function main() {
   const qrPath = path.resolve(
     SERVER_DIR,
     args['qr-out'] ||
-      path.join('credentials', `${safeFilename(machineName)}.agentdeck.png`),
+      path.join('credentials', `${safeFilename(machineName)}.relay.png`),
   );
   const jsonPath = path.resolve(
     SERVER_DIR,
     args['json-out'] ||
-      path.join('credentials', `${safeFilename(machineName)}.agentdeck.json`),
+      path.join('credentials', `${safeFilename(machineName)}.relay.json`),
   );
   fs.mkdirSync(path.dirname(qrPath), { recursive: true });
   fs.mkdirSync(path.dirname(jsonPath), { recursive: true });

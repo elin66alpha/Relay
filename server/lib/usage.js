@@ -438,70 +438,68 @@ function quotaItem(key, label, block) {
   };
 }
 
-async function buildClaudeAgent() {
-  try {
-    const { data, subscriptionType, fetchedAt, stale } = await getClaudeUsage();
-    return {
-      key: 'claude',
-      label: 'Claude Code',
-      available: true,
-      detail: subscriptionType || '',
-      asOf: fetchedAt || null,
-      stale: !!stale,
-      quotas: [
-        quotaItem('five_hour', '5 hour quota', data.five_hour),
-        quotaItem('seven_day', 'Weekly quota', data.seven_day),
-      ],
-    };
-  } catch (err) {
-    return {
-      key: 'claude',
-      label: 'Claude Code',
-      available: true,
-      error: err.message,
-      quotas: [],
-    };
-  }
-}
+// Agents whose quota we can report. `normalize` maps each fetcher's own result
+// shape onto a common { detail, asOf, stale, fiveHour, sevenDay } so the agent
+// payload is built once below.
+const USAGE_SOURCES = [
+  {
+    key: 'claude',
+    label: 'Claude Code',
+    fetch: getClaudeUsage,
+    normalize: (r) => ({
+      detail: r.subscriptionType || '',
+      asOf: r.fetchedAt || null,
+      stale: !!r.stale,
+      fiveHour: r.data.five_hour,
+      sevenDay: r.data.seven_day,
+    }),
+  },
+  {
+    key: 'codex',
+    label: 'Codex',
+    fetch: getCodexUsage,
+    normalize: (r) => ({
+      detail: r.plan || '',
+      asOf: r.fetchedAt || null,
+      stale: !!r.stale,
+      fiveHour: r.five_hour,
+      sevenDay: r.seven_day,
+    }),
+  },
+  // Antigravity has no scriptable quota source yet (see ROADMAP), so we report it
+  // as unavailable rather than fetching. Kept in the table so this stays the one
+  // source of truth for which agents appear in the report.
+  { key: 'agy', label: 'Antigravity', unavailable: 'not_available_yet' },
+];
 
-async function buildCodexAgent() {
+async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
+  if (unavailable) {
+    return { key, label, available: false, unavailableReason: unavailable, quotas: [] };
+  }
   try {
-    const usage = await getCodexUsage();
+    const { detail, asOf, stale, fiveHour, sevenDay } = normalize(await fetch());
     return {
-      key: 'codex',
-      label: 'Codex',
+      key,
+      label,
       available: true,
-      detail: usage.plan || '',
-      asOf: usage.fetchedAt || null,
-      stale: !!usage.stale,
+      detail,
+      asOf,
+      stale,
       quotas: [
-        quotaItem('five_hour', '5 hour quota', usage.five_hour),
-        quotaItem('seven_day', 'Weekly quota', usage.seven_day),
+        quotaItem('five_hour', '5 hour quota', fiveHour),
+        quotaItem('seven_day', 'Weekly quota', sevenDay),
       ],
     };
   } catch (err) {
-    return {
-      key: 'codex',
-      label: 'Codex',
-      available: true,
-      error: err.message,
-      quotas: [],
-    };
+    return { key, label, available: true, error: err.message, quotas: [] };
   }
 }
 
 async function buildUsageReport() {
-  // Claude and Codex are independent network round-trips; fetch them together
-  // so the dialog waits for the slower one, not the sum of both.
-  const agents = await Promise.all([buildClaudeAgent(), buildCodexAgent()]);
-
-  agents.push({
-    key: 'agy',
-    label: 'Antigravity',
-    available: false,
-    unavailableReason: 'not_available_yet',
-    quotas: [],
-  });
+  // The fetched sources are independent network round-trips; run them together so
+  // the dialog waits for the slower one, not the sum of both. (Static rows like
+  // agy resolve immediately.)
+  const agents = await Promise.all(USAGE_SOURCES.map(buildAgentUsage));
 
   return {
     createdAt: new Date().toISOString(),
@@ -513,7 +511,6 @@ async function buildUsageReport() {
 
 module.exports = {
   getClaudeUsage,
-  getAccountUsage: getClaudeUsage,
   getCodexUsage,
   buildUsageReport,
 };

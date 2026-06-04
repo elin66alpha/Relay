@@ -2,7 +2,6 @@
 
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -13,11 +12,13 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
+import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
 
 class BotChatScreen extends StatefulWidget {
@@ -38,7 +39,8 @@ class BotChatScreen extends StatefulWidget {
   State<BotChatScreen> createState() => _BotChatScreenState();
 }
 
-class _BotChatScreenState extends State<BotChatScreen> {
+class _BotChatScreenState extends State<BotChatScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
@@ -48,6 +50,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.chatController.addListener(_onChatChanged);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
@@ -58,7 +61,20 @@ class _BotChatScreenState extends State<BotChatScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Coming back to the foreground, the OS may have torn down the long-lived
+    // event SSE while the backend kept running a turn. Reconnect it right away
+    // so a turn that continued in the background is mirrored without waiting for
+    // the periodic reconnect.
+    if (state == AppLifecycleState.resumed) {
+      widget.chatController.reconnectEvents();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.chatController.removeListener(_onChatChanged);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
@@ -177,14 +193,6 @@ class _BotChatScreenState extends State<BotChatScreen> {
     }
   }
 
-  Future<void> _showUsageDialog() async {
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) =>
-          _UsageDialog(chatController: widget.chatController),
-    );
-  }
-
   Future<void> _showHistorySearch() async {
     final ChatHistorySearchResult? result =
         await showDialog<ChatHistorySearchResult>(
@@ -255,10 +263,10 @@ class _BotChatScreenState extends State<BotChatScreen> {
           : Drawer(
               child: SafeArea(child: sidebar),
             ),
-      appBar: AppBar(
-        leading: usePermanentSidebar
-            ? null
-            : Builder(
+      appBar: usePermanentSidebar
+          ? null
+          : AppBar(
+              leading: Builder(
                 builder: (BuildContext context) {
                   return IconButton(
                     icon: const Icon(Icons.menu),
@@ -267,103 +275,18 @@ class _BotChatScreenState extends State<BotChatScreen> {
                   );
                 },
               ),
-        title: AnimatedBuilder(
-          animation: Listenable.merge(<Listenable>[
-            widget.agentsController,
-            widget.machinesController,
-            widget.chatController,
-          ]),
-          builder: (BuildContext context, Widget? _) {
-            final MachineCredential? machine =
-                widget.machinesController.activeMachine;
-            final AgentSession? session = widget.chatController.activeSession;
-            final String subtitle = <String>[
-              if (machine != null) machine.displayName,
-              if (session != null) session.name,
-            ].join(' - ');
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  widget.agentsController.activeAgent.label,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+              title: _ChatTitle(
+                agentsController: widget.agentsController,
+                machinesController: widget.machinesController,
+                chatController: widget.chatController,
+              ),
+              actions: <Widget>[
+                _SearchButton(
+                  chatController: widget.chatController,
+                  onPressed: _showHistorySearch,
                 ),
-                if (subtitle.isNotEmpty)
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.outline,
-                      fontSize: 12,
-                    ),
-                  ),
               ],
-            );
-          },
-        ),
-        actions: <Widget>[
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                tooltip: context.l10n.clearChat,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : _confirmClearHistory,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.compress),
-                tooltip: context.l10n.compress,
-                onPressed:
-                    widget.chatController.isThinking ? null : _sendCompact,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.search_rounded),
-                tooltip: context.l10n.searchChats,
-                onPressed: widget.chatController.isThinking
-                    ? null
-                    : _showHistorySearch,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.download_outlined),
-                tooltip: context.l10n.exportMarkdown,
-                onPressed:
-                    widget.chatController.isThinking ? null : _exportMarkdown,
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: widget.chatController,
-            builder: (BuildContext context, Widget? _) {
-              return IconButton(
-                icon: const Icon(Icons.query_stats_outlined),
-                tooltip: context.l10n.usage,
-                onPressed:
-                    widget.chatController.isThinking ? null : _showUsageDialog,
-              );
-            },
-          ),
-        ],
-      ),
+            ),
       body: SafeArea(
         child: Row(
           children: <Widget>[
@@ -392,6 +315,13 @@ class _BotChatScreenState extends State<BotChatScreen> {
                       widget.chatController.messages;
                   return Column(
                     children: <Widget>[
+                      if (usePermanentSidebar)
+                        _DesktopChatHeader(
+                          agentsController: widget.agentsController,
+                          machinesController: widget.machinesController,
+                          chatController: widget.chatController,
+                          onSearch: _showHistorySearch,
+                        ),
                       if (widget.chatController.agentLoggedIn(agent.key) ==
                           false)
                         _NotLoggedInBanner(
@@ -433,10 +363,15 @@ class _BotChatScreenState extends State<BotChatScreen> {
                       ),
                       _InputBar(
                         controller: _input,
+                        backend: widget.chatController.backend,
+                        agentKey: widget.agentsController.activeAgent.key,
                         isThinking: widget.chatController.isThinking,
                         isCancelling: widget.chatController.isCancelling,
                         onSend: _send,
                         onCancel: widget.chatController.cancelActiveTurn,
+                        onClear: _confirmClearHistory,
+                        onCompress: _sendCompact,
+                        onExportMarkdown: _exportMarkdown,
                       ),
                     ],
                   );
@@ -446,6 +381,132 @@ class _BotChatScreenState extends State<BotChatScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DesktopChatHeader extends StatelessWidget {
+  const _DesktopChatHeader({
+    required this.agentsController,
+    required this.machinesController,
+    required this.chatController,
+    required this.onSearch,
+  });
+
+  final CliAgentsController agentsController;
+  final MachineCredentialsController machinesController;
+  final BotChatController chatController;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+      ),
+      child: SizedBox(
+        height: 64,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 10, 0),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: _ChatTitle(
+                  agentsController: agentsController,
+                  machinesController: machinesController,
+                  chatController: chatController,
+                ),
+              ),
+              _SearchButton(
+                chatController: chatController,
+                onPressed: onSearch,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatTitle extends StatelessWidget {
+  const _ChatTitle({
+    required this.agentsController,
+    required this.machinesController,
+    required this.chatController,
+  });
+
+  final CliAgentsController agentsController;
+  final MachineCredentialsController machinesController;
+  final BotChatController chatController;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[
+        agentsController,
+        machinesController,
+        chatController,
+      ]),
+      builder: (BuildContext context, Widget? _) {
+        final MachineCredential? machine = machinesController.activeMachine;
+        final AgentSession? session = chatController.activeSession;
+        final String subtitle = <String>[
+          if (machine != null) machine.displayName,
+          if (session != null) session.name,
+        ].join(' - ');
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              agentsController.activeAgent.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (subtitle.isNotEmpty)
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                  fontSize: 12,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SearchButton extends StatelessWidget {
+  const _SearchButton({
+    required this.chatController,
+    required this.onPressed,
+  });
+
+  final BotChatController chatController;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: chatController,
+      builder: (BuildContext context, Widget? _) {
+        return IconButton(
+          icon: const Icon(Icons.search_rounded),
+          tooltip: context.l10n.searchChats,
+          onPressed: chatController.isThinking ? null : onPressed,
+        );
+      },
     );
   }
 }
@@ -668,242 +729,30 @@ class _HistorySearchResults extends StatelessWidget {
   }
 }
 
-class _UsageDialog extends StatefulWidget {
-  const _UsageDialog({required this.chatController});
-
-  final BotChatController chatController;
-
-  @override
-  State<_UsageDialog> createState() => _UsageDialogState();
-}
-
-class _UsageDialogState extends State<_UsageDialog> {
-  late Future<UsageReport> _usageFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _usageFuture = widget.chatController.usageReport();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(context.l10n.usageTitle),
-      content: SizedBox(
-        width: 520,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 560),
-          child: SingleChildScrollView(
-            child: FutureBuilder<UsageReport>(
-              future: _usageFuture,
-              builder: (
-                BuildContext context,
-                AsyncSnapshot<UsageReport> snapshot,
-              ) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return Text(context.l10n.loadingUsage);
-                }
-                if (snapshot.hasError) {
-                  return Text(
-                    snapshot.error.toString(),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  );
-                }
-                final UsageReport report = snapshot.data!;
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (final UsageAgent agent in report.agents)
-                      _UsageAgentPanel(agent: agent),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () {
-            setState(() {
-              _usageFuture = widget.chatController.usageReport();
-            });
-          },
-          child: Text(context.l10n.refresh),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(context.l10n.close),
-        ),
-      ],
-    );
-  }
-}
-
-class _UsageAgentPanel extends StatelessWidget {
-  const _UsageAgentPanel({required this.agent});
-
-  final UsageAgent agent;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  agent.label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              if (agent.detail.isNotEmpty)
-                Text(
-                  agent.detail,
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-            ],
-          ),
-          if (agent.asOf != null || agent.stale) ...<Widget>[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                if (agent.asOf != null)
-                  Text(
-                    context.l10n.usageAsOf(
-                      _formatUsageTime(context, agent.asOf),
-                    ),
-                    style: TextStyle(color: colors.outline, fontSize: 12),
-                  ),
-                if (agent.stale)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colors.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      context.l10n.usageStale,
-                      style: TextStyle(
-                        color: colors.onTertiaryContainer,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          if (!agent.available)
-            Text(
-              context.l10n.unavailable,
-              style: TextStyle(color: colors.outline),
-            )
-          else if (agent.error != null)
-            Text(
-              agent.error!,
-              style: TextStyle(color: colors.error),
-            )
-          else
-            for (final UsageQuota quota in agent.quotas)
-              _UsageQuotaRow(quota: quota),
-        ],
-      ),
-    );
-  }
-}
-
-class _UsageQuotaRow extends StatelessWidget {
-  const _UsageQuotaRow({required this.quota});
-
-  final UsageQuota quota;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final String label = switch (quota.key) {
-      'five_hour' => context.l10n.fiveHourQuota,
-      'seven_day' => context.l10n.weeklyQuota,
-      _ => quota.label,
-    };
-    final String percent = quota.remainingPercent == null
-        ? context.l10n.unknown
-        : '${quota.remainingPercent!.round()}%';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SizedBox(
-            width: 76,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('$percent ${context.l10n.remaining}'),
-                const SizedBox(height: 2),
-                Text(
-                  '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
-                  style: TextStyle(color: colors.outline, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _formatUsageTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
-}
-
 class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.controller,
+    required this.backend,
+    required this.agentKey,
     required this.isThinking,
     required this.isCancelling,
     required this.onSend,
     required this.onCancel,
+    required this.onClear,
+    required this.onCompress,
+    required this.onExportMarkdown,
   });
 
   final TextEditingController controller;
+  final BackendClient backend;
+  final String agentKey;
   final bool isThinking;
   final bool isCancelling;
   final VoidCallback onSend;
   final VoidCallback onCancel;
+  final VoidCallback onClear;
+  final VoidCallback onCompress;
+  final VoidCallback onExportMarkdown;
 
   @override
   State<_InputBar> createState() => _InputBarState();
@@ -911,36 +760,95 @@ class _InputBar extends StatefulWidget {
 
 class _InputBarState extends State<_InputBar> {
   final FocusNode _inputFocus = FocusNode();
+  bool _actionsOpen = false;
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasText = widget.controller.text.trim().isNotEmpty;
+    widget.controller.addListener(_onTextChanged);
+    _inputFocus.addListener(_onFocusChanged);
+  }
 
   @override
   void didUpdateWidget(_InputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // On web the text field loses focus once a reply finishes, forcing the user
-    // to click back into it. Refocus when the turn ends. On mobile we leave
-    // focus alone so we don't pop the soft keyboard open after every reply.
-    if (kIsWeb && oldWidget.isThinking && !widget.isThinking) {
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onTextChanged);
+      _hasText = widget.controller.text.trim().isNotEmpty;
+      widget.controller.addListener(_onTextChanged);
+    }
+    if (widget.isThinking && _actionsOpen) {
+      _actionsOpen = false;
+    }
+    // Hardware-keyboard targets should stay ready for the next prompt after a
+    // turn finishes. On mobile we leave focus alone so the soft keyboard does
+    // not reopen after every reply.
+    if (usesHardwareKeyboard && oldWidget.isThinking && !widget.isThinking) {
       _inputFocus.requestFocus();
     }
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    _inputFocus.removeListener(_onFocusChanged);
     _inputFocus.dispose();
     super.dispose();
   }
 
+  void _onTextChanged() {
+    final bool nextHasText = widget.controller.text.trim().isNotEmpty;
+    if (nextHasText == _hasText && !(nextHasText && _actionsOpen)) return;
+    setState(() {
+      _hasText = nextHasText;
+      if (nextHasText) _actionsOpen = false;
+    });
+  }
+
+  void _onFocusChanged() {
+    if (!_inputFocus.hasFocus || !_actionsOpen) return;
+    setState(() => _actionsOpen = false);
+  }
+
+  void _toggleActions() {
+    if (widget.isThinking || _hasText) return;
+    _inputFocus.unfocus();
+    setState(() => _actionsOpen = !_actionsOpen);
+  }
+
+  void _closeActions() {
+    if (!_actionsOpen) return;
+    setState(() => _actionsOpen = false);
+  }
+
+  void _sendText() {
+    if (widget.isThinking || !_hasText) return;
+    _closeActions();
+    widget.onSend();
+  }
+
+  void _runAction(VoidCallback action) {
+    _closeActions();
+    action();
+  }
+
   void _submitFromKeyboard() {
-    if (!kIsWeb) return;
-    if (!widget.isThinking) {
-      widget.onSend();
-    }
+    if (!usesHardwareKeyboard) return;
+    _sendText();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool canSend = !widget.isThinking;
     final bool canCancel = widget.isThinking && !widget.isCancelling;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final Widget input = _MessageTextField(
+      focusNode: _inputFocus,
+      controller: widget.controller,
+      enabled: !widget.isThinking,
+      onTap: _closeActions,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainer,
@@ -948,51 +856,71 @@ class _InputBarState extends State<_InputBar> {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1024),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Expanded(
-                  child: kIsWeb
-                      ? CallbackShortcuts(
-                          bindings: <ShortcutActivator, VoidCallback>{
-                            const SingleActivator(LogicalKeyboardKey.enter):
-                                _submitFromKeyboard,
-                          },
-                          child: _MessageTextField(
-                            focusNode: _inputFocus,
-                            controller: widget.controller,
-                            enabled: canSend,
-                          ),
-                        )
-                      : _MessageTextField(
-                          focusNode: _inputFocus,
-                          controller: widget.controller,
-                          enabled: canSend,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    Expanded(
+                      child: usesHardwareKeyboard
+                          ? CallbackShortcuts(
+                              bindings: <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(LogicalKeyboardKey.enter):
+                                    _submitFromKeyboard,
+                              },
+                              child: input,
+                            )
+                          : input,
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox.square(
+                      dimension: 44,
+                      child: IconButton.filledTonal(
+                        onPressed: widget.isThinking
+                            ? canCancel
+                                ? widget.onCancel
+                                : null
+                            : _hasText
+                                ? _sendText
+                                : _toggleActions,
+                        icon: Icon(
+                          widget.isThinking
+                              ? Icons.stop_rounded
+                              : _hasText
+                                  ? Icons.arrow_upward_rounded
+                                  : Icons.add_rounded,
                         ),
+                        tooltip: widget.isThinking
+                            ? context.l10n.stop
+                            : _hasText
+                                ? context.l10n.send
+                                : context.l10n.moreChatActions,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: widget.isThinking
-                      ? canCancel
-                          ? widget.onCancel
-                          : null
-                      : canSend
-                          ? widget.onSend
-                          : null,
-                  icon: Icon(
-                    widget.isThinking
-                        ? Icons.stop_rounded
-                        : Icons.arrow_upward_rounded,
-                  ),
-                  tooltip:
-                      widget.isThinking ? context.l10n.stop : context.l10n.send,
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: _actionsOpen
+                      ? _ComposerActionPanel(
+                          backend: widget.backend,
+                          agentKey: widget.agentKey,
+                          onOpenSettingsPage: _closeActions,
+                          onClear: () => _runAction(widget.onClear),
+                          onCompress: () => _runAction(widget.onCompress),
+                          onExportMarkdown: () =>
+                              _runAction(widget.onExportMarkdown),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1004,27 +932,102 @@ class _MessageTextField extends StatelessWidget {
     required this.focusNode,
     required this.controller,
     required this.enabled,
+    required this.onTap,
   });
 
   final FocusNode focusNode;
   final TextEditingController controller;
   final bool enabled;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return TextField(
       focusNode: focusNode,
       controller: controller,
       enabled: enabled,
+      onTap: onTap,
       minLines: 1,
       maxLines: 6,
       textInputAction: TextInputAction.newline,
       decoration: InputDecoration(
         hintText: context.l10n.inputHint,
+        filled: true,
+        fillColor: colors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: colors.outlineVariant),
+        ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 12,
         ),
+      ),
+    );
+  }
+}
+
+class _ComposerActionPanel extends StatelessWidget {
+  const _ComposerActionPanel({
+    required this.backend,
+    required this.agentKey,
+    required this.onOpenSettingsPage,
+    required this.onClear,
+    required this.onCompress,
+    required this.onExportMarkdown,
+  });
+
+  final BackendClient backend;
+  final String agentKey;
+  final VoidCallback onOpenSettingsPage;
+  final VoidCallback onClear;
+  final VoidCallback onCompress;
+  final VoidCallback onExportMarkdown;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          AgentControlsButtons(
+            backend: backend,
+            agentKey: agentKey,
+            onOpenPage: onOpenSettingsPage,
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: <Widget>[
+              ComposerActionButton(
+                icon: Icons.refresh_rounded,
+                label: context.l10n.clearChat,
+                onPressed: onClear,
+              ),
+              ComposerActionButton(
+                icon: Icons.compress,
+                label: context.l10n.compress,
+                onPressed: onCompress,
+              ),
+              ComposerActionButton(
+                icon: Icons.download_outlined,
+                label: context.l10n.exportMarkdown,
+                onPressed: onExportMarkdown,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1058,6 +1061,8 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isUser = message.isUser;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final double maxBubbleWidth =
+        isDesktopTarget ? 760 : MediaQuery.sizeOf(context).width * 0.80;
     final Color bubbleColor = system
         ? colors.tertiaryContainer
         : isUser
@@ -1079,7 +1084,7 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           Container(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.sizeOf(context).width * 0.80,
+              maxWidth: maxBubbleWidth,
             ),
             margin: const EdgeInsets.symmetric(vertical: 5),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),

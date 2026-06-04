@@ -18,6 +18,7 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  bool _available = false;
   int _nextId = 0;
 
   static const String _channelId = 'quota_alerts';
@@ -29,7 +30,8 @@ class NotificationService {
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS);
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows);
 
   /// Initialise the plugin and (on Android) create the notification channel.
   /// Safe to call repeatedly and on unsupported platforms.
@@ -38,32 +40,53 @@ class NotificationService {
       _initialized = true;
       return;
     }
-    const AndroidInitializationSettings android =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings darwin = DarwinInitializationSettings(
-      requestAlertPermission: false,
-      requestBadgePermission: false,
-      requestSoundPermission: false,
-    );
-    await _plugin.initialize(
-      settings: const InitializationSettings(
-        android: android,
-        iOS: darwin,
-        macOS: darwin,
-      ),
-    );
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            _channelId,
-            _channelName,
-            description: _channelDescription,
-            importance: Importance.high,
-          ),
-        );
-    _initialized = true;
+    try {
+      const AndroidInitializationSettings android =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
+      const DarwinInitializationSettings darwin = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      const WindowsInitializationSettings windows =
+          WindowsInitializationSettings(
+        appName: 'Relay',
+        appUserModelId: 'Dev.Relay.App',
+        guid: 'f9cc24b7-4b94-4a0f-a7bb-0f91d2cf3a55',
+      );
+      await _plugin.initialize(
+        settings: const InitializationSettings(
+          android: android,
+          iOS: darwin,
+          macOS: darwin,
+          windows: windows,
+        ),
+      );
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(
+            const AndroidNotificationChannel(
+              _channelId,
+              _channelName,
+              description: _channelDescription,
+              importance: Importance.high,
+            ),
+          );
+      _available = true;
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'relay notifications',
+          context: ErrorDescription('initializing local notifications'),
+        ),
+      );
+      _available = false;
+    } finally {
+      _initialized = true;
+    }
   }
 
   /// Ask the user for notification permission (Android 13+ / iOS / macOS).
@@ -74,16 +97,24 @@ class NotificationService {
     }
     if (!_supported) return;
     await init();
+    if (!_available) return;
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _plugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
-    } else {
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       await _plugin
           .resolvePlatformSpecificImplementation<
               IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
+    } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+    } else {
+      // Windows toast notifications do not use the iOS/macOS permission API.
     }
   }
 
@@ -95,6 +126,7 @@ class NotificationService {
     }
     if (!_supported) return false;
     await init();
+    if (!_available) return false;
     const AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
       _channelId,
@@ -104,16 +136,31 @@ class NotificationService {
       priority: Priority.high,
     );
     const DarwinNotificationDetails darwinDetails = DarwinNotificationDetails();
-    await _plugin.show(
-      id: _nextId++,
-      title: title,
-      body: body,
-      notificationDetails: const NotificationDetails(
-        android: androidDetails,
-        iOS: darwinDetails,
-        macOS: darwinDetails,
-      ),
-    );
-    return true;
+    const WindowsNotificationDetails windowsDetails =
+        WindowsNotificationDetails();
+    try {
+      await _plugin.show(
+        id: _nextId++,
+        title: title,
+        body: body,
+        notificationDetails: const NotificationDetails(
+          android: androidDetails,
+          iOS: darwinDetails,
+          macOS: darwinDetails,
+          windows: windowsDetails,
+        ),
+      );
+      return true;
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'relay notifications',
+          context: ErrorDescription('showing local notification'),
+        ),
+      );
+      return false;
+    }
   }
 }

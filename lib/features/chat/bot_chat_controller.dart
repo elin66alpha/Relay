@@ -37,9 +37,10 @@ class BotChatController extends ChangeNotifier {
   final Map<String, String> _activeSessionByAgent = <String, String>{};
   final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
-  bool _isThinking = false;
   bool _isCancelling = false;
   String? _lastError;
+  // A turn is in flight on this device exactly while a request id is active;
+  // `isThinking` derives from it so the two can't drift apart.
   String? _activeRequestId;
   AppLanguage _language = AppLanguage.en;
   StreamSubscription<BackendEvent>? _eventsSub;
@@ -54,15 +55,29 @@ class BotChatController extends ChangeNotifier {
   // authoritative history rather than replaying its deltas, which keeps the two
   // views identical without delta/snapshot races.
   bool _remoteActive = false;
+  // True only while THIS device's POST /api/chat SSE stream is actively driving
+  // the current turn. When it is false, an in-flight turn (one we started whose
+  // stream dropped, or one restored from history on a cold start) is mirrored
+  // from shared history + events instead of a local stream. This gates both the
+  // "ignore my own echo" event filter and the "don't clobber my stream" poll
+  // skip, so a dropped/absent stream no longer blocks reattachment.
+  bool _localStreamActive = false;
+  // The requestId of a turn we reattached to after our stream dropped. Polling
+  // ends the mirror once history shows this turn finalized, so we recover even
+  // if the shared event stream misses the agent_done edge during the reconnect.
+  String? _reattachRequestId;
   int _quotaScheduleRevision = 0;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   int get messageCount => _messages.length;
-  bool get isThinking => _isThinking;
+  bool get isThinking => _activeRequestId != null;
   bool get isCancelling => _isCancelling;
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
+  // Exposed so the composer's per-agent Model/Effort/Permission controls can
+  // reach the same backend client (and thus the same workdir scope).
+  BackendClient get backend => _backendClient;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
   int get quotaScheduleRevision => _quotaScheduleRevision;
@@ -158,7 +173,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> createSessionFor(CliAgent agent, {String name = ''}) async {
     final MachineCredential? machine = _machine;
-    if (_isThinking || machine == null) return;
+    if (isThinking || machine == null) return;
     final AgentSessionList result =
         await _backendClient.createSession(agent.key, name);
     if (_machine?.id != machine.id) return;
@@ -170,7 +185,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> selectSession(CliAgent agent, String sessionId) async {
     final MachineCredential? machine = _machine;
-    if (_isThinking || machine == null || sessionId.isEmpty) return;
+    if (isThinking || machine == null || sessionId.isEmpty) return;
     final AgentSessionList result =
         await _backendClient.selectSession(agent.key, sessionId);
     if (_machine?.id != machine.id) return;
@@ -182,7 +197,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> deleteSession(CliAgent agent, String sessionId) async {
     final MachineCredential? machine = _machine;
-    if (_isThinking || machine == null || sessionId.isEmpty) return;
+    if (isThinking || machine == null || sessionId.isEmpty) return;
     final AgentSessionList result =
         await _backendClient.deleteSession(agent.key, sessionId);
     if (_machine?.id != machine.id) return;
@@ -240,9 +255,10 @@ class BotChatController extends ChangeNotifier {
     }
     _messages.clear();
     _lastError = null;
-    _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _localStreamActive = false;
+    _reattachRequestId = null;
     _remoteActive = false;
     _remoteSettleTimer?.cancel();
     _stopHistoryPolling();
@@ -257,17 +273,12 @@ class BotChatController extends ChangeNotifier {
     // user has already typed or sent while this was in flight.
     try {
       final String sessionId = await _ensureActiveSessionId(agent);
-      final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
-      if (_agent.key != agent.key ||
-          _machine?.id != machine.id ||
-          activeSessionId != sessionId ||
-          _messages.isNotEmpty) {
-        return;
-      }
-      _messages.addAll(history);
-      _restorePendingTurnFromHistory();
-      if (_isThinking) _startHistoryPolling();
+      final List<ChatMessage>? history =
+          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      // Never clobber messages the user typed or sent while this was in flight.
+      if (history == null || _messages.isNotEmpty) return;
+      _applyHistorySnapshot(history);
+      if (isThinking) _startHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Leave the view empty when history can't be loaded.
@@ -295,8 +306,7 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<void> compressConversation() async {
-    if (_isThinking || _machine == null) return;
-    _isThinking = true;
+    if (isThinking || _machine == null) return;
     _isCancelling = false;
     _lastError = null;
     final String requestId = _newRequestId(_agent);
@@ -310,11 +320,10 @@ class BotChatController extends ChangeNotifier {
         requestId: requestId,
       );
     } catch (err) {
-      _lastError = err.toString();
+      _lastError = _friendlyError(err);
       rethrow;
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
-      _isThinking = false;
       _isCancelling = false;
       notifyListeners();
     }
@@ -322,7 +331,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> sendUserText(String rawText) async {
     final String text = rawText.trim();
-    if (text.isEmpty || _isThinking || _machine == null) return;
+    if (text.isEmpty || isThinking || _machine == null) return;
 
     final ChatMessage userMessage = ChatMessage.user(text);
     _messages.add(userMessage);
@@ -332,7 +341,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> cancelActiveTurn() async {
     final String? requestId = _activeRequestId;
-    if (!_isThinking || _isCancelling || requestId == null) return;
+    if (!isThinking || _isCancelling || requestId == null) return;
     _isCancelling = true;
     notifyListeners();
     try {
@@ -343,14 +352,14 @@ class BotChatController extends ChangeNotifier {
         // outcome instead of forcing a cancelled state here.
         return;
       }
-      _lastError = err.toString();
+      _lastError = _friendlyError(err);
     } finally {
       notifyListeners();
     }
   }
 
   Future<void> retry(ChatMessage message) async {
-    if (_isThinking || _machine == null || !isRetryable(message)) return;
+    if (isThinking || _machine == null || !isRetryable(message)) return;
     final int index =
         _messages.indexWhere((ChatMessage m) => m.id == message.id);
     if (index == -1) return;
@@ -486,9 +495,10 @@ class BotChatController extends ChangeNotifier {
     final CliAgent agent = _agent;
     _messages.clear();
     _lastError = null;
-    _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _localStreamActive = false;
+    _reattachRequestId = null;
     _remoteActive = false;
     _remoteSettleTimer?.cancel();
     _stopHistoryPolling();
@@ -496,18 +506,11 @@ class BotChatController extends ChangeNotifier {
     unawaited(refreshAuthStatus());
     try {
       final String sessionId = await _ensureActiveSessionId(agent);
-      final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
-      if (_agent.key != agent.key ||
-          _machine?.id != machine.id ||
-          activeSessionId != sessionId) {
-        return;
-      }
-      _messages
-        ..clear()
-        ..addAll(history);
-      _restorePendingTurnFromHistory();
-      if (_isThinking) _startHistoryPolling();
+      final List<ChatMessage>? history =
+          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      if (history == null) return;
+      _applyHistorySnapshot(history);
+      if (isThinking) _startHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Leave the view empty when history can't be loaded.
@@ -565,14 +568,39 @@ class BotChatController extends ChangeNotifier {
 
     final String requestId = pending?.metadata[_requestIdKey] as String? ?? '';
     if (pending != null && requestId.isNotEmpty) {
-      _isThinking = true;
       _isCancelling = false;
       _activeRequestId = requestId;
       return;
     }
-    _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+  }
+
+  // Fetch history, returning null if the context (agent/machine/session) drifted
+  // while the request was in flight — callers must not apply a stale snapshot.
+  // The session is owned by the host, so this is how the app pulls it back.
+  Future<List<ChatMessage>?> _fetchHistoryIfCurrent(
+    CliAgent agent,
+    MachineCredential machine,
+    String sessionId,
+  ) async {
+    final List<ChatMessage> history =
+        await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
+    if (_agent.key != agent.key ||
+        _machine?.id != machine.id ||
+        activeSessionId != sessionId) {
+      return null;
+    }
+    return history;
+  }
+
+  // Replace the visible conversation with a freshly fetched snapshot and re-derive
+  // any in-flight turn from it.
+  void _applyHistorySnapshot(List<ChatMessage> history) {
+    _messages
+      ..clear()
+      ..addAll(history);
+    _restorePendingTurnFromHistory();
   }
 
   void _startHistoryPolling() {
@@ -590,7 +618,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> _refreshHistorySnapshot() async {
     final MachineCredential? machine = _machine;
-    if (!(_isThinking || _remoteActive) || machine == null) {
+    if (!(isThinking || _remoteActive) || machine == null) {
       _stopHistoryPolling();
       return;
     }
@@ -598,22 +626,29 @@ class BotChatController extends ChangeNotifier {
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
-      if (_agent.key != agent.key ||
-          _machine?.id != machine.id ||
-          activeSessionId != sessionId) {
-        return;
+      final List<ChatMessage>? history =
+          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      if (history == null || history.isEmpty) return;
+      // Never clobber a turn our own POST stream is actively driving (that
+      // stream is the smoother, authoritative source). Once it drops or is
+      // absent (reattach / cold-start restore), polling becomes authoritative.
+      if (_localStreamActive) return;
+      _applyHistorySnapshot(history);
+      // If we reattached to a dropped turn, end the mirror once history shows it
+      // finalized — even if the shared event stream missed agent_done while it
+      // was reconnecting. The placeholder always exists here (the turn was
+      // already in flight), so a non-streaming entry means it really finished.
+      final String? reattachId = _reattachRequestId;
+      if (reattachId != null) {
+        final int idx = _assistantIndexForRequest(reattachId);
+        final bool stillStreaming =
+            idx != -1 && _messages[idx].metadata[_streamingKey] == true;
+        if (idx != -1 && !stillStreaming) {
+          _reattachRequestId = null;
+          _endRemoteMirror();
+        }
       }
-      if (history.isEmpty) return;
-      // Never clobber our own in-flight turn (our chat stream is the smoother,
-      // authoritative source for it); only mirror when the activity is remote.
-      if (_isThinking && !_remoteActive) return;
-      _messages
-        ..clear()
-        ..addAll(history);
-      _restorePendingTurnFromHistory();
-      if (!(_isThinking || _remoteActive)) _stopHistoryPolling();
+      if (!(isThinking || _remoteActive)) _stopHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Keep the last visible snapshot; the next poll/event may recover.
@@ -624,7 +659,7 @@ class BotChatController extends ChangeNotifier {
   // it from persisted history. Skip while we have our own turn in flight; we do
   // a catch-up refresh when ours finishes.
   void _beginRemoteMirror() {
-    if (_isThinking) return;
+    if (isThinking) return;
     _remoteSettleTimer?.cancel();
     _remoteActive = true;
     _startHistoryPolling();
@@ -640,19 +675,19 @@ class BotChatController extends ChangeNotifier {
     _remoteSettleTimer = Timer(const Duration(milliseconds: 900), () {
       _remoteActive = false;
       unawaited(_refreshHistorySnapshot());
-      if (!_isThinking) _stopHistoryPolling();
+      if (!isThinking) _stopHistoryPolling();
     });
   }
 
   Future<void> _runTurn(CliAgent agent, ChatMessage userMessage) async {
-    _isThinking = true;
     _isCancelling = false;
+    _localStreamActive = true;
     _lastError = null;
-    notifyListeners();
-
     final String requestId = _newRequestId(agent);
     _activeRequestId = requestId;
+    notifyListeners();
 
+    bool reattach = false;
     try {
       final String sessionId = await _ensureActiveSessionId(agent);
       _insertAwaitingAssistant(requestId: requestId);
@@ -675,9 +710,15 @@ class BotChatController extends ChangeNotifier {
     } catch (err) {
       if (err is BackendException && err.code == 'AGENT_CANCELLED') {
         _markAssistantCancelled(requestId);
+      } else if (_isStreamDisconnect(err)) {
+        // The stream dropped (app backgrounded/closed, flaky network) but the
+        // backend keeps running this turn. Keep the streaming placeholder and
+        // the user message as-is; hand off to history polling + the shared
+        // event stream, which mirror progress and finalize when it completes.
+        reattach = true;
       } else {
         _discardAssistantByRequestId(requestId);
-        String detail = err.toString();
+        String detail = _friendlyError(err);
         if (err is BackendException && err.code == 'AGENT_BUSY') {
           detail = _strings.agentBusyRetryLater;
         } else if (err is BackendException && err.code == 'NOT_LOGGED_IN') {
@@ -690,39 +731,56 @@ class BotChatController extends ChangeNotifier {
       }
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
-      _isThinking = false;
+      _localStreamActive = false;
       _isCancelling = false;
+      if (reattach) {
+        // Resume mirroring this still-running turn from shared state. Tracking
+        // the requestId lets polling end the mirror once it finalizes.
+        _reattachRequestId = requestId;
+        _beginRemoteMirror();
+      }
       notifyListeners();
       // A remote turn may have started and finished on this scope while ours was
       // in flight (we skip mirroring then). Catch up to the shared truth now.
-      unawaited(_catchUpHistory());
+      if (!reattach) unawaited(_catchUpHistory());
     }
+  }
+
+  // True when a send failed because the stream/connection dropped rather than
+  // because the agent reported a terminal result. The backend turn may still be
+  // running, so the caller should reattach instead of failing the turn.
+  bool _isStreamDisconnect(Object err) {
+    if (err is TimeoutException) return true;
+    if (err is BackendException) {
+      final String? code = err.code;
+      if (code == 'STREAM_DISCONNECTED' || code == 'STREAM_INCOMPLETE') {
+        return true;
+      }
+      if (code != null && code.startsWith('NETWORK_')) return true;
+    }
+    return false;
   }
 
   // One-shot pull of the shared history, used after our own turn ends to pick up
   // any changes other devices made meanwhile. No-op if a new turn is running.
   Future<void> _catchUpHistory() async {
     final MachineCredential? machine = _machine;
-    if (_isThinking || _remoteActive || machine == null) return;
+    if (isThinking || _remoteActive || machine == null) return;
     final CliAgent agent = _agent;
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage> history =
-          await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
-      if (_agent.key != agent.key ||
-          _machine?.id != machine.id ||
-          activeSessionId != sessionId ||
-          _isThinking ||
-          _remoteActive ||
-          history.isEmpty) {
+      final List<ChatMessage>? history =
+          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      // Bail if our own or a remote turn started while the fetch was in flight.
+      if (history == null || isThinking || _remoteActive || history.isEmpty) {
         return;
       }
-      _messages
-        ..clear()
-        ..addAll(history);
-      _restorePendingTurnFromHistory();
-      if (_isThinking) _startHistoryPolling();
+      _applyHistorySnapshot(history);
+      // The snapshot may have adopted a still-streaming turn another device
+      // started while ours was running; if so, poll it to completion (nothing
+      // else will — _beginRemoteMirror no-ops once isThinking is true).
+      if (isThinking) _startHistoryPolling();
       notifyListeners();
     } catch (_) {
       // Best-effort; the next interaction will reconcile.
@@ -881,6 +939,19 @@ class BotChatController extends ChangeNotifier {
     );
   }
 
+  // Turn a thrown error into a message a user can act on. Low-level network
+  // failures (BackendException with a NETWORK_* code) become localized guidance;
+  // other backend errors show their server message without the wrapper prefix.
+  String _friendlyError(Object err) {
+    if (err is BackendException) {
+      if (err.code?.startsWith('NETWORK_') ?? false) {
+        return _strings.networkError(err.code);
+      }
+      return err.message;
+    }
+    return err.toString();
+  }
+
   void _markUserDeliveryFailed(String localId, String detail) {
     final int index = _messages.indexWhere((ChatMessage m) => m.id == localId);
     if (index == -1) return;
@@ -1007,8 +1078,10 @@ class BotChatController extends ChangeNotifier {
 
     final String requestId = event.data['requestId'] as String? ?? '';
     if (requestId.isEmpty) return;
-    // Our own turn is driven by the chat POST stream; ignore its echo here.
-    if (requestId == _activeRequestId) return;
+    // Ignore the echo of our own turn only while our POST stream is actively
+    // driving it. If that stream dropped, these shared events are how we learn
+    // the still-running turn progressed and finished.
+    if (requestId == _activeRequestId && _localStreamActive) return;
     // Only mirror activity for the agent we are currently viewing.
     final Map<String, Object?> agentData =
         (event.data['agent'] as Map?)?.cast<String, Object?>() ??
@@ -1048,7 +1121,7 @@ class BotChatController extends ChangeNotifier {
   Future<void> _showQuotaNotification(String message) async {
     try {
       final bool shown = await NotificationService.instance.show(
-        title: 'AgentDeck',
+        title: 'Relay',
         body: message,
       );
       if (!shown) _appendSystemMessage(message);

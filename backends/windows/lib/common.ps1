@@ -7,15 +7,15 @@ $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 
 $Script:AppDataDir = if ($env:LOCALAPPDATA) {
-  Join-Path $env:LOCALAPPDATA 'AgentDeck'
+  Join-Path $env:LOCALAPPDATA 'Relay'
 } else {
-  Join-Path $env:USERPROFILE 'AppData\Local\AgentDeck'
+  Join-Path $env:USERPROFILE 'AppData\Local\Relay'
 }
 $Script:LogDir = Join-Path $Script:AppDataDir 'logs'
 $Script:RuntimeDir = Join-Path $Script:AppDataDir 'runtime'
 $Script:BackendPidFile = Join-Path $Script:RuntimeDir 'backend.pid'
 $Script:TunnelPidFile = Join-Path $Script:RuntimeDir 'tunnel.pid'
-$Script:StartupTaskName = 'AgentDeck Backend'
+$Script:StartupTaskName = 'Relay Backend'
 
 function Write-Info {
   param([string]$Message)
@@ -30,7 +30,7 @@ function Write-Warn {
 
 function Write-Fail {
   param([string]$Message)
-  throw "AgentDeck: $Message"
+  throw "Relay: $Message"
 }
 
 function Test-Command {
@@ -130,7 +130,7 @@ function Get-DefaultTunnelName {
   if ([string]::IsNullOrWhiteSpace($name)) {
     $name = 'windows'
   }
-  return "agentdeck-$name"
+  return "relay-$name"
 }
 
 function Get-TunnelIdForName {
@@ -272,7 +272,7 @@ function Test-PidFile {
   return [bool](Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue)
 }
 
-function Start-AgentDeckProcess {
+function Start-RelayProcess {
   param(
     [string]$Name,
     [string]$FilePath,
@@ -299,7 +299,7 @@ function Start-AgentDeckProcess {
   Write-Info "$Name started (PID $($process.Id))."
 }
 
-function Stop-AgentDeckProcess {
+function Stop-RelayProcess {
   param(
     [string]$Name,
     [string]$PidFile
@@ -316,9 +316,9 @@ function Stop-AgentDeckProcess {
   Write-Info "$Name stopped."
 }
 
-function Start-AgentDeckBackend {
+function Start-RelayBackend {
   $nodePath = (Get-Command 'node').Source
-  Start-AgentDeckProcess -Name 'backend' `
+  Start-RelayProcess -Name 'backend' `
     -FilePath $nodePath `
     -ArgumentList @('server.js') `
     -WorkingDirectory $Script:ServerDir `
@@ -327,8 +327,8 @@ function Start-AgentDeckBackend {
     -ErrLog (Join-Path $Script:LogDir 'backend.err.log')
 }
 
-function Start-AgentDeckTunnel {
-  $mode = Get-EnvValue 'AGENTDECK_TUNNEL_MODE'
+function Start-RelayTunnel {
+  $mode = Get-EnvValue 'RELAY_TUNNEL_MODE'
   if ([string]::IsNullOrWhiteSpace($mode) -or $mode -eq 'none') {
     Write-Info 'Tunnel mode is none; not starting cloudflared.'
     return
@@ -346,7 +346,7 @@ function Start-AgentDeckTunnel {
     $argsText = "tunnel --url http://127.0.0.1:$port"
   }
   $args = Split-CommandLine -CommandLine $argsText
-  Start-AgentDeckProcess -Name 'tunnel' `
+  Start-RelayProcess -Name 'tunnel' `
     -FilePath $cloudflaredBin `
     -ArgumentList $args `
     -WorkingDirectory $Script:ServerDir `
@@ -355,26 +355,26 @@ function Start-AgentDeckTunnel {
     -ErrLog (Join-Path $Script:LogDir 'tunnel.err.log')
 }
 
-function Start-AgentDeckServices {
-  Start-AgentDeckBackend
-  Start-AgentDeckTunnel
+function Start-RelayServices {
+  Start-RelayBackend
+  Start-RelayTunnel
 }
 
-function Stop-AgentDeckServices {
-  Stop-AgentDeckProcess -Name 'tunnel' -PidFile $Script:TunnelPidFile
-  Stop-AgentDeckProcess -Name 'backend' -PidFile $Script:BackendPidFile
+function Stop-RelayServices {
+  Stop-RelayProcess -Name 'tunnel' -PidFile $Script:TunnelPidFile
+  Stop-RelayProcess -Name 'backend' -PidFile $Script:BackendPidFile
 }
 
-function Register-AgentDeckStartup {
+function Register-RelayStartup {
   $script = Join-Path $Script:WindowsDir 'start.ps1'
   $powershell = (Get-Command 'powershell.exe').Source
   $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`""
   $trigger = New-ScheduledTaskTrigger -AtLogOn
-  Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Description 'Start AgentDeck backend for the current user.' -Force | Out-Null
+  Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Description 'Start Relay backend for the current user.' -Force | Out-Null
   Write-Info "Startup task registered: $Script:StartupTaskName"
 }
 
-function Unregister-AgentDeckStartup {
+function Unregister-RelayStartup {
   Unregister-ScheduledTask -TaskName $Script:StartupTaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
@@ -397,7 +397,7 @@ function Wait-ForTunnelUrl {
   return ''
 }
 
-function Show-AgentDeckStatus {
+function Show-RelayStatus {
   $backendStatus = if (Test-PidFile -PidFile $Script:BackendPidFile) { 'running' } else { 'stopped' }
   $tunnelStatus = if (Test-PidFile -PidFile $Script:TunnelPidFile) { 'running' } else { 'stopped' }
   Write-Host "Backend: $backendStatus"

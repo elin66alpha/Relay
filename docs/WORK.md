@@ -1,6 +1,6 @@
 # WORK.md - Shared Agent Notes
 
-This file is a short handoff log for agents working on AgentDeck. Keep it
+This file is a short handoff log for agents working on Relay. Keep it
 current, factual, and free of secrets. Detailed history lives in git.
 
 ## Current Project Shape
@@ -16,6 +16,123 @@ current, factual, and free of secrets. Detailed history lives in git.
   history, the resumable CLI session, and in-flight progress.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
+
+## 2026-06-03 - Per-agent Model / Effort / Permission controls
+
+- New composer "+" drawer controls let the user pick, per chat, the agent's
+  model, reasoning effort, and permission mode. Capability-aware: agy exposes no
+  model/effort in its CLI, so only Permission shows for it; Claude and Codex show
+  all three.
+- Single source of truth: `server/lib/agent-options.js` maps every option to the
+  exact CLI argv. `buildArgs(agentKey, settings)` is spliced into each spawn in
+  `agents.js`. **Defaults reproduce the old always-bypass / no-model / no-effort
+  behavior**, so unconfigured scopes are byte-for-byte unchanged. Flag specifics:
+  Claude `--model` / `--effort` (native, low|medium|high|xhigh|max) /
+  `--permission-mode`; Codex `-m` / `-c model_reasoning_effort=` / permission via
+  `-c sandbox_mode=` + `-c approval_policy=never` (NOT `-s` — `codex exec resume`
+  rejects it; and exec is non-interactive so approvals must be `never` or it
+  hangs); agy permission only (`--dangerously-skip-permissions` vs `--sandbox`).
+- Selections persist per `workdir + agent` in `agent-settings.json` (gitignored),
+  shared across devices in the scope. server.js loads them at spawn time for both
+  live chat and scheduled messages.
+- Endpoints (all bearer-protected): `GET /api/agent-options`, `GET`+`POST
+  /api/agent-settings`, `GET /api/agent-version`, `POST /api/agent-update`. The
+  update endpoint runs `<cli> update` so a user who doesn't see the newest model
+  can pull it in from the model picker's "Update CLI" button (confirm + version
+  echo). Brand-new pinned models can be added with no code change via
+  `server/models-extra.json` (gitignored).
+- Client: `lib/features/chat/agent_controls.dart` (controls row + option sheet),
+  `lib/core/models/agent_options.dart`, new BackendClient methods, l10n strings.
+- Verified: flutter analyze clean, flutter test passes, node --check green, the
+  built flag combos accepted live by `claude` and `codex`, endpoints round-trip
+  on localhost, web rebuilt + served (200, <title>Relay</title>), debug APK
+  installed.
+- ENVIRONMENT GOTCHA (not caused by this work): the host PM2 God daemon's
+  restart/reload action RPC is broken — `pm2 restart`/`reload` fail with
+  "Process N not found" for EVERY app (old id 2 and a fresh id 4 alike) while
+  reads (list/describe/save) work. Workaround used to load new server code
+  without touching the unrelated `claude-discord` / `claude-quota-watch` apps:
+  `pm2 delete relay-server && pm2 start ecosystem.config.js --only relay-server`
+  (delete/start use different RPCs that still work), then `pm2 save`. A full fix
+  is `pm2 update` (respawns the daemon) but it cycles ALL apps, so leave that to
+  the user. `build_flow.sh`'s `pm2 restart` step will fail until the daemon is
+  repaired.
+
+## 2026-06-04 - Windows native Flutter frontend pass
+
+- Desktop chat shell now treats wide Windows/macOS/Linux layouts as a native
+  tool surface: permanent left sidebar fills the window height, the active
+  agent/session header sits in the main pane, composer width is capped on wide
+  monitors, and desktop/Web Enter sends while Shift+Enter still inserts a
+  newline through the text field.
+- Windows local notifications are initialized through
+  `flutter_local_notifications` with a Relay AppUserModelID, while init/show
+  failures degrade to the existing in-app fallback instead of blocking startup.
+- Windows runner starts at 1360x860 and enforces a 900x640 minimum logical
+  window size so desktop controls do not collapse into unusable layouts.
+- Secondary screens were desktop-constrained: settings, credentials, quota
+  usage, quota scheduler, file system, and Card Mode now use centered content
+  widths or mouse-friendly action buttons where appropriate.
+- **Windows release build verified** (`flutter build windows --release` →
+  `build/windows/x64/runner/Release/relay.exe`, ~792 KB + `flutter_windows.dll`
+  + plugin DLLs + `data/`). `dart analyze` is clean and `flutter test` is green.
+  The app launches and most features work in manual smoke testing. Two
+  environment workarounds were required to compile — see "Windows build
+  gotchas" in `docs/DESKTOP.md`:
+  1. **Non-ASCII project path breaks the Flutter/MSBuild toolchain.** When the
+     repo lives under a path with CJK characters, `flutter analyze` crashes in
+     the LSP channel and `flutter build windows` fails reading `app.dill` (the
+     path is mangled through the ANSI code page). Build from an ASCII-only path,
+     or use `dart analyze` (not `flutter analyze`) for static checks.
+  2. **VS 2026's MSVC 14.51 rejects `flutter_local_notifications_windows`.**
+     The plugin still includes `<experimental/coroutine>`, which the newest STL
+     turns into a hard error (`STL1011` / `C2338`). Set
+     `CL=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` in the build
+     environment to compile. A permanent fix is to add that define to the
+     plugin target in CMake or update the plugin once upstream migrates to
+     `<coroutine>`.
+
+## 2026-06-02 - Rebrand AgentDeck -> Relay (clean public identity)
+
+- Full rebrand for public release. Two passes, both via scripted
+  case-sensitive/ordered `sed` over `git ls-files` (so node_modules/, build/, and
+  gitignored secrets are untouched): `scripts/rename_to_relay.sh` swept the
+  PascalCase brand `AgentDeck -> Relay` (display text + docs only), then
+  `scripts/migrate_identity_to_relay.sh` migrated every functional identifier off
+  the old brand.
+- New app identity: bundle id / applicationId / namespace `dev.agentdeck.app ->
+  dev.relay.app` (chosen to mirror the old `dev.*.app` shape; verify it's free on
+  the Play Store before first publish). The kotlin
+  source dir moved `dev/agentdeck/app/ -> dev/relay/app/`; the download
+  `MethodChannel` (Kotlin + `file_saver_stub.dart`) tracks it. iOS/macOS/Linux
+  bundle ids, macOS LaunchAgent labels (`dev.relay.app.backend/.tunnel`), and
+  copyright/company strings updated too.
+- Other identifiers (all consistent across their paired sites): Dart package
+  `agentdeck -> relay` (only `package:` user was the codec test; lib/ uses
+  relative imports), PM2 names `relay-server`/`relay-tunnel`, SharedPreferences
+  keys `relay.*.v1`, credential format `relay.credentials.v1` + file ext
+  `*.relay.json/png`, env vars `RELAY_*`, web-push JS global `window.relayPush`
+  (interop JS + `@JS` annotations), FCM Firebase app name `relay-fcm` +
+  `relayFcmBackgroundHandler`, desktop binary `relay`.
+- Verified: `flutter analyze` clean, credential codec test passes (after
+  `flutter pub get` rebuilt the package graph for the new name), `node --check`
+  green on backend.
+- CUTOVER DONE (2026-06-03): a fresh Firebase project `relay-93917` was created;
+  `android/app/google-services.json` (package `dev.relay.app`) and the backend
+  service account `server/fcm-service-account.json` are in place (both gitignored),
+  with `FCM_SERVICE_ACCOUNT_FILE` pointing at the latter. PM2 was re-registered as
+  `relay-server` / `relay-tunnel` (the unrelated `claude-*` apps were left
+  running). Web + debug APK were rebuilt — note `flutter clean` was required first,
+  because the cached web entrypoint still imported `package:agentdeck/main.dart`.
+  The credential was regenerated and re-imported; FCM offline push was verified
+  end-to-end on the `dev.relay.app` build (stale old-project tokens self-prune with
+  a `SenderId mismatch`).
+- PM2 gotcha learned here: `server/ecosystem.config.js` `envValue()` reads
+  `process.env` before `.env`, and the long-lived PM2 daemon had stale
+  `CLOUDFLARED_ARGS` / `FCM_SERVICE_ACCOUNT_FILE` from the old names. Start/restart
+  relay apps with the corrected values exported in the shell (or inline before
+  `build_flow.sh`) so `--update-env` injects them; `pm2 save` then persists a
+  correct dump for reboots without needing a daemon `pm2 kill`.
 
 ## 2026-06-02 - FCM Android offline push
 
@@ -97,7 +214,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Windows setup supports direct mode, named Cloudflare Tunnel, and Cloudflare
   Quick Tunnel, then generates the encrypted credential QR.
 - Windows services run as background processes and are restored at login by a
-  per-user Scheduled Task named `AgentDeck Backend`.
+  per-user Scheduled Task named `Relay Backend`.
 
 ## 2026-05-31 - Named Cloudflare Tunnel Setup
 
@@ -106,7 +223,7 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Named Cloudflare Tunnel mode creates/reuses a tunnel, routes DNS, writes a
   local config under `server/cloudflared-config/`, and runs cloudflared under
   PM2/LaunchAgent.
-- `server/ecosystem.config.js` reads `AGENTDECK_TUNNEL_MODE`,
+- `server/ecosystem.config.js` reads `RELAY_TUNNEL_MODE`,
   `CLOUDFLARED_BIN`, and `CLOUDFLARED_ARGS` from `.env` so PM2 can omit the
   tunnel app, run named tunnel args, or run Quick Tunnel args.
 - `server/scripts/create-credential.js` prefers stable `PUBLIC_BASE_URL` for
@@ -130,8 +247,8 @@ current, factual, and free of secrets. Detailed history lives in git.
 ## 2026-05-31 - Credential JSON and Cloudflare Quick Tunnel
 
 - `server/scripts/create-credential.js` generates both
-  `server/credentials/<machine>.agentdeck.png` and
-  `server/credentials/<machine>.agentdeck.json`.
+  `server/credentials/<machine>.relay.png` and
+  `server/credentials/<machine>.relay.json`.
 - The JSON file is for paste import; credential files remain git-ignored.
 - Credential creation auto-detects the current Cloudflare quick-tunnel URL from
   PM2 logs unless `--url` is passed.

@@ -5,6 +5,9 @@ class CardModel {
   const CardModel({
     required this.id,
     required this.agentKey,
+    required this.workdir,
+    required this.sessionId,
+    required this.sessionName,
     required this.title,
     required this.reason,
     required this.prompt,
@@ -22,6 +25,9 @@ class CardModel {
     return CardModel(
       id: json['id'] as String? ?? '',
       agentKey: json['agentKey'] as String? ?? 'claude',
+      workdir: json['workdir'] as String? ?? '',
+      sessionId: json['sessionId'] as String? ?? '',
+      sessionName: json['sessionName'] as String? ?? '',
       title: json['title'] as String? ?? '',
       reason: json['reason'] as String? ?? '',
       prompt: json['prompt'] as String? ?? '',
@@ -36,6 +42,9 @@ class CardModel {
 
   final String id;
   final String agentKey;
+  final String workdir;
+  final String sessionId;
+  final String sessionName;
   final String title;
   final String reason;
   final String prompt;
@@ -52,6 +61,9 @@ class CardModel {
     return <String, Object?>{
       'id': id,
       'agentKey': agentKey,
+      'workdir': workdir,
+      'sessionId': sessionId,
+      'sessionName': sessionName,
       'title': title,
       'reason': reason,
       'prompt': prompt,

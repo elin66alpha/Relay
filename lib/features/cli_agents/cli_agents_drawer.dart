@@ -6,6 +6,7 @@ import '../../core/models/agent_session.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../machines/machine_credentials_screen.dart';
@@ -13,6 +14,7 @@ import '../settings/app_settings_screen.dart';
 import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
 import '../quota/quota_scheduler_screen.dart';
+import '../quota/quota_usage_screen.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -74,6 +76,20 @@ class CliAgentsDrawer extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => MachineCredentialsScreen(
                             machinesController: machinesController,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.query_stats_outlined),
+                    title: Text(context.l10n.usageQuery),
+                    onTap: () {
+                      if (closeOnAction) Navigator.of(context).pop();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => QuotaUsageScreen(
+                            chatController: chatController,
                           ),
                         ),
                       );
@@ -808,14 +824,14 @@ class _DeviceTokenRow extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       context.l10n.tokenCreatedAt(
-                        _formatShortTime(context, token.createdAt),
+                        formatShortTime(context, token.createdAt),
                       ),
                       style: TextStyle(color: colors.outline, fontSize: 12),
                     ),
                     if (token.revokedAt != null)
                       Text(
                         context.l10n.tokenRevokedAt(
-                          _formatShortTime(context, token.revokedAt),
+                          formatShortTime(context, token.revokedAt),
                         ),
                         style: TextStyle(color: colors.outline, fontSize: 12),
                       ),
@@ -871,14 +887,4 @@ class _TokenBadge extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatShortTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} '
-      '${two(local.hour)}:${two(local.minute)}';
 }

@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:agentdeck/core/credentials/credential_file_codec.dart';
+import 'package:relay/core/credentials/credential_file_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('decrypts Node-generated credential file', () async {
     const String raw = '''
 {
-  "format": "agentdeck.credentials.v1",
+  "format": "relay.credentials.v1",
   "kdf": {
     "name": "pbkdf2-sha256",
     "iterations": 210000,

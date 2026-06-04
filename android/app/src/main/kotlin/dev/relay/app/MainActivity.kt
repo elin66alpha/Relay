@@ -1,4 +1,4 @@
-package dev.agentdeck.app
+package dev.relay.app
 
 import android.content.ContentValues
 import android.os.Build
@@ -11,7 +11,7 @@ import java.io.File
 import java.io.OutputStream
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "dev.agentdeck.app/downloads"
+    private val channelName = "dev.relay.app/downloads"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

@@ -34,7 +34,9 @@ class CardWidget extends StatelessWidget {
                 const Spacer(),
                 if (card.isFromChat)
                   Text(
-                    'From chat',
+                    card.sessionName.isEmpty
+                        ? 'From chat'
+                        : 'From ${card.sessionName}',
                     style: TextStyle(color: colors.outline, fontSize: 11),
                   ),
               ],

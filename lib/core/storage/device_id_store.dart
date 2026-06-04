@@ -10,7 +10,7 @@ class DeviceIdStore {
   })  : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
         _random = random ?? Random.secure();
 
-  static const String _deviceIdKey = 'agentdeck.device_id.v1';
+  static const String _deviceIdKey = 'relay.device_id.v1';
 
   final FlutterSecureStorage _secureStorage;
   final Random _random;

@@ -2,14 +2,14 @@
 
 [English](production-hardening.md) | [中文 README](../README.zh-CN.md)
 
-AgentDeck 可以放在正式 Cloudflare Tunnel 后面，也可以在公网主机上直连部署。Quick Tunnel
+Relay 可以放在正式 Cloudflare Tunnel 后面，也可以在公网主机上直连部署。Quick Tunnel
 适合试用；生产使用应当有稳定 URL、较小暴露面，以及清楚的恢复路径。
 
 ## 推荐形态
 
 - 只使用 HTTPS。正式 Cloudflare Tunnel 在 Cloudflare 侧终止 HTTPS；直连公网主机建议在
-  AgentDeck 前面放 Nginx、Caddy 或其他反向代理，并在代理层终止 TLS。
-- 除非代理或 tunnel 不在同一台机器，否则让 AgentDeck 只监听本机。优先使用
+  Relay 前面放 Nginx、Caddy 或其他反向代理，并在代理层终止 TLS。
+- 除非代理或 tunnel 不在同一台机器，否则让 Relay 只监听本机。优先使用
   `HOST=127.0.0.1` 配合代理/tunnel，而不是直接 `HOST=0.0.0.0`。
 - `PUBLIC_BASE_URL` 填用户导入 app 时使用的稳定地址，例如
   `https://agent.example.com`。修改后需要重新生成凭证。
@@ -25,7 +25,7 @@ AgentDeck 可以放在正式 Cloudflare Tunnel 后面，也可以在公网主机
 - 请求超时时间要长于 agent 超时。默认 agent 超时是 60 分钟。
 - 明确设置上传/下载上限。默认单文件上传 100 MB，下载 300 MB；只有在代理和网络都能承受时，
   才调整 `FILE_UPLOAD_LIMIT`、`DOWNLOAD_MAX_BYTES`。
-- 代理层不要做过宽的 CORS 暴露。AgentDeck 的设备 token 是真正的 API 门禁，但收窄代理配置可以减少误暴露。
+- 代理层不要做过宽的 CORS 暴露。Relay 的设备 token 是真正的 API 门禁，但收窄代理配置可以减少误暴露。
 
 ## 直连公网主机检查项
 

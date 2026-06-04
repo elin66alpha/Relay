@@ -29,7 +29,7 @@ class AppStrings {
   final AppLanguage appLanguage;
   bool get isZh => appLanguage == AppLanguage.zh;
 
-  String get appName => 'AgentDeck';
+  String get appName => 'Relay';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
@@ -37,6 +37,7 @@ class AppStrings {
   String get cardModeSubtitle =>
       isZh ? '基于对话历史的行动建议' : 'Suggested actions from your chats';
   String get usage => isZh ? '额度' : 'Usage';
+  String get usageQuery => isZh ? '额度查询' : 'Quota usage';
   String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
   String get loadingUsage => isZh ? '正在查询额度...' : 'Loading quota...';
   String get fiveHourQuota => isZh ? '5 小时' : '5 hours';
@@ -256,6 +257,37 @@ class AppStrings {
       isZh ? '会话操作失败：$err' : 'Session action failed: $err';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
+  String get moreChatActions => isZh ? '更多操作' : 'More actions';
+
+  // Per-agent Model / Effort / Permission controls (composer "+" drawer).
+  String get agentModel => isZh ? '模型' : 'Model';
+  String get agentEffort => isZh ? '思考' : 'Effort';
+  String get agentPermission => isZh ? '权限' : 'Permission';
+  String get agentModelTitle => isZh ? '选择模型' : 'Select model';
+  String get agentEffortTitle => isZh ? '思考能力' : 'Effort level';
+  String get agentPermissionTitle => isZh ? '权限模式' : 'Permission mode';
+  String get agentControlsUnsupported =>
+      isZh ? '该智能体不支持此项' : 'Not supported by this agent';
+  String get agentControlsLoadFailed =>
+      isZh ? '加载失败,点按重试' : 'Failed to load — tap to retry';
+  String agentSettingSaveFailed(Object err) =>
+      isZh ? '保存失败:$err' : 'Save failed: $err';
+  String agentCliVersion(String version) =>
+      isZh ? '当前版本 $version' : 'Version $version';
+  String get agentUpdateCli => isZh ? '更新 CLI' : 'Update CLI';
+  String get agentUpdateMissingModel => isZh ? '模型不可用?' : 'Model unavailable?';
+  String agentUpdateConfirmTitle(String agent) =>
+      isZh ? '更新 $agent?' : 'Update $agent?';
+  String get agentUpdateConfirmBody => isZh
+      ? '将在后端主机上运行 CLI 自更新,可能耗时一两分钟。完成后已列出的新模型会用更新后的 CLI 运行。'
+      : 'Runs the CLI self-update on the backend host. This can take a minute or two; listed newer models will then run with the updated CLI.';
+  String get agentUpdating => isZh ? '正在更新…' : 'Updating…';
+  String agentUpdateDone(String before, String after) =>
+      isZh ? '更新完成:$before → $after' : 'Updated: $before → $after';
+  String get agentUpdateNoChange => isZh ? '已是最新版本' : 'Already up to date';
+  String agentUpdateFailed(Object err) =>
+      isZh ? '更新失败:$err' : 'Update failed: $err';
+
   String get retry => isZh ? '重试' : 'Retry';
   String get cancelled => isZh ? '已取消' : 'Cancelled';
   String get inputHint => isZh ? '输入消息' : 'Message';
@@ -287,7 +319,7 @@ class AppStrings {
   String get version => isZh ? '版本' : 'Version';
   String get license => isZh ? '许可' : 'License';
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
-  String get copyright => isZh ? '© 2026 AgentDeck' : '© 2026 AgentDeck';
+  String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
       ? '用于连接本机 Claude Code、Codex 与 Antigravity CLI 智能体的私有控制台。'
       : 'Private control surface for local Claude Code, Codex, and Antigravity CLI agents.';
@@ -321,8 +353,8 @@ class AppStrings {
       ? '无法解析 $host。请确认二维码里的地址仍然有效；如果使用 Cloudflare quick tunnel，请在后端重新生成二维码。'
       : 'Cannot resolve $host. Make sure the QR URL is still valid. If you use Cloudflare quick tunnel, regenerate the QR on the backend.';
   String credentialConnectionRefused(String host) => isZh
-      ? '能找到 $host，但后端端口拒绝连接。请确认 AgentDeck 后端正在运行，并监听二维码里的端口。'
-      : '$host resolved, but the backend port refused the connection. Make sure the AgentDeck backend is running and listening on the QR port.';
+      ? '能找到 $host，但后端端口拒绝连接。请确认 Relay 后端正在运行，并监听二维码里的端口。'
+      : '$host resolved, but the backend port refused the connection. Make sure the Relay backend is running and listening on the QR port.';
   String credentialNetworkUnreachable(String host) => isZh
       ? '无法连接到 $host。请确认网络可用、后端在线，或 Cloudflare quick tunnel 仍在运行。'
       : 'Cannot reach $host. Make sure the network is available, the backend is online, or the Cloudflare quick tunnel is still running.';
@@ -343,6 +375,33 @@ class AppStrings {
   String get backendNotOk => isZh ? '后端没有返回 ok。' : 'Backend did not return ok.';
   String connectionFailed(Object err) =>
       isZh ? '连接失败：$err' : 'Connection failed: $err';
+  // Human-readable message for a low-level network failure, keyed by the
+  // BackendException network code (see BackendClient._networkExceptionFor).
+  String networkError(String? code) {
+    switch (code) {
+      case 'NETWORK_HOST_LOOKUP':
+        return isZh
+            ? '无法解析后端地址。请检查网络连接，或确认凭证里的地址仍然有效（quick tunnel 地址会变化，需重新生成二维码）。'
+            : 'Cannot resolve the backend address. Check your network, or confirm the credential URL is still valid (quick-tunnel URLs change — regenerate the QR).';
+      case 'NETWORK_CONNECTION_REFUSED':
+        return isZh
+            ? '后端拒绝连接。请确认 Relay 后端正在运行并监听对应端口。'
+            : 'The backend refused the connection. Make sure the Relay backend is running and listening on the expected port.';
+      case 'NETWORK_UNREACHABLE':
+        return isZh
+            ? '无法连接到后端。请检查网络是否可用、后端是否在线。'
+            : 'Cannot reach the backend. Check that your network is available and the backend is online.';
+      case 'NETWORK_TIMEOUT':
+        return isZh
+            ? '连接后端超时。请确认后端在线后重试。'
+            : 'Timed out reaching the backend. Make sure it is online and try again.';
+      default:
+        return isZh
+            ? '网络错误：无法连接到后端。请检查网络后重试。'
+            : 'Network error: cannot reach the backend. Check your connection and try again.';
+    }
+  }
+
   String deleteMachine(String name) => isZh ? '删除 $name？' : 'Delete $name?';
   String get deleteMachineBody => isZh
       ? '删除后需要重新扫描这台机器的凭证二维码。'
@@ -351,8 +410,8 @@ class AppStrings {
   String get scanQrHint =>
       isZh ? '对准终端或图片里的凭证二维码。' : 'Point the camera at the credential QR code.';
   String get invalidQr => isZh
-      ? '二维码不是有效的 AgentDeck 凭证。'
-      : 'The QR code is not a valid AgentDeck credential.';
+      ? '二维码不是有效的 Relay 凭证。'
+      : 'The QR code is not a valid Relay credential.';
   String get clearChatTitle => isZh ? '清空当前对话？' : 'Clear this chat?';
   String get clearChatBody => isZh
       ? '删除当前会话的历史消息，并在机器上为这个会话开启新的上下文（不影响工作目录里的文件）。'

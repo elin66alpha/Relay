@@ -1,7 +1,7 @@
 {
-  "name": "agentdeck-server",
+  "name": "relay-server",
   "version": "0.1.0",
-  "description": "Local HTTP backend for the AgentDeck Flutter client.",
+  "description": "Local HTTP backend for the Relay Flutter client.",
   "private": true,
   "main": "server.js",
   "scripts": {

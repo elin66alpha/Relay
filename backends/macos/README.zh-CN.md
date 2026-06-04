@@ -17,7 +17,7 @@ brew install cloudflared
 ## 安装
 
 ```bash
-cd /path/to/AgentDeck
+cd /path/to/Relay
 backends/macos/setup.sh
 ```
 
@@ -25,9 +25,9 @@ backends/macos/setup.sh
 
 - 需要时从 `server/.env.example` 创建 `server/.env`；
 - 安装后端 npm 依赖；
-- 创建后端 LaunchAgent：`dev.agentdeck.backend`；
+- 创建后端 LaunchAgent：`dev.relay.app.backend`；
 - 提供直连、正式 Cloudflare Tunnel、Quick Tunnel 三种网络模式；
-- 两种隧道模式下都会创建 cloudflared LaunchAgent：`dev.agentdeck.tunnel`；
+- 两种隧道模式下都会创建 cloudflared LaunchAgent：`dev.relay.app.tunnel`；
 - Quick Tunnel 下从隧道日志读取最新的 `trycloudflare.com` 地址；
 - 执行 `npm run credential`，在终端显示并保存指向所选公网地址的加密凭证二维码。
 
@@ -43,10 +43,10 @@ backends/macos/uninstall.sh
 日志位置：
 
 ```text
-~/Library/Logs/AgentDeck/backend.out.log
-~/Library/Logs/AgentDeck/backend.err.log
-~/Library/Logs/AgentDeck/tunnel.out.log
-~/Library/Logs/AgentDeck/tunnel.err.log
+~/Library/Logs/Relay/backend.out.log
+~/Library/Logs/Relay/backend.err.log
+~/Library/Logs/Relay/tunnel.out.log
+~/Library/Logs/Relay/tunnel.err.log
 ```
 
 ## 说明

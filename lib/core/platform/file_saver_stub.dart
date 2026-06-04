@@ -9,7 +9,7 @@ import 'download_save_result.dart';
 /// Talks to the Android side, which streams a file into the shared MediaStore
 /// Downloads collection (the folder the system "Files"/"Downloads" app shows).
 const MethodChannel _downloadsChannel =
-    MethodChannel('dev.agentdeck.app/downloads');
+    MethodChannel('dev.relay.app/downloads');
 
 /// Native save: the download is streamed to a temp file first so we never hold
 /// the whole thing in memory (a 300 MB download must not OOM a phone). The temp
@@ -26,7 +26,7 @@ Future<DownloadSaveResult> saveDownloadStream({
   final Directory tmpDir = await getTemporaryDirectory();
   final File tmp = File(
     '${tmpDir.path}${Platform.pathSeparator}'
-    'agentdeck_dl_${DateTime.now().microsecondsSinceEpoch}',
+    'relay_dl_${DateTime.now().microsecondsSinceEpoch}',
   );
 
   int received = 0;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
 
 class QuotaSchedulerScreen extends StatefulWidget {
@@ -252,16 +253,22 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
           agent.key,
           () => TextEditingController(text: schedule?.prompt ?? ''),
         );
-        return _QuotaSchedulerRow(
-          agentName: agent.label,
-          refreshTime: _formatQuotaTime(
-            context,
-            quota?.resetsAt ?? schedule?.targetResetsAt,
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 880),
+            child: _QuotaSchedulerRow(
+              agentName: agent.label,
+              refreshTime: formatShortTime(
+                context,
+                quota?.resetsAt ?? schedule?.targetResetsAt,
+              ),
+              controller: controller,
+              saving: _savingAgents.contains(agent.key),
+              onSend: () => _save(agent),
+              onClear: schedule == null ? null : () => _clear(agent, schedule),
+            ),
           ),
-          controller: controller,
-          saving: _savingAgents.contains(agent.key),
-          onSend: () => _save(agent),
-          onClear: schedule == null ? null : () => _clear(agent, schedule),
         );
       },
     );
@@ -301,73 +308,103 @@ class _QuotaSchedulerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                agentName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+    final Widget title = Text(
+      agentName,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    final Widget refresh = Text(
+      '${context.l10n.refreshAt}: $refreshTime',
+      style: TextStyle(color: colors.outline, fontSize: 13),
+    );
+    final Widget promptField = TextField(
+      controller: controller,
+      minLines: 2,
+      maxLines: 5,
+      decoration: InputDecoration(
+        labelText: context.l10n.prompt,
+        border: const OutlineInputBorder(),
+      ),
+    );
+    final Widget sendButton = FilledButton.icon(
+      onPressed: saving ? null : onSend,
+      icon: saving
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.send_rounded),
+      label: Text(context.l10n.send),
+    );
+    final Widget? clearButton = onClear == null
+        ? null
+        : TextButton.icon(
+            onPressed: saving ? null : onClear,
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: Text(context.l10n.clearSchedule),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
             ),
-            const SizedBox(width: 12),
-            Text(
-              '${context.l10n.refreshAt}: $refreshTime',
-              style: TextStyle(color: colors.outline, fontSize: 13),
-            ),
-            if (onClear != null) ...<Widget>[
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: saving ? null : onClear,
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                label: Text(context.l10n.clearSchedule),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                ),
+          );
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool compact = constraints.maxWidth < 680;
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              title,
+              const SizedBox(height: 4),
+              refresh,
+              const SizedBox(height: 10),
+              promptField,
+              const SizedBox(height: 10),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (clearButton != null) clearButton,
+                  sendButton,
+                ],
               ),
             ],
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: controller,
-                minLines: 2,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  labelText: context.l10n.prompt,
-                  border: const OutlineInputBorder(),
-                ),
-              ),
+            Row(
+              children: <Widget>[
+                Expanded(child: title),
+                const SizedBox(width: 12),
+                refresh,
+                if (clearButton != null) ...<Widget>[
+                  const SizedBox(width: 4),
+                  clearButton,
+                ],
+              ],
             ),
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 56,
-              child: FilledButton.icon(
-                onPressed: saving ? null : onSend,
-                icon: saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send_rounded),
-                label: Text(context.l10n.send),
-              ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(child: promptField),
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 56,
+                  child: sendButton,
+                ),
+              ],
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -385,13 +422,4 @@ UsageQuota? _fiveHourQuota(UsageAgent agent) {
     if (quota.key == 'five_hour') return quota;
   }
   return null;
-}
-
-String _formatQuotaTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }

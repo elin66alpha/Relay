@@ -49,6 +49,9 @@ class Win32Window {
   // window properties. Returns nullptr if the window has been destroyed.
   HWND GetHandle();
 
+  // Sets the minimum logical window size enforced by Win32 resizing.
+  void SetMinimumSize(const Size& size);
+
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
@@ -97,6 +100,9 @@ class Win32Window {
 
   // window handle for hosted content.
   HWND child_content_ = nullptr;
+
+  unsigned int min_width_ = 0;
+  unsigned int min_height_ = 0;
 };
 
 #endif  // RUNNER_WIN32_WINDOW_H_

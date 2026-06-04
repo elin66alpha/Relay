@@ -1,16 +1,16 @@
 import 'dart:js_interop';
 
-// Bound to window.agentdeckPush.* defined in web/push_interop.js. That helper
+// Bound to window.relayPush.* defined in web/push_interop.js. That helper
 // owns the service-worker registration and PushManager subscribe so this Dart
 // layer stays a thin bridge.
 
-@JS('agentdeckPush.supported')
+@JS('relayPush.supported')
 external bool _supported();
 
-@JS('agentdeckPush.subscribe')
+@JS('relayPush.subscribe')
 external JSPromise<JSString?> _subscribe(JSString vapidKey);
 
-@JS('agentdeckPush.unsubscribe')
+@JS('relayPush.unsubscribe')
 external JSPromise<JSString?> _unsubscribe();
 
 bool webPushSupported() {

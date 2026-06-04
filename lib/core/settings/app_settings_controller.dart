@@ -4,8 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum AppLanguage { en, zh }
 
 class AppSettingsController extends ChangeNotifier {
-  static const String _languageKey = 'agentdeck.language.v1';
-  static const String _themeKey = 'agentdeck.theme_mode.v1';
+  static const String _languageKey = 'relay.language.v1';
+  static const String _themeKey = 'relay.theme_mode.v1';
 
   AppLanguage _language = AppLanguage.en;
   ThemeMode _themeMode = ThemeMode.system;

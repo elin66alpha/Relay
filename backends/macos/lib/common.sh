@@ -8,14 +8,14 @@ SERVER_DIR="$ROOT_DIR/server"
 ENV_FILE="$SERVER_DIR/.env"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 
-SERVER_LABEL="dev.agentdeck.backend"
-TUNNEL_LABEL="dev.agentdeck.tunnel"
+SERVER_LABEL="dev.relay.app.backend"
+TUNNEL_LABEL="dev.relay.app.tunnel"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
-LOG_DIR="$HOME/Library/Logs/AgentDeck"
+LOG_DIR="$HOME/Library/Logs/Relay"
 SERVER_PLIST="$LAUNCH_AGENTS_DIR/$SERVER_LABEL.plist"
 TUNNEL_PLIST="$LAUNCH_AGENTS_DIR/$TUNNEL_LABEL.plist"
 
-AGENTDECK_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+RELAY_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 c_info() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 c_warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
@@ -87,7 +87,7 @@ default_tunnel_name() {
   local short
   short="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf 'mac')"
   short="$(printf '%s' "$short" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^-+|-+$//g')"
-  printf 'agentdeck-%s' "${short:-mac}"
+  printf 'relay-%s' "${short:-mac}"
 }
 
 tunnel_id_for_name() {
@@ -208,7 +208,7 @@ write_server_plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>$AGENTDECK_PATH</string>
+    <string>$RELAY_PATH</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -265,7 +265,7 @@ write_tunnel_plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>$AGENTDECK_PATH</string>
+    <string>$RELAY_PATH</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -303,7 +303,7 @@ write_named_tunnel_plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>$AGENTDECK_PATH</string>
+    <string>$RELAY_PATH</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

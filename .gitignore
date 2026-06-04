@@ -46,7 +46,7 @@ app.*.map.json
 /android/app/release
 /android/app/google-services.json
 
-# AgentDeck backend local state and secrets
+# Relay backend local state and secrets
 /server/.env
 /server/tokens.json
 /server/chat-history*.json

@@ -14,7 +14,7 @@
 - 当前主流程默认英文，可切换中文。
 - 抽屉清理、机器状态、关于弹窗。
 - 只读额度弹窗显示 Claude Code 和 Codex 的 5 小时、本周剩余额度。
-- 额度刷新提醒改为手机系统原生通知，发送到通知栏而非聊天消息框。
+- 额度刷新提醒改为系统原生通知（Android / iOS / macOS / Windows），发送到通知栏而非聊天消息框。
 - 额度刷新定时消息独立成左栏**“定时消息”**页:可按工作区为下一次 Claude Code 或 Codex 5 小时额度刷新预设一条消息,后端检测到刷新后自动发送;同一工作区多设备同步,并提供“清除已排程”取消。
 - 通过 `GET /api/diagnostics` 和机器状态弹窗提供更完整的后端诊断。
 - 面向稳定公网部署的自有域名 / 直连模式生产加固指南。
@@ -44,8 +44,34 @@
 
 ### 后续提升
 
+- 随着 API 面继续扩大，逐步把 `server/server.js` 中的路由拆到更聚焦的后端
+  route 模块里；保持现有 Express 行为稳定，同时降低长期维护风险。
+- **延期重构(2026-06-04 代码质量审查发现;每一项都涉及行为而非单纯结构,需
+  各自作为带测试的独立改动来做):**
+  - 把一套 `runAgentTurn({ scopeKey, agent, session, prompt, ... })` 抽到 `lib/`
+    模块,让 `/api/chat` 和 `runScheduledQuotaMessage` 不再重复整套 agent-turn
+    生命周期(历史持久化闭包、`emitRunEvent` 广播、`enqueueScope` → 运行 →
+    `broadcastScope` 编排——约 130 行几乎一字不差)。配套再加一个按请求创建的
+    `responder`,一次性决定走 SSE 还是 JSON,替换散落的约 8 处
+    `if (streaming) writeStreamEvent(...) else res.json(...)` 分叉。价值高,但
+    位于最热路径,必须连同专门的测试一起落地。
+  - 给 `history.js` 一份解析后历史的内存副本(惰性加载、原地修改)+ 防抖写盘,
+    取代当前每个流式 delta、每次操作都整文件重读重写 `chat-history.json` 的做法。
+    在流式热路径上是实打实的收益,但会改变崩溃持久性与多进程假设,动手前需先评估。
+  - 把约 10 个 handler 里重复的 `getAgent` + `requestWorkdir` +
+    `sessionContextKeyFor` + `resolveChatSession` 前导代码,替换为一个 Express
+    中间件(或 `resolveAgentScope(req, res)`)来填充 `req.scope`。波及面广但机械,
+    作为一次聚焦的改动来做。
 - 离线远程推送(FCM / APNs):额度刷新提醒和定时消息发送结果,在 app 被系统完全
   杀掉时也能收到。目前这些依赖 app 进程存活且 SSE 在线;真正的离线推送需要接入
   Firebase Cloud Messaging(Android)/ Apple 推送通知服务(iOS),并在后端加一个
   推送发送端。
-- 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。
+- 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。**2026-06-04 已评估
+  (agy 1.0.5):刻意暂不实现。** agy 基于 Gemini Code Assist
+  (`cloudcode-pa.googleapis.com`),唯一的配额路径是未公开的内部 `v1internal`
+  接口(如 `FetchQuotaStatus` / `GetUsageAndQuota` / `v1internal/credits`)。其
+  配额是基于信用额度的多维模型(prompt / flow / flex / FCA 等多种 credits,分
+  档位、可加购),没有能干净映射到现有"5 小时 / 周剩余"额度 UI 的单一数值,且需
+  逆向 protobuf/gRPC schema、无稳定性保证。会话内的 `/credits` `/limits`
+  `/usage` 斜杠命令只在交互式 TUI 里(不可脚本化)。待 Google 提供官方、可脚本化
+  的配额来源再做;在此之前 `usage.js` 继续把 agy 报告为 `not_available_yet`。

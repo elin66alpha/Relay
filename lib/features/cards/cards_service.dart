@@ -7,6 +7,7 @@ import '../../core/models/card_model.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/storage/device_id_store.dart';
 import '../../core/storage/machine_credentials_store.dart';
+import '../../core/storage/workdir_store.dart';
 
 /// HTTP client for the Card Mode endpoints. Mirrors the connection logic of
 /// [BackendClient] (same credential/device-id/bearer-token headers and base
@@ -17,13 +18,16 @@ class CardsService {
     http.Client? httpClient,
     MachineCredentialsStore? credentialsStore,
     DeviceIdStore? deviceIdStore,
+    WorkdirStore? workdirStore,
   })  : _httpClient = httpClient ?? http.Client(),
         _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
-        _deviceIdStore = deviceIdStore ?? DeviceIdStore();
+        _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
+        _workdirStore = workdirStore ?? WorkdirStore();
 
   final http.Client _httpClient;
   final MachineCredentialsStore _credentialsStore;
   final DeviceIdStore _deviceIdStore;
+  final WorkdirStore _workdirStore;
 
   Future<List<CardModel>> getCards() async {
     final Object? decoded = await _requestJson('GET', '/api/cards');
@@ -109,11 +113,13 @@ class CardsService {
 
   Future<Map<String, String>> _headers(MachineCredential credential) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
+    final String? workdir = await _workdirStore.read();
     return <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
+      if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
     };
   }
 
