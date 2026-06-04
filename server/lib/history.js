@@ -263,6 +263,7 @@ module.exports = {
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
   clearHistory,
+  historyScopesFor,
   searchHistory,
   markdownForConversation,
 };

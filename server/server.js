@@ -82,7 +82,7 @@ const {
   reconcileRunningSchedules,
 } = require('./lib/quota-schedules');
 const cards = require('./lib/cards');
-const { generateCardsForAllAgents } = require('./lib/chat-learner');
+const { generateCardsForWorkdir } = require('./lib/chat-learner');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -1981,26 +1981,32 @@ app.get('/api/events', (req, res) => {
 });
 
 // --- Card Mode (additive secondary surface; does not touch chat) ---
-app.get('/api/cards', (_req, res) => {
-  return res.json({ cards: cards.getActiveCards() });
+app.get('/api/cards', (req, res) => {
+  const workdir = eventWorkdir(req);
+  return res.json({ workdir, cards: cards.getActiveCards(workdir) });
 });
 
 app.post('/api/cards/feedback', (req, res) => {
+  const workdir = eventWorkdir(req);
   const cardId = String(req.body.cardId || '').trim();
   const gesture = String(req.body.gesture || '').trim();
   const deferUntil = req.body.deferUntil ? String(req.body.deferUntil) : null;
   if (!cardId || !gesture) {
     return res.status(400).json({ error: 'cardId and gesture are required' });
   }
-  if (!cards.applyFeedback(cardId, gesture, deferUntil)) {
+  if (!cards.applyFeedback(cardId, gesture, deferUntil, workdir)) {
     return res.status(400).json({ error: 'unknown card or gesture' });
   }
   return res.json({ ok: true });
 });
 
-app.post('/api/cards/refresh', (_req, res) => {
-  const generated = cards.replaceGeneratedCards(generateCardsForAllAgents());
-  return res.json({ generated });
+app.post('/api/cards/refresh', (req, res) => {
+  const workdir = eventWorkdir(req);
+  const generated = cards.replaceGeneratedCards(
+    generateCardsForWorkdir(workdir),
+    workdir,
+  );
+  return res.json({ workdir, generated });
 });
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
@@ -2044,8 +2050,12 @@ app.listen(PORT, HOST, () => {
   }
   // Card Mode: seed suggestions once if none are pending yet.
   try {
-    if (cards.pendingCount() === 0) {
-      cards.replaceGeneratedCards(generateCardsForAllAgents());
+    const defaultWorkdir = getDefaultWorkdir();
+    if (cards.pendingCountForWorkdir(defaultWorkdir) === 0) {
+      cards.replaceGeneratedCards(
+        generateCardsForWorkdir(defaultWorkdir),
+        defaultWorkdir,
+      );
     }
   } catch (_err) {
     // Non-fatal; Card Mode is a secondary feature.

@@ -44,6 +44,8 @@
 
 ### 后续提升
 
+- 随着 API 面继续扩大，逐步把 `server/server.js` 中的路由拆到更聚焦的后端
+  route 模块里；保持现有 Express 行为稳定，同时降低长期维护风险。
 - 离线远程推送(FCM / APNs):额度刷新提醒和定时消息发送结果,在 app 被系统完全
   杀掉时也能收到。目前这些依赖 app 进程存活且 SSE 在线;真正的离线推送需要接入
   Firebase Cloud Messaging(Android)/ Apple 推送通知服务(iOS),并在后端加一个

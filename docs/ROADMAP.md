@@ -56,6 +56,9 @@ Reuse boundaries:
 
 ### Later Improvements
 
+- Gradually split `server/server.js` routes into focused backend route modules
+  as the API surface grows, keeping the current Express behavior stable while
+  reducing long-term maintenance risk.
 - Offline remote push (FCM / APNs) for quota-reset alerts and scheduled-message
   results, so they arrive even when the app is fully killed. Today these rely on
   the app process being alive with the SSE stream connected; true offline push

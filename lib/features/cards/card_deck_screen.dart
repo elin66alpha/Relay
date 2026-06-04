@@ -158,7 +158,11 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     if (widget.agentsController.activeAgentKey != card.agentKey) {
       await widget.agentsController.setActive(card.agentKey);
     }
-    await widget.chatController.loadFor(cliAgentByKey(card.agentKey), machine);
+    final CliAgent agent = cliAgentByKey(card.agentKey);
+    await widget.chatController.loadFor(agent, machine);
+    if (card.sessionId.isNotEmpty) {
+      await widget.chatController.selectSession(agent, card.sessionId);
+    }
     if (!mounted) return;
     Navigator.of(context).pop();
     unawaited(widget.chatController.sendUserText(card.prompt));

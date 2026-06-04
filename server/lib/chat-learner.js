@@ -1,35 +1,37 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-
 const { listAgents } = require('./agents');
+const { LEGACY_SESSION_ID, listChatSessions } = require('./chat-sessions');
+const { historyScopesFor } = require('./history');
 
 // Generates candidate suggestion cards from existing chat history. No ML —
-// keyword matching only. Reads the same chat-history.json that GET /api/history
-// serves; history is keyed by `deviceId:agentKey`, so for a given agent we
-// merge messages across all devices.
-const HISTORY_FILE = path.join(__dirname, '..', 'chat-history.json');
+// keyword matching only. Reads the same scoped history that GET /api/history
+// serves: `workdir\0agentKey[\0sessionId]`.
 const RECENT_LIMIT = 60;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const SCOPE_SEPARATOR = '\u0000';
+const MAX_CARDS_PER_WORKDIR = 12;
 
-function loadHistory() {
+function contextKeyFor(workdir, agentKey) {
+  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
+}
+
+function sessionNameFor(workdir, agentKey, sessionId) {
+  const id = sessionId || LEGACY_SESSION_ID;
   try {
-    return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+    const context = listChatSessions(contextKeyFor(workdir, agentKey));
+    const match = context.sessions.find((session) => session.id === id);
+    return match ? match.name : id;
   } catch (_err) {
-    return {};
+    return id === LEGACY_SESSION_ID ? 'Main' : id;
   }
 }
 
-// Most recent messages for one agent across all devices, oldest-first.
-function recentMessagesFor(agentKey, limit = RECENT_LIMIT) {
-  const all = loadHistory();
-  const messages = [];
-  for (const [scopeKey, list] of Object.entries(all)) {
-    if (!Array.isArray(list)) continue;
-    if (!scopeKey.endsWith(`:${agentKey}`)) continue;
-    for (const m of list) messages.push(m);
-  }
+// Most recent messages for one concrete workdir+agent+session scope, oldest-first.
+function recentMessagesForScope(scope, limit = RECENT_LIMIT) {
+  const messages = Array.isArray(scope && scope.messages)
+    ? scope.messages.slice()
+    : [];
   messages.sort((a, b) =>
     String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
   );
@@ -45,17 +47,27 @@ function hasLongCodeBlock(text, minLines) {
   return false;
 }
 
-// Generates up to 4 cards for one agent from its recent history.
-function generateCards(agentKey) {
-  const messages = recentMessagesFor(agentKey, RECENT_LIMIT);
+// Generates up to 4 cards for one workdir+agent+session from its recent history.
+function generateCardsForScope(scope) {
+  const agentKey = scope.agentKey;
+  const workdir = scope.workdir;
+  const sessionId = scope.sessionId || LEGACY_SESSION_ID;
+  const sessionName = sessionNameFor(workdir, agentKey, sessionId);
+  const messages = recentMessagesForScope(scope, RECENT_LIMIT);
   if (messages.length === 0) return [];
 
   const text = messages.map((m) => String(m.content || '')).join('\n');
   const cards = [];
+  const base = {
+    agentKey,
+    workdir,
+    sessionId,
+    sessionName,
+  };
 
   if (/error|exception|traceback|TypeError|NullPointer|undefined is not/i.test(text)) {
     cards.push({
-      agentKey,
+      ...base,
       title: 'Debug recent error',
       reason: 'An error or exception showed up in your recent conversation.',
       prompt: 'Review the error in our recent conversation and suggest a fix',
@@ -74,7 +86,7 @@ function generateCards(agentKey) {
   });
   if (ranTestsRecently) {
     cards.push({
-      agentKey,
+      ...base,
       title: 'Run tests again',
       reason: 'You ran the test suite recently.',
       prompt: 'Run the test suite and summarize any failures',
@@ -85,7 +97,7 @@ function generateCards(agentKey) {
 
   if (hasLongCodeBlock(text, 20)) {
     cards.push({
-      agentKey,
+      ...base,
       title: 'Explain this code',
       reason: 'A long code block was shared recently.',
       prompt: 'Explain the code we discussed recently, section by section',
@@ -96,7 +108,7 @@ function generateCards(agentKey) {
 
   if (/[^\s]*[/\\][^\s]*\.[A-Za-z0-9]{1,8}(\s|$)/m.test(text)) {
     cards.push({
-      agentKey,
+      ...base,
       title: 'Review recent file changes',
       reason: 'File paths came up in your recent conversation.',
       prompt: 'Review the file changes we discussed and suggest improvements',
@@ -107,7 +119,7 @@ function generateCards(agentKey) {
 
   if (cards.length === 0) {
     cards.push({
-      agentKey,
+      ...base,
       title: 'Summarize our session',
       reason: 'A quick recap of your recent session.',
       prompt:
@@ -120,12 +132,17 @@ function generateCards(agentKey) {
   return cards.slice(0, 4);
 }
 
-function generateCardsForAllAgents() {
+function generateCardsForWorkdir(workdir) {
+  const targetWorkdir = String(workdir || '').trim();
+  if (!targetWorkdir) return [];
+  const agentKeys = new Set(listAgents().map((agent) => agent.key));
   const all = [];
-  for (const agent of listAgents()) {
-    all.push(...generateCards(agent.key));
+  for (const scope of historyScopesFor({ workdir: targetWorkdir })) {
+    if (!agentKeys.has(scope.agentKey)) continue;
+    all.push(...generateCardsForScope(scope));
   }
-  return all;
+  all.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  return all.slice(0, MAX_CARDS_PER_WORKDIR);
 }
 
-module.exports = { generateCards, generateCardsForAllAgents };
+module.exports = { generateCardsForScope, generateCardsForWorkdir };

@@ -5,8 +5,9 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Card store for Card Mode suggestions. Persisted to server/cards.json, keyed
-// by a flat array under { "cards": [...] }. Cards are global (per agent), not
-// per device. Mirrors the persistence style of history.js (0o600 file).
+// by a flat array under { "cards": [...] }. Cards are scoped by workdir and
+// may also point at the source agent session. Mirrors the persistence style of
+// history.js (0o600 file).
 const CARDS_FILE = path.join(__dirname, '..', 'cards.json');
 
 function loadAll() {
@@ -29,7 +30,11 @@ if (!fs.existsSync(CARDS_FILE)) {
 
 // Returns pending cards. Deferred cards whose deferUntil has passed are
 // promoted back to pending (and persisted) before returning.
-function getActiveCards() {
+function matchesWorkdir(card, workdir) {
+  return String((card && card.workdir) || '') === String(workdir || '');
+}
+
+function getActiveCards(workdir) {
   const all = loadAll();
   const now = Date.now();
   let changed = false;
@@ -46,7 +51,9 @@ function getActiveCards() {
     }
   }
   if (changed) saveAll(all);
-  return all.cards.filter((c) => c.status === 'pending');
+  return all.cards.filter(
+    (c) => c.status === 'pending' && matchesWorkdir(c, workdir),
+  );
 }
 
 const GESTURE_STATUS = {
@@ -57,11 +64,13 @@ const GESTURE_STATUS = {
 };
 
 // Applies a swipe gesture to one card. Returns false for unknown card/gesture.
-function applyFeedback(cardId, gesture, deferUntil) {
+function applyFeedback(cardId, gesture, deferUntil, workdir) {
   const status = GESTURE_STATUS[gesture];
   if (!status) return false;
   const all = loadAll();
-  const card = all.cards.find((c) => c.id === cardId);
+  const card = all.cards.find(
+    (c) => c.id === cardId && matchesWorkdir(c, workdir),
+  );
   if (!card) return false;
   card.status = status;
   card.deferUntil = gesture === 'defer' ? deferUntil || null : null;
@@ -72,13 +81,21 @@ function applyFeedback(cardId, gesture, deferUntil) {
 
 // Drops existing pending cards (keeps deferred/executed/etc.), inserts the new
 // ones as pending, and persists. Returns the number inserted.
-function replaceGeneratedCards(newCards) {
+function replaceGeneratedCards(newCards, workdir) {
   const all = loadAll();
-  const kept = all.cards.filter((c) => c.status !== 'pending');
+  const scopedWorkdir = String(workdir || '').trim();
+  const kept = all.cards.filter(
+    (c) =>
+      c.status !== 'pending' ||
+      (String(c.workdir || '') && !matchesWorkdir(c, scopedWorkdir)),
+  );
   const now = new Date().toISOString();
   const prepared = (Array.isArray(newCards) ? newCards : []).map((c) => ({
     id: crypto.randomUUID(),
     agentKey: c.agentKey,
+    workdir: c.workdir || scopedWorkdir,
+    sessionId: c.sessionId || '',
+    sessionName: c.sessionName || '',
     title: c.title,
     reason: c.reason || '',
     prompt: c.prompt,
@@ -98,9 +115,16 @@ function pendingCount() {
   return loadAll().cards.filter((c) => c.status === 'pending').length;
 }
 
+function pendingCountForWorkdir(workdir) {
+  return loadAll().cards.filter(
+    (c) => c.status === 'pending' && matchesWorkdir(c, workdir),
+  ).length;
+}
+
 module.exports = {
   getActiveCards,
   applyFeedback,
   replaceGeneratedCards,
   pendingCount,
+  pendingCountForWorkdir,
 };
