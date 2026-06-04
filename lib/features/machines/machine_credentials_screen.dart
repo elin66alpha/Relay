@@ -314,6 +314,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   }
 
   Future<void> _testActive() async {
+    final MachineCredential? active = widget.machinesController.activeMachine;
     setState(() => _isTesting = true);
     final BackendClient client = BackendClient();
     try {
@@ -321,6 +322,13 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       _showMessage(
         ok ? context.l10n.connectionOk : context.l10n.backendNotOk,
         error: !ok,
+      );
+    } on BackendException catch (err) {
+      _showMessage(
+        active != null
+            ? _credentialConnectionMessage(active, err)
+            : context.l10n.connectionFailed(err.message),
+        error: true,
       );
     } catch (err) {
       _showMessage(context.l10n.connectionFailed(err), error: true);
@@ -406,51 +414,62 @@ class _EmptyCredentialState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(
-                Icons.vpn_key_outlined,
-                size: 48,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(height: 18),
-              Text(
-                context.l10n.importMachineCredential,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
+    // Stay centered when the viewport is tall enough, but scroll instead of
+    // overflowing on short viewports (landscape, split-screen, large fonts).
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(
+                        Icons.vpn_key_outlined,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        context.l10n.importMachineCredential,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        context.l10n.emptyCredentialText,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.outline,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      _CredentialActionButtons(
+                        active: null,
+                        isImporting: isImporting,
+                        isTesting: false,
+                        showCameraScan: showCameraScan,
+                        onScan: onScan,
+                        onPaste: onPaste,
+                        onUpload: onUpload,
+                        onTest: null,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                context.l10n.emptyCredentialText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 22),
-              _CredentialActionButtons(
-                active: null,
-                isImporting: isImporting,
-                isTesting: false,
-                showCameraScan: showCameraScan,
-                onScan: onScan,
-                onPaste: onPaste,
-                onUpload: onUpload,
-                onTest: null,
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

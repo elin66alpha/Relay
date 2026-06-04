@@ -39,7 +39,8 @@ class BotChatScreen extends StatefulWidget {
   State<BotChatScreen> createState() => _BotChatScreenState();
 }
 
-class _BotChatScreenState extends State<BotChatScreen> {
+class _BotChatScreenState extends State<BotChatScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
@@ -49,6 +50,7 @@ class _BotChatScreenState extends State<BotChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.chatController.addListener(_onChatChanged);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
@@ -59,7 +61,20 @@ class _BotChatScreenState extends State<BotChatScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Coming back to the foreground, the OS may have torn down the long-lived
+    // event SSE while the backend kept running a turn. Reconnect it right away
+    // so a turn that continued in the background is mirrored without waiting for
+    // the periodic reconnect.
+    if (state == AppLifecycleState.resumed) {
+      widget.chatController.reconnectEvents();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.chatController.removeListener(_onChatChanged);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);

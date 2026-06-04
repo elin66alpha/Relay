@@ -48,4 +48,12 @@
   杀掉时也能收到。目前这些依赖 app 进程存活且 SSE 在线;真正的离线推送需要接入
   Firebase Cloud Messaging(Android)/ Apple 推送通知服务(iOS),并在后端加一个
   推送发送端。
-- 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。
+- 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。**2026-06-04 已评估
+  (agy 1.0.5):刻意暂不实现。** agy 基于 Gemini Code Assist
+  (`cloudcode-pa.googleapis.com`),唯一的配额路径是未公开的内部 `v1internal`
+  接口(如 `FetchQuotaStatus` / `GetUsageAndQuota` / `v1internal/credits`)。其
+  配额是基于信用额度的多维模型(prompt / flow / flex / FCA 等多种 credits,分
+  档位、可加购),没有能干净映射到现有"5 小时 / 周剩余"额度 UI 的单一数值,且需
+  逆向 protobuf/gRPC schema、无稳定性保证。会话内的 `/credits` `/limits`
+  `/usage` 斜杠命令只在交互式 TUI 里(不可脚本化)。待 Google 提供官方、可脚本化
+  的配额来源再做;在此之前 `usage.js` 继续把 agy 报告为 `not_available_yet`。

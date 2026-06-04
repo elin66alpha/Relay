@@ -375,6 +375,33 @@ class AppStrings {
   String get backendNotOk => isZh ? '后端没有返回 ok。' : 'Backend did not return ok.';
   String connectionFailed(Object err) =>
       isZh ? '连接失败：$err' : 'Connection failed: $err';
+  // Human-readable message for a low-level network failure, keyed by the
+  // BackendException network code (see BackendClient._networkExceptionFor).
+  String networkError(String? code) {
+    switch (code) {
+      case 'NETWORK_HOST_LOOKUP':
+        return isZh
+            ? '无法解析后端地址。请检查网络连接，或确认凭证里的地址仍然有效（quick tunnel 地址会变化，需重新生成二维码）。'
+            : 'Cannot resolve the backend address. Check your network, or confirm the credential URL is still valid (quick-tunnel URLs change — regenerate the QR).';
+      case 'NETWORK_CONNECTION_REFUSED':
+        return isZh
+            ? '后端拒绝连接。请确认 Relay 后端正在运行并监听对应端口。'
+            : 'The backend refused the connection. Make sure the Relay backend is running and listening on the expected port.';
+      case 'NETWORK_UNREACHABLE':
+        return isZh
+            ? '无法连接到后端。请检查网络是否可用、后端是否在线。'
+            : 'Cannot reach the backend. Check that your network is available and the backend is online.';
+      case 'NETWORK_TIMEOUT':
+        return isZh
+            ? '连接后端超时。请确认后端在线后重试。'
+            : 'Timed out reaching the backend. Make sure it is online and try again.';
+      default:
+        return isZh
+            ? '网络错误：无法连接到后端。请检查网络后重试。'
+            : 'Network error: cannot reach the backend. Check your connection and try again.';
+    }
+  }
+
   String deleteMachine(String name) => isZh ? '删除 $name？' : 'Delete $name?';
   String get deleteMachineBody => isZh
       ? '删除后需要重新扫描这台机器的凭证二维码。'

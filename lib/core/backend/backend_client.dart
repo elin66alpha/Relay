@@ -864,30 +864,50 @@ class BackendClient {
 
     ChatReply? reply;
     BackendException? streamError;
-    await for (final BackendEvent event
-        in _parseSse(response.stream).timeout(const Duration(minutes: 65))) {
-      if (event.type == 'ready' || event.type == 'heartbeat') continue;
-      onEvent(event);
-      if (event.type == 'agent_done') {
-        reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
-      } else if (event.type == 'agent_cancelled') {
-        streamError = BackendException(
-          'request cancelled',
-          status: 499,
-          code: 'AGENT_CANCELLED',
-        );
-      } else if (event.type == 'agent_error') {
-        final String? code = event.data['code'] as String?;
-        streamError = BackendException(
-          event.data['error'] as String? ?? 'Agent stream failed.',
-          status: code == 'NOT_LOGGED_IN' ? 424 : 500,
-          code: code,
-        );
+    try {
+      await for (final BackendEvent event
+          in _parseSse(response.stream).timeout(const Duration(minutes: 65))) {
+        if (event.type == 'ready' || event.type == 'heartbeat') continue;
+        onEvent(event);
+        if (event.type == 'agent_done') {
+          reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
+        } else if (event.type == 'agent_cancelled') {
+          streamError = BackendException(
+            'request cancelled',
+            status: 499,
+            code: 'AGENT_CANCELLED',
+          );
+        } else if (event.type == 'agent_error') {
+          final String? code = event.data['code'] as String?;
+          streamError = BackendException(
+            event.data['error'] as String? ?? 'Agent stream failed.',
+            status: code == 'NOT_LOGGED_IN' ? 424 : 500,
+            code: code,
+          );
+        }
       }
+    } on http.ClientException {
+      // The app was backgrounded/closed and the OS tore down the socket while
+      // the backend keeps running the turn. A distinct code lets the caller
+      // reattach to the still-running turn instead of marking it failed.
+      throw BackendException(
+        'Lost the connection to the agent stream.',
+        code: 'STREAM_DISCONNECTED',
+      );
+    } on TimeoutException {
+      throw BackendException(
+        'The agent stream stalled.',
+        code: 'STREAM_DISCONNECTED',
+      );
     }
     if (streamError != null) throw streamError;
     if (reply == null) {
-      throw BackendException('Agent stream ended without a final response.');
+      // The stream ended without a terminal agent_done — the turn may still be
+      // running on the backend. A distinct code lets the caller reattach.
+      throw BackendException(
+        'Agent stream ended without a final response.',
+        code: 'STREAM_INCOMPLETE',
+      );
     }
     return reply;
   }

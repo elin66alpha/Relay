@@ -54,6 +54,17 @@ class BotChatController extends ChangeNotifier {
   // authoritative history rather than replaying its deltas, which keeps the two
   // views identical without delta/snapshot races.
   bool _remoteActive = false;
+  // True only while THIS device's POST /api/chat SSE stream is actively driving
+  // the current turn. When it is false, an in-flight turn (one we started whose
+  // stream dropped, or one restored from history on a cold start) is mirrored
+  // from shared history + events instead of a local stream. This gates both the
+  // "ignore my own echo" event filter and the "don't clobber my stream" poll
+  // skip, so a dropped/absent stream no longer blocks reattachment.
+  bool _localStreamActive = false;
+  // The requestId of a turn we reattached to after our stream dropped. Polling
+  // ends the mirror once history shows this turn finalized, so we recover even
+  // if the shared event stream misses the agent_done edge during the reconnect.
+  String? _reattachRequestId;
   int _quotaScheduleRevision = 0;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
@@ -246,6 +257,8 @@ class BotChatController extends ChangeNotifier {
     _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _localStreamActive = false;
+    _reattachRequestId = null;
     _remoteActive = false;
     _remoteSettleTimer?.cancel();
     _stopHistoryPolling();
@@ -313,7 +326,7 @@ class BotChatController extends ChangeNotifier {
         requestId: requestId,
       );
     } catch (err) {
-      _lastError = err.toString();
+      _lastError = _friendlyError(err);
       rethrow;
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
@@ -346,7 +359,7 @@ class BotChatController extends ChangeNotifier {
         // outcome instead of forcing a cancelled state here.
         return;
       }
-      _lastError = err.toString();
+      _lastError = _friendlyError(err);
     } finally {
       notifyListeners();
     }
@@ -492,6 +505,8 @@ class BotChatController extends ChangeNotifier {
     _isThinking = false;
     _isCancelling = false;
     _activeRequestId = null;
+    _localStreamActive = false;
+    _reattachRequestId = null;
     _remoteActive = false;
     _remoteSettleTimer?.cancel();
     _stopHistoryPolling();
@@ -609,13 +624,28 @@ class BotChatController extends ChangeNotifier {
         return;
       }
       if (history.isEmpty) return;
-      // Never clobber our own in-flight turn (our chat stream is the smoother,
-      // authoritative source for it); only mirror when the activity is remote.
-      if (_isThinking && !_remoteActive) return;
+      // Never clobber a turn our own POST stream is actively driving (that
+      // stream is the smoother, authoritative source). Once it drops or is
+      // absent (reattach / cold-start restore), polling becomes authoritative.
+      if (_localStreamActive) return;
       _messages
         ..clear()
         ..addAll(history);
       _restorePendingTurnFromHistory();
+      // If we reattached to a dropped turn, end the mirror once history shows it
+      // finalized — even if the shared event stream missed agent_done while it
+      // was reconnecting. The placeholder always exists here (the turn was
+      // already in flight), so a non-streaming entry means it really finished.
+      final String? reattachId = _reattachRequestId;
+      if (reattachId != null) {
+        final int idx = _assistantIndexForRequest(reattachId);
+        final bool stillStreaming =
+            idx != -1 && _messages[idx].metadata[_streamingKey] == true;
+        if (idx != -1 && !stillStreaming) {
+          _reattachRequestId = null;
+          _endRemoteMirror();
+        }
+      }
       if (!(_isThinking || _remoteActive)) _stopHistoryPolling();
       notifyListeners();
     } catch (_) {
@@ -650,12 +680,14 @@ class BotChatController extends ChangeNotifier {
   Future<void> _runTurn(CliAgent agent, ChatMessage userMessage) async {
     _isThinking = true;
     _isCancelling = false;
+    _localStreamActive = true;
     _lastError = null;
     notifyListeners();
 
     final String requestId = _newRequestId(agent);
     _activeRequestId = requestId;
 
+    bool reattach = false;
     try {
       final String sessionId = await _ensureActiveSessionId(agent);
       _insertAwaitingAssistant(requestId: requestId);
@@ -678,9 +710,15 @@ class BotChatController extends ChangeNotifier {
     } catch (err) {
       if (err is BackendException && err.code == 'AGENT_CANCELLED') {
         _markAssistantCancelled(requestId);
+      } else if (_isStreamDisconnect(err)) {
+        // The stream dropped (app backgrounded/closed, flaky network) but the
+        // backend keeps running this turn. Keep the streaming placeholder and
+        // the user message as-is; hand off to history polling + the shared
+        // event stream, which mirror progress and finalize when it completes.
+        reattach = true;
       } else {
         _discardAssistantByRequestId(requestId);
-        String detail = err.toString();
+        String detail = _friendlyError(err);
         if (err is BackendException && err.code == 'AGENT_BUSY') {
           detail = _strings.agentBusyRetryLater;
         } else if (err is BackendException && err.code == 'NOT_LOGGED_IN') {
@@ -693,13 +731,35 @@ class BotChatController extends ChangeNotifier {
       }
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
+      _localStreamActive = false;
       _isThinking = false;
       _isCancelling = false;
+      if (reattach) {
+        // Resume mirroring this still-running turn from shared state. Tracking
+        // the requestId lets polling end the mirror once it finalizes.
+        _reattachRequestId = requestId;
+        _beginRemoteMirror();
+      }
       notifyListeners();
       // A remote turn may have started and finished on this scope while ours was
       // in flight (we skip mirroring then). Catch up to the shared truth now.
-      unawaited(_catchUpHistory());
+      if (!reattach) unawaited(_catchUpHistory());
     }
+  }
+
+  // True when a send failed because the stream/connection dropped rather than
+  // because the agent reported a terminal result. The backend turn may still be
+  // running, so the caller should reattach instead of failing the turn.
+  bool _isStreamDisconnect(Object err) {
+    if (err is TimeoutException) return true;
+    if (err is BackendException) {
+      final String? code = err.code;
+      if (code == 'STREAM_DISCONNECTED' || code == 'STREAM_INCOMPLETE') {
+        return true;
+      }
+      if (code != null && code.startsWith('NETWORK_')) return true;
+    }
+    return false;
   }
 
   // One-shot pull of the shared history, used after our own turn ends to pick up
@@ -884,6 +944,19 @@ class BotChatController extends ChangeNotifier {
     );
   }
 
+  // Turn a thrown error into a message a user can act on. Low-level network
+  // failures (BackendException with a NETWORK_* code) become localized guidance;
+  // other backend errors show their server message without the wrapper prefix.
+  String _friendlyError(Object err) {
+    if (err is BackendException) {
+      if (err.code?.startsWith('NETWORK_') ?? false) {
+        return _strings.networkError(err.code);
+      }
+      return err.message;
+    }
+    return err.toString();
+  }
+
   void _markUserDeliveryFailed(String localId, String detail) {
     final int index = _messages.indexWhere((ChatMessage m) => m.id == localId);
     if (index == -1) return;
@@ -1010,8 +1083,10 @@ class BotChatController extends ChangeNotifier {
 
     final String requestId = event.data['requestId'] as String? ?? '';
     if (requestId.isEmpty) return;
-    // Our own turn is driven by the chat POST stream; ignore its echo here.
-    if (requestId == _activeRequestId) return;
+    // Ignore the echo of our own turn only while our POST stream is actively
+    // driving it. If that stream dropped, these shared events are how we learn
+    // the still-running turn progressed and finished.
+    if (requestId == _activeRequestId && _localStreamActive) return;
     // Only mirror activity for the agent we are currently viewing.
     final Map<String, Object?> agentData =
         (event.data['agent'] as Map?)?.cast<String, Object?>() ??

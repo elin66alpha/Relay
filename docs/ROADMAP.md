@@ -61,4 +61,15 @@ Reuse boundaries:
   the app process being alive with the SSE stream connected; true offline push
   needs Firebase Cloud Messaging (Android) / Apple Push Notification service
   (iOS) plus a backend push sender.
-- Better Antigravity quota support when an API or reliable CLI source is available.
+- Better Antigravity quota support when an API or reliable CLI source is
+  available. **Evaluated 2026-06-04 (agy 1.0.5): not implemented on purpose.**
+  agy is built on Gemini Code Assist (`cloudcode-pa.googleapis.com`), and its
+  only quota path is the undocumented internal `v1internal` API (e.g.
+  `FetchQuotaStatus` / `GetUsageAndQuota` / `v1internal/credits`). That model is
+  credit-based and multi-dimensional (prompt / flow / flex / FCA credits across
+  tiers, `can_buy_more_credits`), with no clean "5-hour / weekly remaining"
+  value to map onto the existing usage UI, and it would require reverse-
+  engineering protobuf/gRPC schemas with no stability guarantee. The in-session
+  `/credits` `/limits` `/usage` slash commands are interactive-only (not
+  scriptable subcommands). Revisit when Google ships an official, scriptable
+  quota source; until then keep `usage.js` reporting agy as `not_available_yet`.
