@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
 
 class QuotaUsageScreen extends StatefulWidget {
@@ -142,7 +143,7 @@ class _UsageAgentPanel extends StatelessWidget {
                 if (agent.asOf != null)
                   Text(
                     context.l10n.usageAsOf(
-                      _formatUsageTime(context, agent.asOf),
+                      formatShortTime(context, agent.asOf),
                     ),
                     style: TextStyle(color: colors.outline, fontSize: 12),
                   ),
@@ -231,7 +232,7 @@ class _UsageQuotaRow extends StatelessWidget {
                     Text('$percentText ${context.l10n.remaining}'),
                     const SizedBox(height: 3),
                     Text(
-                      '${context.l10n.refreshAt}: ${_formatUsageTime(context, quota.resetsAt)}',
+                      '${context.l10n.refreshAt}: ${formatShortTime(context, quota.resetsAt)}',
                       style: TextStyle(color: colors.outline, fontSize: 12),
                     ),
                   ],
@@ -249,13 +250,4 @@ class _UsageQuotaRow extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatUsageTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }

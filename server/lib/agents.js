@@ -574,21 +574,18 @@ const AGENTS = {
     key: 'claude',
     label: 'Claude Code',
     description: 'Anthropic Claude Code CLI',
-    emoji: 'C',
     run: runClaude,
   },
   codex: {
     key: 'codex',
     label: 'Codex',
     description: 'OpenAI Codex CLI',
-    emoji: 'X',
     run: runCodex,
   },
   agy: {
     key: 'agy',
     label: 'Antigravity',
     description: 'Antigravity CLI',
-    emoji: 'A',
     run: runAgy,
   },
 };

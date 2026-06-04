@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
 
 class QuotaSchedulerScreen extends StatefulWidget {
@@ -258,7 +259,7 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
             constraints: const BoxConstraints(maxWidth: 880),
             child: _QuotaSchedulerRow(
               agentName: agent.label,
-              refreshTime: _formatQuotaTime(
+              refreshTime: formatShortTime(
                 context,
                 quota?.resetsAt ?? schedule?.targetResetsAt,
               ),
@@ -421,13 +422,4 @@ UsageQuota? _fiveHourQuota(UsageAgent agent) {
     if (quota.key == 'five_hour') return quota;
   }
   return null;
-}
-
-String _formatQuotaTime(BuildContext context, String? iso) {
-  if (iso == null || iso.isEmpty) return context.l10n.unknown;
-  final DateTime? parsed = DateTime.tryParse(iso);
-  if (parsed == null) return context.l10n.unknown;
-  final DateTime local = parsed.toLocal();
-  String two(int value) => value.toString().padLeft(2, '0');
-  return '${two(local.month)}/${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }

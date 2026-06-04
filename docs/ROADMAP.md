@@ -59,6 +59,25 @@ Reuse boundaries:
 - Gradually split `server/server.js` routes into focused backend route modules
   as the API surface grows, keeping the current Express behavior stable while
   reducing long-term maintenance risk.
+- **Deferred refactors (surfaced by the 2026-06-04 code-quality pass; each
+  needs its own tested change because it touches behavior, not just shape):**
+  - Extract a shared `runAgentTurn({ scopeKey, agent, session, prompt, ... })`
+    into a `lib/` module so `/api/chat` and `runScheduledQuotaMessage` stop
+    duplicating the whole agent-turn lifecycle (history persistence closures,
+    `emitRunEvent` fan-out, the `enqueueScope` → run → `broadcastScope`
+    choreography — ~130 near-identical lines). Pair it with a per-request
+    `responder` that picks SSE vs JSON once, replacing the ~8 scattered
+    `if (streaming) writeStreamEvent(...) else res.json(...)` forks. High value
+    but it sits on the hottest path, so it must land with dedicated tests.
+  - Give `history.js` an in-memory copy of the parsed history (lazy-loaded,
+    mutated in place) with debounced disk writes, instead of re-reading and
+    re-writing the entire `chat-history.json` on every streaming delta and every
+    operation. Real win on the streaming hot path, but it changes crash-
+    durability and multi-process assumptions, so evaluate those before doing it.
+  - Replace the repeated `getAgent` + `requestWorkdir` + `sessionContextKeyFor`
+    + `resolveChatSession` preamble across ~10 handlers with one Express
+    middleware (or `resolveAgentScope(req, res)`) populating `req.scope`. Broad
+    but mechanical; do it as a focused pass.
 - Offline remote push (FCM / APNs) for quota-reset alerts and scheduled-message
   results, so they arrive even when the app is fully killed. Today these rely on
   the app process being alive with the SSE stream connected; true offline push

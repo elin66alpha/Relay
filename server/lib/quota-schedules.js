@@ -66,9 +66,7 @@ function publicSchedule(schedule) {
 
 function listQuotaSchedules({ includeFinished = true, workdir } = {}) {
   const schedules = readQuotaSchedules();
-  const filtered = includeFinished
-    ? schedules
-    : schedules.filter((item) => ['pending', 'running'].includes(item.status));
+  const filtered = includeFinished ? schedules : schedules.filter(isActive);
   return filtered
     .filter((item) => !workdir || item.workdir === workdir)
     .slice()

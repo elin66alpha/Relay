@@ -29,18 +29,6 @@ function readHistory(scopeKey) {
   return Array.isArray(list) ? list : [];
 }
 
-function appendHistory(scopeKey, messages) {
-  if (!Array.isArray(messages) || messages.length === 0) return;
-  const all = loadAll();
-  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
-  list.push(...messages);
-  if (list.length > MAX_PER_SCOPE) {
-    list.splice(0, list.length - MAX_PER_SCOPE);
-  }
-  all[scopeKey] = list;
-  saveAll(all);
-}
-
 function upsertHistoryMessage(scopeKey, message) {
   if (!message || !message.id) return;
   const all = loadAll();
@@ -79,12 +67,12 @@ function updateHistoryMessage(scopeKey, messageId, updater) {
   return true;
 }
 
-function finalizeStaleStreamingHistory(scopeKey) {
-  const all = loadAll();
-  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
+// Rewrite any still-"streaming" messages in a list as cancelled (used when a
+// turn's stream is gone but history was left mid-flight). Returns the new list
+// and how many entries changed.
+function finalizeStreamingList(list, now) {
   let changed = 0;
-  const now = new Date().toISOString();
-  all[scopeKey] = list.map((message) => {
+  const next = list.map((message) => {
     const metadata =
       message &&
       typeof message.metadata === 'object' &&
@@ -104,7 +92,17 @@ function finalizeStaleStreamingHistory(scopeKey) {
       },
     };
   });
-  if (changed > 0) saveAll(all);
+  return { list: next, changed };
+}
+
+function finalizeStaleStreamingHistory(scopeKey) {
+  const all = loadAll();
+  const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
+  const { list: next, changed } = finalizeStreamingList(list, new Date().toISOString());
+  if (changed > 0) {
+    all[scopeKey] = next;
+    saveAll(all);
+  }
   return changed;
 }
 
@@ -114,26 +112,9 @@ function finalizeAllStaleStreamingHistory() {
   const now = new Date().toISOString();
   for (const [scopeKey, list] of Object.entries(all)) {
     if (!Array.isArray(list)) continue;
-    all[scopeKey] = list.map((message) => {
-      const metadata =
-        message &&
-        typeof message.metadata === 'object' &&
-        !Array.isArray(message.metadata)
-          ? message.metadata
-          : {};
-      if (!message || metadata.streaming !== true) return message;
-      changed += 1;
-      return {
-        ...message,
-        updatedAt: now,
-        metadata: {
-          ...metadata,
-          streaming: false,
-          awaitingFirstToken: false,
-          cancelled: true,
-        },
-      };
-    });
+    const result = finalizeStreamingList(list, now);
+    all[scopeKey] = result.list;
+    changed += result.changed;
   }
   if (changed > 0) saveAll(all);
   return changed;
@@ -257,7 +238,6 @@ function markdownForConversation({ agentLabel, sessionName, messages, exportedAt
 
 module.exports = {
   readHistory,
-  appendHistory,
   upsertHistoryMessage,
   updateHistoryMessage,
   finalizeStaleStreamingHistory,
