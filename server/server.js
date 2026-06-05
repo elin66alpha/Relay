@@ -11,8 +11,6 @@ const express = require('express');
 const compression = require('compression');
 
 const {
-  AgentCancelledError,
-  AgentAuthError,
   DEFAULT_AGENT,
   TIMEOUT_MS,
   getAgent,
@@ -72,6 +70,13 @@ const {
   deleteChatSession,
   sessionScopeKey,
 } = require('./lib/chat-sessions');
+const {
+  agentPayload,
+  createChatResponder,
+  createNoopResponder,
+  runAgentTurn,
+  sessionPayload,
+} = require('./lib/agent-turn');
 const {
   cancelQuotaSchedule,
   createQuotaSchedule,
@@ -388,10 +393,6 @@ function scopeKeyFor(agentKey, workdir, sessionId) {
   return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
 }
 
-function sessionPayload(session) {
-  return session ? { id: session.id, name: session.name } : null;
-}
-
 // The work directory for a request: the device's x-workdir header, or the
 // default for a device that has not chosen one yet. The path is created if
 // missing. Throws WorkdirError for an invalid header, handled by the caller.
@@ -511,10 +512,6 @@ function broadcastScope(
   });
 }
 
-function agentPayload(agent) {
-  return { key: agent.key, label: agent.label };
-}
-
 function taskCompletionSnippet(value) {
   const redacted = redactSensitiveText(value);
   const firstLine =
@@ -554,60 +551,18 @@ function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
     .catch((err) => console.warn(`[fcm] task_done: ${err.message}`));
 }
 
-function emitAgentEvent(type, { requestId, agent, session, deviceId, ...payload }) {
-  sendEvent(type, {
-    requestId,
-    deviceId,
-    agent: agentPayload(agent),
-    ...(session ? { session: sessionPayload(session) } : {}),
-    createdAt: new Date().toISOString(),
-    ...payload,
-  });
-}
-
-function wantsChatStream(req) {
-  return String(req.get('accept') || '')
-    .toLowerCase()
-    .includes('text/event-stream');
-}
-
-function writeStreamEvent(res, type, payload) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
-  } catch (_err) {
-    // The client may have closed the app/web tab while the CLI keeps running.
-  }
-}
-
-function endStream(res) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.end();
-  } catch (_err) {
-    // The request can already be gone; the server-side run still finishes.
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function streamTextFallback(res, requestId, agent, session, deviceId, text) {
-  const value = String(text || '');
-  if (!value) return;
-  const chunks = value.match(/[\s\S]{1,64}/g) || [];
-  for (const chunk of chunks) {
-    writeStreamEvent(res, 'agent_delta', {
-      requestId,
-      deviceId,
-      agent: agentPayload(agent),
-      session: sessionPayload(session),
-      text: chunk,
-      createdAt: new Date().toISOString(),
-    });
-    await sleep(18);
-  }
+function agentTurnDependencies() {
+  return {
+    broadcastScope,
+    enqueueScope,
+    getSettings,
+    runAgent,
+    runningScopes,
+    scopeChains,
+    touchChatSession,
+    updateHistoryMessage,
+    upsertHistoryMessage,
+  };
 }
 
 async function runScheduledQuotaMessage(schedule) {
@@ -628,228 +583,62 @@ async function runScheduledQuotaMessage(schedule) {
   const requestId = `quota.${schedule.id}`;
   const deviceId = 'quota-scheduler';
   const scopeKey = scopeKeyFor(agent.key, schedule.workdir, chatSession.id);
-  const createdAt = new Date().toISOString();
-  const historyUserId = `${requestId}:user`;
-  const historyAssistantId = `${requestId}:assistant`;
-  const baseHistoryMetadata = {
-    requestId,
-    agentKey: agent.key,
-    agentLabel: agent.label,
-    sessionId: chatSession.id,
-    sessionName: chatSession.name,
-    scheduledQuotaMessageId: schedule.id,
-    quotaSourceKey: schedule.sourceKey,
-  };
 
-  upsertHistoryMessage(scopeKey, {
-    id: historyUserId,
-    role: 'user',
-    content: schedule.prompt,
-    agent: agent.key,
-    createdAt,
-    metadata: baseHistoryMetadata,
-  });
-  upsertHistoryMessage(scopeKey, {
-    id: historyAssistantId,
-    role: 'assistant',
-    content: '',
-    agent: agent.key,
-    createdAt,
-    metadata: {
-      ...baseHistoryMetadata,
-      streaming: true,
-      awaitingFirstToken: true,
-      progressLines: ['Scheduled after quota reset.'],
-    },
-  });
-
-  const updateAssistantHistory = (updater) => {
-    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
-      const currentMetadata =
-        message &&
-        typeof message.metadata === 'object' &&
-        !Array.isArray(message.metadata)
-          ? message.metadata
-          : {};
-      return updater({
-        ...message,
-        content: typeof message.content === 'string' ? message.content : '',
-        metadata: currentMetadata,
-      });
-    });
-  };
-
-  const persistProgressLine = (line) => {
-    updateAssistantHistory((message) => {
-      const lines = Array.isArray(message.metadata.progressLines)
-        ? message.metadata.progressLines.filter((item) => typeof item === 'string')
-        : [];
-      if (lines.length === 0 || lines[lines.length - 1] !== line) {
-        lines.push(line);
-      }
-      while (lines.length > 6) lines.shift();
-      return {
-        ...message,
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          ...message.metadata,
-          ...baseHistoryMetadata,
-          streaming: true,
-          progressLines: lines,
-        },
-      };
-    });
-  };
-
-  const persistDelta = (text) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content: `${message.content}${text}`,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: false,
-      },
-    }));
-  };
-
-  const finalizeAssistantHistory = (content, metadata = {}) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        ...metadata,
-        streaming: false,
-        awaitingFirstToken: false,
-        progressLines: [],
-      },
-    }));
-  };
-
-  let streamedText = '';
-  const emitRunEvent = (event) => {
-    if (!event || event.type === 'progress') {
-      const line = event && event.line ? String(event.line) : '';
-      if (!line) return;
-      persistProgressLine(line);
-      broadcastScope('agent_progress', {
-        scopeWorkdir: schedule.workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        line,
-      });
-      return;
-    }
-    if (event.type === 'delta') {
-      const text = String(event.text || '');
-      if (!text) return;
-      streamedText += text;
-      persistDelta(text);
-      broadcastScope('agent_delta', {
-        scopeWorkdir: schedule.workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        text,
-      });
-    }
-  };
-
-  broadcastScope('agent_start', {
-    scopeWorkdir: schedule.workdir,
+  await runAgentTurn({
     agent,
-    session: chatSession,
-    requestId,
+    agentKey: agent.key,
+    contextKey,
+    defaultErrorCode: 'SCHEDULED_AGENT_ERROR',
+    dependencies: agentTurnDependencies(),
     deviceId,
+    finalizeBeforeDone: true,
+    finalizeContent({ content, streamedText }) {
+      return String(content || streamedText || '').trim();
+    },
+    historyMetadata: {
+      scheduledQuotaMessageId: schedule.id,
+      quotaSourceKey: schedule.sourceKey,
+    },
+    initialProgressLines: ['Scheduled after quota reset.'],
+    onBeforeDone() {
+      markQuotaScheduleSent(schedule.id);
+    },
+    onAfterDone() {
+      sendEvent('quota_schedule_sent', {
+        scopeWorkdir: schedule.workdir,
+        schedule: {
+          ...runningSchedule,
+          status: 'sent',
+          sentAt: new Date().toISOString(),
+        },
+        message: `Scheduled ${agent.label} message was sent after quota reset.`,
+        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    onBeforeError({ errorMessage }) {
+      markQuotaScheduleFailed(schedule.id, errorMessage);
+    },
+    onAfterError({ errorMessage }) {
+      sendEvent('quota_schedule_failed', {
+        scopeWorkdir: schedule.workdir,
+        schedule: {
+          ...runningSchedule,
+          status: 'failed',
+          error: errorMessage,
+        },
+        message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
+        messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    prompt: schedule.prompt,
+    requestId,
+    responder: createNoopResponder(),
+    scopeKey,
+    session: chatSession,
+    workdir: schedule.workdir,
   });
-  if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
-    broadcastScope('agent_queued', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-  }
-
-  try {
-    const content = await enqueueScope(scopeKey, async () => {
-      runningScopes.add(scopeKey);
-      try {
-        return await runAgent(agent.key, schedule.prompt, emitRunEvent, {
-          sessionKey: scopeKey,
-          workdir: schedule.workdir,
-          settings: getSettings(agent.key, contextKey),
-        });
-      } finally {
-        runningScopes.delete(scopeKey);
-      }
-    });
-    const finalContent = String(content || streamedText || '').trim();
-    touchChatSession(contextKey, chatSession.id);
-    finalizeAssistantHistory(finalContent);
-    markQuotaScheduleSent(schedule.id);
-    broadcastScope('agent_done', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-    notifyTaskCompletion({
-      agent,
-      scopeWorkdir: schedule.workdir,
-      content: finalContent,
-    });
-    sendEvent('quota_schedule_sent', {
-      scopeWorkdir: schedule.workdir,
-      schedule: {
-        ...runningSchedule,
-        status: 'sent',
-        sentAt: new Date().toISOString(),
-      },
-      message: `Scheduled ${agent.label} message was sent after quota reset.`,
-      messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-      createdAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    const errorMessage =
-      err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN'
-        ? `${agent.label} is not logged in on the backend host. Log in there, then try again.`
-        : err.message || 'scheduled message failed';
-    finalizeAssistantHistory(errorMessage, {
-      errorCode: err.code || 'SCHEDULED_AGENT_ERROR',
-    });
-    markQuotaScheduleFailed(schedule.id, errorMessage);
-    broadcastScope('agent_error', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-      error: errorMessage,
-      code: err.code,
-    });
-    sendEvent('quota_schedule_failed', {
-      scopeWorkdir: schedule.workdir,
-      schedule: {
-        ...runningSchedule,
-        status: 'failed',
-        error: errorMessage,
-      },
-      message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
-      messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
-      createdAt: new Date().toISOString(),
-    });
-  }
 }
 
 async function processDueQuotaSchedules(info) {
@@ -1259,16 +1048,7 @@ app.post('/api/chat', async (req, res) => {
   touchChatSession(contextKey, chatSession.id);
 
   const abortController = new AbortController();
-  const createdAt = new Date().toISOString();
-  const historyUserId = `${requestId}:user`;
   const historyAssistantId = `${requestId}:assistant`;
-  const baseHistoryMetadata = {
-    requestId,
-    agentKey: agent.key,
-    agentLabel: agent.label,
-    sessionId: chatSession.id,
-    sessionName: chatSession.name,
-  };
   const runState = {
     requestId,
     agent,
@@ -1283,344 +1063,26 @@ app.post('/api/chat', async (req, res) => {
     abortController,
   };
   activeRequests.set(requestId, runState);
-
-  const streaming = wantsChatStream(req);
-  let streamedText = '';
-
-  if (recordHistory) {
-    upsertHistoryMessage(scopeKey, {
-      id: historyUserId,
-      role: 'user',
-      content: prompt,
-      agent: agent.key,
-      createdAt,
-      metadata: baseHistoryMetadata,
-    });
-    upsertHistoryMessage(scopeKey, {
-      id: historyAssistantId,
-      role: 'assistant',
-      content: '',
-      agent: agent.key,
-      createdAt,
-      metadata: {
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: true,
-        progressLines: [],
-      },
-    });
-  }
-
-  const updateAssistantHistory = (updater) => {
-    if (!recordHistory) return;
-    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
-      const currentMetadata =
-        message &&
-        typeof message.metadata === 'object' &&
-        !Array.isArray(message.metadata)
-          ? message.metadata
-          : {};
-      return updater({
-        ...message,
-        content: typeof message.content === 'string' ? message.content : '',
-        metadata: currentMetadata,
-      });
-    });
-  };
-
-  const persistProgressLine = (line) => {
-    updateAssistantHistory((message) => {
-      const lines = Array.isArray(message.metadata.progressLines)
-        ? message.metadata.progressLines.filter(
-            (item) => typeof item === 'string',
-          )
-        : [];
-      if (lines.length === 0 || lines[lines.length - 1] !== line) {
-        lines.push(line);
-      }
-      while (lines.length > 6) lines.shift();
-      return {
-        ...message,
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          ...message.metadata,
-          ...baseHistoryMetadata,
-          streaming: true,
-          progressLines: lines,
-        },
-      };
-    });
-  };
-
-  const persistDelta = (text) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content: `${message.content}${text}`,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: false,
-      },
-    }));
-  };
-
-  const finalizeAssistantHistory = (content, metadata = {}) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        ...metadata,
-        streaming: false,
-        awaitingFirstToken: false,
-        progressLines: [],
-      },
-    }));
-  };
-
-  if (streaming) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-    });
-    writeStreamEvent(res, 'ready', { ok: true, requestId });
-  }
-
-  const emitRunEvent = (event) => {
-    if (!event || event.type === 'progress') {
-      const line = event && event.line ? String(event.line) : '';
-      if (!line) return;
-      persistProgressLine(line);
-      const payload = {
-        scopeWorkdir: workdir,
-        requestId,
-        agent,
-        session: chatSession,
-        deviceId,
-        line,
-      };
-      if (streaming) {
-        writeStreamEvent(res, 'agent_progress', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          line,
-          createdAt: new Date().toISOString(),
-        });
-      } else {
-        emitAgentEvent('agent_progress', payload);
-      }
-      return;
-    }
-    if (event.type === 'delta') {
-      const text = String(event.text || '');
-      if (!text) return;
-      streamedText += text;
-      persistDelta(text);
-      const payload = {
-        scopeWorkdir: workdir,
-        requestId,
-        agent,
-        session: chatSession,
-        deviceId,
-        text,
-      };
-      if (streaming) {
-        writeStreamEvent(res, 'agent_delta', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          text,
-          createdAt: new Date().toISOString(),
-        });
-      } else {
-        emitAgentEvent('agent_delta', payload);
-      }
-    }
-  };
-
-  // Other devices in this workdir learn a turn started and begin mirroring from
-  // persisted history. The originator ignores its own requestId. If the scope is
-  // already busy this turn will queue behind the in-flight one.
-  broadcastScope('agent_start', {
-    scopeWorkdir: workdir,
-    agent,
-    session: chatSession,
-    requestId,
-    deviceId,
-  });
-  const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
-  if (willQueue) {
-    broadcastScope('agent_queued', {
-      scopeWorkdir: workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-    if (streaming) {
-      writeStreamEvent(res, 'agent_queued', {
-        requestId,
-        deviceId,
-        agent: agentPayload(agent),
-        session: sessionPayload(chatSession),
-        createdAt: new Date().toISOString(),
-      });
-    }
-  }
+  const responder = createChatResponder({ req, res });
 
   try {
-    const content = await enqueueScope(scopeKey, async () => {
-      // The turn may have been cancelled while waiting its turn in the queue.
-      if (runState.cancelled) throw new AgentCancelledError();
-      runningScopes.add(scopeKey);
-      try {
-        return await runAgent(agentKey, prompt, emitRunEvent, {
-          sessionKey: scopeKey,
-          signal: abortController.signal,
-          workdir,
-          settings: getSettings(agentKey, contextKey),
-        });
-      } finally {
-        runningScopes.delete(scopeKey);
-      }
-    });
-    if (streaming && !streamedText.trim()) {
-      await streamTextFallback(res, requestId, agent, chatSession, deviceId, content);
-    }
-    touchChatSession(contextKey, chatSession.id);
-    broadcastScope('agent_done', {
-      scopeWorkdir: workdir,
+    await runAgentTurn({
       agent,
-      session: chatSession,
-      requestId,
+      agentKey,
+      contextKey,
+      dependencies: agentTurnDependencies(),
       deviceId,
-    });
-    notifyTaskCompletion({
-      agent,
-      scopeWorkdir: workdir,
-      content: content || streamedText,
-    });
-    finalizeAssistantHistory(content);
-    const completedAt = new Date().toISOString();
-    const reply = {
+      notifyTaskCompletion,
+      prompt,
+      recordHistory,
       requestId,
-      agent: agentPayload(agent),
-      session: sessionPayload(chatSession),
-      message: {
-        role: 'assistant',
-        content,
-        createdAt: completedAt,
-      },
-    };
-    if (streaming) {
-      writeStreamEvent(res, 'agent_done', reply);
-      endStream(res);
-      return;
-    }
-    return res.json(reply);
-  } catch (err) {
-    if (err instanceof AgentCancelledError || err.code === 'AGENT_CANCELLED') {
-      finalizeAssistantHistory(streamedText, { cancelled: true });
-      if (!runState.cancelEventSent) {
-        runState.cancelEventSent = true;
-        broadcastScope('agent_cancelled', {
-          scopeWorkdir: workdir,
-          agent,
-          session: chatSession,
-          requestId,
-          deviceId,
-        });
-      }
-      if (streaming) {
-        writeStreamEvent(res, 'agent_cancelled', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          createdAt: new Date().toISOString(),
-        });
-        endStream(res);
-        return;
-      }
-      return res.status(499).json({
-        error: 'request cancelled',
-        code: 'AGENT_CANCELLED',
-      });
-    }
-
-    // Agent CLI has no logged-in account: surface a real, actionable state
-    // instead of leaving the persisted in-flight bubble stuck forever.
-    if (err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN') {
-      const message =
-        `${agentPayload(agent).label} is not logged in on the backend host. ` +
-        'Log in there, then try again.';
-      finalizeAssistantHistory(message, { errorCode: 'NOT_LOGGED_IN' });
-      broadcastScope('agent_error', {
-        scopeWorkdir: workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        error: message,
-        code: 'NOT_LOGGED_IN',
-      });
-      if (streaming) {
-        writeStreamEvent(res, 'agent_error', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          error: message,
-          code: 'NOT_LOGGED_IN',
-          createdAt: new Date().toISOString(),
-        });
-        endStream(res);
-        return;
-      }
-      // 424 Failed Dependency: not 401 (reserved for an invalid device token)
-      // and not 503 (TOKEN_NOT_CONFIGURED). Clients branch on the code field.
-      return res.status(424).json({
-        error: message,
-        code: 'NOT_LOGGED_IN',
-        agent: agent.key,
-      });
-    }
-
-    const errorMessage = err.message || 'agent request failed';
-    finalizeAssistantHistory(errorMessage, {
-      errorCode: err.code || 'AGENT_ERROR',
-    });
-    broadcastScope('agent_error', {
-      scopeWorkdir: workdir,
-      agent,
+      responder,
+      runState,
+      scopeKey,
       session: chatSession,
-      requestId,
-      deviceId,
-      error: errorMessage,
-      code: err.code,
+      signal: abortController.signal,
+      workdir,
     });
-    if (streaming) {
-      writeStreamEvent(res, 'agent_error', {
-        requestId,
-        deviceId,
-        agent: agentPayload(agent),
-        session: sessionPayload(chatSession),
-        error: errorMessage,
-        code: err.code,
-        createdAt: new Date().toISOString(),
-      });
-      endStream(res);
-      return;
-    }
-    return res.status(500).json({ error: errorMessage });
   } finally {
     activeRequests.delete(requestId);
   }
