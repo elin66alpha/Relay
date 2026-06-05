@@ -399,6 +399,65 @@ function requestWorkdir(req) {
   return resolveRequestWorkdir(req.get('x-workdir'));
 }
 
+const agentRequiredError = () => ({ status: 400, body: { error: 'agent is required' } });
+
+function agentRequiredOrUnknownError(agentKey) {
+  return {
+    status: 400,
+    body: { error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' },
+  };
+}
+
+function resolveAgentScope(req, res, options = {}) {
+  const {
+    agentFrom = 'params',
+    agentKey,
+    sessionId,
+    workdir: resolvedWorkdir,
+    requireSession = true,
+    agentError = () => ({ status: 404, body: { error: 'unknown agent', code: 'UNKNOWN_AGENT' } }),
+    beforeWorkdir,
+  } = options;
+  const agentValues =
+    agentFrom === 'body' ? req.body : agentFrom === 'query' ? req.query : req.params;
+  const key = String(agentKey === undefined ? agentValues && agentValues.agent : agentKey).trim();
+  const agent = getAgent(key);
+  if (!agent) {
+    const { status, body } = agentError(key);
+    res.status(status).json(body);
+    return null;
+  }
+  if (typeof beforeWorkdir === 'function' && beforeWorkdir({ agent, agentKey: key }) === false) return null;
+  let workdir = resolvedWorkdir;
+  if (!workdir) {
+    try {
+      workdir = requestWorkdir(req);
+    } catch (err) {
+      sendWorkdirError(res, err);
+      return null;
+    }
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  if (!requireSession) {
+    return { agent, workdir, contextKey, session: null, scopeKey: contextKey };
+  }
+  const requestedSessionId = String(
+    sessionId === undefined ? req.query && req.query.sessionId : sessionId,
+  ).trim();
+  const session = resolveChatSession(contextKey, requestedSessionId);
+  if (!session) {
+    res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+    return null;
+  }
+  return {
+    agent,
+    workdir,
+    contextKey,
+    session,
+    scopeKey: scopeKeyFor(agent.key, workdir, session.id),
+  };
+}
+
 // Resolve a workdir for read-only contexts (SSE subscription, status) without
 // creating it; fall back to the default if the header is missing or invalid.
 function eventWorkdir(req) {
@@ -861,17 +920,13 @@ app.get('/api/agent-options', (req, res) => {
 // Current model/effort/permission selection for the request's workdir+agent
 // scope (shared by every device in that scope).
 app.get('/api/agent-settings', (req, res) => {
-  const agent = getAgent(String(req.query.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentFrom: 'query',
+    requireSession: false,
+    agentError: agentRequiredError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   return res.json({
     ok: true,
     agent: agent.key,
@@ -884,21 +939,17 @@ app.get('/api/agent-settings', (req, res) => {
 // Only provided groups change; invalid ids fall back to the agent default.
 app.post('/api/agent-settings', (req, res) => {
   const body = req.body || {};
-  const agent = getAgent(String(body.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
+  const scope = resolveAgentScope(req, res, {
+    agentKey: body.agent,
+    requireSession: false,
+    agentError: agentRequiredError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const partial = {};
   for (const group of ['model', 'effort', 'permission']) {
     if (typeof body[group] === 'string') partial[group] = body[group];
   }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
   const settings = setSettings(agent.key, contextKey, partial);
   return res.json({ ok: true, agent: agent.key, workdir, settings });
 });
@@ -1190,31 +1241,21 @@ app.post('/api/chat', async (req, res) => {
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
   }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  if (activeRequests.has(requestId)) {
-    return res.status(409).json({
-      error: 'request already running',
-      code: 'REQUEST_BUSY',
-    });
-  }
-
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  // Session = workdir + agent + chat session. Concurrent turns on the same
-  // session are serialized (see enqueueScope below) rather than rejected.
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: (key) => ({ status: 400, body: { error: `unknown agent: ${key}` } }),
+    beforeWorkdir: () => {
+      if (!activeRequests.has(requestId)) return true;
+      res.status(409).json({
+        error: 'request already running',
+        code: 'REQUEST_BUSY',
+      });
+      return false;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey, session: chatSession, scopeKey } = scope;
   touchChatSession(contextKey, chatSession.id);
 
   const abortController = new AbortController();
@@ -1631,17 +1672,13 @@ app.post('/api/chat/cancel', (req, res) => {
 
 app.get('/api/sessions', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   return res.json({
     ok: true,
     agent: agentPayload(agent),
@@ -1652,17 +1689,13 @@ app.get('/api/sessions', (req, res) => {
 
 app.post('/api/sessions', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const created = createChatSession(contextKey, req.body.name);
   if (!created) {
     return res.status(409).json({
@@ -1681,20 +1714,18 @@ app.post('/api/sessions', (req, res) => {
 app.post('/api/sessions/active', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
   const sessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  if (!sessionId) {
-    return res.status(400).json({ error: 'sessionId is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+    beforeWorkdir: () => {
+      if (sessionId) return true;
+      res.status(400).json({ error: 'sessionId is required' });
+      return false;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const result = setActiveChatSession(contextKey, sessionId);
   if (!result) {
     return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
@@ -1710,26 +1741,27 @@ app.post('/api/sessions/active', (req, res) => {
 app.post('/api/sessions/delete', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
   const sessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  if (!sessionId) {
-    return res.status(400).json({ error: 'sessionId is required' });
-  }
-  if (sessionId === LEGACY_SESSION_ID) {
-    return res.status(400).json({
-      error: 'the default session cannot be deleted',
-      code: 'SESSION_PROTECTED',
-    });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+    beforeWorkdir: () => {
+      if (!sessionId) {
+        res.status(400).json({ error: 'sessionId is required' });
+        return false;
+      }
+      if (sessionId === LEGACY_SESSION_ID) {
+        res.status(400).json({
+          error: 'the default session cannot be deleted',
+          code: 'SESSION_PROTECTED',
+        });
+        return false;
+      }
+      return true;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const existing = listChatSessions(contextKey).sessions.find(
     (session) => session.id === sessionId,
   );
@@ -1760,25 +1792,13 @@ app.post('/api/sessions/delete', (req, res) => {
 app.get('/api/history', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
   const requestedSessionId = String(req.query.sessionId || '').trim();
-  if (!agentKey) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, session: chatSession, scopeKey } = scope;
   // Only finalize a streaming bubble as stale when nothing is running OR queued
   // for this scope; a queued turn has a persisted awaiting bubble that is not
   // yet in runningScopes and must not be prematurely marked cancelled.
@@ -1827,25 +1847,13 @@ app.get('/api/history/search', (req, res) => {
 app.get('/api/history/export', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
   const requestedSessionId = String(req.query.sessionId || '').trim();
-  if (!agentKey) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, session: chatSession, scopeKey } = scope;
   if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
     finalizeStaleStreamingHistory(scopeKey);
   }
@@ -1883,29 +1891,19 @@ app.post('/api/quota-schedules', (req, res) => {
   const sourceKey = String(req.body.sourceKey || '').trim();
   const agentKey = String(req.body.agent || req.body.agentKey || '').trim();
   const requestedSessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
   if (!['claude', 'codex'].includes(sourceKey)) {
     return res.status(400).json({
       error: 'sourceKey must be claude or codex',
       code: 'INVALID_QUOTA_SOURCE',
     });
   }
-  if (!agent) {
-    return res.status(400).json({
-      error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required',
-    });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, session: chatSession } = scope;
   try {
     const schedule = createQuotaSchedule({
       sourceKey,
