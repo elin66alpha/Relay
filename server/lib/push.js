@@ -23,6 +23,7 @@ try {
 }
 
 const SUBS_FILE = path.join(__dirname, '..', 'push-subscriptions.json');
+const VALID_CATEGORIES = new Set(['quota', 'task']);
 
 const VAPID_PUBLIC_KEY = String(process.env.VAPID_PUBLIC_KEY || '').trim();
 const VAPID_PRIVATE_KEY = String(process.env.VAPID_PRIVATE_KEY || '').trim();
@@ -52,7 +53,7 @@ function publicKey() {
 function loadSubscriptions() {
   try {
     const decoded = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf-8'));
-    return Array.isArray(decoded) ? decoded : [];
+    return Array.isArray(decoded) ? decoded.map(normalizeRecord) : [];
   } catch (_err) {
     return [];
   }
@@ -70,9 +71,36 @@ function subscriptionEndpoint(subscription) {
     : '';
 }
 
+function normalizeCategories(categories) {
+  const value =
+    categories && typeof categories === 'object' && !Array.isArray(categories)
+      ? categories
+      : {};
+  return {
+    quota: value.quota !== false,
+    task: value.task !== false,
+  };
+}
+
+function normalizeRecord(record) {
+  const value =
+    record && typeof record === 'object' && !Array.isArray(record)
+      ? record
+      : {};
+  return {
+    ...value,
+    categories: normalizeCategories(value.categories),
+  };
+}
+
+function categoryAllowed(record, category) {
+  if (!VALID_CATEGORIES.has(category)) return true;
+  return normalizeCategories(record && record.categories)[category] !== false;
+}
+
 // Upsert a subscription keyed by its endpoint (re-subscribing the same browser
 // updates its workdir/lang rather than creating a duplicate).
-function addSubscription({ subscription, workdir, lang }) {
+function addSubscription({ subscription, workdir, lang, categories }) {
   const endpoint = subscriptionEndpoint(subscription);
   if (!endpoint) return false;
   const record = {
@@ -80,6 +108,7 @@ function addSubscription({ subscription, workdir, lang }) {
     keys: (subscription && subscription.keys) || {},
     workdir: String(workdir || ''),
     lang: lang === 'zh' ? 'zh' : 'en',
+    categories: normalizeCategories(categories),
     updatedAt: new Date().toISOString(),
   };
   const list = loadSubscriptions().filter((item) => item.endpoint !== endpoint);
@@ -102,7 +131,14 @@ function removeSubscription(endpoint) {
 // subscriptions registered under that workdir receive it (matches the SSE
 // scoping); otherwise everyone does (e.g. quota_reset). Best-effort and async;
 // gone subscriptions (404/410) are pruned.
-async function notify({ title, message, messageZh, scopeWorkdir }) {
+async function notify({
+  title,
+  titleZh,
+  message,
+  messageZh,
+  scopeWorkdir,
+  category,
+}) {
   if (!configured) return 0;
   const list = loadSubscriptions();
   if (list.length === 0) return 0;
@@ -110,16 +146,19 @@ async function notify({ title, message, messageZh, scopeWorkdir }) {
     scopeWorkdir != null && scopeWorkdir !== ''
       ? list.filter((item) => item.workdir === scopeWorkdir)
       : list;
-  if (scoped.length === 0) return 0;
+  const recipients = scoped.filter((item) => categoryAllowed(item, category));
+  if (recipients.length === 0) return 0;
 
   const gone = [];
   let sent = 0;
   await Promise.all(
-    scoped.map(async (record) => {
+    recipients.map(async (record) => {
       const body =
         record.lang === 'zh' && messageZh ? messageZh : message || messageZh || '';
+      const notificationTitle =
+        record.lang === 'zh' && titleZh ? titleZh : title || 'Relay';
       const payload = JSON.stringify({
-        title: title || 'Relay',
+        title: notificationTitle,
         body,
         tag: 'relay',
       });

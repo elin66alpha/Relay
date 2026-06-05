@@ -11,8 +11,6 @@ const express = require('express');
 const compression = require('compression');
 
 const {
-  AgentCancelledError,
-  AgentAuthError,
   DEFAULT_AGENT,
   TIMEOUT_MS,
   getAgent,
@@ -56,7 +54,9 @@ const {
   updateHistoryMessage,
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
+  flushHistory,
   clearHistory,
+  redactSensitiveText,
   searchHistory,
   markdownForConversation,
 } = require('./lib/history');
@@ -71,6 +71,13 @@ const {
   deleteChatSession,
   sessionScopeKey,
 } = require('./lib/chat-sessions');
+const {
+  agentPayload,
+  createChatResponder,
+  createNoopResponder,
+  runAgentTurn,
+  sessionPayload,
+} = require('./lib/agent-turn');
 const {
   cancelQuotaSchedule,
   createQuotaSchedule,
@@ -345,6 +352,28 @@ function sendEvent(type, payload) {
   }
 }
 
+function hasPresence(scopeWorkdir) {
+  if (!scopeWorkdir) return false;
+  for (const client of eventClients) {
+    if (client.workdir === scopeWorkdir) return true;
+  }
+  return false;
+}
+
+function pushCategoriesFromBody(body) {
+  const source =
+    body &&
+    body.categories &&
+    typeof body.categories === 'object' &&
+    !Array.isArray(body.categories)
+      ? body.categories
+      : body || {};
+  return {
+    quota: source.quota !== false,
+    task: source.task !== false,
+  };
+}
+
 function normalizeDeviceId(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -365,15 +394,70 @@ function scopeKeyFor(agentKey, workdir, sessionId) {
   return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
 }
 
-function sessionPayload(session) {
-  return session ? { id: session.id, name: session.name } : null;
-}
-
 // The work directory for a request: the device's x-workdir header, or the
 // default for a device that has not chosen one yet. The path is created if
 // missing. Throws WorkdirError for an invalid header, handled by the caller.
 function requestWorkdir(req) {
   return resolveRequestWorkdir(req.get('x-workdir'));
+}
+
+const agentRequiredError = () => ({ status: 400, body: { error: 'agent is required' } });
+
+function agentRequiredOrUnknownError(agentKey) {
+  return {
+    status: 400,
+    body: { error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' },
+  };
+}
+
+function resolveAgentScope(req, res, options = {}) {
+  const {
+    agentFrom = 'params',
+    agentKey,
+    sessionId,
+    workdir: resolvedWorkdir,
+    requireSession = true,
+    agentError = () => ({ status: 404, body: { error: 'unknown agent', code: 'UNKNOWN_AGENT' } }),
+    beforeWorkdir,
+  } = options;
+  const agentValues =
+    agentFrom === 'body' ? req.body : agentFrom === 'query' ? req.query : req.params;
+  const key = String(agentKey === undefined ? agentValues && agentValues.agent : agentKey).trim();
+  const agent = getAgent(key);
+  if (!agent) {
+    const { status, body } = agentError(key);
+    res.status(status).json(body);
+    return null;
+  }
+  if (typeof beforeWorkdir === 'function' && beforeWorkdir({ agent, agentKey: key }) === false) return null;
+  let workdir = resolvedWorkdir;
+  if (!workdir) {
+    try {
+      workdir = requestWorkdir(req);
+    } catch (err) {
+      sendWorkdirError(res, err);
+      return null;
+    }
+  }
+  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  if (!requireSession) {
+    return { agent, workdir, contextKey, session: null, scopeKey: contextKey };
+  }
+  const requestedSessionId = String(
+    sessionId === undefined ? req.query && req.query.sessionId : sessionId,
+  ).trim();
+  const session = resolveChatSession(contextKey, requestedSessionId);
+  if (!session) {
+    res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+    return null;
+  }
+  return {
+    agent,
+    workdir,
+    contextKey,
+    session,
+    scopeKey: scopeKeyFor(agent.key, workdir, session.id),
+  };
 }
 
 // Resolve a workdir for read-only contexts (SSE subscription, status) without
@@ -429,64 +513,57 @@ function broadcastScope(
   });
 }
 
-function agentPayload(agent) {
-  return { key: agent.key, label: agent.label };
+function taskCompletionSnippet(value) {
+  const redacted = redactSensitiveText(value);
+  const firstLine =
+    redacted
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .find((line) => line.length > 0) || '';
+  if (!firstLine) return 'Task completed.';
+  if (firstLine.length <= 140) return firstLine;
+  return `${firstLine.slice(0, 137)}...`;
 }
 
-function emitAgentEvent(type, { requestId, agent, session, deviceId, ...payload }) {
-  sendEvent(type, {
-    requestId,
-    deviceId,
-    agent: agentPayload(agent),
-    ...(session ? { session: sessionPayload(session) } : {}),
-    createdAt: new Date().toISOString(),
-    ...payload,
-  });
+function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
+  if (hasPresence(scopeWorkdir)) return;
+  const title = `${agent.label} finished`;
+  const titleZh = `${agent.label} 已完成`;
+  const body = taskCompletionSnippet(content);
+  push
+    .notify({
+      title,
+      titleZh,
+      message: body,
+      messageZh: body,
+      scopeWorkdir,
+      category: 'task',
+    })
+    .catch((err) => console.warn(`[push] task_done: ${err.message}`));
+  fcm
+    .notify({
+      title,
+      titleZh,
+      message: body,
+      messageZh: body,
+      scopeWorkdir,
+      category: 'task',
+    })
+    .catch((err) => console.warn(`[fcm] task_done: ${err.message}`));
 }
 
-function wantsChatStream(req) {
-  return String(req.get('accept') || '')
-    .toLowerCase()
-    .includes('text/event-stream');
-}
-
-function writeStreamEvent(res, type, payload) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
-  } catch (_err) {
-    // The client may have closed the app/web tab while the CLI keeps running.
-  }
-}
-
-function endStream(res) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.end();
-  } catch (_err) {
-    // The request can already be gone; the server-side run still finishes.
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function streamTextFallback(res, requestId, agent, session, deviceId, text) {
-  const value = String(text || '');
-  if (!value) return;
-  const chunks = value.match(/[\s\S]{1,64}/g) || [];
-  for (const chunk of chunks) {
-    writeStreamEvent(res, 'agent_delta', {
-      requestId,
-      deviceId,
-      agent: agentPayload(agent),
-      session: sessionPayload(session),
-      text: chunk,
-      createdAt: new Date().toISOString(),
-    });
-    await sleep(18);
-  }
+function agentTurnDependencies() {
+  return {
+    broadcastScope,
+    enqueueScope,
+    getSettings,
+    runAgent,
+    runningScopes,
+    scopeChains,
+    touchChatSession,
+    updateHistoryMessage,
+    upsertHistoryMessage,
+  };
 }
 
 async function runScheduledQuotaMessage(schedule) {
@@ -507,237 +584,62 @@ async function runScheduledQuotaMessage(schedule) {
   const requestId = `quota.${schedule.id}`;
   const deviceId = 'quota-scheduler';
   const scopeKey = scopeKeyFor(agent.key, schedule.workdir, chatSession.id);
-  const createdAt = new Date().toISOString();
-  const historyUserId = `${requestId}:user`;
-  const historyAssistantId = `${requestId}:assistant`;
-  const baseHistoryMetadata = {
-    requestId,
-    agentKey: agent.key,
-    agentLabel: agent.label,
-    sessionId: chatSession.id,
-    sessionName: chatSession.name,
-    scheduledQuotaMessageId: schedule.id,
-    quotaSourceKey: schedule.sourceKey,
-  };
 
-  upsertHistoryMessage(scopeKey, {
-    id: historyUserId,
-    role: 'user',
-    content: schedule.prompt,
-    agent: agent.key,
-    createdAt,
-    metadata: baseHistoryMetadata,
-  });
-  upsertHistoryMessage(scopeKey, {
-    id: historyAssistantId,
-    role: 'assistant',
-    content: '',
-    agent: agent.key,
-    createdAt,
-    metadata: {
-      ...baseHistoryMetadata,
-      streaming: true,
-      awaitingFirstToken: true,
-      progressLines: ['Scheduled after quota reset.'],
-    },
-  });
-
-  const updateAssistantHistory = (updater) => {
-    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
-      const currentMetadata =
-        message &&
-        typeof message.metadata === 'object' &&
-        !Array.isArray(message.metadata)
-          ? message.metadata
-          : {};
-      return updater({
-        ...message,
-        content: typeof message.content === 'string' ? message.content : '',
-        metadata: currentMetadata,
-      });
-    });
-  };
-
-  const persistProgressLine = (line) => {
-    updateAssistantHistory((message) => {
-      const lines = Array.isArray(message.metadata.progressLines)
-        ? message.metadata.progressLines.filter((item) => typeof item === 'string')
-        : [];
-      if (lines.length === 0 || lines[lines.length - 1] !== line) {
-        lines.push(line);
-      }
-      while (lines.length > 6) lines.shift();
-      return {
-        ...message,
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          ...message.metadata,
-          ...baseHistoryMetadata,
-          streaming: true,
-          progressLines: lines,
-        },
-      };
-    });
-  };
-
-  const persistDelta = (text) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content: `${message.content}${text}`,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: false,
-      },
-    }));
-  };
-
-  const finalizeAssistantHistory = (content, metadata = {}) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        ...metadata,
-        streaming: false,
-        awaitingFirstToken: false,
-        progressLines: [],
-      },
-    }));
-  };
-
-  let streamedText = '';
-  const emitRunEvent = (event) => {
-    if (!event || event.type === 'progress') {
-      const line = event && event.line ? String(event.line) : '';
-      if (!line) return;
-      persistProgressLine(line);
-      broadcastScope('agent_progress', {
-        scopeWorkdir: schedule.workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        line,
-      });
-      return;
-    }
-    if (event.type === 'delta') {
-      const text = String(event.text || '');
-      if (!text) return;
-      streamedText += text;
-      persistDelta(text);
-      broadcastScope('agent_delta', {
-        scopeWorkdir: schedule.workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        text,
-      });
-    }
-  };
-
-  broadcastScope('agent_start', {
-    scopeWorkdir: schedule.workdir,
+  await runAgentTurn({
     agent,
-    session: chatSession,
-    requestId,
+    agentKey: agent.key,
+    contextKey,
+    defaultErrorCode: 'SCHEDULED_AGENT_ERROR',
+    dependencies: agentTurnDependencies(),
     deviceId,
+    finalizeBeforeDone: true,
+    finalizeContent({ content, streamedText }) {
+      return String(content || streamedText || '').trim();
+    },
+    historyMetadata: {
+      scheduledQuotaMessageId: schedule.id,
+      quotaSourceKey: schedule.sourceKey,
+    },
+    initialProgressLines: ['Scheduled after quota reset.'],
+    onBeforeDone() {
+      markQuotaScheduleSent(schedule.id);
+    },
+    onAfterDone() {
+      sendEvent('quota_schedule_sent', {
+        scopeWorkdir: schedule.workdir,
+        schedule: {
+          ...runningSchedule,
+          status: 'sent',
+          sentAt: new Date().toISOString(),
+        },
+        message: `Scheduled ${agent.label} message was sent after quota reset.`,
+        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    onBeforeError({ errorMessage }) {
+      markQuotaScheduleFailed(schedule.id, errorMessage);
+    },
+    onAfterError({ errorMessage }) {
+      sendEvent('quota_schedule_failed', {
+        scopeWorkdir: schedule.workdir,
+        schedule: {
+          ...runningSchedule,
+          status: 'failed',
+          error: errorMessage,
+        },
+        message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
+        messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    prompt: schedule.prompt,
+    requestId,
+    responder: createNoopResponder(),
+    scopeKey,
+    session: chatSession,
+    workdir: schedule.workdir,
   });
-  if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
-    broadcastScope('agent_queued', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-  }
-
-  try {
-    const content = await enqueueScope(scopeKey, async () => {
-      runningScopes.add(scopeKey);
-      try {
-        return await runAgent(agent.key, schedule.prompt, emitRunEvent, {
-          sessionKey: scopeKey,
-          workdir: schedule.workdir,
-          settings: getSettings(agent.key, contextKey),
-        });
-      } finally {
-        runningScopes.delete(scopeKey);
-      }
-    });
-    const finalContent = String(content || streamedText || '').trim();
-    touchChatSession(contextKey, chatSession.id);
-    finalizeAssistantHistory(finalContent);
-    markQuotaScheduleSent(schedule.id);
-    broadcastScope('agent_done', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-    sendEvent('quota_schedule_sent', {
-      scopeWorkdir: schedule.workdir,
-      schedule: {
-        ...runningSchedule,
-        status: 'sent',
-        sentAt: new Date().toISOString(),
-      },
-      message: `Scheduled ${agent.label} message was sent after quota reset.`,
-      messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-      createdAt: new Date().toISOString(),
-    });
-    push
-      .notify({
-        message: `Scheduled ${agent.label} message was sent after quota reset.`,
-        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-        scopeWorkdir: schedule.workdir,
-      })
-      .catch((err) => console.warn(`[push] quota_schedule_sent: ${err.message}`));
-    fcm
-      .notify({
-        message: `Scheduled ${agent.label} message was sent after quota reset.`,
-        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-        scopeWorkdir: schedule.workdir,
-      })
-      .catch((err) => console.warn(`[fcm] quota_schedule_sent: ${err.message}`));
-  } catch (err) {
-    const errorMessage =
-      err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN'
-        ? `${agent.label} is not logged in on the backend host. Log in there, then try again.`
-        : err.message || 'scheduled message failed';
-    finalizeAssistantHistory(errorMessage, {
-      errorCode: err.code || 'SCHEDULED_AGENT_ERROR',
-    });
-    markQuotaScheduleFailed(schedule.id, errorMessage);
-    broadcastScope('agent_error', {
-      scopeWorkdir: schedule.workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-      error: errorMessage,
-      code: err.code,
-    });
-    sendEvent('quota_schedule_failed', {
-      scopeWorkdir: schedule.workdir,
-      schedule: {
-        ...runningSchedule,
-        status: 'failed',
-        error: errorMessage,
-      },
-      message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
-      messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
-      createdAt: new Date().toISOString(),
-    });
-  }
 }
 
 async function processDueQuotaSchedules(info) {
@@ -808,17 +710,13 @@ app.get('/api/agent-options', (req, res) => {
 // Current model/effort/permission selection for the request's workdir+agent
 // scope (shared by every device in that scope).
 app.get('/api/agent-settings', (req, res) => {
-  const agent = getAgent(String(req.query.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentFrom: 'query',
+    requireSession: false,
+    agentError: agentRequiredError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   return res.json({
     ok: true,
     agent: agent.key,
@@ -831,21 +729,17 @@ app.get('/api/agent-settings', (req, res) => {
 // Only provided groups change; invalid ids fall back to the agent default.
 app.post('/api/agent-settings', (req, res) => {
   const body = req.body || {};
-  const agent = getAgent(String(body.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
+  const scope = resolveAgentScope(req, res, {
+    agentKey: body.agent,
+    requireSession: false,
+    agentError: agentRequiredError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const partial = {};
   for (const group of ['model', 'effort', 'permission']) {
     if (typeof body[group] === 'string') partial[group] = body[group];
   }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
   const settings = setSettings(agent.key, contextKey, partial);
   return res.json({ ok: true, agent: agent.key, workdir, settings });
 });
@@ -942,6 +836,7 @@ app.post('/api/push/subscribe', (req, res) => {
     subscription,
     workdir,
     lang: req.body && req.body.lang,
+    categories: pushCategoriesFromBody(req.body),
   });
   res.json({ ok: true });
 });
@@ -967,6 +862,7 @@ app.post('/api/push/fcm/register', (req, res) => {
     token,
     workdir,
     lang: req.body && req.body.lang,
+    categories: pushCategoriesFromBody(req.body),
   });
   return res.json({ ok: true, enabled: fcm.isEnabled() });
 });
@@ -1135,44 +1031,25 @@ app.post('/api/chat', async (req, res) => {
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
   }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  if (activeRequests.has(requestId)) {
-    return res.status(409).json({
-      error: 'request already running',
-      code: 'REQUEST_BUSY',
-    });
-  }
-
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  // Session = workdir + agent + chat session. Concurrent turns on the same
-  // session are serialized (see enqueueScope below) rather than rejected.
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: (key) => ({ status: 400, body: { error: `unknown agent: ${key}` } }),
+    beforeWorkdir: () => {
+      if (!activeRequests.has(requestId)) return true;
+      res.status(409).json({
+        error: 'request already running',
+        code: 'REQUEST_BUSY',
+      });
+      return false;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey, session: chatSession, scopeKey } = scope;
   touchChatSession(contextKey, chatSession.id);
 
   const abortController = new AbortController();
-  const createdAt = new Date().toISOString();
-  const historyUserId = `${requestId}:user`;
   const historyAssistantId = `${requestId}:assistant`;
-  const baseHistoryMetadata = {
-    requestId,
-    agentKey: agent.key,
-    agentLabel: agent.label,
-    sessionId: chatSession.id,
-    sessionName: chatSession.name,
-  };
   const runState = {
     requestId,
     agent,
@@ -1187,339 +1064,26 @@ app.post('/api/chat', async (req, res) => {
     abortController,
   };
   activeRequests.set(requestId, runState);
-
-  const streaming = wantsChatStream(req);
-  let streamedText = '';
-
-  if (recordHistory) {
-    upsertHistoryMessage(scopeKey, {
-      id: historyUserId,
-      role: 'user',
-      content: prompt,
-      agent: agent.key,
-      createdAt,
-      metadata: baseHistoryMetadata,
-    });
-    upsertHistoryMessage(scopeKey, {
-      id: historyAssistantId,
-      role: 'assistant',
-      content: '',
-      agent: agent.key,
-      createdAt,
-      metadata: {
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: true,
-        progressLines: [],
-      },
-    });
-  }
-
-  const updateAssistantHistory = (updater) => {
-    if (!recordHistory) return;
-    updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
-      const currentMetadata =
-        message &&
-        typeof message.metadata === 'object' &&
-        !Array.isArray(message.metadata)
-          ? message.metadata
-          : {};
-      return updater({
-        ...message,
-        content: typeof message.content === 'string' ? message.content : '',
-        metadata: currentMetadata,
-      });
-    });
-  };
-
-  const persistProgressLine = (line) => {
-    updateAssistantHistory((message) => {
-      const lines = Array.isArray(message.metadata.progressLines)
-        ? message.metadata.progressLines.filter(
-            (item) => typeof item === 'string',
-          )
-        : [];
-      if (lines.length === 0 || lines[lines.length - 1] !== line) {
-        lines.push(line);
-      }
-      while (lines.length > 6) lines.shift();
-      return {
-        ...message,
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          ...message.metadata,
-          ...baseHistoryMetadata,
-          streaming: true,
-          progressLines: lines,
-        },
-      };
-    });
-  };
-
-  const persistDelta = (text) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content: `${message.content}${text}`,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        streaming: true,
-        awaitingFirstToken: false,
-      },
-    }));
-  };
-
-  const finalizeAssistantHistory = (content, metadata = {}) => {
-    updateAssistantHistory((message) => ({
-      ...message,
-      content,
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        ...message.metadata,
-        ...baseHistoryMetadata,
-        ...metadata,
-        streaming: false,
-        awaitingFirstToken: false,
-        progressLines: [],
-      },
-    }));
-  };
-
-  if (streaming) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-    });
-    writeStreamEvent(res, 'ready', { ok: true, requestId });
-  }
-
-  const emitRunEvent = (event) => {
-    if (!event || event.type === 'progress') {
-      const line = event && event.line ? String(event.line) : '';
-      if (!line) return;
-      persistProgressLine(line);
-      const payload = {
-        scopeWorkdir: workdir,
-        requestId,
-        agent,
-        session: chatSession,
-        deviceId,
-        line,
-      };
-      if (streaming) {
-        writeStreamEvent(res, 'agent_progress', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          line,
-          createdAt: new Date().toISOString(),
-        });
-      } else {
-        emitAgentEvent('agent_progress', payload);
-      }
-      return;
-    }
-    if (event.type === 'delta') {
-      const text = String(event.text || '');
-      if (!text) return;
-      streamedText += text;
-      persistDelta(text);
-      const payload = {
-        scopeWorkdir: workdir,
-        requestId,
-        agent,
-        session: chatSession,
-        deviceId,
-        text,
-      };
-      if (streaming) {
-        writeStreamEvent(res, 'agent_delta', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          text,
-          createdAt: new Date().toISOString(),
-        });
-      } else {
-        emitAgentEvent('agent_delta', payload);
-      }
-    }
-  };
-
-  // Other devices in this workdir learn a turn started and begin mirroring from
-  // persisted history. The originator ignores its own requestId. If the scope is
-  // already busy this turn will queue behind the in-flight one.
-  broadcastScope('agent_start', {
-    scopeWorkdir: workdir,
-    agent,
-    session: chatSession,
-    requestId,
-    deviceId,
-  });
-  const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
-  if (willQueue) {
-    broadcastScope('agent_queued', {
-      scopeWorkdir: workdir,
-      agent,
-      session: chatSession,
-      requestId,
-      deviceId,
-    });
-    if (streaming) {
-      writeStreamEvent(res, 'agent_queued', {
-        requestId,
-        deviceId,
-        agent: agentPayload(agent),
-        session: sessionPayload(chatSession),
-        createdAt: new Date().toISOString(),
-      });
-    }
-  }
+  const responder = createChatResponder({ req, res });
 
   try {
-    const content = await enqueueScope(scopeKey, async () => {
-      // The turn may have been cancelled while waiting its turn in the queue.
-      if (runState.cancelled) throw new AgentCancelledError();
-      runningScopes.add(scopeKey);
-      try {
-        return await runAgent(agentKey, prompt, emitRunEvent, {
-          sessionKey: scopeKey,
-          signal: abortController.signal,
-          workdir,
-          settings: getSettings(agentKey, contextKey),
-        });
-      } finally {
-        runningScopes.delete(scopeKey);
-      }
-    });
-    if (streaming && !streamedText.trim()) {
-      await streamTextFallback(res, requestId, agent, chatSession, deviceId, content);
-    }
-    touchChatSession(contextKey, chatSession.id);
-    broadcastScope('agent_done', {
-      scopeWorkdir: workdir,
+    await runAgentTurn({
       agent,
-      session: chatSession,
-      requestId,
+      agentKey,
+      contextKey,
+      dependencies: agentTurnDependencies(),
       deviceId,
-    });
-    finalizeAssistantHistory(content);
-    const completedAt = new Date().toISOString();
-    const reply = {
+      notifyTaskCompletion,
+      prompt,
+      recordHistory,
       requestId,
-      agent: agentPayload(agent),
-      session: sessionPayload(chatSession),
-      message: {
-        role: 'assistant',
-        content,
-        createdAt: completedAt,
-      },
-    };
-    if (streaming) {
-      writeStreamEvent(res, 'agent_done', reply);
-      endStream(res);
-      return;
-    }
-    return res.json(reply);
-  } catch (err) {
-    if (err instanceof AgentCancelledError || err.code === 'AGENT_CANCELLED') {
-      finalizeAssistantHistory(streamedText, { cancelled: true });
-      if (!runState.cancelEventSent) {
-        runState.cancelEventSent = true;
-        broadcastScope('agent_cancelled', {
-          scopeWorkdir: workdir,
-          agent,
-          session: chatSession,
-          requestId,
-          deviceId,
-        });
-      }
-      if (streaming) {
-        writeStreamEvent(res, 'agent_cancelled', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          createdAt: new Date().toISOString(),
-        });
-        endStream(res);
-        return;
-      }
-      return res.status(499).json({
-        error: 'request cancelled',
-        code: 'AGENT_CANCELLED',
-      });
-    }
-
-    // Agent CLI has no logged-in account: surface a real, actionable state
-    // instead of leaving the persisted in-flight bubble stuck forever.
-    if (err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN') {
-      const message =
-        `${agentPayload(agent).label} is not logged in on the backend host. ` +
-        'Log in there, then try again.';
-      finalizeAssistantHistory(message, { errorCode: 'NOT_LOGGED_IN' });
-      broadcastScope('agent_error', {
-        scopeWorkdir: workdir,
-        agent,
-        session: chatSession,
-        requestId,
-        deviceId,
-        error: message,
-        code: 'NOT_LOGGED_IN',
-      });
-      if (streaming) {
-        writeStreamEvent(res, 'agent_error', {
-          requestId,
-          deviceId,
-          agent: agentPayload(agent),
-          session: sessionPayload(chatSession),
-          error: message,
-          code: 'NOT_LOGGED_IN',
-          createdAt: new Date().toISOString(),
-        });
-        endStream(res);
-        return;
-      }
-      // 424 Failed Dependency: not 401 (reserved for an invalid device token)
-      // and not 503 (TOKEN_NOT_CONFIGURED). Clients branch on the code field.
-      return res.status(424).json({
-        error: message,
-        code: 'NOT_LOGGED_IN',
-        agent: agent.key,
-      });
-    }
-
-    const errorMessage = err.message || 'agent request failed';
-    finalizeAssistantHistory(errorMessage, {
-      errorCode: err.code || 'AGENT_ERROR',
-    });
-    broadcastScope('agent_error', {
-      scopeWorkdir: workdir,
-      agent,
+      responder,
+      runState,
+      scopeKey,
       session: chatSession,
-      requestId,
-      deviceId,
-      error: errorMessage,
-      code: err.code,
+      signal: abortController.signal,
+      workdir,
     });
-    if (streaming) {
-      writeStreamEvent(res, 'agent_error', {
-        requestId,
-        deviceId,
-        agent: agentPayload(agent),
-        session: sessionPayload(chatSession),
-        error: errorMessage,
-        code: err.code,
-        createdAt: new Date().toISOString(),
-      });
-      endStream(res);
-      return;
-    }
-    return res.status(500).json({ error: errorMessage });
   } finally {
     activeRequests.delete(requestId);
   }
@@ -1571,17 +1135,13 @@ app.post('/api/chat/cancel', (req, res) => {
 
 app.get('/api/sessions', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   return res.json({
     ok: true,
     agent: agentPayload(agent),
@@ -1592,17 +1152,13 @@ app.get('/api/sessions', (req, res) => {
 
 app.post('/api/sessions', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const created = createChatSession(contextKey, req.body.name);
   if (!created) {
     return res.status(409).json({
@@ -1621,20 +1177,18 @@ app.post('/api/sessions', (req, res) => {
 app.post('/api/sessions/active', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
   const sessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  if (!sessionId) {
-    return res.status(400).json({ error: 'sessionId is required' });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+    beforeWorkdir: () => {
+      if (sessionId) return true;
+      res.status(400).json({ error: 'sessionId is required' });
+      return false;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const result = setActiveChatSession(contextKey, sessionId);
   if (!result) {
     return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
@@ -1650,26 +1204,27 @@ app.post('/api/sessions/active', (req, res) => {
 app.post('/api/sessions/delete', (req, res) => {
   const agentKey = String(req.body.agent || '').trim();
   const sessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required' });
-  }
-  if (!sessionId) {
-    return res.status(400).json({ error: 'sessionId is required' });
-  }
-  if (sessionId === LEGACY_SESSION_ID) {
-    return res.status(400).json({
-      error: 'the default session cannot be deleted',
-      code: 'SESSION_PROTECTED',
-    });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    requireSession: false,
+    agentError: agentRequiredOrUnknownError,
+    beforeWorkdir: () => {
+      if (!sessionId) {
+        res.status(400).json({ error: 'sessionId is required' });
+        return false;
+      }
+      if (sessionId === LEGACY_SESSION_ID) {
+        res.status(400).json({
+          error: 'the default session cannot be deleted',
+          code: 'SESSION_PROTECTED',
+        });
+        return false;
+      }
+      return true;
+    },
+  });
+  if (!scope) return;
+  const { agent, workdir, contextKey } = scope;
   const existing = listChatSessions(contextKey).sessions.find(
     (session) => session.id === sessionId,
   );
@@ -1700,25 +1255,13 @@ app.post('/api/sessions/delete', (req, res) => {
 app.get('/api/history', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
   const requestedSessionId = String(req.query.sessionId || '').trim();
-  if (!agentKey) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, session: chatSession, scopeKey } = scope;
   // Only finalize a streaming bubble as stale when nothing is running OR queued
   // for this scope; a queued turn has a persisted awaiting bubble that is not
   // yet in runningScopes and must not be prematurely marked cancelled.
@@ -1767,25 +1310,13 @@ app.get('/api/history/search', (req, res) => {
 app.get('/api/history/export', (req, res) => {
   const agentKey = String(req.query.agent || '').trim();
   const requestedSessionId = String(req.query.sessionId || '').trim();
-  if (!agentKey) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const agent = getAgent(agentKey);
-  if (!agent) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, session: chatSession, scopeKey } = scope;
   if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
     finalizeStaleStreamingHistory(scopeKey);
   }
@@ -1823,29 +1354,19 @@ app.post('/api/quota-schedules', (req, res) => {
   const sourceKey = String(req.body.sourceKey || '').trim();
   const agentKey = String(req.body.agent || req.body.agentKey || '').trim();
   const requestedSessionId = String(req.body.sessionId || '').trim();
-  const agent = getAgent(agentKey);
   if (!['claude', 'codex'].includes(sourceKey)) {
     return res.status(400).json({
       error: 'sourceKey must be claude or codex',
       code: 'INVALID_QUOTA_SOURCE',
     });
   }
-  if (!agent) {
-    return res.status(400).json({
-      error: agentKey ? `unknown agent: ${agentKey}` : 'agent is required',
-    });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const contextKey = sessionContextKeyFor(agent.key, workdir);
-  const chatSession = resolveChatSession(contextKey, requestedSessionId);
-  if (!chatSession) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
+  const scope = resolveAgentScope(req, res, {
+    agentKey,
+    sessionId: requestedSessionId,
+    agentError: agentRequiredOrUnknownError,
+  });
+  if (!scope) return;
+  const { agent, workdir, session: chatSession } = scope;
   try {
     const schedule = createQuotaSchedule({
       sourceKey,
@@ -2038,6 +1559,26 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
   });
 }
 
+function flushHistoryForShutdown() {
+  try {
+    flushHistory();
+  } catch (err) {
+    console.error(`Failed to flush chat history: ${err.message}`);
+  }
+}
+
+function exitCodeForSignal(signal) {
+  return signal === 'SIGINT' ? 130 : 143;
+}
+
+process.on('exit', flushHistoryForShutdown);
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    flushHistoryForShutdown();
+    process.exit(exitCodeForSignal(signal));
+  });
+}
+
 app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
   if (PUBLIC_BASE_URL) {
@@ -2046,6 +1587,7 @@ app.listen(PORT, HOST, () => {
   console.log(`default workdir: ${getDefaultWorkdir()}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {
+    flushHistory();
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);
   }
   // Card Mode: seed suggestions once if none are pending yet.
@@ -2086,10 +1628,18 @@ app.listen(PORT, HOST, () => {
         });
         // Reach offline clients; SSE only covers open app sessions.
         push
-          .notify({ message, messageZh: info && info.messageZh })
+          .notify({
+            message,
+            messageZh: info && info.messageZh,
+            category: 'quota',
+          })
           .catch((err) => console.warn(`[push] quota_reset: ${err.message}`));
         fcm
-          .notify({ message, messageZh: info && info.messageZh })
+          .notify({
+            message,
+            messageZh: info && info.messageZh,
+            category: 'quota',
+          })
           .catch((err) => console.warn(`[fcm] quota_reset: ${err.message}`));
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);

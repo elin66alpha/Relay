@@ -37,9 +37,8 @@ class AppSettingsScreen extends StatelessWidget {
                         _buildSectionTitle(context, context.l10n.appearance),
                         Card(
                           elevation: 0,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerLow,
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -88,9 +87,8 @@ class AppSettingsScreen extends StatelessWidget {
                         _buildSectionTitle(context, context.l10n.language),
                         Card(
                           elevation: 0,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerLow,
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -123,12 +121,47 @@ class AppSettingsScreen extends StatelessWidget {
                             ),
                           ),
                         ),
+                        _buildSectionTitle(
+                          context,
+                          context.l10n.notifications,
+                        ),
+                        Card(
+                          elevation: 0,
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            children: <Widget>[
+                              SwitchListTile(
+                                title: Text(context.l10n.quotaAlerts),
+                                value: settingsController.quotaPushEnabled,
+                                onChanged: (bool value) {
+                                  settingsController.setQuotaPushEnabled(value);
+                                },
+                              ),
+                              const Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                              ),
+                              SwitchListTile(
+                                title: Text(context.l10n.taskAlerts),
+                                value: settingsController.taskPushEnabled,
+                                onChanged: (bool value) {
+                                  settingsController.setTaskPushEnabled(value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
                         _buildSectionTitle(context, context.l10n.about),
                         Card(
                           elevation: 0,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerLow,
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -136,8 +169,7 @@ class AppSettingsScreen extends StatelessWidget {
                           child: ListTile(
                             leading: const Icon(Icons.info_outline),
                             title: Text(context.l10n.aboutApp),
-                            subtitle:
-                                Text('${context.l10n.version} 0.1.0+1'),
+                            subtitle: Text('${context.l10n.version} 0.1.0+1'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => _showAbout(context),
                           ),
