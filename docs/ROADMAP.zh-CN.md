@@ -1,6 +1,6 @@
 # 路线图
 
-[English roadmap](ROADMAP.md) | [中文 README](README.zh-CN.md)
+[English roadmap](ROADMAP.md) | [中文 README](../README.zh-CN.md)
 
 ## 已实现
 

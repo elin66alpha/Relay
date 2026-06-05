@@ -1,239 +1,70 @@
 # Relay
 
-[English](README.md) | [路线图](ROADMAP.zh-CN.md) | [生产加固指南](docs/production-hardening.zh-CN.md)
+[English](README.md) | [路线图](docs/ROADMAP.zh-CN.md) | [生产加固指南](docs/production-hardening.zh-CN.md)
 
-Relay 是一个私有 CLI 智能体控制台。Flutter 客户端连接运行在你自己机器上的 Node 后端，然后在一个 app 里切换和调用：
-
-- Claude Code CLI
-- Codex CLI
-- Antigravity CLI (`agy`)
+Relay 是一个私有 CLI 智能体控制台。你可以在手机、Web 或桌面端打开同一个前端，把它连接到自己的后端；这个后端可以跑在家里的 PC / Mac 上，也可以跑在云端 VPS 上。
 
 app 不内置任何默认后端地址。首次连接必须扫描后端生成的加密凭证二维码，并输入用户自己设置的密码。
 
-## 设计原则
-
-- 不写死个人主机、路径、token 或凭证。
-- 移动端、Web、桌面端和不同后端平台共用同一套 API、凭证和会话模型；操作系统差异只放在安装脚本和适配层里。
-- 受保护后端 API 必须使用加密凭证二维码生成的、可吊销的设备 token。
-- 安装脚本提供三种网络模式：公网直连、稳定域名的正式 Cloudflare Tunnel，以及快速试用的 Cloudflare Quick Tunnel。
+连接之后，Relay 会把 CLI agent 的日常使用集中到一个聊天界面里：你可以切换 Claude Code、Codex 和 Antigravity，选择工作目录，保留多个会话，查看 agent 的流式回复，管理文件，检查额度，并用卡片模式快速确认下一步动作。
 
 ## 当前能力
 
-- 一台后端机器可以在同一个工作路径里暴露 Claude Code、Codex 和 Antigravity。
-- **会话按「工作路径 + agent + 命名 session」共享。** 每个 `workdir + agent` 下可以有多个命名会话。每个会话都有独立历史和可续接 CLI 上下文，可从抽屉里的 `+` 新建，也可以切换或删除，且不会影响工作目录里的文件。处于同一工作路径和同一会话的设备会实时镜像彼此的消息和 agent 进度。
-- app 不在本地保存聊天记录。对话由后端（CLI 宿主机）保存，重开 app 或切换工作路径/会话时从后端拉回，并自动定位到最新消息而非顶部。清空对话会同时清掉当前会话的后端历史和可续接 CLI 上下文。
-- Claude Code 和 Codex 通过 SSE 流式显示回答。Web 端会对高频流式 UI 更新做节流，避免长回复时界面卡顿。
-- assistant 聊天气泡会把 agent 输出按 Markdown 渲染成人类可读格式，包括标题、加粗、
-  斜体、列表、引用、代码块和分隔线。`**文字**` 显示为加粗，`*文字*` 显示为斜体，
-  行内 code 显示为斜体而不是带背景色的代码样式；同时兼容 `###标题` 这种无空格标题和旧的
-  `##文字##` 行内强调。用户自己发送的消息仍按原文显示。
-- 长任务可以从 app 中取消。
-- 额度查询用只读弹窗展示，不再写入聊天记录。弹窗显示 Claude Code 和 Codex 的 5 小时剩余额度、本周剩余额度及刷新时间；Antigravity 显示暂未开放。
-- 定时消息独立成左侧抽屉里的**“定时消息”**入口，点进是一个专属页面：Claude Code / Codex 各一行，显示是哪个 agent、它的下一次 5 小时刷新时间、一个消息输入框、一个**发送**键，以及在已排一条时出现的**清除已排程**键。后端检测到下一次刷新后，会把这条消息自动发送到该 agent 的会话。每个工作区（工作路径）各自保留一条待发送消息；再次发送会替换原有那条。该页面在同一工作区的多设备间同步，且当远端同步到达时，会保留你正在输入但尚未发送的草稿。若发送途中后端被停止，该消息会在下次启动时标记为失败而非永久卡住；已完成的旧记录会被裁剪以保持存储有界。
-- 额度刷新提醒和预设消息发送结果走系统原生通知（Android / iOS / macOS / Windows），发到通知栏而非聊天气泡。依赖 app 进程存活、SSE 在线；app 被系统完全杀掉时收不到（离线远程推送需 FCM/APNs，暂不引入）。
-- 机器状态弹窗使用 `GET /api/diagnostics` 展示更完整的后端诊断：公网 URL、监听地址、token 数量、CLI 可执行文件与登录状态、workdir 权限、存储文件、Web 构建、活动请求、队列和 SSE 连接数。
-- 抽屉里的**“文件系统”**入口是浏览文件和设定工作路径的唯一入口（原来独立的“工作路径”页已并入这里）。它从当前工作路径打开、按绝对路径浏览，所以“上一级”可以一路走到系统根目录，而不只是 workdir。文件夹可以点进去；**“设为工作路径”**把当前文件夹设为本设备的工作路径——每台设备在本地各自持有路径（通过 `X-Workdir` 发送），切换路径即加载该路径下保存的 agent 会话。支持下载文件、把文件夹下载为 `.zip`、上传文件，Web 端还支持拖拽上传。下载带进度条、直接存到系统下载文件夹（Android 走 MediaStore，Web 走浏览器下载夹）、明确显示存到了哪，并在你离开页面后仍会弹完成通知。单次下载上限 300 MB（文件夹按未压缩总大小算）、单个上传上限 100 MB。默认隐藏点文件，可切换显示。文件浏览/下载/上传可达浏览器能到的任意路径，仅由 bearer token 把关，与 agent 在主机上本就拥有的全盘访问一致。
-- 后端受保护 API 在生成至少一个凭证 token 前保持关闭。
-- 同一套 Flutter 客户端同时支持移动端、Web 和原生桌面（Windows / macOS / Linux）。窄屏 Web 保持手机式抽屉布局，宽屏 Web 使用常驻侧边栏。桌面构建与打包见 [DESKTOP.md](DESKTOP.md)。
-- 压缩按钮会静默执行 agent 的压缩命令，不会把 `/compact` 或 agent 的压缩回复写进当前界面或重开后加载的聊天记录。
+- 一个后端可以连接多个前端设备；手机、Web 和桌面端都能回到同一个工作目录和会话。
+- 支持 Claude Code、Codex 和 Antigravity，在同一个 app 里切换使用。
+- 聊天记录和可续接 CLI 上下文保存在后端，重开 app 后可以继续之前的工作。
+- 文件系统入口可以浏览后端机器上的目录、切换工作路径、上传和下载文件。
+- 额度弹窗、定时消息和系统通知帮助你跟踪 Claude Code / Codex 的可用时间。
+- 卡片模式会根据近期会话生成建议，用户只需要通过手势确认、稍后处理或丢弃。
 
 ## 项目结构
 
 ```text
 Relay/
-├── backends/             不同操作系统的后端安装脚本
-│   ├── linux/            基于 PM2 的 Linux 安装入口
-│   ├── macos/            基于 LaunchAgent 的 macOS 安装入口
-│   └── windows/          基于 PowerShell/计划任务的 Windows 安装入口
-├── lib/                  Flutter 客户端
-│   ├── core/backend/     后端 HTTP/SSE client
-│   ├── core/models/      聊天、CLI agent、机器模型
-│   ├── core/storage/     安全存储与设备标识
-│   └── features/         聊天、抽屉、凭证、设置、文件系统、卡片
-├── docs/                 生产加固说明
-└── server/               本机 Node 后端
-    ├── server.js         HTTP API + SSE 事件
-    └── lib/              agents、tokens、workdir、usage、quota-watch、credentials、
-                          diagnostics、quota schedules
+├── backends/             Linux、macOS、Windows 后端安装脚本
+├── lib/                  Flutter 前端，覆盖移动端、Web 和桌面端
+├── server/               本机或 VPS 上运行的 Node 后端
+├── docs/                 路线图、生产加固、桌面端和 agent 工作文档
+└── scripts/              本地开发和构建辅助脚本
 ```
+
+更多开发细节见 [AGENT.md](docs/AGENT.md)。
 
 ## 后端快速开始
 
-Linux 使用现有的 PM2 后端安装流程：
+先准备一台你愿意作为后端的机器：家里的 PC / Mac、一直开机的工作站，或者一台 VPS 都可以。后端机器需要能运行 Node.js 18 或更高版本，并且已经安装并登录 Claude Code、Codex、Antigravity 其中至少一个 CLI agent。
+
+然后在仓库根目录运行对应平台的安装脚本：
 
 ```bash
 ./backends/linux/setup.sh
 ```
 
-macOS 使用 LaunchAgent 管理服务，不依赖 PM2：
-
 ```bash
 ./backends/macos/setup.sh
 ```
-
-Windows 使用 PowerShell 后台进程和当前用户计划任务：
 
 ```powershell
 .\backends\windows\setup.ps1
 ```
 
-三套安装流程都提供三种网络模式。
+安装过程中会让你选择连接方式：
 
-- **不用隧穿 / 直连模式**：适用于 VPS 或任何有可达公网 IP/域名的主机。你输入 app 连接地址，后端绑定到 `0.0.0.0`，二维码指向这个地址。暴露到不可信网络前，请在前面配置 HTTPS 反向代理（nginx/Caddy）。
-- **Cloudflare Tunnel 模式**：标准 named tunnel 流程，适合你 Cloudflare zone 下的稳定域名。安装脚本可以执行 `cloudflared tunnel login`、创建或复用 named tunnel、运行 `cloudflared tunnel route dns`、写入本地 tunnel config，并用 PM2/LaunchAgent 常驻运行。如果旧的 A/AAAA/CNAME 记录已经占用了这个主机名，脚本会询问是否覆盖成 tunnel DNS route。凭证二维码指向 `https://你的域名`。
-- **Cloudflare Quick Tunnel 模式**（默认）：后端继续监听 `127.0.0.1`，cloudflared 运行
-  `tunnel --url http://localhost:8787`，凭证二维码指向 cloudflared 打印出来的最新
-  `https://*.trycloudflare.com` 地址。这个模式搭建最快，手机不需要和后端在同一网络。Quick Tunnel 地址会在隧道重启后轮换，因此隧道 URL 变化后需要重新生成并导入二维码。
+- **直连模式**：适合有公网 IP 或固定域名的 VPS / 主机。
+- **Cloudflare Tunnel**：适合已经有自己的域名，并想要稳定 HTTPS 地址。
+- **Cloudflare Quick Tunnel**：最快试用方式，不需要提前准备域名，但地址可能会变化。
 
-无论哪种方式，在提示时设置一个凭证密码，然后在 app 中导入二维码。
+脚本会启动后端，并生成加密凭证二维码和对应的 JSON 凭证文件。打开 Relay app，扫描二维码或导入 JSON 文件，再输入你设置的密码，就可以连接这台后端。
 
-前置要求：Node.js ≥ 18；Linux 安装还需要 `pm2` (`npm install -g pm2`)；Windows 需要 PowerShell；两种 Cloudflare 隧穿模式都需要 `cloudflared`。文件夹下载在 Linux/macOS 上使用系统 `zip` 命令，在 Windows 上使用 PowerShell `Compress-Archive`。
+## 前端演示
 
-仓库根目录旧的 `./setup.sh` 仍保留为 Linux 可用的快捷入口。
-
-## 手动后端启动
-
-如果你不想使用 `setup.sh`，倾向于自己手动执行步骤：
-
-```bash
-cd /path/to/Relay/server
-npm install
-cp .env.example .env
-npm start
-```
-
-主要环境变量：
-
-```dotenv
-PORT=8787
-HOST=127.0.0.1
-MACHINE_ID=
-MACHINE_NAME=
-PUBLIC_BASE_URL=
-RELAY_TUNNEL_MODE=
-CLOUDFLARED_BIN=
-CLOUDFLARED_ARGS=
-RELAY_DEFAULT_DIR=
-AGENT_TIMEOUT_MS=3600000
-POWERSHELL_BIN=
-ENABLE_QUOTA_WATCH=true
-QUOTA_POLL_MS=300000
-```
-
-Cloudflare Tunnel 和 Quick Tunnel 模式默认使用 `HOST=127.0.0.1`，因为 cloudflared 从本机访问后端。直连模式使用 `HOST=0.0.0.0`，让公网 IP/域名能访问后端。`RELAY_DEFAULT_DIR` 只是**新设备首次启动时的默认路径**（留空则为 `~/agent_deck`）；之后每台设备在本地各自持有当前路径，可在 app 的“文件系统”入口修改。工作路径必须是绝对路径，不接受普通相对路径。
-
-## 创建凭证二维码
-
-先确保后端和所选网络模式已启动（Linux 通常是 `pm2 start ecosystem.config.js`）。
-
-### 方式 A：标准交互式创建（自动探测或读取后端公网地址）
-平台安装脚本（类 Unix 主机上的 `backends/*/setup.sh`，Windows 上的
-`backends/windows/setup.ps1`）会自动生成二维码。手动创建时，Quick Tunnel 下脚本会自动读取
-cloudflared 日志里的最新 `trycloudflare.com` 地址；正式 Cloudflare Tunnel / 直连模式下会使用
-`.env` 里的 `PUBLIC_BASE_URL`，并提示你输入密码：
-```bash
-cd /path/to/Relay/server
-pm2 start ecosystem.config.js
-npm run credential
-```
-
-### 方式 B：快捷单行命令（仅建议自动化场景）
-如果用于自动化，可以直接通过参数传入密码。它不如交互式输入私密，因为 shell 历史或进程列表可能暴露密码：
-```bash
-npm run credential -- --passphrase "你的密码"
-```
-
-### 方式 C：手动指定网址与密码（直连模式 / 使用固定域名）
-如果你用直连模式或配了自己的稳定公网域名，可以用这条单行命令直接生成：
-```bash
-npm run credential -- --passphrase "你的密码" --url "https://你的固定域名"
-npm run credential -- --json-out "credentials/machine.relay.json"
-```
-
-### 脚本后台执行的操作：
-- 自动探测 Quick Tunnel 地址，或读取正式 Cloudflare Tunnel / 直连模式写入的 `PUBLIC_BASE_URL`（除非通过 `--url` 指定）。
-- 在缺少 `MACHINE_ID` 时自动生成并写入 `.env` 文件。
-- 在 `server/tokens.json` 中生成一个可吊销的、针对该设备的专用 token。
-- 删除 `server/credentials/` 里的旧凭证文件，然后在终端输出最新二维码，并同步保存：
-  - `server/credentials/<machine>.relay.png`：扫码或上传二维码图片用；
-  - `server/credentials/<machine>.relay.json`：打开文件，复制全文，用 app 的“粘贴凭证”导入。
-
-生成新二维码**不会自动吊销已有设备 token**。这是为了避免“给新设备生成二维码”时把已经导入过的手机/Web 端弄成 401。需要停用旧设备时，请手动 `--revoke`。
-
-生成的二维码内容是 PBKDF2-SHA256 + AES-256-GCM 加密后的凭证信封，您的明文密码绝不会写入磁盘。
-
-查看或吊销 token：
-
-```bash
-npm run credential -- --list-tokens
-npm run credential -- --revoke <token-id>
-```
-
-## Flutter 客户端
-
-```bash
-cd /path/to/Relay
-flutter pub get
-flutter run
-```
-
-首次打开 app 时，导入后端凭证并输入凭证密码。移动端可以用摄像头扫描二维码。Web 和桌面端（Windows/macOS/Linux）通过粘贴加密二维码内容或上传保存下来的二维码图片导入，并刻意隐藏摄像头扫码（桌面无 mobile_scanner 实现）。之后可以在凭证页面继续添加更多机器。
-
-Web 凭证通过 Flutter 的 Web 安全存储后端持久化在浏览器本地存储中，因此连接私人机器时请使用私人的浏览器配置。
-
-构建 Web 前端并让 Node 后端托管它：
-
-```bash
-cd /path/to/Relay
-flutter build web --pwa-strategy=none
-cd server
-npm start
-```
-
-当 `build/web/index.html` 存在时，后端会在与 API 相同的主机和端口上提供 Flutter Web 应用。推荐禁用 Flutter service worker，避免浏览器在后端重启后继续加载旧前端代码。
-
-开发时反复执行的构建流程可以直接运行：
-
-```bash
-./scripts/build_flow.sh
-```
-
-它会依次执行 Flutter analysis/test、Node 语法检查、构建 Web、重启 PM2 后端、等待 Web
-端点可访问、构建 Android debug APK，并用 `adb install -r` 安装到手机。
-
-### APK 签名（开发阶段）
-
-目前没有正式 release 密钥。Android 的 `release` 构建类型复用 debug 签名配置，
-因此**我们构建的每个 APK——无论 `flutter build apk`（release）还是 `--debug`——都是
-debug 签名的**。这样开发流程更简单，但也意味着在一台机器上构建的 APK 无法覆盖安装由
-另一台机器的 `debug.keystore` 签名的版本；遇到这种情况需先卸载旧 app
-（`adb uninstall dev.relay.app`），卸载会清空其本地数据。正式对外/上架前再配置
-专用 release 密钥。
-
-## API 概览
-
-- `GET /api/health`
-- `GET /api/status`
-- `GET /api/diagnostics`
-- `GET /api/agents`
-- `GET /api/auth/status`
-- `GET /api/usage`
-- `GET /api/quota-schedules`
-- `POST /api/quota-schedules`
-- `POST /api/quota-schedules/cancel`
-- `GET /api/workdir`
-- `GET /api/workdir/browse`
-- `POST /api/workdir`
-- `GET /api/fs/download`
-- `POST /api/fs/upload`
-- `POST /api/chat`
-- `POST /api/chat/cancel`
-- `GET /api/sessions`
-- `POST /api/sessions`
-- `POST /api/sessions/active`
-- `POST /api/sessions/delete`
-- `GET /api/history`
-- `POST /api/session/clear`
-- `GET /api/events`
-
-所有 `/api/*` 路由都需要 `Authorization: Bearer <token>`。如果后端还没有生成任何 token，受保护 API 会返回 `TOKEN_NOT_CONFIGURED`，不会以未鉴权状态运行。
+<p>
+  <img src="docs/assets/screenshots/relay-mobile-chat-zh.png" alt="主聊天界面" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-setup-zh.png" alt="首次连接" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-drawer-zh.png" alt="Agent 与会话抽屉" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-bottom-zh.png" alt="聊天底部操作区" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-fs-zh.png" alt="文件系统" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-cards-zh.png" alt="卡片模式" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-quota-zh.png" alt="定时消息" width="260">
+  <img src="docs/assets/screenshots/relay-mobile-quota-usage-zh.png" alt="额度查询" width="260">
+</p>
