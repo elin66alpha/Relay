@@ -1,7 +1,8 @@
-# WORK.md - Shared Agent Notes
+# AGENT.md - Shared Agent Notes
 
-This file is a short handoff log for agents working on Relay. Keep it
-current, factual, and free of secrets. Detailed history lives in git.
+This file is a short handoff log and technical reference for agents working on
+Relay. Keep it current, factual, and free of secrets. Detailed history lives in
+git.
 
 ## Current Project Shape
 
@@ -12,10 +13,169 @@ current, factual, and free of secrets. Detailed history lives in git.
 - Clients connect by importing an encrypted credential QR / payload and entering
   the user-chosen password.
 - All protected APIs require a revocable bearer token from `server/tokens.json`.
-- Sessions are keyed by `workdir + agent`; devices in the same path share chat
-  history, the resumable CLI session, and in-flight progress.
+- Sessions are keyed by `workdir + agent + session`; devices in the same scope
+  share chat history, the resumable CLI session, and in-flight progress.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
+
+## Operating Principles
+
+- Do not hard-code personal hosts, paths, tokens, or credentials.
+- Mobile, Web, desktop, and backend platforms share the same API, credential,
+  and session model; OS-specific setup stays in adapters and scripts.
+- Protected backend APIs require a revocable device token generated through the
+  encrypted credential QR.
+- Setup offers direct public-host mode, named Cloudflare Tunnel for stable
+  hostnames, and Cloudflare Quick Tunnel for fast trials.
+- Keep README visitor-facing. Put manual startup, credential internals, API
+  lists, build flow details, and agent handoff notes here.
+
+## Manual Backend Setup
+
+Prefer the platform setup scripts for real users. For manual agent work:
+
+```bash
+cd /path/to/Relay/server
+npm install
+cp .env.example .env
+npm start
+```
+
+Important environment variables:
+
+```dotenv
+PORT=8787
+HOST=127.0.0.1
+MACHINE_ID=
+MACHINE_NAME=
+PUBLIC_BASE_URL=
+RELAY_TUNNEL_MODE=
+CLOUDFLARED_BIN=
+CLOUDFLARED_ARGS=
+RELAY_DEFAULT_DIR=
+AGENT_TIMEOUT_MS=3600000
+POWERSHELL_BIN=
+ENABLE_QUOTA_WATCH=true
+QUOTA_POLL_MS=300000
+```
+
+`HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because
+cloudflared reaches the backend locally. In Direct mode, use `HOST=0.0.0.0` so
+the public IP/domain can reach the backend. `RELAY_DEFAULT_DIR` is only the
+default path a brand-new device starts from (empty means `~/agent_deck`); each
+device later stores its own current path locally and sends it through
+`X-Workdir`. Work directories must be absolute paths.
+
+## Credential QR Reference
+
+The platform setup scripts generate the QR automatically. To regenerate it
+manually from `server/`:
+
+```bash
+npm run credential
+npm run credential -- --passphrase "pw"
+npm run credential -- --passphrase "pw" --url "https://your-domain"
+npm run credential -- --json-out "credentials/machine.relay.json"
+```
+
+The script creates `MACHINE_ID` if missing, adds a revocable per-device token to
+`server/tokens.json`, prints the QR in the terminal, and saves
+`server/credentials/<machine>.relay.png` plus
+`server/credentials/<machine>.relay.json`. Upload/scan the PNG, or copy the JSON
+file content into the app's paste-credential flow. Generating a new QR removes
+old credential files, but does not revoke existing device tokens. The payload is
+encrypted with PBKDF2-SHA256 + AES-256-GCM; the plaintext password is never
+written to disk.
+
+Credential script behavior:
+
+- Auto-detects the current Quick Tunnel URL from logs, or uses
+  `PUBLIC_BASE_URL` for named Cloudflare Tunnel / Direct mode unless `--url` is
+  provided.
+- Creates and persists `MACHINE_ID` in `.env` when missing.
+- Creates one revocable token per generated credential payload.
+- Deletes old files under `server/credentials/` so the latest QR/paste payload
+  is unambiguous.
+- Does not revoke existing device tokens when generating a new QR; use
+  `--revoke` explicitly when disabling a device.
+- Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and
+  must be regenerated after that URL changes.
+
+Token management:
+
+```bash
+npm run credential -- --list-tokens
+npm run credential -- --revoke <token-id>
+```
+
+## Flutter Client And Web Build
+
+For local frontend development:
+
+```bash
+cd /path/to/Relay
+flutter pub get
+flutter run
+```
+
+Web credentials persist in browser local storage through Flutter's Web
+secure-storage backend, so use a private browser profile for private machines.
+
+To build the Web frontend and let the Node backend serve it:
+
+```bash
+cd /path/to/Relay
+flutter build web --pwa-strategy=none
+cd server
+npm start
+```
+
+When `build/web/index.html` exists, the backend serves the Flutter Web app on
+the same host/port as the API. Use `--pwa-strategy=none` so browsers do not keep
+serving stale frontend code after a backend restart.
+
+## APK Signing During Development
+
+There is no release keystore yet. The Android `release` build type reuses the
+debug signing config, so every APK currently built by this repo is debug-signed.
+An APK built on one machine may not update an install signed by another
+machine's `debug.keystore`; uninstall the old app first if needed:
+
+```bash
+adb uninstall dev.relay.app
+```
+
+Configure a proper release keystore before public or Play Store distribution.
+
+## API Overview
+
+All `/api/*` routes require `Authorization: Bearer <token>`. If the backend has
+not generated any token yet, protected API routes return
+`TOKEN_NOT_CONFIGURED` instead of running unauthenticated.
+
+- `GET /api/health`
+- `GET /api/status`
+- `GET /api/diagnostics`
+- `GET /api/agents`
+- `GET /api/auth/status`
+- `GET /api/usage`
+- `GET /api/quota-schedules`
+- `POST /api/quota-schedules`
+- `POST /api/quota-schedules/cancel`
+- `GET /api/workdir`
+- `GET /api/workdir/browse`
+- `POST /api/workdir`
+- `GET /api/fs/download`
+- `POST /api/fs/upload`
+- `POST /api/chat`
+- `POST /api/chat/cancel`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `POST /api/sessions/active`
+- `POST /api/sessions/delete`
+- `GET /api/history`
+- `POST /api/session/clear`
+- `GET /api/events`
 
 ## 2026-06-03 - Per-agent Model / Effort / Permission controls
 
@@ -78,7 +238,7 @@ current, factual, and free of secrets. Detailed history lives in git.
   + plugin DLLs + `data/`). `dart analyze` is clean and `flutter test` is green.
   The app launches and most features work in manual smoke testing. Two
   environment workarounds were required to compile — see "Windows build
-  gotchas" in `docs/DESKTOP.md`:
+  gotchas" in `DESKTOP.md`:
   1. **Non-ASCII project path breaks the Flutter/MSBuild toolchain.** When the
      repo lives under a path with CJK characters, `flutter analyze` crashes in
      the LSP channel and `flutter build windows` fails reading `app.dill` (the

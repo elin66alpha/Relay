@@ -314,6 +314,9 @@ class AppStrings {
       isZh ? '生成凭证时设置的密码' : 'Password set when generating the credential';
   String get decrypt => isZh ? '解密' : 'Decrypt';
   String get settings => isZh ? '设置' : 'Settings';
+  String get notifications => isZh ? '通知' : 'Notifications';
+  String get quotaAlerts => isZh ? '额度刷新提醒' : 'Quota reset alerts';
+  String get taskAlerts => isZh ? '任务完成提醒' : 'Task completion alerts';
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';

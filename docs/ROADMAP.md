@@ -1,6 +1,6 @@
 # Roadmap
 
-[中文路线图](ROADMAP.zh-CN.md) | [README](README.md)
+[中文路线图](ROADMAP.zh-CN.md) | [README](../README.md)
 
 ## Implemented
 

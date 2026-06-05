@@ -27,6 +27,8 @@ class FcmService {
   StreamSubscription<RemoteMessage>? _foregroundSub;
   String? _registeredToken;
   String _lang = 'en';
+  bool _quotaPushEnabled = true;
+  bool _taskPushEnabled = true;
 
   bool get _supported =>
       !kIsWeb &&
@@ -36,9 +38,13 @@ class FcmService {
   Future<bool> syncRegistration({
     required BackendClient backendClient,
     required String lang,
+    required bool quotaPushEnabled,
+    required bool taskPushEnabled,
   }) async {
     if (!_supported) return true;
     _lang = lang == 'zh' ? 'zh' : 'en';
+    _quotaPushEnabled = quotaPushEnabled;
+    _taskPushEnabled = taskPushEnabled;
     try {
       _registerBackgroundHandler();
       final bool initialized = await _ensureInitialized();
@@ -56,7 +62,12 @@ class FcmService {
 
       final String? token = await FirebaseMessaging.instance.getToken();
       if (token == null || token.isEmpty) return false;
-      await backendClient.registerFcmToken(token, _lang);
+      await backendClient.registerFcmToken(
+        token,
+        _lang,
+        quotaPushEnabled: _quotaPushEnabled,
+        taskPushEnabled: _taskPushEnabled,
+      );
       _registeredToken = token;
       _listenForTokenRefresh(backendClient);
       _listenForForegroundMessages();
@@ -102,7 +113,14 @@ class FcmService {
       (String token) {
         if (token.isEmpty) return;
         unawaited(
-          backendClient.registerFcmToken(token, _lang).then((_) {
+          backendClient
+              .registerFcmToken(
+            token,
+            _lang,
+            quotaPushEnabled: _quotaPushEnabled,
+            taskPushEnabled: _taskPushEnabled,
+          )
+              .then((_) {
             _registeredToken = token;
           }).catchError((_) {}),
         );
@@ -115,9 +133,8 @@ class FcmService {
     _foregroundSub =
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final RemoteNotification? notification = message.notification;
-      final String title = notification?.title ??
-          message.data['title']?.toString() ??
-          'Relay';
+      final String title =
+          notification?.title ?? message.data['title']?.toString() ?? 'Relay';
       final String body =
           notification?.body ?? message.data['body']?.toString() ?? '';
       if (body.isEmpty) return;

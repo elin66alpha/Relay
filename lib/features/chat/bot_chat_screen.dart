@@ -90,10 +90,20 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   void _onSettingsChanged() {
     widget.chatController.setLanguage(widget.settingsController.language);
+    widget.chatController.setNotificationPreferences(
+      quotaPushEnabled: widget.settingsController.quotaPushEnabled,
+      taskPushEnabled: widget.settingsController.taskPushEnabled,
+    );
+    widget.chatController.syncPushSubscription(force: true);
+    widget.chatController.syncFcmRegistration(force: true);
   }
 
   void _syncContext() {
     widget.chatController.setLanguage(widget.settingsController.language);
+    widget.chatController.setNotificationPreferences(
+      quotaPushEnabled: widget.settingsController.quotaPushEnabled,
+      taskPushEnabled: widget.settingsController.taskPushEnabled,
+    );
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) return;

@@ -7,10 +7,20 @@ const path = require('path');
 // it pulls history back from here (the CLI host) when it reopens. Keyed by
 // scopeKey (`workdir\0agentKey[\0sessionId]`), matching the session key used in
 // agents.js, so history and the resumable CLI session are cleared together.
-const HISTORY_FILE = path.join(__dirname, '..', 'chat-history.json');
+const HISTORY_FILE = process.env.RELAY_HISTORY_FILE
+  ? path.resolve(process.env.RELAY_HISTORY_FILE)
+  : path.join(__dirname, '..', 'chat-history.json');
 const MAX_PER_SCOPE = 200; // Cap per conversation so the file can't grow forever.
 const SCOPE_SEPARATOR = '\u0000';
 const LEGACY_SESSION_ID = 'default';
+const FLUSH_IDLE_MS = 300;
+const FLUSH_MAX_MS = 2000;
+
+let cache = null;
+let cacheLoaded = false;
+let dirty = false;
+let flushTimer = null;
+let maxFlushTimer = null;
 
 function loadAll() {
   try {
@@ -21,17 +31,73 @@ function loadAll() {
 }
 
 function saveAll(data) {
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(data), { mode: 0o600 });
+  const tmp = `${HISTORY_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
+  fs.renameSync(tmp, HISTORY_FILE);
+}
+
+function ensureLoaded() {
+  if (!cacheLoaded) {
+    cache = loadAll();
+    cacheLoaded = true;
+  }
+  return cache;
+}
+
+function unrefTimer(timer) {
+  if (timer && typeof timer.unref === 'function') timer.unref();
+}
+
+function clearFlushTimers() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (maxFlushTimer) {
+    clearTimeout(maxFlushTimer);
+    maxFlushTimer = null;
+  }
+}
+
+function flushPendingHistory() {
+  clearFlushTimers();
+  if (!dirty) return false;
+  saveAll(ensureLoaded());
+  dirty = false;
+  return true;
+}
+
+function flushFromTimer() {
+  try {
+    flushPendingHistory();
+  } catch (err) {
+    console.warn(`[history] failed to flush chat history: ${err.message}`);
+  }
+}
+
+function scheduleFlush() {
+  dirty = true;
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = setTimeout(flushFromTimer, FLUSH_IDLE_MS);
+  unrefTimer(flushTimer);
+  if (!maxFlushTimer) {
+    maxFlushTimer = setTimeout(flushFromTimer, FLUSH_MAX_MS);
+    unrefTimer(maxFlushTimer);
+  }
+}
+
+function flushHistory() {
+  return flushPendingHistory();
 }
 
 function readHistory(scopeKey) {
-  const list = loadAll()[scopeKey];
+  const list = ensureLoaded()[scopeKey];
   return Array.isArray(list) ? list : [];
 }
 
 function upsertHistoryMessage(scopeKey, message) {
   if (!message || !message.id) return;
-  const all = loadAll();
+  const all = ensureLoaded();
   const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
   const index = list.findIndex((item) => item && item.id === message.id);
   if (index === -1) {
@@ -50,12 +116,12 @@ function upsertHistoryMessage(scopeKey, message) {
     list.splice(0, list.length - MAX_PER_SCOPE);
   }
   all[scopeKey] = list;
-  saveAll(all);
+  scheduleFlush();
 }
 
 function updateHistoryMessage(scopeKey, messageId, updater) {
   if (!messageId || typeof updater !== 'function') return false;
-  const all = loadAll();
+  const all = ensureLoaded();
   const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
   const index = list.findIndex((item) => item && item.id === messageId);
   if (index === -1) return false;
@@ -63,7 +129,7 @@ function updateHistoryMessage(scopeKey, messageId, updater) {
   if (!next) return false;
   list[index] = next;
   all[scopeKey] = list;
-  saveAll(all);
+  scheduleFlush();
   return true;
 }
 
@@ -96,18 +162,18 @@ function finalizeStreamingList(list, now) {
 }
 
 function finalizeStaleStreamingHistory(scopeKey) {
-  const all = loadAll();
+  const all = ensureLoaded();
   const list = Array.isArray(all[scopeKey]) ? all[scopeKey] : [];
   const { list: next, changed } = finalizeStreamingList(list, new Date().toISOString());
   if (changed > 0) {
     all[scopeKey] = next;
-    saveAll(all);
+    scheduleFlush();
   }
   return changed;
 }
 
 function finalizeAllStaleStreamingHistory() {
-  const all = loadAll();
+  const all = ensureLoaded();
   let changed = 0;
   const now = new Date().toISOString();
   for (const [scopeKey, list] of Object.entries(all)) {
@@ -116,15 +182,15 @@ function finalizeAllStaleStreamingHistory() {
     all[scopeKey] = result.list;
     changed += result.changed;
   }
-  if (changed > 0) saveAll(all);
+  if (changed > 0) scheduleFlush();
   return changed;
 }
 
 function clearHistory(scopeKey) {
-  const all = loadAll();
+  const all = ensureLoaded();
   if (!(scopeKey in all)) return false;
   delete all[scopeKey];
-  saveAll(all);
+  scheduleFlush();
   return true;
 }
 
@@ -175,7 +241,7 @@ function snippetFor(text, query) {
 }
 
 function historyScopesFor({ workdir, agentKey }) {
-  const all = loadAll();
+  const all = ensureLoaded();
   const scopes = [];
   for (const [scopeKey, messages] of Object.entries(all)) {
     const info = scopeInfo(scopeKey);
@@ -242,7 +308,9 @@ module.exports = {
   updateHistoryMessage,
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
+  flushHistory,
   clearHistory,
+  redactSensitiveText,
   historyScopesFor,
   searchHistory,
   markdownForConversation,
