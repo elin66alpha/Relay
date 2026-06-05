@@ -54,6 +54,7 @@ const {
   updateHistoryMessage,
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
+  flushHistory,
   clearHistory,
   redactSensitiveText,
   searchHistory,
@@ -1558,6 +1559,26 @@ if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
   });
 }
 
+function flushHistoryForShutdown() {
+  try {
+    flushHistory();
+  } catch (err) {
+    console.error(`Failed to flush chat history: ${err.message}`);
+  }
+}
+
+function exitCodeForSignal(signal) {
+  return signal === 'SIGINT' ? 130 : 143;
+}
+
+process.on('exit', flushHistoryForShutdown);
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    flushHistoryForShutdown();
+    process.exit(exitCodeForSignal(signal));
+  });
+}
+
 app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
   if (PUBLIC_BASE_URL) {
@@ -1566,6 +1587,7 @@ app.listen(PORT, HOST, () => {
   console.log(`default workdir: ${getDefaultWorkdir()}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {
+    flushHistory();
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);
   }
   // Card Mode: seed suggestions once if none are pending yet.
