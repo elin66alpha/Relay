@@ -19,6 +19,7 @@ try {
 }
 
 const TOKENS_FILE = path.join(__dirname, '..', 'fcm-tokens.json');
+const VALID_CATEGORIES = new Set(['quota', 'task']);
 const SERVICE_ACCOUNT_FILE = String(
   process.env.FCM_SERVICE_ACCOUNT_FILE || '',
 ).trim();
@@ -52,7 +53,7 @@ function isEnabled() {
 function loadTokens() {
   try {
     const decoded = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf-8'));
-    return Array.isArray(decoded) ? decoded : [];
+    return Array.isArray(decoded) ? decoded.map(normalizeRecord) : [];
   } catch (_err) {
     return [];
   }
@@ -68,8 +69,35 @@ function tokenValue(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeCategories(categories) {
+  const value =
+    categories && typeof categories === 'object' && !Array.isArray(categories)
+      ? categories
+      : {};
+  return {
+    quota: value.quota !== false,
+    task: value.task !== false,
+  };
+}
+
+function normalizeRecord(record) {
+  const value =
+    record && typeof record === 'object' && !Array.isArray(record)
+      ? record
+      : {};
+  return {
+    ...value,
+    categories: normalizeCategories(value.categories),
+  };
+}
+
+function categoryAllowed(record, category) {
+  if (!VALID_CATEGORIES.has(category)) return true;
+  return normalizeCategories(record && record.categories)[category] !== false;
+}
+
 // Upsert by token so refreshes update workdir/lang instead of duplicating rows.
-function addToken({ token, workdir, lang }) {
+function addToken({ token, workdir, lang, categories }) {
   if (!configured) return false;
   const id = tokenValue(token);
   if (!id) return false;
@@ -77,6 +105,7 @@ function addToken({ token, workdir, lang }) {
     token: id,
     workdir: String(workdir || ''),
     lang: lang === 'zh' ? 'zh' : 'en',
+    categories: normalizeCategories(categories),
     updatedAt: new Date().toISOString(),
   };
   const list = loadTokens().filter((item) => item.token !== id);
@@ -107,7 +136,14 @@ function invalidTokenError(err) {
   );
 }
 
-async function notify({ title, message, messageZh, scopeWorkdir }) {
+async function notify({
+  title,
+  titleZh,
+  message,
+  messageZh,
+  scopeWorkdir,
+  category,
+}) {
   if (!configured) return 0;
   const list = loadTokens();
   if (list.length === 0) return 0;
@@ -115,18 +151,20 @@ async function notify({ title, message, messageZh, scopeWorkdir }) {
     scopeWorkdir != null && scopeWorkdir !== ''
       ? list.filter((item) => item.workdir === scopeWorkdir)
       : list;
-  if (scoped.length === 0) return 0;
+  const recipients = scoped.filter((item) => categoryAllowed(item, category));
+  if (recipients.length === 0) return 0;
 
   const messaging = admin.messaging(app);
   const invalid = [];
   let sent = 0;
   await Promise.all(
-    scoped.map(async (record) => {
+    recipients.map(async (record) => {
       const token = tokenValue(record.token);
       if (!token) return;
       const body =
         record.lang === 'zh' && messageZh ? messageZh : message || messageZh || '';
-      const notificationTitle = title || 'Relay';
+      const notificationTitle =
+        record.lang === 'zh' && titleZh ? titleZh : title || 'Relay';
       try {
         await messaging.send({
           token,

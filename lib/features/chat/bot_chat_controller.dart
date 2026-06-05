@@ -67,6 +67,8 @@ class BotChatController extends ChangeNotifier {
   // if the shared event stream misses the agent_done edge during the reconnect.
   String? _reattachRequestId;
   int _quotaScheduleRevision = 0;
+  bool _quotaPushEnabled = true;
+  bool _taskPushEnabled = true;
 
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   int get messageCount => _messages.length;
@@ -212,6 +214,20 @@ class BotChatController extends ChangeNotifier {
 
   void setLanguage(AppLanguage language) {
     _language = language;
+  }
+
+  void setNotificationPreferences({
+    required bool quotaPushEnabled,
+    required bool taskPushEnabled,
+  }) {
+    if (_quotaPushEnabled == quotaPushEnabled &&
+        _taskPushEnabled == taskPushEnabled) {
+      return;
+    }
+    _quotaPushEnabled = quotaPushEnabled;
+    _taskPushEnabled = taskPushEnabled;
+    _pushSynced = false;
+    _fcmSynced = false;
   }
 
   bool isRetryable(ChatMessage message) =>
@@ -391,8 +407,10 @@ class BotChatController extends ChangeNotifier {
   // when the backend has no VAPID keys, or until the user grants permission
   // (retried on the next app open). Runs at most once per session.
   bool _pushSynced = false;
-  Future<void> syncPushSubscription() async {
-    if (_pushSynced || _machine == null || !webPushSupported()) return;
+  Future<void> syncPushSubscription({bool force = false}) async {
+    if ((!force && _pushSynced) || _machine == null || !webPushSupported()) {
+      return;
+    }
     try {
       final PushConfig config = await _backendClient.pushConfig();
       if (!config.enabled || config.publicKey.isEmpty) {
@@ -404,6 +422,8 @@ class BotChatController extends ChangeNotifier {
       await _backendClient.subscribePush(
         subscription,
         _strings.isZh ? 'zh' : 'en',
+        quotaPushEnabled: _quotaPushEnabled,
+        taskPushEnabled: _taskPushEnabled,
       );
       _pushSynced = true;
     } catch (_) {
@@ -415,12 +435,14 @@ class BotChatController extends ChangeNotifier {
   // arrive while the app is backgrounded or killed. Android/iOS only and
   // best-effort; web/desktop and missing Firebase config are no-ops.
   bool _fcmSynced = false;
-  Future<void> syncFcmRegistration() async {
-    if (_fcmSynced || _machine == null) return;
+  Future<void> syncFcmRegistration({bool force = false}) async {
+    if ((!force && _fcmSynced) || _machine == null) return;
     try {
       final bool handled = await FcmService.instance.syncRegistration(
         backendClient: _backendClient,
         lang: _strings.isZh ? 'zh' : 'en',
+        quotaPushEnabled: _quotaPushEnabled,
+        taskPushEnabled: _taskPushEnabled,
       );
       if (handled) _fcmSynced = true;
     } catch (_) {

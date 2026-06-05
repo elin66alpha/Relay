@@ -57,6 +57,7 @@ const {
   finalizeStaleStreamingHistory,
   finalizeAllStaleStreamingHistory,
   clearHistory,
+  redactSensitiveText,
   searchHistory,
   markdownForConversation,
 } = require('./lib/history');
@@ -345,6 +346,28 @@ function sendEvent(type, payload) {
   }
 }
 
+function hasPresence(scopeWorkdir) {
+  if (!scopeWorkdir) return false;
+  for (const client of eventClients) {
+    if (client.workdir === scopeWorkdir) return true;
+  }
+  return false;
+}
+
+function pushCategoriesFromBody(body) {
+  const source =
+    body &&
+    body.categories &&
+    typeof body.categories === 'object' &&
+    !Array.isArray(body.categories)
+      ? body.categories
+      : body || {};
+  return {
+    quota: source.quota !== false,
+    task: source.task !== false,
+  };
+}
+
 function normalizeDeviceId(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -431,6 +454,45 @@ function broadcastScope(
 
 function agentPayload(agent) {
   return { key: agent.key, label: agent.label };
+}
+
+function taskCompletionSnippet(value) {
+  const redacted = redactSensitiveText(value);
+  const firstLine =
+    redacted
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .find((line) => line.length > 0) || '';
+  if (!firstLine) return 'Task completed.';
+  if (firstLine.length <= 140) return firstLine;
+  return `${firstLine.slice(0, 137)}...`;
+}
+
+function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
+  if (hasPresence(scopeWorkdir)) return;
+  const title = `${agent.label} finished`;
+  const titleZh = `${agent.label} 已完成`;
+  const body = taskCompletionSnippet(content);
+  push
+    .notify({
+      title,
+      titleZh,
+      message: body,
+      messageZh: body,
+      scopeWorkdir,
+      category: 'task',
+    })
+    .catch((err) => console.warn(`[push] task_done: ${err.message}`));
+  fcm
+    .notify({
+      title,
+      titleZh,
+      message: body,
+      messageZh: body,
+      scopeWorkdir,
+      category: 'task',
+    })
+    .catch((err) => console.warn(`[fcm] task_done: ${err.message}`));
 }
 
 function emitAgentEvent(type, { requestId, agent, session, deviceId, ...payload }) {
@@ -683,6 +745,11 @@ async function runScheduledQuotaMessage(schedule) {
       requestId,
       deviceId,
     });
+    notifyTaskCompletion({
+      agent,
+      scopeWorkdir: schedule.workdir,
+      content: finalContent,
+    });
     sendEvent('quota_schedule_sent', {
       scopeWorkdir: schedule.workdir,
       schedule: {
@@ -694,20 +761,6 @@ async function runScheduledQuotaMessage(schedule) {
       messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
       createdAt: new Date().toISOString(),
     });
-    push
-      .notify({
-        message: `Scheduled ${agent.label} message was sent after quota reset.`,
-        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-        scopeWorkdir: schedule.workdir,
-      })
-      .catch((err) => console.warn(`[push] quota_schedule_sent: ${err.message}`));
-    fcm
-      .notify({
-        message: `Scheduled ${agent.label} message was sent after quota reset.`,
-        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-        scopeWorkdir: schedule.workdir,
-      })
-      .catch((err) => console.warn(`[fcm] quota_schedule_sent: ${err.message}`));
   } catch (err) {
     const errorMessage =
       err instanceof AgentAuthError || err.code === 'NOT_LOGGED_IN'
@@ -942,6 +995,7 @@ app.post('/api/push/subscribe', (req, res) => {
     subscription,
     workdir,
     lang: req.body && req.body.lang,
+    categories: pushCategoriesFromBody(req.body),
   });
   res.json({ ok: true });
 });
@@ -967,6 +1021,7 @@ app.post('/api/push/fcm/register', (req, res) => {
     token,
     workdir,
     lang: req.body && req.body.lang,
+    categories: pushCategoriesFromBody(req.body),
   });
   return res.json({ ok: true, enabled: fcm.isEnabled() });
 });
@@ -1406,6 +1461,11 @@ app.post('/api/chat', async (req, res) => {
       session: chatSession,
       requestId,
       deviceId,
+    });
+    notifyTaskCompletion({
+      agent,
+      scopeWorkdir: workdir,
+      content: content || streamedText,
     });
     finalizeAssistantHistory(content);
     const completedAt = new Date().toISOString();
@@ -2086,10 +2146,18 @@ app.listen(PORT, HOST, () => {
         });
         // Reach offline clients; SSE only covers open app sessions.
         push
-          .notify({ message, messageZh: info && info.messageZh })
+          .notify({
+            message,
+            messageZh: info && info.messageZh,
+            category: 'quota',
+          })
           .catch((err) => console.warn(`[push] quota_reset: ${err.message}`));
         fcm
-          .notify({ message, messageZh: info && info.messageZh })
+          .notify({
+            message,
+            messageZh: info && info.messageZh,
+            category: 'quota',
+          })
           .catch((err) => console.warn(`[fcm] quota_reset: ${err.message}`));
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);

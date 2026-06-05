@@ -8,6 +8,8 @@ class FcmService {
   Future<bool> syncRegistration({
     required BackendClient backendClient,
     required String lang,
+    required bool quotaPushEnabled,
+    required bool taskPushEnabled,
   }) async {
     return true;
   }

@@ -732,12 +732,22 @@ class BackendClient {
     return PushConfig.fromJson(decoded.cast<String, Object?>());
   }
 
-  Future<void> subscribePush(String subscriptionJson, String lang) async {
+  Future<void> subscribePush(
+    String subscriptionJson,
+    String lang, {
+    required bool quotaPushEnabled,
+    required bool taskPushEnabled,
+  }) async {
     final Object? subscription = jsonDecode(subscriptionJson);
     await _requestJson(
       'POST',
       '/api/push/subscribe',
-      body: <String, Object?>{'subscription': subscription, 'lang': lang},
+      body: <String, Object?>{
+        'subscription': subscription,
+        'lang': lang,
+        'quota': quotaPushEnabled,
+        'task': taskPushEnabled,
+      },
       timeout: const Duration(seconds: 15),
     );
   }
@@ -751,11 +761,21 @@ class BackendClient {
     );
   }
 
-  Future<void> registerFcmToken(String token, String lang) async {
+  Future<void> registerFcmToken(
+    String token,
+    String lang, {
+    required bool quotaPushEnabled,
+    required bool taskPushEnabled,
+  }) async {
     await _requestJson(
       'POST',
       '/api/push/fcm/register',
-      body: <String, Object?>{'token': token, 'lang': lang},
+      body: <String, Object?>{
+        'token': token,
+        'lang': lang,
+        'quota': quotaPushEnabled,
+        'task': taskPushEnabled,
+      },
       timeout: const Duration(seconds: 15),
     );
   }
