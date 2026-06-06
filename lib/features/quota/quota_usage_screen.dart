@@ -53,7 +53,16 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
             AsyncSnapshot<UsageReport> snapshot,
           ) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return Center(child: Text(context.l10n.loadingUsage));
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 12),
+                    Text(context.l10n.loadingUsage),
+                  ],
+                ),
+              );
             }
             if (snapshot.hasError) {
               return Center(
