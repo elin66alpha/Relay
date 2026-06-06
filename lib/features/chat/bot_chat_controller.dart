@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
@@ -37,6 +38,11 @@ class BotChatController extends ChangeNotifier {
   final Map<String, String> _activeSessionByAgent = <String, String>{};
   final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
+  bool _historyLoading = false;
+  // Increments on each context-switch load. The finally only clears the
+  // spinner when its captured seq is still the latest, so a slow earlier load
+  // settling after a newer one started can't flash the empty placeholder.
+  int _historyLoadSeq = 0;
   bool _isCancelling = false;
   String? _lastError;
   // A turn is in flight on this device exactly while a request id is active;
@@ -70,9 +76,13 @@ class BotChatController extends ChangeNotifier {
   bool _quotaPushEnabled = true;
   bool _taskPushEnabled = true;
 
-  List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
+  // A read-only view over the live list (O(1)), not a copy. The chat screen
+  // reads this on every (throttled) streaming rebuild, so copying the whole
+  // history each time was O(n) churn that grew with the conversation.
+  List<ChatMessage> get messages => UnmodifiableListView<ChatMessage>(_messages);
   int get messageCount => _messages.length;
   bool get isThinking => _activeRequestId != null;
+  bool get isHistoryLoading => _historyLoading;
   bool get isCancelling => _isCancelling;
   String? get lastError => _lastError;
   CliAgent get agent => _agent;
@@ -270,6 +280,8 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     _messages.clear();
+    _historyLoading = true;
+    final int loadSeq = ++_historyLoadSeq;
     _lastError = null;
     _isCancelling = false;
     _activeRequestId = null;
@@ -298,6 +310,11 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // Leave the view empty when history can't be loaded.
+    } finally {
+      if (loadSeq == _historyLoadSeq) {
+        _historyLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -516,6 +533,8 @@ class BotChatController extends ChangeNotifier {
     if (machine == null) return;
     final CliAgent agent = _agent;
     _messages.clear();
+    _historyLoading = true;
+    final int loadSeq = ++_historyLoadSeq;
     _lastError = null;
     _isCancelling = false;
     _activeRequestId = null;
@@ -536,6 +555,11 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // Leave the view empty when history can't be loaded.
+    } finally {
+      if (loadSeq == _historyLoadSeq) {
+        _historyLoading = false;
+        notifyListeners();
+      }
     }
     _prefetchInactiveSessions();
   }
