@@ -8,11 +8,26 @@ const path = require('path');
 
 const { getDefaultWorkdir } = require('./workdir');
 const { buildArgs } = require('./agent-options');
+const { createJsonStore } = require('./json-store');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
   10,
 );
+
+// Cap how much process output we hold in memory. A long `claude --verbose
+// stream-json` run can emit tens of MB to stdout; the captured buffer is only
+// used as an error fallback (the real reply is parsed line-by-line or read from
+// codex's -o file), so keeping just the tail bounds memory without losing the
+// most recent, most relevant output.
+const MAX_CAPTURED_OUTPUT = 8 * 1024 * 1024;
+
+function appendCapped(buffer, text) {
+  const next = buffer + text;
+  return next.length > MAX_CAPTURED_OUTPUT
+    ? next.slice(next.length - MAX_CAPTURED_OUTPUT)
+    : next;
+}
 
 // Persistent CLI sessions: each session key keeps one continuous conversation.
 // Keys are scoped by workdir + agent + optional chat session id. clearSession
@@ -65,33 +80,26 @@ function isAuthError(text) {
   return AUTH_ERROR_RE.test(String(text || ''));
 }
 
-function loadSessions() {
-  try {
-    return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
-  } catch (_err) {
-    return {};
-  }
-}
-
-function saveSessions(sessions) {
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(sessions), { mode: 0o600 });
-}
+// Cached, atomic store for the resumable-session map. The cache keeps the
+// per-turn getSession lookup off the disk, and the atomic write means a crash
+// mid-save can't truncate the file.
+const sessionStore = createJsonStore(SESSION_FILE, { defaultValue: {} });
 
 function getSession(sessionKey) {
-  return loadSessions()[sessionKey] || null;
+  return sessionStore.load()[sessionKey] || null;
 }
 
 function setSession(sessionKey, value) {
-  const sessions = loadSessions();
-  sessions[sessionKey] = value;
-  saveSessions(sessions);
+  sessionStore.mutate((sessions) => {
+    sessions[sessionKey] = value;
+  });
 }
 
 function clearSession(sessionKey) {
-  const sessions = loadSessions();
-  if (!(sessionKey in sessions)) return false;
-  delete sessions[sessionKey];
-  saveSessions(sessions);
+  if (!(sessionKey in sessionStore.load())) return false;
+  sessionStore.mutate((sessions) => {
+    delete sessions[sessionKey];
+  });
   return true;
 }
 
@@ -186,7 +194,7 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
 
     proc.stdout.on('data', (chunk) => {
       const text = chunk.toString();
-      stdout += text;
+      stdout = appendCapped(stdout, text);
       if (!onLine) return;
       buffer += text;
       let index;
@@ -204,7 +212,7 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
     });
 
     proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
+      stderr = appendCapped(stderr, chunk.toString());
     });
 
     proc.on('error', (err) => {
@@ -231,6 +239,20 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
         resolve(`${label} output parsing failed: ${err.message}`);
       }
     });
+  });
+}
+
+// Shared tail for every runner: resolve the __retry marker (a stale resumed
+// session was cleared — run the turn once more from scratch) and the
+// __authError marker (raise a typed error instead of returning CLI text).
+function finishRun(resultPromise, { agentKey, onEvent, retry }) {
+  return resultPromise.then((result) => {
+    if (result && result.__retry && retry) {
+      emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
+      return retry();
+    }
+    if (result && result.__authError) throw new AgentAuthError(agentKey);
+    return result;
   });
 }
 
@@ -283,7 +305,7 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
   else args.push('--session-id', sessionId);
   args.push(String(prompt));
 
-  return spawnStream({
+  return finishRun(spawnStream({
     cmd: 'claude',
     args,
     cwd,
@@ -335,13 +357,10 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
       if (isAuthError(error)) return { __authError: true };
       return error || '(claude produced no output)';
     },
-  }).then((result) => {
-    if (result && result.__retry) {
-      emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runClaude(prompt, onEvent, sessionKey, signal, workdir, settings);
-    }
-    if (result && result.__authError) throw new AgentAuthError('claude');
-    return result;
+  }), {
+    agentKey: 'claude',
+    onEvent,
+    retry: () => runClaude(prompt, onEvent, sessionKey, signal, workdir, settings),
   });
 }
 
@@ -401,7 +420,7 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   let sawTextDelta = false;
   const emitDelta = makeDeltaEmitter(onEvent);
 
-  return spawnStream({
+  return finishRun(spawnStream({
     cmd: 'codex',
     args,
     cwd,
@@ -460,13 +479,10 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
       if (isAuthError(error) || isAuthError(stdout)) return { __authError: true };
       return fallback(stdout, stderr, code, 'codex');
     },
-  }).then((result) => {
-    if (result && result.__retry) {
-      emit(onEvent, 'The old session is no longer valid. Retrying with a new session...');
-      return runCodex(prompt, onEvent, sessionKey, signal, workdir, settings);
-    }
-    if (result && result.__authError) throw new AgentAuthError('codex');
-    return result;
+  }), {
+    agentKey: 'codex',
+    onEvent,
+    retry: () => runCodex(prompt, onEvent, sessionKey, signal, workdir, settings),
   });
 }
 
@@ -486,16 +502,17 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const prior = getSession(sessionKey);
   emit(onEvent, 'Antigravity is working...');
   // agy exposes no model/effort; buildArgs only yields the permission flag
-  // (default = --sandbox).
+  // (default = --sandbox). The prompt goes last, after every flag, so prompt
+  // text starting with '-' can never be parsed as an option.
   const args = [
     '--print',
-    String(prompt),
     ...buildArgs('agy', settings),
     '--add-dir',
     cwd,
   ];
   if (prior && prior.id) args.push('--conversation', prior.id);
-  return spawnStream({
+  args.push(String(prompt));
+  return finishRun(spawnStream({
     cmd: 'agy',
     args,
     cwd,
@@ -563,10 +580,7 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
       }
       return text || fallback(stdout, stderr, code, 'agy');
     },
-  }).then((result) => {
-    if (result && result.__authError) throw new AgentAuthError('agy');
-    return result;
-  });
+  }), { agentKey: 'agy', onEvent });
 }
 
 const AGENTS = {

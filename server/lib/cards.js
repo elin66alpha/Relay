@@ -4,23 +4,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const { createJsonStore } = require('./json-store');
+
 // Card store for Card Mode suggestions. Persisted to server/cards.json, keyed
 // by a flat array under { "cards": [...] }. Cards are scoped by workdir and
-// may also point at the source agent session. Mirrors the persistence style of
-// history.js (0o600 file).
+// may also point at the source agent session.
 const CARDS_FILE = path.join(__dirname, '..', 'cards.json');
 
+const store = createJsonStore(CARDS_FILE, {
+  defaultValue: { cards: [] },
+  pretty: true,
+});
+
 function loadAll() {
-  try {
-    const data = JSON.parse(fs.readFileSync(CARDS_FILE, 'utf-8'));
-    return Array.isArray(data.cards) ? data : { cards: [] };
-  } catch (_err) {
-    return { cards: [] };
-  }
+  const data = store.load();
+  return data && Array.isArray(data.cards) ? data : { cards: [] };
 }
 
 function saveAll(data) {
-  fs.writeFileSync(CARDS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  store.save(data);
 }
 
 // Create an empty store on first load if the file does not exist yet.

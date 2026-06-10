@@ -45,6 +45,7 @@ const { describeAgent, CLI } = require('./lib/agent-options');
 const { getSettings, setSettings } = require('./lib/agent-settings');
 const push = require('./lib/push');
 const fcm = require('./lib/fcm');
+const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { authStatus } = require('./lib/auth-status');
 const { buildDiagnostics } = require('./lib/diagnostics');
@@ -110,9 +111,24 @@ const MAX_UPLOAD_BYTES = parseInt(
   process.env.UPLOAD_MAX_BYTES || String(100 * 1024 * 1024),
   10,
 );
+// Cap a single chat prompt. The prompt travels to the CLI as one argv token and
+// Linux limits a single argument to ~128KB (MAX_ARG_STRLEN), so anything larger
+// could never reach the agent — fail it with a clear error instead of a
+// confusing spawn failure. Override with PROMPT_MAX_BYTES.
+const MAX_PROMPT_BYTES = parseInt(
+  process.env.PROMPT_MAX_BYTES || String(100 * 1024),
+  10,
+);
+// CORS origin allowed to call the API from a browser. The bearer token is the
+// real gate (browsers never attach it automatically), but narrowing this to the
+// app's own origin (e.g. the PUBLIC_BASE_URL host) shrinks the surface further.
+const CORS_ALLOW_ORIGIN = String(process.env.CORS_ALLOW_ORIGIN || '*').trim() || '*';
 
 const app = express();
 const eventClients = new Set();
+// Live SSE connection count per workdir, so presence checks on the broadcast
+// path are O(1) instead of scanning every connected client.
+const workdirPresence = new Map();
 const activeRequests = new Map();
 // Scopes currently executing an agent turn, keyed by `workdir\0agentKey[\0sessionId]`.
 const runningScopes = new Set();
@@ -120,23 +136,51 @@ const runningScopes = new Set();
 // in-flight turn (the underlying `claude --resume` session cannot run two turns
 // at once), then runs automatically. Maps scopeKey -> tail Promise.
 const scopeChains = new Map();
-const rawUpload = express.raw({
-  type: 'application/octet-stream',
-  // A hair above MAX_UPLOAD_BYTES so the handler returns our own clean JSON for
-  // at-cap files; anything well over the cap is rejected by the parser below.
-  limit: process.env.FILE_UPLOAD_LIMIT || '101mb',
-});
+function uploadTooLargeError() {
+  return new FilesystemError('upload exceeds the size limit', {
+    status: 413,
+    code: 'FS_UPLOAD_TOO_LARGE',
+  });
+}
 
-// Turns the body-parser's "payload too large" (and any upstream error) into the
-// same JSON shape the app understands, instead of Express's default HTML 413.
-function uploadErrorHandler(err, req, res, next) {
-  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
-    return res.status(413).json({
-      error: 'upload exceeds the size limit',
-      code: 'FS_UPLOAD_TOO_LARGE',
+// Stream an upload body straight to disk instead of buffering it in memory
+// (uploads run up to MAX_UPLOAD_BYTES; a few concurrent buffered ones used to
+// spike RSS by hundreds of MB). The bytes land in a fresh temp file next to the
+// target ('wx' so we never write through anything pre-existing), then rename
+// into place — atomic, and replacing rather than following a symlink at the
+// target. Over-limit transfers are cut off mid-stream.
+function streamUploadToFile(req, targetPath, maxBytes) {
+  const tmpPath = `${targetPath}.upload-${randomUUID()}`;
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode: 0o644 });
+    let received = 0;
+    let failed = false;
+    const fail = (err) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(out);
+      out.destroy();
+      fs.unlink(tmpPath, () => {});
+      reject(err);
+    };
+    req.on('error', fail);
+    req.on('aborted', () => fail(new Error('upload aborted')));
+    out.on('error', fail);
+    req.on('data', (chunk) => {
+      received += chunk.length;
+      if (received > maxBytes) fail(uploadTooLargeError());
     });
-  }
-  return next(err);
+    out.on('finish', () => {
+      if (failed) return;
+      try {
+        fs.renameSync(tmpPath, targetPath);
+        resolve(received);
+      } catch (err) {
+        fail(err);
+      }
+    });
+    req.pipe(out);
+  });
 }
 
 // Compress responses before they cross the tunnel. The web bundle is the bulk of
@@ -156,7 +200,8 @@ app.use(
 
 app.use(express.json({ limit: '16mb' }));
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', CORS_ALLOW_ORIGIN);
+  if (CORS_ALLOW_ORIGIN !== '*') res.setHeader('Vary', 'Origin');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Device-Id, X-Workdir',
@@ -354,10 +399,7 @@ function sendEvent(type, payload) {
 
 function hasPresence(scopeWorkdir) {
   if (!scopeWorkdir) return false;
-  for (const client of eventClients) {
-    if (client.workdir === scopeWorkdir) return true;
-  }
-  return false;
+  return (workdirPresence.get(scopeWorkdir) || 0) > 0;
 }
 
 function pushCategoriesFromBody(body) {
@@ -527,29 +569,15 @@ function taskCompletionSnippet(value) {
 
 function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
   if (hasPresence(scopeWorkdir)) return;
-  const title = `${agent.label} finished`;
-  const titleZh = `${agent.label} 已完成`;
   const body = taskCompletionSnippet(content);
-  push
-    .notify({
-      title,
-      titleZh,
-      message: body,
-      messageZh: body,
-      scopeWorkdir,
-      category: 'task',
-    })
-    .catch((err) => console.warn(`[push] task_done: ${err.message}`));
-  fcm
-    .notify({
-      title,
-      titleZh,
-      message: body,
-      messageZh: body,
-      scopeWorkdir,
-      category: 'task',
-    })
-    .catch((err) => console.warn(`[fcm] task_done: ${err.message}`));
+  notifyAll({
+    title: `${agent.label} finished`,
+    titleZh: `${agent.label} 已完成`,
+    message: body,
+    messageZh: body,
+    scopeWorkdir,
+    category: 'task',
+  });
 }
 
 function agentTurnDependencies() {
@@ -939,10 +967,10 @@ app.post('/api/workdir', (req, res) => {
   }
 });
 
-app.get('/api/workdir/browse', (req, res) => {
+app.get('/api/workdir/browse', async (req, res) => {
   try {
     return res.json(
-      listAbsoluteDirectory(req.query.path, {
+      await listAbsoluteDirectory(req.query.path, {
         showHidden: queryBool(req.query.showHidden),
         fallbackDir: eventWorkdir(req),
       }),
@@ -963,7 +991,9 @@ app.get('/api/fs/download', async (req, res) => {
         maxBytes: MAX_DOWNLOAD_BYTES,
       });
     } else {
-      download = prepareDownload(req.query.path, requestWorkdir(req));
+      download = await prepareDownload(req.query.path, requestWorkdir(req), {
+        maxBytes: MAX_DOWNLOAD_BYTES,
+      });
     }
   } catch (err) {
     return sendFilesystemError(res, err);
@@ -981,8 +1011,11 @@ app.get('/api/fs/download', async (req, res) => {
   return sendDirectoryZip(download, res);
 });
 
-app.post('/api/fs/upload', rawUpload, uploadErrorHandler, async (req, res) => {
-  if (Buffer.isBuffer(req.body) && req.body.length > MAX_UPLOAD_BYTES) {
+app.post('/api/fs/upload', async (req, res) => {
+  // Refuse oversized transfers before reading any body bytes when the client
+  // declares a length; undeclared (chunked) bodies are cut off mid-stream.
+  const declared = parseInt(req.get('content-length') || '', 10);
+  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
     return res.status(413).json({
       error: 'upload exceeds the size limit',
       code: 'FS_UPLOAD_TOO_LARGE',
@@ -1008,10 +1041,7 @@ app.post('/api/fs/upload', rawUpload, uploadErrorHandler, async (req, res) => {
         });
       }
     }
-    await fs.promises.writeFile(
-      target.target,
-      Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
-    );
+    await streamUploadToFile(req, target.target, MAX_UPLOAD_BYTES);
     return res.json({
       ok: true,
       entry: uploadedEntry(target.root, target.target),
@@ -1030,6 +1060,12 @@ app.post('/api/chat', async (req, res) => {
   const deviceId = normalizeDeviceId(req.get('x-device-id'));
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
+  }
+  if (Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) {
+    return res.status(413).json({
+      error: 'prompt exceeds the size limit',
+      code: 'PROMPT_TOO_LARGE',
+    });
   }
   const scope = resolveAgentScope(req, res, {
     agentKey,
@@ -1489,6 +1525,7 @@ app.get('/api/events', (req, res) => {
   });
   const client = { res, deviceId, workdir };
   eventClients.add(client);
+  workdirPresence.set(workdir, (workdirPresence.get(workdir) || 0) + 1);
   res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
   const heartbeat = setInterval(() => {
@@ -1498,6 +1535,9 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => {
     clearInterval(heartbeat);
     eventClients.delete(client);
+    const remaining = (workdirPresence.get(workdir) || 1) - 1;
+    if (remaining > 0) workdirPresence.set(workdir, remaining);
+    else workdirPresence.delete(workdir);
   });
 });
 
@@ -1639,20 +1679,11 @@ app.listen(PORT, HOST, () => {
           createdAt: new Date().toISOString(),
         });
         // Reach offline clients; SSE only covers open app sessions.
-        push
-          .notify({
-            message,
-            messageZh: info && info.messageZh,
-            category: 'quota',
-          })
-          .catch((err) => console.warn(`[push] quota_reset: ${err.message}`));
-        fcm
-          .notify({
-            message,
-            messageZh: info && info.messageZh,
-            category: 'quota',
-          })
-          .catch((err) => console.warn(`[fcm] quota_reset: ${err.message}`));
+        notifyAll({
+          message,
+          messageZh: info && info.messageZh,
+          category: 'quota',
+        });
         processDueQuotaSchedules(info).catch((err) => {
           console.error(`[quota:${info && info.key}] scheduled message runner failed: ${err.message}`);
         });

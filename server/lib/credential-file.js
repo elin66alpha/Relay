@@ -5,7 +5,10 @@ const crypto = require('crypto');
 const FORMAT = 'relay.credentials.v1';
 const KDF_NAME = 'pbkdf2-sha256';
 const CIPHER_NAME = 'aes-256-gcm';
-const PBKDF2_ITERATIONS = 120000;
+// OWASP-recommended floor for PBKDF2-HMAC-SHA256 (2023). The app reads the
+// iteration count from the envelope (accepts 10k-2M), so older credentials
+// generated with fewer iterations keep decrypting.
+const PBKDF2_ITERATIONS = 600000;
 
 function encryptCredential(machine, passphrase) {
   if (!passphrase || !String(passphrase).trim()) {

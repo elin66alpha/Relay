@@ -1,8 +1,9 @@
 'use strict';
 
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
+
+const { createJsonStore } = require('./json-store');
 
 const SESSIONS_FILE = path.join(__dirname, '..', 'chat-sessions.json');
 const LEGACY_SESSION_ID = 'default';
@@ -10,17 +11,10 @@ const LEGACY_SESSION_ID = 'default';
 // "Main" session). Keeps chat-sessions.json bounded and the drawer manageable.
 const MAX_SESSIONS = 8;
 
-function loadAll() {
-  try {
-    return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
-  } catch (_err) {
-    return {};
-  }
-}
-
-function saveAll(data) {
-  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data), { mode: 0o600 });
-}
+// Cached, atomic store. Read paths (list/resolve) normalize in memory and never
+// write; only explicit mutations (create/activate/touch/delete) persist. This
+// keeps GET /api/history and friends from rewriting the file on every request.
+const store = createJsonStore(SESSIONS_FILE, { defaultValue: {} });
 
 function validSessionId(value) {
   const text = String(value || '').trim();
@@ -91,19 +85,22 @@ function contextPayload(context) {
   };
 }
 
+function contextFor(contextKey) {
+  return normalizeContext(store.load()[contextKey]);
+}
+
+function saveContext(contextKey, context) {
+  store.mutate((all) => {
+    all[contextKey] = context;
+  });
+}
+
 function listChatSessions(contextKey) {
-  const all = loadAll();
-  const existed = Object.prototype.hasOwnProperty.call(all, contextKey);
-  const context = normalizeContext(all[contextKey]);
-  all[contextKey] = context;
-  if (!existed) saveAll(all);
-  return contextPayload(context);
+  return contextPayload(contextFor(contextKey));
 }
 
 function resolveChatSession(contextKey, requestedSessionId) {
-  const all = loadAll();
-  const context = normalizeContext(all[contextKey]);
-  all[contextKey] = context;
+  const context = contextFor(contextKey);
   const requested = validSessionId(requestedSessionId);
   let session = null;
   if (String(requestedSessionId || '').trim()) {
@@ -115,13 +112,11 @@ function resolveChatSession(contextKey, requestedSessionId) {
       context.sessions.find((item) => item.id === context.activeSessionId) ||
       context.sessions[0];
   }
-  saveAll(all);
   return session ? { ...session } : null;
 }
 
 function createChatSession(contextKey, rawName) {
-  const all = loadAll();
-  const context = normalizeContext(all[contextKey]);
+  const context = contextFor(contextKey);
   if (context.sessions.length >= MAX_SESSIONS) {
     return null;
   }
@@ -134,43 +129,37 @@ function createChatSession(contextKey, rawName) {
   };
   context.sessions.unshift(session);
   context.activeSessionId = session.id;
-  all[contextKey] = context;
-  saveAll(all);
+  saveContext(contextKey, context);
   return contextPayload(context);
 }
 
 function setActiveChatSession(contextKey, sessionId) {
   const id = validSessionId(sessionId);
   if (!id) return null;
-  const all = loadAll();
-  const context = normalizeContext(all[contextKey]);
+  const context = contextFor(contextKey);
   const session = context.sessions.find((item) => item.id === id);
   if (!session) return null;
   context.activeSessionId = id;
-  all[contextKey] = context;
-  saveAll(all);
+  saveContext(contextKey, context);
   return contextPayload(context);
 }
 
 function touchChatSession(contextKey, sessionId) {
   const id = validSessionId(sessionId);
   if (!id) return null;
-  const all = loadAll();
-  const context = normalizeContext(all[contextKey]);
+  const context = contextFor(contextKey);
   const session = context.sessions.find((item) => item.id === id);
   if (!session) return null;
   session.updatedAt = new Date().toISOString();
   context.activeSessionId = id;
-  all[contextKey] = context;
-  saveAll(all);
+  saveContext(contextKey, context);
   return { ...session };
 }
 
 function deleteChatSession(contextKey, sessionId) {
   const id = validSessionId(sessionId);
   if (!id) return null;
-  const all = loadAll();
-  const context = normalizeContext(all[contextKey]);
+  const context = contextFor(contextKey);
   const index = context.sessions.findIndex((session) => session.id === id);
   if (index === -1) return null;
   const [deleted] = context.sessions.splice(index, 1);
@@ -180,8 +169,7 @@ function deleteChatSession(contextKey, sessionId) {
   if (context.activeSessionId === id) {
     context.activeSessionId = context.sessions[0].id;
   }
-  all[contextKey] = context;
-  saveAll(all);
+  saveContext(contextKey, context);
   return {
     deleted,
     ...contextPayload(context),

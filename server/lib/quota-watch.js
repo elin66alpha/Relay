@@ -1,7 +1,7 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
+const { createJsonStore } = require('./json-store');
 const { getClaudeUsage, getCodexUsage } = require('./usage');
 
 const MIN_PREV = 5;
@@ -33,20 +33,32 @@ const SOURCES = [
 function startQuotaWatch({ name = 'app', onReset, intervalMs }) {
   const stateFile = path.join(__dirname, '..', `quota-state-${name}.json`);
   const poll = intervalMs || parseInt(process.env.QUOTA_POLL_MS || '300000', 10);
+  const store = createJsonStore(stateFile, { defaultValue: {} });
 
   function load() {
-    try {
-      return JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-    } catch (_err) {
-      return {};
-    }
+    const state = store.load();
+    return state && typeof state === 'object' ? state : {};
   }
 
   function save(state) {
-    fs.writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
+    store.save(state);
   }
 
+  // Guard against overlapping runs: a slow poll (network hiccups) must not let
+  // setInterval stack a second check on top of the first.
+  let checking = false;
+
   async function check() {
+    if (checking) return;
+    checking = true;
+    try {
+      await runCheck();
+    } finally {
+      checking = false;
+    }
+  }
+
+  async function runCheck() {
     const state = load();
     for (const source of SOURCES) {
       let current;

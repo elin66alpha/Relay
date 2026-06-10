@@ -36,6 +36,24 @@ function saveAll(data) {
   fs.renameSync(tmp, HISTORY_FILE);
 }
 
+// Background flush path. The debounced timer fires constantly while an agent
+// turn streams deltas, so its disk I/O must not block the event loop the way a
+// writeFileSync of the whole history would. Writes are chained so two timer
+// flushes can never interleave on the temp file; the synchronous saveAll stays
+// for shutdown (process.on('exit') cannot await) and uses its own temp name so
+// it can't collide with an in-flight async write.
+let writeChain = Promise.resolve();
+
+function saveAllAsync(data) {
+  const body = JSON.stringify(data);
+  writeChain = writeChain.then(async () => {
+    const tmp = `${HISTORY_FILE}.tmp-async`;
+    await fs.promises.writeFile(tmp, body, { mode: 0o600 });
+    await fs.promises.rename(tmp, HISTORY_FILE);
+  });
+  return writeChain;
+}
+
 function ensureLoaded() {
   if (!cacheLoaded) {
     cache = loadAll();
@@ -68,11 +86,13 @@ function flushPendingHistory() {
 }
 
 function flushFromTimer() {
-  try {
-    flushPendingHistory();
-  } catch (err) {
+  clearFlushTimers();
+  if (!dirty) return;
+  dirty = false;
+  saveAllAsync(ensureLoaded()).catch((err) => {
+    dirty = true;
     console.warn(`[history] failed to flush chat history: ${err.message}`);
-  }
+  });
 }
 
 function scheduleFlush() {

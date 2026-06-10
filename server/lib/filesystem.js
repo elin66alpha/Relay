@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
@@ -16,6 +17,73 @@ class FilesystemError extends Error {
 
 function isInside(parent, child) {
   return child === parent || child.startsWith(`${parent}${path.sep}`);
+}
+
+// --- access policy ------------------------------------------------------------
+//
+// The file API is deliberately filesystem-wide (the unified browser can reach
+// anything the server user can), but a leaked device token must not be able to
+// escalate: reading tokens.json/.env mints new credentials, and reading the CLI
+// auth files or ~/.ssh takes over accounts beyond Relay. Those paths are always
+// refused, for download, upload, and listing alike. Everything else stays
+// reachable unless RELAY_FS_ROOTS narrows the API to an explicit allowlist
+// (comma-separated absolute paths); agent execution is not affected either way.
+
+const SERVER_DIR = path.resolve(__dirname, '..');
+
+const SENSITIVE_PATHS = [
+  path.join(SERVER_DIR, 'tokens.json'),
+  path.join(SERVER_DIR, '.env'),
+  path.join(SERVER_DIR, 'credentials'),
+  path.join(SERVER_DIR, 'push-subscriptions.json'),
+  path.join(SERVER_DIR, 'fcm-tokens.json'),
+  path.join(os.homedir(), '.ssh'),
+  path.join(os.homedir(), '.claude', '.credentials.json'),
+  path.join(os.homedir(), '.codex', 'auth.json'),
+];
+
+const FS_ROOTS = String(process.env.RELAY_FS_ROOTS || '')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .map((entry) => path.resolve(entry));
+
+function restrictedError() {
+  return new FilesystemError('path is restricted', {
+    status: 403,
+    code: 'FS_PATH_RESTRICTED',
+  });
+}
+
+// Refuse a target that is a sensitive path, lives inside one, or is one of the
+// atomic-write temp files beside one. When RELAY_FS_ROOTS is set, the target
+// must also fall under one of the configured roots.
+function assertPathAllowed(target) {
+  const resolved = path.resolve(target);
+  for (const sensitive of SENSITIVE_PATHS) {
+    if (isInside(sensitive, resolved) || resolved === `${sensitive}.tmp`) {
+      throw restrictedError();
+    }
+  }
+  if (FS_ROOTS.length && !FS_ROOTS.some((root) => isInside(root, resolved))) {
+    throw new FilesystemError('path is outside the allowed roots', {
+      status: 403,
+      code: 'FS_PATH_OUTSIDE_ROOTS',
+    });
+  }
+}
+
+// Directory downloads additionally refuse trees that *contain* a sensitive path
+// — zipping the server directory (or any ancestor) would otherwise exfiltrate
+// tokens.json inside the archive.
+function assertTreeAllowed(target) {
+  assertPathAllowed(target);
+  const resolved = path.resolve(target);
+  for (const sensitive of SENSITIVE_PATHS) {
+    if (isInside(resolved, sensitive)) {
+      throw restrictedError();
+    }
+  }
 }
 
 function normalizeRelative(input) {
@@ -75,6 +143,7 @@ function resolveExisting(relativePath, workdir) {
       code: 'FS_PATH_OUTSIDE_WORKDIR',
     });
   }
+  assertPathAllowed(realTarget);
   return {
     root,
     realRoot,
@@ -85,8 +154,8 @@ function resolveExisting(relativePath, workdir) {
   };
 }
 
-function entryFor(root, target, dirent, { absolutePaths = false } = {}) {
-  const stat = fs.lstatSync(target);
+async function entryFor(root, target, dirent, { absolutePaths = false } = {}) {
+  const stat = await fs.promises.lstat(target);
   let type = 'other';
   if (stat.isDirectory()) {
     type = 'directory';
@@ -103,10 +172,9 @@ function entryFor(root, target, dirent, { absolutePaths = false } = {}) {
   };
 }
 
-function visibleDirents(target, { showHidden = false } = {}) {
-  return fs
-    .readdirSync(target, { withFileTypes: true })
-    .filter((dirent) => showHidden || !dirent.name.startsWith('.'));
+async function visibleDirents(target, { showHidden = false } = {}) {
+  const dirents = await fs.promises.readdir(target, { withFileTypes: true });
+  return dirents.filter((dirent) => showHidden || !dirent.name.startsWith('.'));
 }
 
 function sortEntries(entries) {
@@ -117,7 +185,7 @@ function sortEntries(entries) {
   });
 }
 
-function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) {
+async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) {
   const raw = String(value || '').trim();
   if (raw && !path.isAbsolute(raw)) {
     throw new FilesystemError('directory browser path must be absolute', {
@@ -128,7 +196,7 @@ function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) 
   const target = path.resolve(raw || fallbackDir || getDefaultWorkdir());
   let stat;
   try {
-    stat = fs.statSync(target);
+    stat = await fs.promises.stat(target);
   } catch (_err) {
     throw new FilesystemError('path not found', {
       status: 404,
@@ -141,13 +209,19 @@ function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) 
       code: 'FS_PATH_NOT_DIRECTORY',
     });
   }
+  assertPathAllowed(target);
   const root = path.parse(target).root;
+  const dirents = await visibleDirents(target, { showHidden });
   const entries = sortEntries(
-    visibleDirents(target, { showHidden }).map((dirent) =>
-      entryFor(root, path.join(target, dirent.name), dirent, {
-        absolutePaths: true,
-      }),
-    ),
+    (
+      await Promise.all(
+        dirents.map((dirent) =>
+          entryFor(root, path.join(target, dirent.name), dirent, {
+            absolutePaths: true,
+          }).catch(() => null),
+        ),
+      )
+    ).filter(Boolean),
   );
   return {
     root,
@@ -224,6 +298,8 @@ async function prepareDownloadAbsolute(value, { maxBytes } = {}) {
     });
   }
   const isDirectory = stat.isDirectory();
+  if (isDirectory) assertTreeAllowed(target);
+  else assertPathAllowed(target);
   const totalBytes = isDirectory ? await directorySize(target) : stat.size;
   if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
     throw new FilesystemError('download exceeds the size limit', {
@@ -286,10 +362,13 @@ function resolveAbsoluteUploadTarget(value, filename) {
       code: 'FS_PATH_OUTSIDE_WORKDIR',
     });
   }
+  assertPathAllowed(target);
   return { directory, target, name, root: directory, realRoot: directory };
 }
 
-function prepareDownload(relativePath, workdir) {
+// Workdir-relative download. Enforces the same size cap as the absolute path:
+// a single file by its size, a directory by its uncompressed total.
+async function prepareDownload(relativePath, workdir, { maxBytes } = {}) {
   const resolved = resolveExisting(relativePath, workdir);
   if (!resolved.stat.isFile() && !resolved.stat.isDirectory()) {
     throw new FilesystemError('only files and directories can be downloaded', {
@@ -297,11 +376,24 @@ function prepareDownload(relativePath, workdir) {
       code: 'FS_UNSUPPORTED_DOWNLOAD',
     });
   }
+  const isDirectory = resolved.stat.isDirectory();
+  if (isDirectory) assertTreeAllowed(resolved.target);
+  const totalBytes = isDirectory
+    ? await directorySize(resolved.target)
+    : resolved.stat.size;
+  if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
+    throw new FilesystemError('download exceeds the size limit', {
+      status: 413,
+      code: 'FS_DOWNLOAD_TOO_LARGE',
+      meta: { totalBytes, maxBytes },
+    });
+  }
   const basename = path.basename(resolved.target) || 'workdir';
   return {
     ...resolved,
-    filename: resolved.stat.isDirectory() ? `${basename}.zip` : basename,
-    isDirectory: resolved.stat.isDirectory(),
+    filename: isDirectory ? `${basename}.zip` : basename,
+    isDirectory,
+    totalBytes,
     zipCwd: path.dirname(resolved.target),
     zipEntryName: basename,
   };
@@ -330,6 +422,7 @@ function resolveUploadTarget(relativePath, filename, workdir) {
       code: 'FS_PATH_OUTSIDE_WORKDIR',
     });
   }
+  assertPathAllowed(target);
   return {
     root: resolved.root,
     realRoot: resolved.realRoot,
