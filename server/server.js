@@ -1581,6 +1581,18 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 
 app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
+  // Warm the model-discovery cache off the request path. The first scan/spawn
+  // per agent is synchronous (agy even shells out to `agy models`), so priming
+  // it now keeps the first chat turn and options fetch fast.
+  setImmediate(() => {
+    for (const agent of ['claude', 'codex', 'agy']) {
+      try {
+        describeAgent(agent);
+      } catch (_err) {
+        // Best-effort; discovery falls back to the static catalog at call time.
+      }
+    }
+  });
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }

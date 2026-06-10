@@ -8,33 +8,41 @@
 // Capability-aware: agy (Antigravity) exposes no model/effort selection in its
 // CLI, so those groups are empty for it and the client hides those entries.
 //
-// Defaults preserve the historical behavior exactly: no --model, no effort flag,
-// and permission = bypass (the old hard-coded --dangerously-skip-permissions /
-// --dangerously-bypass-approvals-and-sandbox).
+// Every group is an explicit, named choice — there is no opaque "default" entry,
+// so the user always knows exactly which model, reasoning effort, and permission
+// tier is in effect. A never-configured scope starts from AGENT_DEFAULTS below.
 
 const fs = require('fs');
 const path = require('path');
 
-// Curated model catalog. Claude alias entries (opus/sonnet/haiku) resolve to the
-// latest model the installed CLI ships, so `claude update` can expose newer
-// versions with no catalog change. Codex model ids are pinned to the public
-// Codex model catalog; keep `default` for the CLI's recommended default.
-// Brand-new pinned model ids can be added without a code change via
-// models-extra.json (see mergeExtraModels).
+const { discoverModels } = require('./model-discovery');
+
+// Static fallback model catalog. The live list normally comes from
+// model-discovery (which reads what the installed CLI actually ships, newest
+// first, including legacy and brand-new models). These entries are used only
+// when discovery is unavailable or disabled (RELAY_MODEL_DISCOVERY=0). Newer or
+// older pinned ids can be added without a code change via models-extra.json (see
+// mergeExtraModels).
 const BASE_MODELS = {
+  // Static fallback only — normally replaced by live discovery. Ids match the
+  // discovered scheme (full model id) so toggling discovery never churns a
+  // stored selection.
   claude: [
-    { id: 'default', label: 'Default (account)', args: [] },
-    { id: 'opus', label: 'Opus (latest)', args: ['--model', 'opus'] },
-    { id: 'sonnet', label: 'Sonnet (latest)', args: ['--model', 'sonnet'] },
-    { id: 'haiku', label: 'Haiku (latest)', args: ['--model', 'haiku'] },
+    { id: 'claude-opus-4-8', label: 'Opus 4.8', args: ['--model', 'claude-opus-4-8'] },
+    { id: 'claude-opus-4-7', label: 'Opus 4.7', args: ['--model', 'claude-opus-4-7'] },
+    { id: 'claude-opus-4-6', label: 'Opus 4.6', args: ['--model', 'claude-opus-4-6'] },
+    {
+      id: 'claude-sonnet-4-6',
+      label: 'Sonnet 4.6',
+      args: ['--model', 'claude-sonnet-4-6'],
+    },
+    {
+      id: 'claude-haiku-4-5',
+      label: 'Haiku 4.5',
+      args: ['--model', 'claude-haiku-4-5'],
+    },
   ],
   codex: [
-    {
-      id: 'default',
-      label: 'Default',
-      description: 'Let Codex use its recommended model.',
-      args: [],
-    },
     {
       id: 'gpt-5.5',
       label: 'GPT-5.5 (recommended)',
@@ -60,7 +68,6 @@ const BASE_MODELS = {
 const EFFORTS = {
   // Claude Code has a native --effort flag (low|medium|high|xhigh|max).
   claude: [
-    { id: 'default', label: 'Default', args: [] },
     { id: 'low', label: 'Low', args: ['--effort', 'low'] },
     { id: 'medium', label: 'Medium', args: ['--effort', 'medium'] },
     { id: 'high', label: 'High', args: ['--effort', 'high'] },
@@ -69,7 +76,6 @@ const EFFORTS = {
   ],
   // Codex exposes reasoning effort via a config override, not a flag.
   codex: [
-    { id: 'default', label: 'Default', args: [] },
     { id: 'minimal', label: 'Minimal', args: ['-c', 'model_reasoning_effort=minimal'] },
     { id: 'low', label: 'Low', args: ['-c', 'model_reasoning_effort=low'] },
     { id: 'medium', label: 'Medium', args: ['-c', 'model_reasoning_effort=medium'] },
@@ -78,16 +84,17 @@ const EFFORTS = {
   agy: [],
 };
 
-// Permission tiers. The first entry of each agent is the default and reproduces
-// the previous always-bypass behavior. For Codex, non-bypass tiers must pin
-// approval_policy=never — `codex exec` is non-interactive, so any approval
-// prompt would hang forever instead of being answered.
+// Permission tiers. The bypass tier is listed first but is no longer the
+// default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. For
+// Codex, non-bypass tiers must pin approval_policy=never — `codex exec` is
+// non-interactive, so any approval prompt would hang forever instead of being
+// answered.
 const PERMISSIONS = {
   claude: [
     {
       id: 'bypass',
       label: 'Bypass (full auto)',
-      description: 'Skip all permission checks. Current default.',
+      description: 'Skip all permission checks.',
       args: ['--dangerously-skip-permissions'],
     },
     {
@@ -102,18 +109,12 @@ const PERMISSIONS = {
       description: 'Read and plan, but make no changes.',
       args: ['--permission-mode', 'plan'],
     },
-    {
-      id: 'default',
-      label: 'Ask (default mode)',
-      description: 'Standard prompting; tools needing approval may block non-interactively.',
-      args: ['--permission-mode', 'default'],
-    },
   ],
   codex: [
     {
       id: 'bypass',
       label: 'Bypass (full auto)',
-      description: 'No sandbox, no approvals. Current default.',
+      description: 'No sandbox, no approvals.',
       args: ['--dangerously-bypass-approvals-and-sandbox'],
     },
     // Use the `-c sandbox_mode=` config override rather than `-s`: `codex exec
@@ -143,7 +144,7 @@ const PERMISSIONS = {
     {
       id: 'bypass',
       label: 'Bypass (full auto)',
-      description: 'Auto-approve all tool requests. Current default.',
+      description: 'Auto-approve all tool requests.',
       args: ['--dangerously-skip-permissions'],
     },
     {
@@ -162,7 +163,33 @@ const CLI = {
   agy: { bin: 'agy', versionArgs: ['--version'], updateArgs: ['update'] },
 };
 
-const DEFAULTS = { model: 'default', effort: 'default', permission: 'bypass' };
+// The initial effort / permission for a never-configured scope. Every value is
+// a real, user-visible option id (no opaque "default") so the effective setting
+// is always knowable. The model default is derived from the live catalog (newest
+// first) rather than pinned here, so it tracks the installed CLI. Permission
+// starts on a safer "auto" tier instead of full bypass: claude auto-accepts
+// edits, codex writes within the workspace (approvals disabled so exec never
+// hangs), and agy runs sandboxed.
+const AGENT_DEFAULTS = {
+  claude: { effort: 'high', permission: 'acceptEdits' },
+  codex: { effort: 'medium', permission: 'workspace-write' },
+  agy: { permission: 'sandbox' },
+};
+
+// Agents whose model group gets an automatic default (the newest catalog entry).
+// agy is excluded: its discovered ids use an unverified --model arg, so leaving
+// it unset keeps the default run on agy's own built-in model; selection is
+// opt-in.
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex']);
+
+function defaultsFor(agentKey) {
+  const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
+  if (MODEL_DEFAULT_AGENTS.has(agentKey)) {
+    const models = modelsFor(agentKey);
+    if (models.length) defaults.model = models[0].id;
+  }
+  return defaults;
+}
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
@@ -198,7 +225,12 @@ function mergeExtraModels(agentKey, base) {
 }
 
 function modelsFor(agentKey) {
-  const base = BASE_MODELS[agentKey] || [];
+  // Prefer the live list the installed CLI ships (so the picker tracks the
+  // binary, including brand-new models); fall back to the static catalog when
+  // discovery is unavailable. User pins from models-extra.json apply either way.
+  const discovered = discoverModels(agentKey);
+  const base =
+    discovered && discovered.length ? discovered : BASE_MODELS[agentKey] || [];
   return mergeExtraModels(agentKey, base);
 }
 
@@ -218,7 +250,7 @@ function describeAgent(agentKey) {
     list.map(({ id, label, description }) => ({ id, label, description }));
   return {
     agent: agentKey,
-    defaults: DEFAULTS,
+    defaults: defaultsFor(agentKey),
     supports: {
       model: groups.model.length > 0,
       effort: groups.effort.length > 0,
@@ -242,13 +274,14 @@ function pick(list, id, fallbackId) {
 // selections the agent doesn't support (e.g. model/effort on agy).
 function normalizeSettings(agentKey, settings) {
   const groups = groupsFor(agentKey);
+  const defaults = defaultsFor(agentKey);
   const s = settings || {};
   const out = {};
   for (const group of ['model', 'effort', 'permission']) {
     const list = groups[group];
     if (!list.length) continue;
-    const chosen = pick(list, s[group], DEFAULTS[group]);
-    out[group] = chosen ? chosen.id : DEFAULTS[group];
+    const chosen = pick(list, s[group], defaults[group]);
+    out[group] = chosen ? chosen.id : defaults[group];
   }
   return out;
 }
@@ -257,19 +290,20 @@ function normalizeSettings(agentKey, settings) {
 // (model, effort, permission). Returns [] for unknown agents.
 function buildArgs(agentKey, settings) {
   const groups = groupsFor(agentKey);
+  const defaults = defaultsFor(agentKey);
   const s = settings || {};
   const args = [];
   for (const group of ['model', 'effort', 'permission']) {
     const list = groups[group];
     if (!list.length) continue;
-    const chosen = pick(list, s[group], DEFAULTS[group]);
+    const chosen = pick(list, s[group], defaults[group]);
     if (chosen && Array.isArray(chosen.args)) args.push(...chosen.args);
   }
   return args;
 }
 
 module.exports = {
-  DEFAULTS,
+  defaultsFor,
   CLI,
   describeAgent,
   normalizeSettings,
