@@ -7,29 +7,21 @@
 // write, so an unknown id silently falls back to the agent's default and a
 // never-configured scope starts from that agent's default selection.
 
-const fs = require('fs');
 const path = require('path');
 
 const { defaultsFor, normalizeSettings } = require('./agent-options');
+const { createJsonStore } = require('./json-store');
 
 const SETTINGS_FILE = path.join(__dirname, '..', 'agent-settings.json');
 
-function loadAll() {
-  try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
-  } catch (_err) {
-    return {};
-  }
-}
-
-function saveAll(data) {
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data), { mode: 0o600 });
-}
+// Cached, atomic store: getSettings runs on every agent turn, so reads must not
+// hit the disk each time.
+const store = createJsonStore(SETTINGS_FILE, { defaultValue: {} });
 
 // Effective settings for a scope: stored selection normalized for the agent,
 // falling back to defaults for any group not yet chosen or not supported.
 function getSettings(agentKey, scopeKey) {
-  const stored = loadAll()[scopeKey] || {};
+  const stored = store.load()[scopeKey] || {};
   return normalizeSettings(agentKey, { ...defaultsFor(agentKey), ...stored });
 }
 
@@ -37,15 +29,15 @@ function getSettings(agentKey, scopeKey) {
 // the merged result is normalized so invalid ids never reach disk. Returns the
 // new effective settings.
 function setSettings(agentKey, scopeKey, partial) {
-  const all = loadAll();
-  const merged = normalizeSettings(agentKey, {
-    ...defaultsFor(agentKey),
-    ...(all[scopeKey] || {}),
-    ...(partial || {}),
+  return store.mutate((all) => {
+    const merged = normalizeSettings(agentKey, {
+      ...defaultsFor(agentKey),
+      ...(all[scopeKey] || {}),
+      ...(partial || {}),
+    });
+    all[scopeKey] = merged;
+    return merged;
   });
-  all[scopeKey] = merged;
-  saveAll(all);
-  return merged;
 }
 
 module.exports = { getSettings, setSettings };

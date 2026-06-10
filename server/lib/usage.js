@@ -25,6 +25,23 @@ const USAGE_BACKOFF_MAX_MS = parseInt(
   process.env.USAGE_BACKOFF_MAX_MS || '900000',
   10,
 );
+// Hard timeout for every outbound usage/oauth request. Without it a stalled
+// connection hangs /api/usage forever and permanently wedges the single-flight
+// background refresh (its promise would never settle).
+const USAGE_HTTP_TIMEOUT_MS = parseInt(
+  process.env.USAGE_HTTP_TIMEOUT_MS || '15000',
+  10,
+);
+
+function attachTimeout(req, url) {
+  req.setTimeout(USAGE_HTTP_TIMEOUT_MS, () => {
+    req.destroy(
+      new UsageQueryError(
+        `request to ${new URL(url).host} timed out after ${USAGE_HTTP_TIMEOUT_MS}ms`,
+      ),
+    );
+  });
+}
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
@@ -213,6 +230,7 @@ function httpJson(method, url, headers, body) {
         resolve({ status: res.statusCode, body: parsed, raw: buffer });
       });
     });
+    attachTimeout(req, url);
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -308,6 +326,7 @@ function httpHeadersOnly(url, headers, bodyStr) {
       res.destroy();
       resolve(out);
     });
+    attachTimeout(req, url);
     req.on('error', reject);
     req.write(bodyStr);
     req.end();

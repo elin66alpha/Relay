@@ -28,10 +28,16 @@ stable URL, a small attack surface, and a clear recovery path.
 - Keep request timeouts longer than the agent timeout. The default agent timeout
   is 60 minutes.
 - Set upload and download caps deliberately. Defaults are 100 MB upload and
-  300 MB download; tune `FILE_UPLOAD_LIMIT`, `DOWNLOAD_MAX_BYTES`, and
-  `DOWNLOAD_MAX_BYTES` only if the proxy and network can handle them.
-- Avoid broad CORS exposure at the proxy layer. Relay's device token is the
-  real API gate, but a narrow proxy configuration reduces accidental exposure.
+  300 MB download; tune `UPLOAD_MAX_BYTES` and `DOWNLOAD_MAX_BYTES` only if the
+  proxy and network can handle them.
+- Avoid broad CORS exposure. Relay's device token is the real API gate, but
+  setting `CORS_ALLOW_ORIGIN` to the app's exact origin (and/or a narrow proxy
+  configuration) reduces accidental exposure.
+- Consider `RELAY_FS_ROOTS` to confine the file browse/upload/download API to an
+  explicit list of directories. Even without it, Relay refuses to serve its own
+  `tokens.json`, `.env`, `credentials/`, `~/.ssh`, and the CLI auth files, so a
+  leaked device token cannot mint new credentials or steal host keys through
+  the file API.
 
 ## Direct Public Host Checklist
 

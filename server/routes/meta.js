@@ -1,0 +1,304 @@
+'use strict';
+
+const { execFile } = require('child_process');
+const express = require('express');
+
+module.exports = function createMetaRouter(ctx) {
+  const {
+    CLI,
+    DEFAULT_AGENT,
+    ENABLE_QUOTA_WATCH,
+    HOST,
+    MAX_DOWNLOAD_BYTES,
+    MAX_UPLOAD_BYTES,
+    PORT,
+    PUBLIC_BASE_URL,
+    TIMEOUT_MS,
+    WEB_BUILD_DIR,
+    activeRequests,
+    agentRequiredError,
+    authStatus,
+    bearerToken,
+    buildDiagnostics,
+    cards,
+    describeAgent,
+    eventClients,
+    eventWorkdir,
+    formatUptime,
+    generateCardsForWorkdir,
+    getAgent,
+    getDefaultWorkdir,
+    getSettings,
+    listAgents,
+    listTokenSummaries,
+    normalizeDeviceId,
+    os,
+    revokeTokenById,
+    resolveAgentScope,
+    runningScopes,
+    scopeChains,
+    setSettings,
+    workdirPresence,
+  } = ctx;
+  const router = express.Router();
+
+  router.get('/api/health', (_req, res) => {
+    res.json({ ok: true, time: new Date().toISOString() });
+  });
+
+  router.get('/api/agents', (_req, res) => {
+    res.json({ defaultAgent: DEFAULT_AGENT, agents: listAgents() });
+  });
+
+  // Run a CLI binary with fixed argv (no user-controlled tokens) and resolve with
+  // its trimmed output. Used for `<cli> --version` and `<cli> update`.
+  function runCliCommand(bin, args, timeoutMs) {
+    return new Promise((resolve) => {
+      execFile(
+        bin,
+        args,
+        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          const out = String(stdout || '').trim();
+          const errOut = String(stderr || '').trim();
+          resolve({
+            ok: !err,
+            code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
+            stdout: out,
+            stderr: errOut,
+            text: out || errOut,
+            timedOut: !!(err && err.killed),
+          });
+        },
+      );
+    });
+  }
+
+  async function cliVersion(agentKey) {
+    const cli = CLI[agentKey];
+    if (!cli) return '';
+    const result = await runCliCommand(cli.bin, cli.versionArgs, 15000);
+    // Versions print as e.g. "2.1.161 (Claude Code)" / "codex-cli 0.132.0".
+    return result.ok ? result.text.split('\n')[0].trim() : '';
+  }
+
+  // Catalog of selectable model/effort/permission options for one agent
+  // (capability-aware; agy has no model/effort). Static, so no workdir needed.
+  router.get('/api/agent-options', (req, res) => {
+    const agent = getAgent(String(req.query.agent || '').trim());
+    if (!agent) {
+      return res.status(400).json({ error: 'agent is required' });
+    }
+    return res.json({ ok: true, ...describeAgent(agent.key) });
+  });
+
+  // Current model/effort/permission selection for the request's workdir+agent
+  // scope (shared by every device in that scope).
+  router.get('/api/agent-settings', (req, res) => {
+    const scope = resolveAgentScope(req, res, {
+      agentFrom: 'query',
+      requireSession: false,
+      agentError: agentRequiredError,
+    });
+    if (!scope) return;
+    const { agent, workdir, contextKey } = scope;
+    return res.json({
+      ok: true,
+      agent: agent.key,
+      workdir,
+      settings: getSettings(agent.key, contextKey),
+    });
+  });
+
+  // Update the selection for a scope. Body: { agent, model?, effort?, permission? }.
+  // Only provided groups change; invalid ids fall back to the agent default.
+  router.post('/api/agent-settings', (req, res) => {
+    const body = req.body || {};
+    const scope = resolveAgentScope(req, res, {
+      agentKey: body.agent,
+      requireSession: false,
+      agentError: agentRequiredError,
+    });
+    if (!scope) return;
+    const { agent, workdir, contextKey } = scope;
+    const partial = {};
+    for (const group of ['model', 'effort', 'permission']) {
+      if (typeof body[group] === 'string') partial[group] = body[group];
+    }
+    const settings = setSettings(agent.key, contextKey, partial);
+    return res.json({ ok: true, agent: agent.key, workdir, settings });
+  });
+
+  // Installed CLI version for the agent (for the model page's version label).
+  router.get('/api/agent-version', async (req, res) => {
+    const agent = getAgent(String(req.query.agent || '').trim());
+    if (!agent) {
+      return res.status(400).json({ error: 'agent is required' });
+    }
+    const version = await cliVersion(agent.key);
+    return res.json({ ok: true, agent: agent.key, version });
+  });
+
+  // Update the agent's CLI binary so newly shipped models become selectable.
+  // Runs `<cli> update` (fixed argv); returns the before/after version. Protected
+  // by the same bearer-token middleware as every other /api/* route.
+  router.post('/api/agent-update', async (req, res) => {
+    const agent = getAgent(String((req.body || {}).agent || '').trim());
+    if (!agent) {
+      return res.status(400).json({ error: 'agent is required' });
+    }
+    const cli = CLI[agent.key];
+    if (!cli) {
+      return res.status(400).json({ error: `no updater for ${agent.key}` });
+    }
+    const before = await cliVersion(agent.key);
+    const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
+    const after = await cliVersion(agent.key);
+    return res.json({
+      ok: result.ok,
+      agent: agent.key,
+      before,
+      after,
+      changed: !!after && after !== before,
+      timedOut: result.timedOut,
+      output: result.text.slice(0, 4000),
+    });
+  });
+
+  // Best-effort login state per agent so the app can warn before sending a
+  // message. loggedIn is true/false when detectable from on-disk credentials,
+  // or null when it cannot be determined without running the CLI (e.g. agy).
+  router.get('/api/auth/status', (_req, res) => {
+    res.json({
+      agents: listAgents().map((agent) => ({
+        key: agent.key,
+        label: agent.label,
+        loggedIn: authStatus(agent.key),
+      })),
+    });
+  });
+
+  router.get('/api/tokens', (req, res) => {
+    res.json({
+      tokens: listTokenSummaries({ currentToken: bearerToken(req) }),
+    });
+  });
+
+  router.post('/api/tokens/:id/revoke', (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const revoked = revokeTokenById(id);
+    if (!revoked) {
+      return res.status(404).json({ error: 'token not found' });
+    }
+    res.json({
+      token: {
+        id: revoked.id || '',
+        label: revoked.label || '',
+        createdAt: revoked.createdAt || '',
+        revoked: true,
+        revokedAt: revoked.revokedAt || '',
+        current: String(revoked.token || '') === bearerToken(req),
+      },
+    });
+  });
+
+  router.get('/api/status', (req, res) => {
+    res.json({
+      ok: true,
+      defaultAgent: DEFAULT_AGENT,
+      workdir: eventWorkdir(req),
+      defaultWorkdir: getDefaultWorkdir(),
+      systemUptime: formatUptime(os.uptime()),
+      processUptime: formatUptime(process.uptime()),
+      agentTimeoutMs: TIMEOUT_MS,
+      quotaWatch: ENABLE_QUOTA_WATCH,
+      publicBaseUrl: PUBLIC_BASE_URL,
+    });
+  });
+
+  router.get('/api/diagnostics', (req, res) => {
+    const workdir = eventWorkdir(req);
+    res.json(
+      buildDiagnostics({
+        workdir,
+        defaultWorkdir: getDefaultWorkdir(),
+        publicBaseUrl: PUBLIC_BASE_URL,
+        host: HOST,
+        port: PORT,
+        quotaWatch: ENABLE_QUOTA_WATCH,
+        agentTimeoutMs: TIMEOUT_MS,
+        maxUploadBytes: MAX_UPLOAD_BYTES,
+        maxDownloadBytes: MAX_DOWNLOAD_BYTES,
+        webBuildDir: WEB_BUILD_DIR,
+        agents: listAgents(),
+        runtime: {
+          sseClients: eventClients.size,
+          activeRequests: activeRequests.size,
+          runningScopes: runningScopes.size,
+          queuedScopes: scopeChains.size,
+        },
+      }),
+    );
+  });
+
+  router.get('/api/events', (req, res) => {
+    const deviceId = normalizeDeviceId(req.get('x-device-id'));
+    // Scope this subscription to the device's current work directory so it only
+    // receives chat events for the conversation it is viewing. The client
+    // reconnects with a new x-workdir header when the user switches paths.
+    const workdir = eventWorkdir(req);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const client = { res, deviceId, workdir };
+    eventClients.add(client);
+    workdirPresence.set(workdir, (workdirPresence.get(workdir) || 0) + 1);
+    res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      res.write(`event: heartbeat\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
+    }, 30_000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      eventClients.delete(client);
+      const remaining = (workdirPresence.get(workdir) || 1) - 1;
+      if (remaining > 0) workdirPresence.set(workdir, remaining);
+      else workdirPresence.delete(workdir);
+    });
+  });
+
+  // --- Card Mode (additive secondary surface; does not touch chat) ---
+  router.get('/api/cards', (req, res) => {
+    const workdir = eventWorkdir(req);
+    return res.json({ workdir, cards: cards.getActiveCards(workdir) });
+  });
+
+  router.post('/api/cards/feedback', (req, res) => {
+    const workdir = eventWorkdir(req);
+    const cardId = String(req.body.cardId || '').trim();
+    const gesture = String(req.body.gesture || '').trim();
+    const deferUntil = req.body.deferUntil ? String(req.body.deferUntil) : null;
+    if (!cardId || !gesture) {
+      return res.status(400).json({ error: 'cardId and gesture are required' });
+    }
+    if (!cards.applyFeedback(cardId, gesture, deferUntil, workdir)) {
+      return res.status(400).json({ error: 'unknown card or gesture' });
+    }
+    return res.json({ ok: true });
+  });
+
+  router.post('/api/cards/refresh', (req, res) => {
+    const workdir = eventWorkdir(req);
+    const generated = cards.replaceGeneratedCards(
+      generateCardsForWorkdir(workdir),
+      workdir,
+    );
+    return res.json({ workdir, generated });
+  });
+
+  return router;
+};
