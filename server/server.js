@@ -5,7 +5,7 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
 const compression = require('compression');
@@ -91,6 +91,12 @@ const {
 } = require('./lib/quota-schedules');
 const cards = require('./lib/cards');
 const { generateCardsForWorkdir } = require('./lib/chat-learner');
+const createFsRouter = require('./routes/fs');
+const createChatRouter = require('./routes/chat');
+const createSessionsRouter = require('./routes/sessions');
+const createQuotaRouter = require('./routes/quota');
+const createPushRouter = require('./routes/push');
+const createMetaRouter = require('./routes/meta');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -685,890 +691,100 @@ async function processDueQuotaSchedules(info) {
   }
 }
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
-});
+const routeContext = {
+  CLI,
+  DEFAULT_AGENT,
+  ENABLE_QUOTA_WATCH,
+  HOST,
+  LEGACY_SESSION_ID,
+  MAX_DOWNLOAD_BYTES,
+  MAX_PROMPT_BYTES,
+  MAX_SESSIONS,
+  MAX_UPLOAD_BYTES,
+  PORT,
+  PUBLIC_BASE_URL,
+  TIMEOUT_MS,
+  WEB_BUILD_DIR,
+  activeRequests,
+  agentPayload,
+  agentRequiredError,
+  agentRequiredOrUnknownError,
+  agentTurnDependencies,
+  authStatus,
+  bearerToken,
+  broadcastScope,
+  buildDiagnostics,
+  buildUsageReport,
+  cancelQuotaSchedule,
+  cards,
+  clearHistory,
+  clearSession,
+  createChatResponder,
+  createChatSession,
+  createQuotaSchedule,
+  deleteChatSession,
+  describeAgent,
+  eventClients,
+  eventWorkdir,
+  fcm,
+  finalizeStaleStreamingHistory,
+  formatUptime,
+  fs,
+  generateCardsForWorkdir,
+  getAgent,
+  getDefaultWorkdir,
+  getSettings,
+  listAbsoluteDirectory,
+  listAgents,
+  listChatSessions,
+  listQuotaSchedules,
+  listTokenSummaries,
+  markdownForConversation,
+  normalizeDeviceId,
+  notifyTaskCompletion,
+  os,
+  path,
+  prepareDownload,
+  prepareDownloadAbsolute,
+  push,
+  pushCategoriesFromBody,
+  queryBool,
+  randomUUID,
+  readHistory,
+  requestWorkdir,
+  resolveAbsoluteUploadTarget,
+  resolveAgentScope,
+  resolveChatSession,
+  resolveUploadTarget,
+  revokeTokenById,
+  runAgentTurn,
+  runningScopes,
+  safeDownloadName,
+  scopeChains,
+  scopeKeyFor,
+  searchHistory,
+  sendDirectoryZip,
+  sendEvent,
+  sendFilesystemError,
+  sendWorkdirError,
+  sessionContextKeyFor,
+  sessionPayload,
+  setActiveChatSession,
+  setSettings,
+  streamUploadToFile,
+  touchChatSession,
+  uploadedEntry,
+  validateWorkdir,
+  workdirBusy,
+  workdirPresence,
+};
 
-app.get('/api/agents', (_req, res) => {
-  res.json({ defaultAgent: DEFAULT_AGENT, agents: listAgents() });
-});
-
-// Run a CLI binary with fixed argv (no user-controlled tokens) and resolve with
-// its trimmed output. Used for `<cli> --version` and `<cli> update`.
-function runCliCommand(bin, args, timeoutMs) {
-  return new Promise((resolve) => {
-    execFile(
-      bin,
-      args,
-      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        const out = String(stdout || '').trim();
-        const errOut = String(stderr || '').trim();
-        resolve({
-          ok: !err,
-          code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
-          stdout: out,
-          stderr: errOut,
-          text: out || errOut,
-          timedOut: !!(err && err.killed),
-        });
-      },
-    );
-  });
-}
-
-async function cliVersion(agentKey) {
-  const cli = CLI[agentKey];
-  if (!cli) return '';
-  const result = await runCliCommand(cli.bin, cli.versionArgs, 15000);
-  // Versions print as e.g. "2.1.161 (Claude Code)" / "codex-cli 0.132.0".
-  return result.ok ? result.text.split('\n')[0].trim() : '';
-}
-
-// Catalog of selectable model/effort/permission options for one agent
-// (capability-aware; agy has no model/effort). Static, so no workdir needed.
-app.get('/api/agent-options', (req, res) => {
-  const agent = getAgent(String(req.query.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  return res.json({ ok: true, ...describeAgent(agent.key) });
-});
-
-// Current model/effort/permission selection for the request's workdir+agent
-// scope (shared by every device in that scope).
-app.get('/api/agent-settings', (req, res) => {
-  const scope = resolveAgentScope(req, res, {
-    agentFrom: 'query',
-    requireSession: false,
-    agentError: agentRequiredError,
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  return res.json({
-    ok: true,
-    agent: agent.key,
-    workdir,
-    settings: getSettings(agent.key, contextKey),
-  });
-});
-
-// Update the selection for a scope. Body: { agent, model?, effort?, permission? }.
-// Only provided groups change; invalid ids fall back to the agent default.
-app.post('/api/agent-settings', (req, res) => {
-  const body = req.body || {};
-  const scope = resolveAgentScope(req, res, {
-    agentKey: body.agent,
-    requireSession: false,
-    agentError: agentRequiredError,
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  const partial = {};
-  for (const group of ['model', 'effort', 'permission']) {
-    if (typeof body[group] === 'string') partial[group] = body[group];
-  }
-  const settings = setSettings(agent.key, contextKey, partial);
-  return res.json({ ok: true, agent: agent.key, workdir, settings });
-});
-
-// Installed CLI version for the agent (for the model page's version label).
-app.get('/api/agent-version', async (req, res) => {
-  const agent = getAgent(String(req.query.agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const version = await cliVersion(agent.key);
-  return res.json({ ok: true, agent: agent.key, version });
-});
-
-// Update the agent's CLI binary so newly shipped models become selectable.
-// Runs `<cli> update` (fixed argv); returns the before/after version. Protected
-// by the same bearer-token middleware as every other /api/* route.
-app.post('/api/agent-update', async (req, res) => {
-  const agent = getAgent(String((req.body || {}).agent || '').trim());
-  if (!agent) {
-    return res.status(400).json({ error: 'agent is required' });
-  }
-  const cli = CLI[agent.key];
-  if (!cli) {
-    return res.status(400).json({ error: `no updater for ${agent.key}` });
-  }
-  const before = await cliVersion(agent.key);
-  const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
-  const after = await cliVersion(agent.key);
-  return res.json({
-    ok: result.ok,
-    agent: agent.key,
-    before,
-    after,
-    changed: !!after && after !== before,
-    timedOut: result.timedOut,
-    output: result.text.slice(0, 4000),
-  });
-});
-
-// Best-effort login state per agent so the app can warn before sending a
-// message. loggedIn is true/false when detectable from on-disk credentials,
-// or null when it cannot be determined without running the CLI (e.g. agy).
-app.get('/api/auth/status', (_req, res) => {
-  res.json({
-    agents: listAgents().map((agent) => ({
-      key: agent.key,
-      label: agent.label,
-      loggedIn: authStatus(agent.key),
-    })),
-  });
-});
-
-app.get('/api/tokens', (req, res) => {
-  res.json({
-    tokens: listTokenSummaries({ currentToken: bearerToken(req) }),
-  });
-});
-
-app.post('/api/tokens/:id/revoke', (req, res) => {
-  const id = String(req.params.id || '').trim();
-  const revoked = revokeTokenById(id);
-  if (!revoked) {
-    return res.status(404).json({ error: 'token not found' });
-  }
-  res.json({
-    token: {
-      id: revoked.id || '',
-      label: revoked.label || '',
-      createdAt: revoked.createdAt || '',
-      revoked: true,
-      revokedAt: revoked.revokedAt || '',
-      current: String(revoked.token || '') === bearerToken(req),
-    },
-  });
-});
-
-app.get('/api/push/config', (_req, res) => {
-  res.json({ enabled: push.isEnabled(), publicKey: push.publicKey() });
-});
-
-app.post('/api/push/subscribe', (req, res) => {
-  const subscription = req.body && req.body.subscription;
-  if (!subscription || !subscription.endpoint) {
-    return res.status(400).json({ error: 'subscription is required' });
-  }
-  let workdir = '';
-  try {
-    workdir = requestWorkdir(req);
-  } catch (_err) {
-    workdir = '';
-  }
-  push.addSubscription({
-    subscription,
-    workdir,
-    lang: req.body && req.body.lang,
-    categories: pushCategoriesFromBody(req.body),
-  });
-  res.json({ ok: true });
-});
-
-app.post('/api/push/unsubscribe', (req, res) => {
-  const endpoint = req.body && req.body.endpoint;
-  push.removeSubscription(endpoint);
-  res.json({ ok: true });
-});
-
-app.post('/api/push/fcm/register', (req, res) => {
-  const token = req.body && req.body.token;
-  if (!token || typeof token !== 'string') {
-    return res.status(400).json({ error: 'token is required' });
-  }
-  let workdir = '';
-  try {
-    workdir = requestWorkdir(req);
-  } catch (_err) {
-    workdir = '';
-  }
-  fcm.addToken({
-    token,
-    workdir,
-    lang: req.body && req.body.lang,
-    categories: pushCategoriesFromBody(req.body),
-  });
-  return res.json({ ok: true, enabled: fcm.isEnabled() });
-});
-
-app.post('/api/push/fcm/unregister', (req, res) => {
-  const token = req.body && req.body.token;
-  fcm.removeToken(token);
-  res.json({ ok: true, enabled: fcm.isEnabled() });
-});
-
-app.get('/api/status', (req, res) => {
-  res.json({
-    ok: true,
-    defaultAgent: DEFAULT_AGENT,
-    workdir: eventWorkdir(req),
-    defaultWorkdir: getDefaultWorkdir(),
-    systemUptime: formatUptime(os.uptime()),
-    processUptime: formatUptime(process.uptime()),
-    agentTimeoutMs: TIMEOUT_MS,
-    quotaWatch: ENABLE_QUOTA_WATCH,
-    publicBaseUrl: PUBLIC_BASE_URL,
-  });
-});
-
-app.get('/api/diagnostics', (req, res) => {
-  const workdir = eventWorkdir(req);
-  res.json(
-    buildDiagnostics({
-      workdir,
-      defaultWorkdir: getDefaultWorkdir(),
-      publicBaseUrl: PUBLIC_BASE_URL,
-      host: HOST,
-      port: PORT,
-      quotaWatch: ENABLE_QUOTA_WATCH,
-      agentTimeoutMs: TIMEOUT_MS,
-      maxUploadBytes: MAX_UPLOAD_BYTES,
-      maxDownloadBytes: MAX_DOWNLOAD_BYTES,
-      webBuildDir: WEB_BUILD_DIR,
-      agents: listAgents(),
-      runtime: {
-        sseClients: eventClients.size,
-        activeRequests: activeRequests.size,
-        runningScopes: runningScopes.size,
-        queuedScopes: scopeChains.size,
-      },
-    }),
-  );
-});
-
-app.get('/api/workdir', (req, res) => {
-  try {
-    const dir = requestWorkdir(req);
-    return res.json({ dir, busy: workdirBusy(dir) });
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-});
-
-// Validate (and optionally create) a path the device wants to switch to. With
-// per-device workdirs there is no global state to change here: the client
-// stores the returned canonical path locally and sends it back via x-workdir.
-app.post('/api/workdir', (req, res) => {
-  try {
-    const result = validateWorkdir(req.body && req.body.path, {
-      create: req.body && req.body.create === true,
-    });
-    return res.json({
-      ok: true,
-      dir: result.dir,
-      created: result.created,
-    });
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-});
-
-app.get('/api/workdir/browse', async (req, res) => {
-  try {
-    return res.json(
-      await listAbsoluteDirectory(req.query.path, {
-        showHidden: queryBool(req.query.showHidden),
-        fallbackDir: eventWorkdir(req),
-      }),
-    );
-  } catch (err) {
-    return sendFilesystemError(res, err);
-  }
-});
-
-app.get('/api/fs/download', async (req, res) => {
-  let download;
-  try {
-    // The unified file browser sends absolute paths (it can reach anywhere up to
-    // root); older relative paths stay confined to the workdir. Both enforce the
-    // size cap so an oversized transfer is refused before it starts.
-    if (req.query.path && path.isAbsolute(String(req.query.path))) {
-      download = await prepareDownloadAbsolute(req.query.path, {
-        maxBytes: MAX_DOWNLOAD_BYTES,
-      });
-    } else {
-      download = await prepareDownload(req.query.path, requestWorkdir(req), {
-        maxBytes: MAX_DOWNLOAD_BYTES,
-      });
-    }
-  } catch (err) {
-    return sendFilesystemError(res, err);
-  }
-
-  if (!download.isDirectory) {
-    return res.download(download.target, download.filename, (err) => {
-      if (err && !res.headersSent) {
-        return sendFilesystemError(res, err);
-      }
-      return undefined;
-    });
-  }
-
-  return sendDirectoryZip(download, res);
-});
-
-app.post('/api/fs/upload', async (req, res) => {
-  // Refuse oversized transfers before reading any body bytes when the client
-  // declares a length; undeclared (chunked) bodies are cut off mid-stream.
-  const declared = parseInt(req.get('content-length') || '', 10);
-  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
-    return res.status(413).json({
-      error: 'upload exceeds the size limit',
-      code: 'FS_UPLOAD_TOO_LARGE',
-    });
-  }
-  let target;
-  try {
-    // Absolute target from the unified browser, or workdir-relative (legacy).
-    if (req.query.path && path.isAbsolute(String(req.query.path))) {
-      target = resolveAbsoluteUploadTarget(req.query.path, req.query.name);
-    } else {
-      target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
-    }
-    if (fs.existsSync(target.target)) {
-      const realTarget = fs.realpathSync(target.target);
-      if (
-        realTarget !== target.realRoot &&
-        !realTarget.startsWith(`${target.realRoot}${path.sep}`)
-      ) {
-        return res.status(403).json({
-          error: 'path is outside the work directory',
-          code: 'FS_PATH_OUTSIDE_WORKDIR',
-        });
-      }
-    }
-    await streamUploadToFile(req, target.target, MAX_UPLOAD_BYTES);
-    return res.json({
-      ok: true,
-      entry: uploadedEntry(target.root, target.target),
-    });
-  } catch (err) {
-    return sendFilesystemError(res, err);
-  }
-});
-
-app.post('/api/chat', async (req, res) => {
-  const agentKey = String(req.body.agent || DEFAULT_AGENT).trim();
-  const requestId = String(req.body.requestId || randomUUID()).trim();
-  const prompt = String(req.body.prompt || '').trim();
-  const requestedSessionId = String(req.body.sessionId || '').trim();
-  const recordHistory = req.body.recordHistory !== false;
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
-  if (!prompt) {
-    return res.status(400).json({ error: 'prompt is required' });
-  }
-  if (Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) {
-    return res.status(413).json({
-      error: 'prompt exceeds the size limit',
-      code: 'PROMPT_TOO_LARGE',
-    });
-  }
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    sessionId: requestedSessionId,
-    agentError: (key) => ({ status: 400, body: { error: `unknown agent: ${key}` } }),
-    beforeWorkdir: () => {
-      if (!activeRequests.has(requestId)) return true;
-      res.status(409).json({
-        error: 'request already running',
-        code: 'REQUEST_BUSY',
-      });
-      return false;
-    },
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey, session: chatSession, scopeKey } = scope;
-  touchChatSession(contextKey, chatSession.id);
-
-  const abortController = new AbortController();
-  const historyAssistantId = `${requestId}:assistant`;
-  const runState = {
-    requestId,
-    agent,
-    session: chatSession,
-    deviceId,
-    scopeKey,
-    scopeWorkdir: workdir,
-    recordHistory,
-    historyAssistantId,
-    cancelled: false,
-    cancelEventSent: false,
-    abortController,
-  };
-  activeRequests.set(requestId, runState);
-  const responder = createChatResponder({ req, res });
-
-  try {
-    await runAgentTurn({
-      agent,
-      agentKey,
-      contextKey,
-      dependencies: agentTurnDependencies(),
-      deviceId,
-      notifyTaskCompletion,
-      prompt,
-      recordHistory,
-      requestId,
-      responder,
-      runState,
-      scopeKey,
-      session: chatSession,
-      signal: abortController.signal,
-      workdir,
-    });
-  } finally {
-    activeRequests.delete(requestId);
-  }
-});
-
-app.post('/api/chat/cancel', (req, res) => {
-  const requestId = String(req.body.requestId || '').trim();
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
-  if (!requestId) {
-    return res.status(400).json({ error: 'requestId is required' });
-  }
-
-  const runState = activeRequests.get(requestId);
-  if (!runState) {
-    return res.status(404).json({
-      error: 'request not found',
-      code: 'REQUEST_NOT_FOUND',
-    });
-  }
-  // Shared sessions: any device currently in the same work directory may cancel
-  // the turn, not just the device that started it.
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  if (runState.scopeWorkdir && runState.scopeWorkdir !== workdir) {
-    return res.status(404).json({
-      error: 'request not found',
-      code: 'REQUEST_NOT_FOUND',
-    });
-  }
-
-  runState.cancelled = true;
-  if (!runState.cancelEventSent) {
-    runState.cancelEventSent = true;
-    broadcastScope('agent_cancelled', {
-      scopeWorkdir: runState.scopeWorkdir,
-      agent: runState.agent,
-      session: runState.session,
-      requestId,
-      deviceId: runState.deviceId,
-    });
-  }
-  runState.abortController.abort();
-  return res.json({ ok: true, requestId });
-});
-
-app.get('/api/sessions', (req, res) => {
-  const agentKey = String(req.query.agent || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    requireSession: false,
-    agentError: agentRequiredOrUnknownError,
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  return res.json({
-    ok: true,
-    agent: agentPayload(agent),
-    workdir,
-    ...listChatSessions(contextKey),
-  });
-});
-
-app.post('/api/sessions', (req, res) => {
-  const agentKey = String(req.body.agent || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    requireSession: false,
-    agentError: agentRequiredOrUnknownError,
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  const created = createChatSession(contextKey, req.body.name);
-  if (!created) {
-    return res.status(409).json({
-      error: `session limit reached (max ${MAX_SESSIONS})`,
-      code: 'SESSION_LIMIT_REACHED',
-    });
-  }
-  return res.json({
-    ok: true,
-    agent: agentPayload(agent),
-    workdir,
-    ...created,
-  });
-});
-
-app.post('/api/sessions/active', (req, res) => {
-  const agentKey = String(req.body.agent || '').trim();
-  const sessionId = String(req.body.sessionId || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    requireSession: false,
-    agentError: agentRequiredOrUnknownError,
-    beforeWorkdir: () => {
-      if (sessionId) return true;
-      res.status(400).json({ error: 'sessionId is required' });
-      return false;
-    },
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  const result = setActiveChatSession(contextKey, sessionId);
-  if (!result) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  return res.json({
-    ok: true,
-    agent: agentPayload(agent),
-    workdir,
-    ...result,
-  });
-});
-
-app.post('/api/sessions/delete', (req, res) => {
-  const agentKey = String(req.body.agent || '').trim();
-  const sessionId = String(req.body.sessionId || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    requireSession: false,
-    agentError: agentRequiredOrUnknownError,
-    beforeWorkdir: () => {
-      if (!sessionId) {
-        res.status(400).json({ error: 'sessionId is required' });
-        return false;
-      }
-      if (sessionId === LEGACY_SESSION_ID) {
-        res.status(400).json({
-          error: 'the default session cannot be deleted',
-          code: 'SESSION_PROTECTED',
-        });
-        return false;
-      }
-      return true;
-    },
-  });
-  if (!scope) return;
-  const { agent, workdir, contextKey } = scope;
-  const existing = listChatSessions(contextKey).sessions.find(
-    (session) => session.id === sessionId,
-  );
-  if (!existing) {
-    return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-  }
-  const scopeKey = scopeKeyFor(agent.key, workdir, sessionId);
-  if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
-    return res.status(409).json({
-      error: 'session has a running turn',
-      code: 'SESSION_BUSY',
-    });
-  }
-  const result = deleteChatSession(contextKey, sessionId);
-  clearSession(scopeKey);
-  clearHistory(scopeKey);
-  return res.json({
-    ok: true,
-    agent: agentPayload(agent),
-    workdir,
-    deletedSessionId: sessionId,
-    ...result,
-  });
-});
-
-// Return the stored conversation for this work directory + agent + chat session
-// so any device in the same path/session shows the same chat.
-app.get('/api/history', (req, res) => {
-  const agentKey = String(req.query.agent || '').trim();
-  const requestedSessionId = String(req.query.sessionId || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    sessionId: requestedSessionId,
-    agentError: agentRequiredOrUnknownError,
-  });
-  if (!scope) return;
-  const { agent, workdir, session: chatSession, scopeKey } = scope;
-  // Only finalize a streaming bubble as stale when nothing is running OR queued
-  // for this scope; a queued turn has a persisted awaiting bubble that is not
-  // yet in runningScopes and must not be prematurely marked cancelled.
-  if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
-    finalizeStaleStreamingHistory(scopeKey);
-  }
-  return res.json({
-    agent: agent.key,
-    workdir,
-    session: sessionPayload(chatSession),
-    messages: readHistory(scopeKey),
-  });
-});
-
-app.get('/api/history/search', (req, res) => {
-  const query = String(req.query.q || '').trim();
-  const agentKey = String(req.query.agent || '').trim();
-  if (!query) {
-    return res.status(400).json({ error: 'q is required' });
-  }
-  if (agentKey && !getAgent(agentKey)) {
-    return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-  }
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  const sessionNameFor = (matchAgentKey, sessionId) => {
-    const contextKey = sessionContextKeyFor(matchAgentKey, workdir);
-    const session = listChatSessions(contextKey).sessions.find(
-      (item) => item.id === sessionId,
-    );
-    return session ? session.name : sessionId;
-  };
-  const matches = searchHistory({
-    workdir,
-    query,
-    agentKey,
-    sessionNameFor,
-  });
-  return res.json({ workdir, query, matches });
-});
-
-app.get('/api/history/export', (req, res) => {
-  const agentKey = String(req.query.agent || '').trim();
-  const requestedSessionId = String(req.query.sessionId || '').trim();
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    sessionId: requestedSessionId,
-    agentError: agentRequiredOrUnknownError,
-  });
-  if (!scope) return;
-  const { agent, session: chatSession, scopeKey } = scope;
-  if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
-    finalizeStaleStreamingHistory(scopeKey);
-  }
-  const exportedAt = new Date().toISOString();
-  const markdown = markdownForConversation({
-    agentLabel: agent.label,
-    sessionName: chatSession.name,
-    messages: readHistory(scopeKey),
-    exportedAt,
-  });
-  const fileName = `${safeDownloadName(agent.key)}-${safeDownloadName(chatSession.name, 'session')}.md`;
-  return res.json({
-    agent: agent.key,
-    session: sessionPayload(chatSession),
-    fileName,
-    markdown,
-  });
-});
-
-app.get('/api/usage', async (_req, res) => {
-  try {
-    const report = await buildUsageReport();
-    return res.json(report);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/quota-schedules', (req, res) => {
-  const workdir = eventWorkdir(req);
-  return res.json({ workdir, schedules: listQuotaSchedules({ workdir }) });
-});
-
-app.post('/api/quota-schedules', (req, res) => {
-  const sourceKey = String(req.body.sourceKey || '').trim();
-  const agentKey = String(req.body.agent || req.body.agentKey || '').trim();
-  const requestedSessionId = String(req.body.sessionId || '').trim();
-  if (!['claude', 'codex'].includes(sourceKey)) {
-    return res.status(400).json({
-      error: 'sourceKey must be claude or codex',
-      code: 'INVALID_QUOTA_SOURCE',
-    });
-  }
-  const scope = resolveAgentScope(req, res, {
-    agentKey,
-    sessionId: requestedSessionId,
-    agentError: agentRequiredOrUnknownError,
-  });
-  if (!scope) return;
-  const { agent, workdir, session: chatSession } = scope;
-  try {
-    const schedule = createQuotaSchedule({
-      sourceKey,
-      agentKey: agent.key,
-      sessionId: chatSession.id,
-      sessionName: chatSession.name,
-      workdir,
-      prompt: req.body.prompt,
-      targetResetsAt: req.body.targetResetsAt,
-      replaceExisting: req.body.replaceExisting === true,
-    });
-    sendEvent('quota_schedule_changed', {
-      scopeWorkdir: workdir,
-      action: req.body.replaceExisting === true ? 'replace' : 'create',
-      schedule,
-      createdAt: new Date().toISOString(),
-    });
-    return res.json({ ok: true, schedule });
-  } catch (err) {
-    return res.status(err.code === 'SCHEDULE_EXISTS' ? 409 : 400).json({
-      error: err.message,
-      code: err.code || 'SCHEDULE_CREATE_FAILED',
-    });
-  }
-});
-
-app.post('/api/quota-schedules/cancel', (req, res) => {
-  const id = String(req.body.id || '').trim();
-  if (!id) {
-    return res.status(400).json({ error: 'id is required' });
-  }
-  try {
-    const schedule = cancelQuotaSchedule(id);
-    if (!schedule) {
-      return res.status(404).json({
-        error: 'scheduled message not found',
-        code: 'SCHEDULE_NOT_FOUND',
-      });
-    }
-    sendEvent('quota_schedule_changed', {
-      scopeWorkdir: schedule.workdir,
-      action: 'cancel',
-      schedule,
-      createdAt: new Date().toISOString(),
-    });
-    return res.json({ ok: true, schedule });
-  } catch (err) {
-    return res.status(409).json({
-      error: err.message,
-      code: err.code || 'SCHEDULE_CANCEL_FAILED',
-    });
-  }
-});
-
-// Clear one chat session's history plus resumable CLI session so the next message
-// starts a new machine-side conversation. This does not touch files on disk.
-app.post('/api/session/clear', (req, res) => {
-  const agentKey = String(req.body.agent || '').trim();
-  const requestedSessionId = String(req.body.sessionId || '').trim();
-  let workdir;
-  try {
-    workdir = requestWorkdir(req);
-  } catch (err) {
-    return sendWorkdirError(res, err);
-  }
-  if (agentKey) {
-    const agent = getAgent(agentKey);
-    if (!agent) {
-      return res.status(400).json({ error: `unknown agent: ${agentKey}` });
-    }
-    const contextKey = sessionContextKeyFor(agent.key, workdir);
-    const sessions = listChatSessions(contextKey).sessions;
-    const chatSession = requestedSessionId
-      ? sessions.find((session) => session.id === requestedSessionId)
-      : resolveChatSession(contextKey, '');
-    if (!chatSession) {
-      return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
-    }
-    const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
-    if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
-      return res.status(409).json({
-        error: 'session has a running turn',
-        code: 'SESSION_BUSY',
-      });
-    }
-    const cleared = clearSession(scopeKey);
-    clearHistory(scopeKey);
-    touchChatSession(contextKey, chatSession.id);
-    return res.json({
-      ok: true,
-      agent: agentKey,
-      workdir,
-      session: sessionPayload(chatSession),
-      cleared,
-    });
-  }
-  let cleared = 0;
-  for (const agent of listAgents()) {
-    const contextKey = sessionContextKeyFor(agent.key, workdir);
-    for (const chatSession of listChatSessions(contextKey).sessions) {
-      const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
-      if (clearSession(scopeKey)) cleared += 1;
-      clearHistory(scopeKey);
-    }
-  }
-  return res.json({ ok: true, workdir, cleared });
-});
-
-app.get('/api/events', (req, res) => {
-  const deviceId = normalizeDeviceId(req.get('x-device-id'));
-  // Scope this subscription to the device's current work directory so it only
-  // receives chat events for the conversation it is viewing. The client
-  // reconnects with a new x-workdir header when the user switches paths.
-  const workdir = eventWorkdir(req);
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  const client = { res, deviceId, workdir };
-  eventClients.add(client);
-  workdirPresence.set(workdir, (workdirPresence.get(workdir) || 0) + 1);
-  res.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
-
-  const heartbeat = setInterval(() => {
-    res.write(`event: heartbeat\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
-  }, 30_000);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    eventClients.delete(client);
-    const remaining = (workdirPresence.get(workdir) || 1) - 1;
-    if (remaining > 0) workdirPresence.set(workdir, remaining);
-    else workdirPresence.delete(workdir);
-  });
-});
-
-// --- Card Mode (additive secondary surface; does not touch chat) ---
-app.get('/api/cards', (req, res) => {
-  const workdir = eventWorkdir(req);
-  return res.json({ workdir, cards: cards.getActiveCards(workdir) });
-});
-
-app.post('/api/cards/feedback', (req, res) => {
-  const workdir = eventWorkdir(req);
-  const cardId = String(req.body.cardId || '').trim();
-  const gesture = String(req.body.gesture || '').trim();
-  const deferUntil = req.body.deferUntil ? String(req.body.deferUntil) : null;
-  if (!cardId || !gesture) {
-    return res.status(400).json({ error: 'cardId and gesture are required' });
-  }
-  if (!cards.applyFeedback(cardId, gesture, deferUntil, workdir)) {
-    return res.status(400).json({ error: 'unknown card or gesture' });
-  }
-  return res.json({ ok: true });
-});
-
-app.post('/api/cards/refresh', (req, res) => {
-  const workdir = eventWorkdir(req);
-  const generated = cards.replaceGeneratedCards(
-    generateCardsForWorkdir(workdir),
-    workdir,
-  );
-  return res.json({ workdir, generated });
-});
+app.use(createMetaRouter(routeContext));
+app.use(createPushRouter(routeContext));
+app.use(createFsRouter(routeContext));
+app.use(createChatRouter(routeContext));
+app.use(createSessionsRouter(routeContext));
+app.use(createQuotaRouter(routeContext));
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
   app.use(express.static(WEB_BUILD_DIR, {
