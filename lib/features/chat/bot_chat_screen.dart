@@ -131,8 +131,10 @@ class _BotChatScreenState extends State<BotChatScreen>
   }
 
   Future<void> _sendCompact() async {
+    final String compactedNotice = context.l10n.conversationCompacted;
     try {
       await widget.chatController.compressConversation();
+      widget.chatController.appendNotice(compactedNotice);
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -347,6 +349,9 @@ class _BotChatScreenState extends State<BotChatScreen>
                       itemBuilder: (BuildContext context, int index) {
                         final ChatMessage message =
                             messages[messages.length - 1 - index];
+                        if (widget.chatController.isNoticeMessage(message)) {
+                          return _ChatNotice(text: message.content);
+                        }
                         // RepaintBoundary isolates each bubble's painting so a
                         // streaming/animating bubble does not repaint the rest
                         // of the visible history every frame.
@@ -1063,6 +1068,32 @@ class _ComposerActionPanel extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// A centered, muted one-line status note (e.g. "Conversation compacted")
+// rendered inline in the message list instead of as a chat bubble.
+class _ChatNotice extends StatelessWidget {
+  const _ChatNotice({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            color: colors.onSurfaceVariant,
+          ),
+        ),
       ),
     );
   }
