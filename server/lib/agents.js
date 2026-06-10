@@ -269,8 +269,8 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const emitDelta = makeDeltaEmitter(onEvent);
 
   // model / effort / permission for this scope. buildArgs supplies the
-  // permission flag too (default = --dangerously-skip-permissions), so the
-  // previous always-bypass behavior is unchanged when nothing is configured.
+  // permission flag too; an unconfigured scope defaults to the acceptEdits
+  // "auto" tier (--permission-mode acceptEdits), not full bypass.
   const args = [
     '--print',
     '--output-format',
@@ -376,8 +376,8 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   );
 
   // buildArgs supplies model (-m), effort (-c model_reasoning_effort=) and
-  // permission (default = --dangerously-bypass-approvals-and-sandbox). The `-c`
-  // forms work for both `exec` and `exec resume`.
+  // permission (default = the workspace-write tier, approvals disabled). The
+  // `-c` forms work for both `exec` and `exec resume`.
   const common = [
     '--json',
     ...buildArgs('codex', settings),
@@ -486,7 +486,7 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const prior = getSession(sessionKey);
   emit(onEvent, 'Antigravity is working...');
   // agy exposes no model/effort; buildArgs only yields the permission flag
-  // (default = --dangerously-skip-permissions).
+  // (default = --sandbox).
   const args = [
     '--print',
     String(prompt),

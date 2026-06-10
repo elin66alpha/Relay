@@ -4,13 +4,13 @@
 // device sharing a `workdir + agent` scope sees the same choice (matching the
 // shared-session design). The store maps a scope key string -> { model, effort,
 // permission }. Selections are normalized against agent-options on read and
-// write, so an unknown id silently falls back to the agent's default and the
-// historical bypass/no-flag behavior is preserved for never-configured scopes.
+// write, so an unknown id silently falls back to the agent's default and a
+// never-configured scope starts from that agent's default selection.
 
 const fs = require('fs');
 const path = require('path');
 
-const { DEFAULTS, normalizeSettings } = require('./agent-options');
+const { defaultsFor, normalizeSettings } = require('./agent-options');
 
 const SETTINGS_FILE = path.join(__dirname, '..', 'agent-settings.json');
 
@@ -30,7 +30,7 @@ function saveAll(data) {
 // falling back to defaults for any group not yet chosen or not supported.
 function getSettings(agentKey, scopeKey) {
   const stored = loadAll()[scopeKey] || {};
-  return normalizeSettings(agentKey, { ...DEFAULTS, ...stored });
+  return normalizeSettings(agentKey, { ...defaultsFor(agentKey), ...stored });
 }
 
 // Persist a (partial) selection for a scope. Only the provided groups change;
@@ -39,7 +39,7 @@ function getSettings(agentKey, scopeKey) {
 function setSettings(agentKey, scopeKey, partial) {
   const all = loadAll();
   const merged = normalizeSettings(agentKey, {
-    ...DEFAULTS,
+    ...defaultsFor(agentKey),
     ...(all[scopeKey] || {}),
     ...(partial || {}),
   });

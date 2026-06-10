@@ -332,6 +332,7 @@ class AppStrings {
   String get offline => isZh ? '未在线' : 'Not online';
   String get compress => isZh ? '压缩对话' : 'Compress';
   String get compressComplete => isZh ? '压缩完成' : 'Compression complete';
+  String get conversationCompacted => isZh ? '对话已压缩' : 'Conversation compacted';
   String compressFailed(Object err) =>
       isZh ? '压缩失败：$err' : 'Compression failed: $err';
   String get english => 'English';

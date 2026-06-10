@@ -24,6 +24,7 @@ class BotChatController extends ChangeNotifier {
   static const String _deliveryFailedKey = 'deliveryFailed';
   static const String _errorDetailKey = 'errorDetail';
   static const String _systemKey = 'system';
+  static const String _noticeKey = 'notice';
   static const String _requestIdKey = 'requestId';
   static const String _progressLinesKey = 'progressLines';
   static const String _cancelledKey = 'cancelled';
@@ -251,6 +252,12 @@ class BotChatController extends ChangeNotifier {
 
   bool isSystemMessage(ChatMessage message) =>
       message.metadata[_systemKey] == true;
+
+  // A notice is an ephemeral, centered one-liner (e.g. "Conversation
+  // compacted") rather than a chat bubble. It lives only in the in-memory
+  // message list, so it disappears on the next history reload.
+  bool isNoticeMessage(ChatMessage message) =>
+      message.metadata[_noticeKey] == true;
 
   bool isCancelled(ChatMessage message) =>
       message.metadata[_cancelledKey] == true;
@@ -1007,6 +1014,17 @@ class BotChatController extends ChangeNotifier {
         _deliveryFailedKey: true,
         _errorDetailKey: detail,
       },
+    );
+    notifyListeners();
+  }
+
+  // Append a centered, non-bubble status line to the current conversation.
+  void appendNotice(String text) {
+    _messages.add(
+      ChatMessage.assistant(
+        text,
+        metadata: const <String, Object?>{_noticeKey: true},
+      ),
     );
     notifyListeners();
   }
