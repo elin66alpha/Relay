@@ -1,8 +1,9 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
+
+const { createJsonStore } = require('./json-store');
 
 const SCHEDULES_FILE = path.join(__dirname, '..', 'quota-schedules.json');
 const MAX_PROMPT_LENGTH = 12000;
@@ -17,13 +18,15 @@ function isActive(schedule) {
   return ACTIVE_STATUSES.includes(schedule.status);
 }
 
+const store = createJsonStore(SCHEDULES_FILE, {
+  defaultValue: [],
+  pretty: true,
+  trailingNewline: true,
+});
+
 function readQuotaSchedules() {
-  try {
-    const decoded = JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf8'));
-    return Array.isArray(decoded) ? decoded : [];
-  } catch (_err) {
-    return [];
-  }
+  const decoded = store.load();
+  return Array.isArray(decoded) ? decoded : [];
 }
 
 // Never drop pending/running; cap the retained finished records so the file
@@ -38,11 +41,7 @@ function pruneSchedules(schedules) {
 }
 
 function writeQuotaSchedules(schedules) {
-  fs.writeFileSync(
-    SCHEDULES_FILE,
-    `${JSON.stringify(pruneSchedules(schedules), null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  store.save(pruneSchedules(schedules));
 }
 
 function publicSchedule(schedule) {

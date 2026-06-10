@@ -1,24 +1,28 @@
 'use strict';
 
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
+
+const { createJsonStore } = require('./json-store');
 
 const TOKENS_FILE = path.join(__dirname, '..', 'tokens.json');
 
+// Cached, atomic store. The `npm run credential` script writes tokens.json from
+// a separate process; its write changes the file stamp, so this server's cached
+// copy is refreshed on the next read instead of going stale.
+const store = createJsonStore(TOKENS_FILE, {
+  defaultValue: [],
+  pretty: true,
+  trailingNewline: true,
+});
+
 function readTokenRecords() {
-  try {
-    const decoded = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf-8'));
-    return Array.isArray(decoded) ? decoded.filter((item) => item && item.token) : [];
-  } catch (_err) {
-    return [];
-  }
+  const decoded = store.load();
+  return Array.isArray(decoded) ? decoded.filter((item) => item && item.token) : [];
 }
 
 function writeTokenRecords(records) {
-  fs.writeFileSync(TOKENS_FILE, `${JSON.stringify(records, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  store.save(records);
 }
 
 function activeTokenRecords() {
@@ -31,10 +35,25 @@ function hasConfiguredToken() {
   return activeTokenRecords().length > 0;
 }
 
+// Compare a presented token against each active token in constant time, so a
+// timing side channel can't reveal how many leading characters matched. Hashing
+// both sides first keeps timingSafeEqual's equal-length requirement regardless
+// of the candidate's length.
+function tokenDigest(value) {
+  return crypto.createHash('sha256').update(String(value)).digest();
+}
+
 function isTokenAllowed(token) {
   const clean = String(token || '').trim();
   if (!clean) return false;
-  return activeTokenRecords().some((record) => clean === String(record.token));
+  const candidate = tokenDigest(clean);
+  let allowed = false;
+  for (const record of activeTokenRecords()) {
+    if (crypto.timingSafeEqual(candidate, tokenDigest(record.token))) {
+      allowed = true;
+    }
+  }
+  return allowed;
 }
 
 function tokenRecordForToken(token) {
