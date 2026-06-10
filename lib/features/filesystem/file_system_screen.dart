@@ -404,8 +404,10 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                       Text(_operationText!),
                     ],
                     if (_isLoading) ...<Widget>[
+                      const SizedBox(height: 24),
+                      const Center(child: CircularProgressIndicator()),
                       const SizedBox(height: 12),
-                      Text(context.l10n.loadingFiles),
+                      Center(child: Text(context.l10n.loadingFiles)),
                     ] else if (_error != null) ...<Widget>[
                       const SizedBox(height: 12),
                       Text(

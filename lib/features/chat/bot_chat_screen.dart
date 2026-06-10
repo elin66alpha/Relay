@@ -131,8 +131,10 @@ class _BotChatScreenState extends State<BotChatScreen>
   }
 
   Future<void> _sendCompact() async {
+    final String compactedNotice = context.l10n.conversationCompacted;
     try {
       await widget.chatController.compressConversation();
+      widget.chatController.appendNotice(compactedNotice);
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -162,6 +164,9 @@ class _BotChatScreenState extends State<BotChatScreen>
   // of scroll jank (and it gets worse as the list grows). Instead, coalesce to
   // at most one scroll per frame, jump rather than animate so nothing competes,
   // and leave the user alone when they have scrolled up to read older messages.
+  //
+  // The list is reverse:true, so the bottom (newest message) is offset 0
+  // (minScrollExtent) and scrolling up to older messages increases the offset.
   void _onChatChanged() {
     if (_autoScrollQueued) return;
     _autoScrollQueued = true;
@@ -172,11 +177,11 @@ class _BotChatScreenState extends State<BotChatScreen>
       final int count = widget.chatController.messageCount;
       final bool messageAdded = count != _lastMessageCount;
       _lastMessageCount = count;
-      final bool nearBottom = pos.maxScrollExtent - pos.pixels < 280;
+      final bool nearBottom = pos.pixels - pos.minScrollExtent < 280;
       // Follow streaming text only while pinned to the bottom; always snap when
       // a new message (user send / new reply bubble) is appended.
       if (!nearBottom && !messageAdded) return;
-      _scroll.jumpTo(pos.maxScrollExtent);
+      _scroll.jumpTo(pos.minScrollExtent);
     });
   }
 
@@ -323,6 +328,63 @@ class _BotChatScreenState extends State<BotChatScreen>
                   final CliAgent agent = widget.agentsController.activeAgent;
                   final List<ChatMessage> messages =
                       widget.chatController.messages;
+                  final Widget conversationChild;
+                  if (widget.chatController.isHistoryLoading &&
+                      messages.isEmpty) {
+                    conversationChild =
+                        const Center(child: CircularProgressIndicator());
+                  } else if (messages.isEmpty) {
+                    conversationChild =
+                        _EmptyChatPlaceholder(agentName: agent.label);
+                  } else {
+                    conversationChild = ListView.builder(
+                      controller: _scroll,
+                      // Reversed: offset 0 is the bottom, so opening or switching
+                      // a conversation lands on the newest message instantly with
+                      // no scroll and no top-to-bottom jump, however long the
+                      // history is. itemBuilder walks messages back-to-front.
+                      reverse: true,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                      itemCount: messages.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        final ChatMessage message =
+                            messages[messages.length - 1 - index];
+                        if (widget.chatController.isNoticeMessage(message)) {
+                          return _ChatNotice(text: message.content);
+                        }
+                        // RepaintBoundary isolates each bubble's painting so a
+                        // streaming/animating bubble does not repaint the rest
+                        // of the visible history every frame.
+                        return RepaintBoundary(
+                          key: ValueKey<String>(message.id),
+                          child: _MessageBubble(
+                            message: message,
+                            retryable:
+                                widget.chatController.isRetryable(message),
+                            streaming:
+                                widget.chatController.isStreaming(message),
+                            awaitingFirstToken:
+                                widget.chatController.isAwaitingFirstToken(
+                              message,
+                            ),
+                            errorDetail: widget.chatController.errorDetailFor(
+                              message,
+                            ),
+                            system: widget.chatController.isSystemMessage(
+                              message,
+                            ),
+                            cancelled:
+                                widget.chatController.isCancelled(message),
+                            progressLines:
+                                widget.chatController.progressLinesFor(
+                              message,
+                            ),
+                            onRetry: () => widget.chatController.retry(message),
+                          ),
+                        );
+                      },
+                    );
+                  }
                   return Column(
                     children: <Widget>[
                       if (usePermanentSidebar)
@@ -338,39 +400,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                           agentLabel: agent.label,
                           onRecheck: widget.chatController.refreshAuthStatus,
                         ),
-                      Expanded(
-                        child: messages.isEmpty
-                            ? _EmptyChatPlaceholder(agentName: agent.label)
-                            : ListView.builder(
-                                controller: _scroll,
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                                itemCount: messages.length,
-                                itemBuilder: (BuildContext context, int index) {
-                                  final ChatMessage message = messages[index];
-                                  return _MessageBubble(
-                                    key: ValueKey<String>(message.id),
-                                    message: message,
-                                    retryable: widget.chatController
-                                        .isRetryable(message),
-                                    streaming: widget.chatController
-                                        .isStreaming(message),
-                                    awaitingFirstToken: widget.chatController
-                                        .isAwaitingFirstToken(message),
-                                    errorDetail: widget.chatController
-                                        .errorDetailFor(message),
-                                    system: widget.chatController
-                                        .isSystemMessage(message),
-                                    cancelled: widget.chatController
-                                        .isCancelled(message),
-                                    progressLines: widget.chatController
-                                        .progressLinesFor(message),
-                                    onRetry: () =>
-                                        widget.chatController.retry(message),
-                                  );
-                                },
-                              ),
-                      ),
+                      Expanded(child: conversationChild),
                       _InputBar(
                         controller: _input,
                         backend: widget.chatController.backend,
@@ -1043,6 +1073,32 @@ class _ComposerActionPanel extends StatelessWidget {
   }
 }
 
+// A centered, muted one-line status note (e.g. "Conversation compacted")
+// rendered inline in the message list instead of as a chat bubble.
+class _ChatNotice extends StatelessWidget {
+  const _ChatNotice({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            color: colors.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
@@ -1054,7 +1110,6 @@ class _MessageBubble extends StatelessWidget {
     required this.cancelled,
     required this.progressLines,
     required this.onRetry,
-    super.key,
   });
 
   final ChatMessage message;
@@ -1166,7 +1221,7 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-class _MessageText extends StatelessWidget {
+class _MessageText extends StatefulWidget {
   const _MessageText({
     required this.text,
     required this.color,
@@ -1178,20 +1233,54 @@ class _MessageText extends StatelessWidget {
   final bool formatInlineEmphasis;
 
   @override
+  State<_MessageText> createState() => _MessageTextState();
+}
+
+class _MessageTextState extends State<_MessageText> {
+  // Parsing markdown is the costly part of a finished assistant bubble. The
+  // chat subtree rebuilds ~12x/sec during a streaming turn, so we cache the
+  // built widget and return the same instance unless something it depends on
+  // changed. Returning an identical Widget lets Flutter skip rebuilding the
+  // MarkdownBody (and re-parsing) entirely. We rebuild on prop changes
+  // (didUpdateWidget) and on theme changes (didChangeDependencies).
+  Widget? _cached;
+
+  @override
+  void didUpdateWidget(_MessageText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text ||
+        oldWidget.color != widget.color ||
+        oldWidget.formatInlineEmphasis != widget.formatInlineEmphasis) {
+      _cached = null;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Theme (and thus the markdown style sheet) may have changed.
+    _cached = null;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    return _cached ??= _buildContent(context);
+  }
+
+  Widget _buildContent(BuildContext context) {
     final TextStyle style = TextStyle(
-      color: color,
+      color: widget.color,
       height: 1.45,
       fontSize: 15,
     );
-    if (!formatInlineEmphasis) {
-      return SelectableText(text, style: style);
+    if (!widget.formatInlineEmphasis) {
+      return SelectableText(widget.text, style: style);
     }
     return MarkdownBody(
-      data: _normalizeAgentMarkdown(text),
+      data: _normalizeAgentMarkdown(widget.text),
       selectable: true,
       softLineBreak: true,
-      styleSheet: _markdownStyleSheet(context, color, style),
+      styleSheet: _markdownStyleSheet(context, widget.color, style),
     );
   }
 }
