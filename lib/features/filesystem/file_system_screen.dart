@@ -8,6 +8,9 @@ import '../../core/backend/backend_client.dart';
 import '../../core/download/download_manager.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/platform/file_drop.dart';
+import '../../core/util/error_text.dart';
+import '../../core/util/format_bytes.dart';
+import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
 
 /// Unified file browser: browse the whole filesystem (up to root), set the work
@@ -93,7 +96,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = friendlyErrorText(context.l10n, err);
         _isLoading = false;
       });
     }
@@ -117,7 +120,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = friendlyErrorText(context.l10n, err);
         _isLoading = false;
       });
     }
@@ -155,7 +158,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
         _workPath = previous; // revert the optimistic update on failure
         _error = err is BackendException && err.code == 'WORKDIR_BUSY'
             ? context.l10n.workdirBusy
-            : err.toString();
+            : friendlyErrorText(context.l10n, err);
       });
     }
   }
@@ -163,14 +166,27 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   Future<void> _pickUpload() async {
     final FilePickerResult? result = await FilePicker.pickFiles(
       allowMultiple: true,
-      withData: true,
+      withData: kIsWeb,
+      withReadStream: !kIsWeb,
     );
     if (result == null) return;
     final List<_UploadFile> files = <_UploadFile>[];
     for (final PlatformFile file in result.files) {
-      final Uint8List? bytes = file.bytes;
-      if (bytes == null) continue;
-      files.add(_UploadFile(name: file.name, bytes: bytes));
+      if (kIsWeb) {
+        final Uint8List? bytes = file.bytes;
+        if (bytes == null) continue;
+        files.add(_UploadFile.bytes(name: file.name, data: bytes));
+      } else {
+        final Stream<List<int>>? bytes = file.readStream;
+        if (bytes == null) continue;
+        files.add(
+          _UploadFile.stream(
+            name: file.name,
+            data: bytes,
+            length: file.size,
+          ),
+        );
+      }
     }
     await _uploadFiles(files);
   }
@@ -179,9 +195,9 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     return _uploadFiles(
       dropped
           .map(
-            (DroppedFile file) => _UploadFile(
+            (DroppedFile file) => _UploadFile.bytes(
               name: file.name,
-              bytes: file.bytes,
+              data: file.bytes,
             ),
           )
           .toList(growable: false),
@@ -194,9 +210,9 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     // Reject oversized files up front so we never push them over the tunnel; the
     // backend enforces the same cap as a safety net.
     final List<_UploadFile> tooBig =
-        files.where((_UploadFile f) => f.bytes.length > _maxUploadBytes).toList();
+        files.where((_UploadFile f) => f.length > _maxUploadBytes).toList();
     final List<_UploadFile> toUpload =
-        files.where((_UploadFile f) => f.bytes.length <= _maxUploadBytes).toList();
+        files.where((_UploadFile f) => f.length <= _maxUploadBytes).toList();
     if (tooBig.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -216,11 +232,21 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       for (final _UploadFile file in toUpload) {
         if (!mounted) return;
         setState(() => _operationText = context.l10n.uploadingFile(file.name));
-        await widget.chatController.uploadFile(
-          path: listing.absolutePath,
-          name: file.name,
-          bytes: file.bytes,
-        );
+        final Uint8List? bytes = file.bytes;
+        if (bytes != null) {
+          await widget.chatController.uploadFile(
+            path: listing.absolutePath,
+            name: file.name,
+            bytes: bytes,
+          );
+        } else {
+          await widget.chatController.uploadFileStream(
+            path: listing.absolutePath,
+            name: file.name,
+            bytes: file.readStream!,
+            length: file.length,
+          );
+        }
         uploaded += 1;
       }
       if (!mounted) return;
@@ -230,7 +256,11 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       await _browse(listing.absolutePath);
     } catch (err) {
       if (!mounted) return;
-      setState(() => _error = context.l10n.uploadFailed(err));
+      setState(
+        () => _error = context.l10n.uploadFailed(
+          friendlyErrorText(context.l10n, err),
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -262,172 +292,185 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n.fileSystem)),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: <Widget>[
-            Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1040),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    if (_workPath != null)
-                      Text(
-                        context.l10n.currentWorkPath(_workPath!),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+        child: CustomScrollView(
+          slivers: <Widget>[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1040),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        FilledButton.icon(
-                          onPressed: _isLoading || _isBusy
-                              ? null
-                              : () => _pickUpload(),
-                          icon: const Icon(Icons.upload_file_outlined),
-                          label: Text(context.l10n.uploadFile),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _isLoading || _isBusy || atWorkPath
-                              ? null
-                              : _setAsWorkPath,
-                          icon: const Icon(Icons.flag_outlined),
-                          label: Text(context.l10n.setAsWorkPath),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _isLoading || _isBusy
-                              ? null
-                              : () => _browse(
-                                    _listing?.absolutePath ?? _workPath ?? '',
-                                  ),
-                          icon: const Icon(Icons.refresh_outlined),
-                          label: Text(context.l10n.refresh),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      context.l10n.transferLimitHint,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
-                      ),
-                    ),
-                    if (kIsWeb) ...<Widget>[
-                      const SizedBox(height: 12),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
+                        if (_workPath != null)
+                          Text(
+                            context.l10n.currentWorkPath(_workPath!),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(8),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: <Widget>[
+                            FilledButton.icon(
+                              onPressed: _isLoading || _isBusy
+                                  ? null
+                                  : () => _pickUpload(),
+                              icon: const Icon(Icons.upload_file_outlined),
+                              label: Text(context.l10n.uploadFile),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _isLoading || _isBusy || atWorkPath
+                                  ? null
+                                  : _setAsWorkPath,
+                              icon: const Icon(Icons.flag_outlined),
+                              label: Text(context.l10n.setAsWorkPath),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _isLoading || _isBusy
+                                  ? null
+                                  : () => _browse(
+                                        _listing?.absolutePath ??
+                                            _workPath ??
+                                            '',
+                                      ),
+                              icon: const Icon(Icons.refresh_outlined),
+                              label: Text(context.l10n.refresh),
+                            ),
+                          ],
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Row(
-                            children: <Widget>[
-                              const Icon(Icons.drive_folder_upload_outlined),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(context.l10n.dragDropUpload),
+                        const SizedBox(height: 6),
+                        Text(
+                          context.l10n.transferLimitHint,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                        if (kIsWeb) ...<Widget>[
+                          const SizedBox(height: 12),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: theme.colorScheme.outlineVariant,
                               ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: <Widget>[
+                                  const Icon(
+                                    Icons.drive_folder_upload_outlined,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(context.l10n.dragDropUpload),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        Text(
+                          context.l10n.currentFolder,
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        if (listing != null)
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: SelectableText(
+                                  listing.absolutePath,
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ),
+                              if (atWorkPath)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Chip(
+                                    label: Text(context.l10n.workPathTag),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                ),
                             ],
                           ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    Text(
-                      context.l10n.currentFolder,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    if (listing != null)
-                      Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: SelectableText(
-                              listing.absolutePath,
-                              style: theme.textTheme.bodySmall,
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: <Widget>[
+                            OutlinedButton.icon(
+                              onPressed: listing?.parentPath == null ||
+                                      _isLoading ||
+                                      _isBusy
+                                  ? null
+                                  : () => _browse(listing!.parentPath!),
+                              icon: const Icon(Icons.arrow_upward_outlined),
+                              label: Text(context.l10n.parentFolder),
                             ),
-                          ),
-                          if (atWorkPath)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Chip(
-                                label: Text(context.l10n.workPathTag),
-                                visualDensity: VisualDensity.compact,
+                            OutlinedButton.icon(
+                              onPressed: _isLoading || _isBusy
+                                  ? null
+                                  : _toggleHiddenFiles,
+                              icon: Icon(
+                                _showHidden
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                              ),
+                              label: Text(
+                                _showHidden
+                                    ? context.l10n.hideHiddenFiles
+                                    : context.l10n.showHiddenFiles,
                               ),
                             ),
+                          ],
+                        ),
+                        ListenableBuilder(
+                          listenable: _downloads,
+                          builder: (BuildContext context, Widget? _) =>
+                              _DownloadStatus(downloads: _downloads),
+                        ),
+                        if (_operationText != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          Text(_operationText!),
                         ],
-                      ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        OutlinedButton.icon(
-                          onPressed: listing?.parentPath == null ||
-                                  _isLoading ||
-                                  _isBusy
-                              ? null
-                              : () => _browse(listing!.parentPath!),
-                          icon: const Icon(Icons.arrow_upward_outlined),
-                          label: Text(context.l10n.parentFolder),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed:
-                              _isLoading || _isBusy ? null : _toggleHiddenFiles,
-                          icon: Icon(
-                            _showHidden
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
+                        if (_isLoading) ...<Widget>[
+                          const SizedBox(height: 24),
+                          const Center(child: CircularProgressIndicator()),
+                          const SizedBox(height: 12),
+                          Center(child: Text(context.l10n.loadingFiles)),
+                        ] else if (_error != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            style: TextStyle(color: theme.colorScheme.error),
                           ),
-                          label: Text(
-                            _showHidden
-                                ? context.l10n.hideHiddenFiles
-                                : context.l10n.showHiddenFiles,
-                          ),
-                        ),
+                        ] else if (listing != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                        ],
                       ],
                     ),
-                    ListenableBuilder(
-                      listenable: _downloads,
-                      builder: (BuildContext context, Widget? _) =>
-                          _DownloadStatus(downloads: _downloads),
-                    ),
-                    if (_operationText != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Text(_operationText!),
-                    ],
-                    if (_isLoading) ...<Widget>[
-                      const SizedBox(height: 24),
-                      const Center(child: CircularProgressIndicator()),
-                      const SizedBox(height: 12),
-                      Center(child: Text(context.l10n.loadingFiles)),
-                    ] else if (_error != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Text(
-                        _error!,
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                    ] else if (listing != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      _FileList(
-                        listing: listing,
-                        isBusy: _isBusy,
-                        downloadActive: _downloadActive,
-                        onOpen: (FsEntry entry) => _browse(entry.path),
-                        onDownload: _download,
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
+            if (!_isLoading && _error == null && listing != null)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                sliver: _FileList(
+                  listing: listing,
+                  isBusy: _isBusy,
+                  downloadActive: _downloadActive,
+                  onOpen: (FsEntry entry) => _browse(entry.path),
+                  onDownload: _download,
+                ),
+              ),
           ],
         ),
       ),
@@ -528,7 +571,7 @@ class _DownloadProgress extends StatelessWidget {
         if (hasTotal && !saving) ...<Widget>[
           const SizedBox(height: 4),
           Text(
-            '${_formatBytes(received)} / ${_formatBytes(total!)}',
+            '${formatBytes(received)} / ${formatBytes(total!)}',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.outline,
             ),
@@ -556,36 +599,54 @@ class _FileList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: <Widget>[
-          if (listing.entries.isEmpty)
-            ListTile(title: Text(context.l10n.emptyFolder)),
-          for (final FsEntry entry in listing.entries)
-            ListTile(
-              leading: Icon(
-                entry.isDirectory
-                    ? Icons.folder_outlined
-                    : Icons.insert_drive_file_outlined,
-              ),
-              title: Text(entry.name),
-              subtitle: Text(_subtitleFor(context, entry)),
-              enabled: !isBusy,
-              onTap: entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
-              trailing: IconButton(
-                tooltip: context.l10n.download,
-                onPressed:
-                    isBusy || downloadActive ? null : () => onDownload(entry),
-                icon: const Icon(Icons.download_outlined),
+    if (listing.entries.isEmpty) {
+      return SliverToBoxAdapter(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1040),
+            child: _FileListFrame(
+              first: true,
+              last: true,
+              child: ListTile(title: Text(context.l10n.emptyFolder)),
+            ),
+          ),
+        ),
+      );
+    }
+    return SliverList.builder(
+      itemCount: listing.entries.length,
+      itemBuilder: (BuildContext context, int index) {
+        final FsEntry entry = listing.entries[index];
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1040),
+            child: _FileListFrame(
+              first: index == 0,
+              last: index == listing.entries.length - 1,
+              child: ListTile(
+                leading: Icon(
+                  entry.isDirectory
+                      ? Icons.folder_outlined
+                      : Icons.insert_drive_file_outlined,
+                ),
+                title: Text(entry.name),
+                subtitle: Text(_subtitleFor(context, entry)),
+                enabled: !isBusy,
+                onTap:
+                    entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
+                trailing: IconButton(
+                  tooltip: context.l10n.download,
+                  onPressed:
+                      isBusy || downloadActive ? null : () => onDownload(entry),
+                  icon: const Icon(Icons.download_outlined),
+                ),
               ),
             ),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -596,38 +657,63 @@ class _FileList extends StatelessWidget {
             ? context.l10n.fileTypeFile
             : context.l10n.fileTypeOther;
     final String size =
-        entry.isDirectory ? '' : ' · ${_formatBytes(entry.size)}';
-    final String modifiedAt = _formatModifiedAt(entry.modifiedAt);
+        entry.isDirectory ? '' : ' · ${formatBytes(entry.size)}';
+    final String modifiedAt = formatLongTime(entry.modifiedAt);
     final String modified = modifiedAt.isEmpty ? '' : ' · $modifiedAt';
     return '$type$size$modified';
   }
+}
 
-  String _formatModifiedAt(String iso) {
-    if (iso.isEmpty) return '';
-    final DateTime? parsed = DateTime.tryParse(iso);
-    if (parsed == null) return iso.replaceFirst('T', ' ').split('.').first;
-    final DateTime local = parsed.toLocal();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${local.year}-${two(local.month)}-${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+class _FileListFrame extends StatelessWidget {
+  const _FileListFrame({
+    required this.first,
+    required this.last,
+    required this.child,
+  });
+
+  final bool first;
+  final bool last;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = Theme.of(context).colorScheme.outlineVariant;
+    const Radius radius = Radius.circular(8);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          top: first ? BorderSide(color: color) : BorderSide.none,
+          left: BorderSide(color: color),
+          right: BorderSide(color: color),
+          bottom: BorderSide(color: color),
+        ),
+        borderRadius: BorderRadius.vertical(
+          top: first ? radius : Radius.zero,
+          bottom: last ? radius : Radius.zero,
+        ),
+      ),
+      child: child,
+    );
   }
 }
 
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  final double kb = bytes / 1024;
-  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-  final double mb = kb / 1024;
-  if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-  return '${(mb / 1024).toStringAsFixed(1)} GB';
-}
-
 class _UploadFile {
-  const _UploadFile({
+  const _UploadFile.bytes({
     required this.name,
-    required this.bytes,
-  });
+    required Uint8List data,
+  })  : bytes = data,
+        readStream = null,
+        length = data.length;
+
+  const _UploadFile.stream({
+    required this.name,
+    required Stream<List<int>> data,
+    required this.length,
+  })  : bytes = null,
+        readStream = data;
 
   final String name;
-  final Uint8List bytes;
+  final Uint8List? bytes;
+  final Stream<List<int>>? readStream;
+  final int length;
 }

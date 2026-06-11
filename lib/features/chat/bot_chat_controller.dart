@@ -13,10 +13,11 @@ import '../../core/notifications/fcm_service.dart';
 import '../../core/notifications/notification_service.dart';
 import '../../core/notifications/web_push.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/util/error_text.dart';
 
 class BotChatController extends ChangeNotifier {
   BotChatController({BackendClient? backendClient})
-    : _backendClient = backendClient ?? BackendClient();
+      : _backendClient = backendClient ?? BackendClient();
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -585,7 +586,21 @@ class BotChatController extends ChangeNotifier {
     required String path,
     required String name,
     required Uint8List bytes,
-  }) => _backendClient.uploadFile(path: path, name: name, bytes: bytes);
+  }) =>
+      _backendClient.uploadFile(path: path, name: name, bytes: bytes);
+
+  Future<FsEntry> uploadFileStream({
+    required String path,
+    required String name,
+    required Stream<List<int>> bytes,
+    required int length,
+  }) =>
+      _backendClient.uploadFileStream(
+        path: path,
+        name: name,
+        bytes: bytes,
+        length: length,
+      );
 
   void connectEvents() {
     _wantsEvents = true;
@@ -1079,15 +1094,7 @@ class BotChatController extends ChangeNotifier {
   // Turn a thrown error into a message a user can act on. Low-level network
   // failures (BackendException with a NETWORK_* code) become localized guidance;
   // other backend errors show their server message without the wrapper prefix.
-  String _friendlyError(Object err) {
-    if (err is BackendException) {
-      if (err.code?.startsWith('NETWORK_') ?? false) {
-        return _strings.networkError(err.code);
-      }
-      return err.message;
-    }
-    return err.toString();
-  }
+  String _friendlyError(Object err) => friendlyErrorText(_strings, err);
 
   void _markUserDeliveryFailed(String localId, String detail) {
     final int index = _messages.indexWhere((ChatMessage m) => m.id == localId);
@@ -1196,8 +1203,8 @@ class BotChatController extends ChangeNotifier {
     if (event.type == 'quota_reset') {
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
-                event.data['message'] as String? ??
-                ''
+              event.data['message'] as String? ??
+              ''
           : event.data['message'] as String? ?? '';
       if (message.isEmpty) return;
       // Quota alerts prefer a system/browser notification. If the platform
@@ -1211,8 +1218,8 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
-                event.data['message'] as String? ??
-                ''
+              event.data['message'] as String? ??
+              ''
           : event.data['message'] as String? ?? '';
       if (message.isEmpty) return;
       unawaited(_showQuotaNotification(message));
@@ -1233,12 +1240,12 @@ class BotChatController extends ChangeNotifier {
     // Only mirror activity for the agent we are currently viewing.
     final Map<String, Object?> agentData =
         (event.data['agent'] as Map?)?.cast<String, Object?>() ??
-        const <String, Object?>{};
+            const <String, Object?>{};
     final String agentKey = agentData['key'] as String? ?? '';
     if (agentKey.isNotEmpty && agentKey != _agent.key) return;
     final Map<String, Object?> sessionData =
         (event.data['session'] as Map?)?.cast<String, Object?>() ??
-        const <String, Object?>{};
+            const <String, Object?>{};
     final String sessionId = sessionData['id'] as String? ?? '';
     // Only drop an event when we actually know which session we're viewing.
     // While sessions are still loading (activeSessionId == null) we let events

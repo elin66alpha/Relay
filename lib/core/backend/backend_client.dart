@@ -12,17 +12,10 @@ import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
 import '../storage/workdir_store.dart';
+import '../util/format_bytes.dart';
+import 'api_transport.dart';
 
-class BackendException implements Exception {
-  BackendException(this.message, {this.status, this.code});
-
-  final String message;
-  final int? status;
-  final String? code;
-
-  @override
-  String toString() => 'BackendException(${status ?? '-'}): $message';
-}
+export 'api_transport.dart' show BackendException;
 
 List<ChatMessage> _decodeHistoryMessages(String body) {
   late final Object? decoded;
@@ -189,8 +182,8 @@ class BackendDiagnostics {
       if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
       strings.quotaWatchLine(_bool(server, 'quotaWatch')),
       strings.diagnosticsTransferLimitLine(
-        _formatBytes(_int(server, 'maxUploadBytes')),
-        _formatBytes(_int(server, 'maxDownloadBytes')),
+        formatBytes(_int(server, 'maxUploadBytes')),
+        formatBytes(_int(server, 'maxDownloadBytes')),
       ),
       strings.diagnosticsTokenLine(
         configured: _bool(auth, 'configured'),
@@ -239,19 +232,8 @@ class BackendDiagnostics {
       file['name']?.toString() ?? '',
       exists: file['exists'] == true,
       writable: file['writable'] == true,
-      size: _formatBytes((file['sizeBytes'] as num?)?.toInt() ?? 0),
+      size: formatBytes((file['sizeBytes'] as num?)?.toInt() ?? 0),
     );
-  }
-
-  static String _formatBytes(int value) {
-    if (value <= 0) return '0 B';
-    if (value >= 1024 * 1024) {
-      return '${(value / (1024 * 1024)).round()} MB';
-    }
-    if (value >= 1024) {
-      return '${(value / 1024).round()} KB';
-    }
-    return '$value B';
   }
 }
 
@@ -634,22 +616,22 @@ class BackendClient {
     DeviceIdStore? deviceIdStore,
     WorkdirStore? workdirStore,
     http.Client? httpClient,
-  })  : _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
-        _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
-        _workdirStore = workdirStore ?? WorkdirStore(),
-        _httpClient = httpClient ?? http.Client();
+  }) : _transport = ApiTransport(
+          credentialsStore: credentialsStore,
+          deviceIdStore: deviceIdStore,
+          workdirStore: workdirStore,
+          httpClient: httpClient,
+        );
 
-  final MachineCredentialsStore _credentialsStore;
-  final DeviceIdStore _deviceIdStore;
-  final WorkdirStore _workdirStore;
-  final http.Client _httpClient;
+  final ApiTransport _transport;
+  http.Client get _httpClient => _transport.httpClient;
 
   /// This device's current work directory, or null when it has not chosen one
   /// (the backend then uses its default).
-  Future<String?> currentWorkdir() => _workdirStore.read();
+  Future<String?> currentWorkdir() => _transport.currentWorkdir();
 
   Future<void> close() async {
-    _httpClient.close();
+    _transport.close();
   }
 
   Future<bool> health({Duration timeout = const Duration(seconds: 20)}) async {
@@ -1272,7 +1254,7 @@ class BackendClient {
     // The backend only validates the path; this device owns its current workdir,
     // so persist the canonical path locally and send it on later requests.
     if (info.dir.isNotEmpty) {
-      await _workdirStore.write(info.dir);
+      await _transport.writeWorkdir(info.dir);
     }
     return info;
   }
@@ -1347,7 +1329,43 @@ class BackendClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw _exceptionFor(response.statusCode, response.body);
     }
-    final Object? decoded = jsonDecode(response.body);
+    return _uploadedEntryFromBody(response.body);
+  }
+
+  Future<FsEntry> uploadFileStream({
+    required String path,
+    required String name,
+    required Stream<List<int>> bytes,
+    required int length,
+  }) async {
+    final MachineCredential credential = await _requireCredential();
+    final Uri uri = _uri(
+      credential,
+      '/api/fs/upload?path=${Uri.encodeQueryComponent(path)}'
+      '&name=${Uri.encodeQueryComponent(name)}',
+    );
+    final http.StreamedRequest request = http.StreamedRequest('POST', uri);
+    request.headers.addAll(
+      await _headers(
+        credential,
+        contentType: 'application/octet-stream',
+      ),
+    );
+    request.contentLength = length;
+    final Future<http.StreamedResponse> responseFuture =
+        _httpClient.send(request).timeout(const Duration(minutes: 10));
+    await request.sink.addStream(bytes);
+    await request.sink.close();
+    final http.StreamedResponse response = await responseFuture;
+    final String body = await response.stream.bytesToString();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _exceptionFor(response.statusCode, body);
+    }
+    return _uploadedEntryFromBody(body);
+  }
+
+  FsEntry _uploadedEntryFromBody(String body) {
+    final Object? decoded = jsonDecode(body);
     if (decoded is! Map || decoded['entry'] is! Map) {
       throw BackendException('Invalid file upload response.');
     }
@@ -1419,16 +1437,8 @@ class BackendClient {
     String path, {
     Map<String, Object?>? body,
     Duration timeout = const Duration(seconds: 20),
-  }) async {
-    final MachineCredential credential = await _requireCredential();
-    return _requestJsonWithCredential(
-      credential,
-      method,
-      path,
-      body: body,
-      timeout: timeout,
-    );
-  }
+  }) =>
+      _transport.requestJson(method, path, body: body, timeout: timeout);
 
   Future<Object?> _requestJsonWithCredential(
     MachineCredential credential,
@@ -1436,76 +1446,31 @@ class BackendClient {
     String path, {
     Map<String, Object?>? body,
     Duration timeout = const Duration(seconds: 20),
-  }) async {
-    final Uri uri = _uri(credential, path);
-    final Map<String, String> headers = await _headers(credential);
-    late final http.Response response;
-    try {
-      if (method == 'GET') {
-        response =
-            await _httpClient.get(uri, headers: headers).timeout(timeout);
-      } else if (method == 'POST') {
-        response = await _httpClient
-            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
-            .timeout(timeout);
-      } else {
-        throw BackendException('Unsupported method: $method');
-      }
-    } on BackendException {
-      rethrow;
-    } on TimeoutException {
-      throw BackendException(
-        'Timed out connecting to ${uri.host}.',
-        code: 'NETWORK_TIMEOUT',
+  }) =>
+      _transport.requestJsonWithCredential(
+        credential,
+        method,
+        path,
+        body: body,
+        timeout: timeout,
       );
-    } on http.ClientException catch (err) {
-      throw _networkExceptionFor(err, uri);
-    } catch (err) {
-      throw _networkExceptionFor(err, uri);
-    }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _exceptionFor(response.statusCode, response.body);
-    }
-    if (response.body.trim().isEmpty) return null;
-    try {
-      return jsonDecode(response.body);
-    } on FormatException {
-      throw BackendException('Backend returned non-JSON content.');
-    }
-  }
+  Future<MachineCredential> _requireCredential() =>
+      _transport.requireCredential();
 
-  Future<MachineCredential> _requireCredential() async {
-    final MachineCredential? credential = await _credentialsStore.readActive();
-    if (credential == null) {
-      throw BackendException('Import a machine credential first.');
-    }
-    return credential;
-  }
-
-  Uri _uri(MachineCredential credential, String path) {
-    final String base = credential.baseUrl.endsWith('/')
-        ? credential.baseUrl
-        : '${credential.baseUrl}/';
-    final String cleanPath = path.startsWith('/') ? path.substring(1) : path;
-    return Uri.parse(base).resolve(cleanPath);
-  }
+  Uri _uri(MachineCredential credential, String path) =>
+      _transport.uri(credential, path);
 
   Future<Map<String, String>> _headers(
     MachineCredential credential, {
     String accept = 'application/json',
     String contentType = 'application/json',
-  }) async {
-    final String deviceId = await _deviceIdStore.readOrCreate();
-    final String? workdir = await _workdirStore.read();
-    return <String, String>{
-      'Accept': accept,
-      'Content-Type': contentType,
-      'Authorization': 'Bearer ${credential.token.trim()}',
-      'X-Device-Id': deviceId,
-      if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
-    };
-  }
+  }) =>
+      _transport.headers(
+        credential,
+        accept: accept,
+        contentType: contentType,
+      );
 
   String _downloadFileName(Map<String, String> headers, String path) {
     final String disposition = headers['content-disposition'] ?? '';
@@ -1524,44 +1489,11 @@ class BackendClient {
     return parts.isEmpty ? 'workdir.zip' : parts.last;
   }
 
-  BackendException _exceptionFor(int status, String body) {
-    String message = body.trim();
-    try {
-      final Object? decoded = jsonDecode(body);
-      if (decoded is Map) {
-        if (decoded['error'] != null) {
-          message = decoded['error'].toString();
-        }
-        return BackendException(
-          message.isEmpty ? 'HTTP $status' : message,
-          status: status,
-          code: decoded['code']?.toString(),
-        );
-      }
-    } on FormatException {
-      // Keep raw body.
-    }
-    if (message.isEmpty) message = 'HTTP $status';
-    return BackendException(message, status: status);
-  }
+  BackendException _exceptionFor(int status, String body) =>
+      _transport.exceptionFor(status, body);
 
-  BackendException _networkExceptionFor(Object err, Uri uri) {
-    final String raw = err.toString();
-    final String lower = raw.toLowerCase();
-    String code = 'NETWORK_ERROR';
-    if (lower.contains('failed host lookup') ||
-        lower.contains('no address associated') ||
-        lower.contains('name_not_resolved') ||
-        lower.contains('nodename nor servname')) {
-      code = 'NETWORK_HOST_LOOKUP';
-    } else if (lower.contains('connection refused')) {
-      code = 'NETWORK_CONNECTION_REFUSED';
-    } else if (lower.contains('network is unreachable') ||
-        lower.contains('no route to host')) {
-      code = 'NETWORK_UNREACHABLE';
-    }
-    return BackendException(raw, code: code);
-  }
+  BackendException _networkExceptionFor(Object err, Uri uri) =>
+      _transport.networkExceptionFor(err, uri);
 
   Map<String, Object?> _decodeEventData(StringBuffer data) {
     try {
