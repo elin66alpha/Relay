@@ -5,7 +5,7 @@
 > 每条标注了文件位置、问题描述与建议的修复方向，供后续逐条解决。
 > 与后端审查记录 `code_integrity.md` 配套。
 >
-> 审查日期：2026-06-10 ·
+> 审查日期：2026-06-10 · 修复日期：2026-06-11（codex 执行，commit `473b309`/`fe5b21d`，Claude 验收） ·
 > 状态图例：⬜ 待处理 / 🔧 进行中 / ✅ 已解决
 
 ---
@@ -14,24 +14,36 @@
 
 | 优先级 | 事项 | 编号 | 状态 |
 |---|---|---|---|
-| 🔴 高 | PBKDF2 60 万次迭代在 UI isolate 上跑，导入凭据时全 app 冻结数秒至数十秒 | F-1 | ⬜ |
-| 🔴 高 | 共享 SSE 事件流静默断链无检测，跨设备镜像与 quota 通知永久停摆 | F-2 | ⬜ |
-| 🟠 中 | 流式 delta O(n²) 字符串拼接 + 每个 delta 全表扫描 | F-3 | ⬜ |
-| 🟠 中 | 远端镜像轮询每 2s 在 UI isolate 全量解码会话 JSON | F-4 | ⬜ |
-| 🟠 中 | 文件浏览器一次性构建目录全部条目，大目录秒级卡死 | F-5 | ⬜ |
-| 🟠 中 | 每个 API 请求 3 次 secure-storage/prefs 读 + 凭据 JSON 全量解码 | P-1 | ⬜ |
-| 🟠 中 | CardsService 复制 BackendClient 约 80 行连接管线 | R-1 | ⬜ |
-| 🟡 低 | 其余性能/安全/复用项 | 见下 | ⬜ |
+| 🔴 高 | PBKDF2 60 万次迭代在 UI isolate 上跑，导入凭据时全 app 冻结数秒至数十秒 | F-1 | ✅ |
+| 🔴 高 | 共享 SSE 事件流静默断链无检测，跨设备镜像与 quota 通知永久停摆 | F-2 | ✅ |
+| 🟠 中 | 流式 delta O(n²) 字符串拼接 + 每个 delta 全表扫描 | F-3 | ✅ |
+| 🟠 中 | 远端镜像轮询每 2s 在 UI isolate 全量解码会话 JSON | F-4 | ✅ |
+| 🟠 中 | 文件浏览器一次性构建目录全部条目，大目录秒级卡死 | F-5 | ✅ |
+| 🟠 中 | 每个 API 请求 3 次 secure-storage/prefs 读 + 凭据 JSON 全量解码 | P-1 | ✅ |
+| 🟠 中 | CardsService 复制 BackendClient 约 80 行连接管线 | R-1 | ✅ |
+| 🟡 低 | 其余性能/安全/复用项 | 见下 | ✅ |
 
 > 背景：Dart 与 Node 一样是单线程事件循环（UI isolate 还要每 16ms 出一帧）。
 > 任何 CPU 密集或高频同步工作直接表现为掉帧；长同步计算 = 整个 app 冻结
 > （触摸无响应、动画停住，Android 超过 5s 触发 ANR 弹窗）。
 
+
+**修复实现概览**：新增 `lib/core/backend/api_transport.dart`（BackendClient 与 CardsService
+共用的连接管线，R-1/S-2 依赖）、`lib/core/util/error_text.dart`（统一友好错误文案，S-2）、
+`lib/core/util/format_bytes.dart` + `time_format.formatLongTime`（R-3）。
+F-1 经 `compute()` 在后台 isolate 解密（Web 直跑 WebCrypto）；F-2 事件流加 90s 空闲超时
+（3 个心跳周期）；F-3 流式 delta 走 per-request StringBuffer + 尾部索引扫描；
+F-4 大于 256KB 的历史响应进 isolate 解码 + 快照未变时跳过重建；
+P-1 三个 store 改静态共享内存缓存（写路径失效）；F-5 文件列表改 CustomScrollView +
+SliverList.builder；F-6 native 上传走 withReadStream + http.StreamedRequest（Web 保持 bytes）；
+S-1 导入 http:// 凭据弹明文风险确认框。F-7（Web 下载全量缓冲）按计划记录为已知平台限制，
+不做代码改动。
+
 ---
 
 ## 一、全局卡死 / 卡顿（F）
 
-### F-1 ⬜ 凭据解密 PBKDF2 在 UI isolate 上跑（唯一会"整 app 冻结"的点）
+### F-1 ✅ 凭据解密 PBKDF2 在 UI isolate 上跑（唯一会"整 app 冻结"的点）
 - **位置**：`lib/core/credentials/credential_file_codec.dart:52-61`（`Pbkdf2.deriveKey`）；
   调用链 `machine_credentials_screen.dart:188-208 _finishImport` →
   `machine_credentials_controller.dart:60-68 decryptEncryptedBytes`
@@ -46,7 +58,7 @@
   （顶层函数 + 可传参数，照抄 QR 解码的模式）；Web 保持现状（`cryptography` 在浏览器
   自动走 WebCrypto，异步且不占主线程，且 Web 没有 isolate）。修好后 15s 超时才真正有意义。
 
-### F-2 ⬜ 共享 SSE 事件流静默断链后永远挂起
+### F-2 ✅ 共享 SSE 事件流静默断链后永远挂起
 - **位置**：`lib/core/backend/backend_client.dart:1332-1349`（`streamEvents`，无任何超时）+
   `lib/features/chat/bot_chat_controller.dart:1047-1061`（`_connectEventsNow`）
 - **问题**：`/api/events` 长连接没有 idle 超时。网络切换（WiFi→流量）、NAT/代理表项过期、
@@ -60,7 +72,7 @@
   `response.stream.timeout(Duration(seconds: 90))`（心跳间隔的 2-3 倍），超时抛错走
   现有 `onError` → `_scheduleEventReconnect` 路径。一行级改动，收益极大。
 
-### F-3 ⬜ 流式 delta：O(n²) 拼接 + 每个 delta 全表扫描
+### F-3 ✅ 流式 delta：O(n²) 拼接 + 每个 delta 全表扫描
 - **位置**：`lib/features/chat/bot_chat_controller.dart:931-948`（`_appendDelta` 的
   `'${current.content}$text'`）、`:987-993`（`_assistantIndexForRequest` 用 `indexWhere` 从头扫）
 - **问题**：每收到一个 delta 都把已累计的全部内容复制一遍再追加 —— 总成本 O(n²)。
@@ -71,7 +83,7 @@
   在节流的 notify 时机才物化成 String 写回消息；索引查找改从尾部扫
   （倒序循环或 `lastIndexWhere`），命中通常 O(1)。
 
-### F-4 ⬜ 远端镜像轮询每 2s 全量解码 + 全量重建消息列表
+### F-4 ✅ 远端镜像轮询每 2s 全量解码 + 全量重建消息列表
 - **位置**：`lib/features/chat/bot_chat_controller.dart:659-709`
   （`_startHistoryPolling` 2s 周期 → `_refreshHistorySnapshot`）→
   `backend_client.dart:1067-1084 fetchHistory`（`jsonDecode` 整个会话 + 逐条 `ChatMessage.fromJson`）
@@ -82,7 +94,7 @@
   顺手可做：快照与现有消息逐条比对，内容没变就不 `notifyListeners()`（省掉无谓 rebuild）。
   更彻底的增量拉取（`?after=messageId`）需要后端配合，作为可选二期。
 
-### F-5 ⬜ 文件浏览器一次性构建目录全部条目
+### F-5 ✅ 文件浏览器一次性构建目录全部条目
 - **位置**：`lib/features/filesystem/file_system_screen.dart:542-590`（`_FileList`：
   `Column` + `for` 全量展开）；外层 `build` 是单 child 的 `ListView`（`:265`），无法惰性构建
 - **问题**：进入 `node_modules`、`build` 这类几千项的目录时，一帧内构建+布局几千个
@@ -91,7 +103,7 @@
 - **修复方向**：整页改 `CustomScrollView`：头部控件用 `SliverToBoxAdapter`，
   文件列表用 `SliverList.builder` 惰性构建。行为不变，只是按需建行。
 
-### F-6 ⬜ 上传链路整文件驻留内存（≥2 份拷贝）
+### F-6 ✅ 上传链路整文件驻留内存（≥2 份拷贝）
 - **位置**：`lib/features/filesystem/file_system_screen.dart:163-175`
   （`FilePicker.pickFiles(withData: true)`）→ `backend_client.dart:1299-1330`
   （`uploadFile(bytes:)` 整块 POST）
@@ -102,7 +114,7 @@
   流式上传；Web 保持 bytes（浏览器限制）。100MB 上限检查改用 `PlatformFile.size` 而非
   `bytes.length`，避免为检查大小先读全文件。
 
-### F-7 ⬜ Web 下载全量缓冲在内存（已知平台限制，记录备查）
+### F-7 ✅ Web 下载全量缓冲在内存（已知平台限制，记录备查）
 - **位置**：`lib/core/platform/file_saver_web.dart:16-40`（`BytesBuilder` 累积全部字节再造 Blob）
 - **问题**：浏览器 Blob 需要完整字节，300MB 上限的下载会占满标签页内存。
   native 端已正确流式写盘（`file_saver_stub.dart`），仅 Web 受限。
@@ -113,7 +125,7 @@
 
 ## 二、性能 / 优化（P）
 
-### P-1 ⬜ 每个 API 请求 3 次 secure-storage/prefs 读 + 凭据 JSON 全量解码（最高频）
+### P-1 ✅ 每个 API 请求 3 次 secure-storage/prefs 读 + 凭据 JSON 全量解码（最高频）
 - **位置**：`lib/core/backend/backend_client.dart:1453-1483`
   （`_requireCredential` → `MachineCredentialsStore.readActive`：secure-storage 读 + 解码
   **全部**凭据 + prefs 读 activeId；`_headers` → `DeviceIdStore.readOrCreate`（secure-storage）
@@ -126,7 +138,7 @@
   凭据列表/activeId 在 `upsert`/`delete`/`setActive` 时失效；workdir 在 `write`/`clear` 时失效。
   全部写入都经过同一类的方法，失效时机可控（同后端 tokens.json 缓存的思路）。
 
-### P-2 ⬜ 流式期间 AnimatedBuilder 重建整个聊天 Column
+### P-2 ✅ 流式期间 AnimatedBuilder 重建整个聊天 Column
 - **位置**：`lib/features/chat/bot_chat_screen.dart:320-419`
 - **问题**：`AnimatedBuilder` 包住 desktop header + 登录 banner + 会话列表 + `_InputBar`，
   流式期间每 80ms 全部重建一遍。列表项有 RepaintBoundary + markdown 缓存兜底，
@@ -136,14 +148,14 @@
   header/banner/input bar 只监听各自需要的状态（isThinking 可以拆成 ValueNotifier，
   或简单点：把不随消息变化的部分提为 `child:` 参数传入 builder 复用实例）。
 
-### P-3 ⬜ 卡片拖拽每帧 setState 重建整副牌
+### P-3 ✅ 卡片拖拽每帧 setState 重建整副牌
 - **位置**：`lib/features/cards/card_deck_screen.dart:110-113`（`_onPanUpdate` setState）
 - **问题**：拖拽中每个 pointer move 触发整个 State rebuild（3 张卡 + 按钮区 + 布局计算）。
   卡片内容不大所以目前能撑住，但这是标准的"动画走 rebuild"反模式。
 - **修复方向**：拖拽偏移放进 `ValueNotifier<Offset>`，顶卡的 Transform 用
   `ValueListenableBuilder`/`AnimatedBuilder` 订阅，`CardWidget` 作为 child 缓存不重建。
 
-### P-4 ⬜ `progressLinesFor` 每次 rebuild 都新建 List
+### P-4 ✅ `progressLinesFor` 每次 rebuild 都新建 List
 - **位置**：`lib/features/chat/bot_chat_controller.dart:268-273`
 - **问题**：流式期间每个可见气泡每个节流 tick 调用一次，
   每次 `whereType<String>().toList()` 新分配。小开销，顺手修。
@@ -157,7 +169,7 @@
 > 前端攻击面远小于后端（无服务端口、凭据已走 secure storage、QR 是加密信封），
 > 本节为低危加固项。
 
-### S-1 ⬜ 明文 `http://` 凭据静默接受，token 裸奔
+### S-1 ✅ 明文 `http://` 凭据静默接受，token 裸奔
 - **位置**：`lib/core/models/machine_credential.dart:60-86`（`validate` 允许 http）；
   `backend_client.dart:1469-1483`（每个请求 `Authorization: Bearer` 直接发）
 - **问题**：导入 baseUrl 为 `http://` 的凭据没有任何提示，之后 bearer token、
@@ -165,7 +177,7 @@
 - **修复方向**：不禁止（局域网/自托管需要 http），但导入非 https 凭据时弹一次性
   警告对话框注明风险；连接状态 UI 给 http 机器加标识。
 
-### S-2 ⬜ 错误信息直接 `toString()` 上屏
+### S-2 ✅ 错误信息直接 `toString()` 上屏
 - **位置**：`file_system_screen.dart:95-122`（`_error = err.toString()`）、
   `machine_credentials_screen.dart:382-403`、`card_deck_screen.dart` 等
 - **问题**：原始异常串包含内部 URL、绝对路径、Dart 类型名，既不友好也泄露细节。
@@ -177,7 +189,7 @@
 
 ## 四、复用性 / 简洁性（R）
 
-### R-1 ⬜ CardsService 复制 BackendClient 约 80 行连接管线
+### R-1 ✅ CardsService 复制 BackendClient 约 80 行连接管线
 - **位置**：`lib/features/cards/cards_service.dart:70-144`
   （`_requestJson`/`_requireCredential`/`_uri`/`_headers`/`_exceptionFor` 与
   `backend_client.dart:1392-1519` 逐行雷同，注释自己都承认 "Mirrors the connection logic"）
@@ -187,13 +199,13 @@
   提供 `requestJson`/`uri`/`headers`/异常映射），BackendClient 与 CardsService 共用；
   或最简方案：CardsService 直接接受并复用一个 `BackendClient` 实例的公开方法。
 
-### R-2 ⬜ `loadFor` 与 `_reloadConversation` 90% 重复
+### R-2 ✅ `loadFor` 与 `_reloadConversation` 90% 重复
 - **位置**：`lib/features/chat/bot_chat_controller.dart:275-326` 与 `:538-572`
 - **问题**：重置状态块（8 个字段 + 停轮询）、ensureSession→fetch→apply→finally 序列
   两处各写一遍，靠人肉保持同步 —— `_historyLoadSeq` 这类竞态保护逻辑重复两份尤其危险。
 - **修复方向**：抽私有 `_resetAndReload({bool clearSessionLists})`，两个入口只保留差异。
 
-### R-3 ⬜ 字节/时间格式化函数三处重复
+### R-3 ✅ 字节/时间格式化函数三处重复
 - **位置**：`_formatBytes`：`backend_client.dart:230-239` 与 `file_system_screen.dart:616-623`
   （两种实现、精度还不一致）；时间：`core/util/time_format.dart formatShortTime` 与
   `file_system_screen.dart:605-613 _formatModifiedAt`（后者自己手搓 pad2）

@@ -17,7 +17,12 @@ class MachineCredentialsStore {
 
   final FlutterSecureStorage _secureStorage;
 
-  static void resetCacheForTest() {
+  static void resetCacheForTest() => _invalidateCache();
+
+  // The cache is static (shared by every store instance), so any write must
+  // drop it for all readers — BackendClient and CardsService hold their own
+  // instances of this store.
+  static void _invalidateCache() {
     _cachedCredentials = null;
     _activeIdLoaded = false;
     _cachedActiveId = null;
@@ -97,7 +102,7 @@ class MachineCredentialsStore {
       return mutable;
     });
     await _writeAll(credentials);
-    resetCacheForTest();
+    _invalidateCache();
     if (makeActive) {
       await setActive(credential.id);
     }
@@ -108,7 +113,7 @@ class MachineCredentialsStore {
     if (!credentials.any((MachineCredential item) => item.id == id)) return;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString(_activeMachineKey, id);
-    resetCacheForTest();
+    _invalidateCache();
   }
 
   Future<void> delete(String id) async {
@@ -126,13 +131,13 @@ class MachineCredentialsStore {
         await prefs.setString(_activeMachineKey, credentials.first.id);
       }
     }
-    resetCacheForTest();
+    _invalidateCache();
   }
 
   Future<void> _writeAll(List<MachineCredential> credentials) async {
     if (credentials.isEmpty) {
       await _secureStorage.delete(key: _credentialsKey);
-      resetCacheForTest();
+      _invalidateCache();
       return;
     }
     await _secureStorage.write(
@@ -141,7 +146,7 @@ class MachineCredentialsStore {
         credentials.map((MachineCredential item) => item.toJson()).toList(),
       ),
     );
-    resetCacheForTest();
+    _invalidateCache();
   }
 
   bool _isUsable(MachineCredential credential) {
