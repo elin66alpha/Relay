@@ -2,13 +2,18 @@
 
 This file is a short handoff log and technical reference for agents working on
 Relay. Keep it current, factual, and free of secrets. Detailed history lives in
-git.
+git; finished work should be summarized here briefly, not narrated.
 
 ## Current Project Shape
 
 - Flutter client for Android, iOS, Web, and desktop runner projects.
-- Node.js backend in `server/`; OS setup lives in `backends/` (Linux PM2,
-  macOS LaunchAgent, Windows PowerShell/Scheduled Task).
+- Node.js backend in `server/`: entry `server.js` (~900 lines: config,
+  middleware, shared state, schedulers, static serving) plus per-domain route
+  modules in `server/routes/{meta,push,fs,chat,sessions,quota}.js` — each
+  exports a `createXxxRouter(ctx)` factory receiving shared state through
+  `routeContext`.
+- OS setup lives in `backends/` (Linux PM2, macOS LaunchAgent, Windows
+  PowerShell/Scheduled Task).
 - Supported CLI agents: Claude Code, Codex, and Antigravity (`agy`).
 - Clients connect by importing an encrypted credential QR / payload and entering
   the user-chosen password.
@@ -17,18 +22,25 @@ git.
   share chat history, the resumable CLI session, and in-flight progress.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
+- App identity: bundle id / applicationId / namespace `dev.relay.app` (verify
+  it is free on the Play Store before first publish), PM2 apps `relay-server` /
+  `relay-tunnel`, SharedPreferences keys `relay.*.v1`, credential format
+  `relay.credentials.v1` (files `*.relay.json/png`), env prefix `RELAY_*`,
+  desktop binary `relay`.
+- Offline push: Web Push (VAPID) for browsers, FCM for Android
+  (Firebase project `relay-93917`). Both are optional and gated on config —
+  see `server/.env.example` (`VAPID_*`, `FCM_SERVICE_ACCOUNT_FILE`) and
+  `android/app/google-services.json`; the Gradle Google Services plugin is
+  applied only when that JSON exists, so APKs build without Firebase config.
 
 ## Operating Principles
 
 - Do not hard-code personal hosts, paths, tokens, or credentials.
 - Mobile, Web, desktop, and backend platforms share the same API, credential,
   and session model; OS-specific setup stays in adapters and scripts.
-- Protected backend APIs require a revocable device token generated through the
-  encrypted credential QR.
-- Setup offers direct public-host mode, named Cloudflare Tunnel for stable
-  hostnames, and Cloudflare Quick Tunnel for fast trials.
 - Keep README visitor-facing. Put manual startup, credential internals, API
-  lists, build flow details, and agent handoff notes here.
+  lists, build flow details, and agent handoff notes here. Architecture and
+  coding guidance for agents lives in `docs/CLAUDE.md`.
 
 ## Manual Backend Setup
 
@@ -41,22 +53,19 @@ cp .env.example .env
 npm start
 ```
 
-Important environment variables:
+All environment variables are documented inline in `server/.env.example`. The
+ones that most often matter for agent work:
 
 ```dotenv
 PORT=8787
 HOST=127.0.0.1
-MACHINE_ID=
-MACHINE_NAME=
 PUBLIC_BASE_URL=
-RELAY_TUNNEL_MODE=
-CLOUDFLARED_BIN=
-CLOUDFLARED_ARGS=
 RELAY_DEFAULT_DIR=
 AGENT_TIMEOUT_MS=3600000
-POWERSHELL_BIN=
-ENABLE_QUOTA_WATCH=true
-QUOTA_POLL_MS=300000
+PROMPT_MAX_BYTES=        # prompt rides as one argv token; Linux caps ~128KB
+CORS_ALLOW_ORIGIN=       # default *; narrow to the app origin in production
+RELAY_FS_ROOTS=          # optional allowlist for the file API
+USAGE_HTTP_TIMEOUT_MS=   # outbound quota requests, default 15s
 ```
 
 `HOST=127.0.0.1` is the default for Cloudflare Tunnel and Quick Tunnel because
@@ -82,21 +91,17 @@ The script creates `MACHINE_ID` if missing, adds a revocable per-device token to
 `server/tokens.json`, prints the QR in the terminal, and saves
 `server/credentials/<machine>.relay.png` plus
 `server/credentials/<machine>.relay.json`. Upload/scan the PNG, or copy the JSON
-file content into the app's paste-credential flow. Generating a new QR removes
-old credential files, but does not revoke existing device tokens. The payload is
-encrypted with PBKDF2-SHA256 + AES-256-GCM; the plaintext password is never
+file content into the app's paste-credential flow. The payload is encrypted with
+PBKDF2-SHA256 (600k iterations) + AES-256-GCM; the plaintext password is never
 written to disk.
 
-Credential script behavior:
+Behavior notes:
 
 - Auto-detects the current Quick Tunnel URL from logs, or uses
   `PUBLIC_BASE_URL` for named Cloudflare Tunnel / Direct mode unless `--url` is
   provided.
-- Creates and persists `MACHINE_ID` in `.env` when missing.
-- Creates one revocable token per generated credential payload.
 - Deletes old files under `server/credentials/` so the latest QR/paste payload
-  is unambiguous.
-- Does not revoke existing device tokens when generating a new QR; use
+  is unambiguous, but does **not** revoke existing device tokens; use
   `--revoke` explicitly when disabling a device.
 - Quick Tunnel credentials are tied to the current `trycloudflare.com` URL and
   must be regenerated after that URL changes.
@@ -124,15 +129,16 @@ secure-storage backend, so use a private browser profile for private machines.
 To build the Web frontend and let the Node backend serve it:
 
 ```bash
-cd /path/to/Relay
-flutter build web --pwa-strategy=none
-cd server
-npm start
+flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+cd server && npm start
 ```
 
 When `build/web/index.html` exists, the backend serves the Flutter Web app on
-the same host/port as the API. Use `--pwa-strategy=none` so browsers do not keep
-serving stale frontend code after a backend restart.
+the same host/port as the API. Both flags are load-bearing:
+`--pwa-strategy=none` so browsers do not keep serving stale frontend code after
+a backend restart, and `--no-web-resources-cdn` to bundle CanvasKit locally
+(the gstatic CDN is unreachable on some networks and leaves the app
+loaded-but-blank).
 
 ## APK Signing During Development
 
@@ -153,294 +159,99 @@ All `/api/*` routes require `Authorization: Bearer <token>`. If the backend has
 not generated any token yet, protected API routes return
 `TOKEN_NOT_CONFIGURED` instead of running unauthenticated.
 
-- `GET /api/health`
-- `GET /api/status`
-- `GET /api/diagnostics`
-- `GET /api/agents`
-- `GET /api/auth/status`
-- `GET /api/usage`
-- `GET /api/quota-schedules`
-- `POST /api/quota-schedules`
-- `POST /api/quota-schedules/cancel`
-- `GET /api/workdir`
-- `GET /api/workdir/browse`
-- `POST /api/workdir`
-- `GET /api/fs/download`
-- `POST /api/fs/upload`
-- `POST /api/chat`
-- `POST /api/chat/cancel`
-- `GET /api/sessions`
-- `POST /api/sessions`
-- `POST /api/sessions/active`
-- `POST /api/sessions/delete`
-- `GET /api/history`
-- `POST /api/session/clear`
-- `GET /api/events`
+- Meta: `GET /api/health`, `GET /api/status`, `GET /api/diagnostics`,
+  `GET /api/agents`, `GET /api/auth/status`, `GET /api/events` (SSE),
+  `GET /api/tokens`, `POST /api/tokens/:id/revoke`
+- Agent config: `GET /api/agent-options`, `GET`+`POST /api/agent-settings`,
+  `GET /api/agent-version`, `POST /api/agent-update`
+- Chat: `POST /api/chat` (SSE when `Accept: text/event-stream`),
+  `POST /api/chat/cancel`, `GET /api/history`, `GET /api/history/export`,
+  `GET /api/history/search`, `POST /api/session/clear`
+- Sessions: `GET`+`POST /api/sessions`, `POST /api/sessions/active`,
+  `POST /api/sessions/delete`
+- Quota: `GET /api/usage`, `GET`+`POST /api/quota-schedules`,
+  `POST /api/quota-schedules/cancel`
+- Files & workdir: `GET`+`POST /api/workdir`, `GET /api/workdir/browse`,
+  `GET /api/fs/download`, `POST /api/fs/upload`
+- Push: `GET /api/push/config`, `POST /api/push/subscribe`,
+  `POST /api/push/unsubscribe`, `POST /api/push/fcm/register`,
+  `POST /api/push/fcm/unregister`
+- Cards: `GET /api/cards`, `POST /api/cards/feedback`, `POST /api/cards/refresh`
 
-## 2026-06-03 - Per-agent Model / Effort / Permission controls
+## Environment / Ops Gotchas
 
-- New composer "+" drawer controls let the user pick, per chat, the agent's
-  model, reasoning effort, and permission mode. Capability-aware: agy exposes no
-  model/effort in its CLI, so only Permission shows for it; Claude and Codex show
-  all three.
-- Single source of truth: `server/lib/agent-options.js` maps every option to the
-  exact CLI argv. `buildArgs(agentKey, settings)` is spliced into each spawn in
-  `agents.js`. **Defaults reproduce the old always-bypass / no-model / no-effort
-  behavior**, so unconfigured scopes are byte-for-byte unchanged. Flag specifics:
-  Claude `--model` / `--effort` (native, low|medium|high|xhigh|max) /
-  `--permission-mode`; Codex `-m` / `-c model_reasoning_effort=` / permission via
-  `-c sandbox_mode=` + `-c approval_policy=never` (NOT `-s` — `codex exec resume`
-  rejects it; and exec is non-interactive so approvals must be `never` or it
-  hangs); agy permission only (`--dangerously-skip-permissions` vs `--sandbox`).
-- Selections persist per `workdir + agent` in `agent-settings.json` (gitignored),
-  shared across devices in the scope. server.js loads them at spawn time for both
-  live chat and scheduled messages.
-- Endpoints (all bearer-protected): `GET /api/agent-options`, `GET`+`POST
-  /api/agent-settings`, `GET /api/agent-version`, `POST /api/agent-update`. The
-  update endpoint runs `<cli> update` so a user who doesn't see the newest model
-  can pull it in from the model picker's "Update CLI" button (confirm + version
-  echo). Brand-new pinned models can be added with no code change via
-  `server/models-extra.json` (gitignored).
-- Client: `lib/features/chat/agent_controls.dart` (controls row + option sheet),
-  `lib/core/models/agent_options.dart`, new BackendClient methods, l10n strings.
-- Verified: flutter analyze clean, flutter test passes, node --check green, the
-  built flag combos accepted live by `claude` and `codex`, endpoints round-trip
-  on localhost, web rebuilt + served (200, <title>Relay</title>), debug APK
-  installed.
-- ENVIRONMENT GOTCHA (not caused by this work): the host PM2 God daemon's
-  restart/reload action RPC is broken — `pm2 restart`/`reload` fail with
-  "Process N not found" for EVERY app (old id 2 and a fresh id 4 alike) while
-  reads (list/describe/save) work. Workaround used to load new server code
-  without touching the unrelated `claude-discord` / `claude-quota-watch` apps:
+- **PM2 God daemon restart RPC is broken on the current host**: `pm2 restart` /
+  `pm2 reload` fail with "Process N not found" for every app, while reads
+  (list/describe/save) work. Workaround that avoids touching unrelated apps:
   `pm2 delete relay-server && pm2 start ecosystem.config.js --only relay-server`
-  (delete/start use different RPCs that still work), then `pm2 save`. A full fix
-  is `pm2 update` (respawns the daemon) but it cycles ALL apps, so leave that to
-  the user. `build_flow.sh`'s `pm2 restart` step will fail until the daemon is
-  repaired.
+  then `pm2 save`. A full fix is `pm2 update`, but it cycles ALL apps — leave
+  that to the user. `build_flow.sh`'s `pm2 restart` step fails until the daemon
+  is repaired.
+- **`server/ecosystem.config.js` `envValue()` reads `process.env` before
+  `.env`**, and the long-lived PM2 daemon can hold stale values. When changing
+  env vars, start/restart relay apps with the corrected values exported in the
+  shell so `--update-env` injects them, then `pm2 save`.
+- **Windows builds** have two toolchain quirks (non-ASCII project path breaks
+  Flutter/MSBuild; VS 2026 MSVC rejects `flutter_local_notifications_windows`).
+  See "Windows build gotchas" in `DESKTOP.md` for the workarounds.
 
-## 2026-06-04 - Windows native Flutter frontend pass
+## Code Integrity Passes
 
-- Desktop chat shell now treats wide Windows/macOS/Linux layouts as a native
-  tool surface: permanent left sidebar fills the window height, the active
-  agent/session header sits in the main pane, composer width is capped on wide
-  monitors, and desktop/Web Enter sends while Shift+Enter still inserts a
-  newline through the text field.
-- Windows local notifications are initialized through
-  `flutter_local_notifications` with a Relay AppUserModelID, while init/show
-  failures degrade to the existing in-app fallback instead of blocking startup.
-- Windows runner starts at 1360x860 and enforces a 900x640 minimum logical
-  window size so desktop controls do not collapse into unusable layouts.
-- Secondary screens were desktop-constrained: settings, credentials, quota
-  usage, quota scheduler, file system, and Card Mode now use centered content
-  widths or mouse-friendly action buttons where appropriate.
-- **Windows release build verified** (`flutter build windows --release` →
-  `build/windows/x64/runner/Release/relay.exe`, ~792 KB + `flutter_windows.dll`
-  + plugin DLLs + `data/`). `dart analyze` is clean and `flutter test` is green.
-  The app launches and most features work in manual smoke testing. Two
-  environment workarounds were required to compile — see "Windows build
-  gotchas" in `DESKTOP.md`:
-  1. **Non-ASCII project path breaks the Flutter/MSBuild toolchain.** When the
-     repo lives under a path with CJK characters, `flutter analyze` crashes in
-     the LSP channel and `flutter build windows` fails reading `app.dill` (the
-     path is mangled through the ANSI code page). Build from an ASCII-only path,
-     or use `dart analyze` (not `flutter analyze`) for static checks.
-  2. **VS 2026's MSVC 14.51 rejects `flutter_local_notifications_windows`.**
-     The plugin still includes `<experimental/coroutine>`, which the newest STL
-     turns into a hard error (`STL1011` / `C2338`). Set
-     `CL=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` in the build
-     environment to compile. A permanent fix is to add that define to the
-     plugin target in CMake or update the plugin once upstream migrates to
-     `<coroutine>`.
+Two full manual audits (backend, then frontend) were run and **all findings
+were fixed**; the per-finding audit documents have been retired. What remains
+relevant:
 
-## 2026-06-02 - Rebrand AgentDeck -> Relay (clean public identity)
+### Backend (`server/`, audited 2026-06-09, fixed 2026-06-10, PR #4)
 
-- Full rebrand for public release. Two passes, both via scripted
-  case-sensitive/ordered `sed` over `git ls-files` (so node_modules/, build/, and
-  gitignored secrets are untouched): `scripts/rename_to_relay.sh` swept the
-  PascalCase brand `AgentDeck -> Relay` (display text + docs only), then
-  `scripts/migrate_identity_to_relay.sh` migrated every functional identifier off
-  the old brand.
-- New app identity: bundle id / applicationId / namespace `dev.agentdeck.app ->
-  dev.relay.app` (chosen to mirror the old `dev.*.app` shape; verify it's free on
-  the Play Store before first publish). The kotlin
-  source dir moved `dev/agentdeck/app/ -> dev/relay/app/`; the download
-  `MethodChannel` (Kotlin + `file_saver_stub.dart`) tracks it. iOS/macOS/Linux
-  bundle ids, macOS LaunchAgent labels (`dev.relay.app.backend/.tunnel`), and
-  copyright/company strings updated too.
-- Other identifiers (all consistent across their paired sites): Dart package
-  `agentdeck -> relay` (only `package:` user was the codec test; lib/ uses
-  relative imports), PM2 names `relay-server`/`relay-tunnel`, SharedPreferences
-  keys `relay.*.v1`, credential format `relay.credentials.v1` + file ext
-  `*.relay.json/png`, env vars `RELAY_*`, web-push JS global `window.relayPush`
-  (interop JS + `@JS` annotations), FCM Firebase app name `relay-fcm` +
-  `relayFcmBackgroundHandler`, desktop binary `relay`.
-- Verified: `flutter analyze` clean, credential codec test passes (after
-  `flutter pub get` rebuilt the package graph for the new name), `node --check`
-  green on backend.
-- CUTOVER DONE (2026-06-03): a fresh Firebase project `relay-93917` was created;
-  `android/app/google-services.json` (package `dev.relay.app`) and the backend
-  service account `server/fcm-service-account.json` are in place (both gitignored),
-  with `FCM_SERVICE_ACCOUNT_FILE` pointing at the latter. PM2 was re-registered as
-  `relay-server` / `relay-tunnel` (the unrelated `claude-*` apps were left
-  running). Web + debug APK were rebuilt — note `flutter clean` was required first,
-  because the cached web entrypoint still imported `package:agentdeck/main.dart`.
-  The credential was regenerated and re-imported; FCM offline push was verified
-  end-to-end on the `dev.relay.app` build (stale old-project tokens self-prune with
-  a `SenderId mismatch`).
-- PM2 gotcha learned here: `server/ecosystem.config.js` `envValue()` reads
-  `process.env` before `.env`, and the long-lived PM2 daemon had stale
-  `CLOUDFLARED_ARGS` / `FCM_SERVICE_ACCOUNT_FILE` from the old names. Start/restart
-  relay apps with the corrected values exported in the shell (or inline before
-  `build_flow.sh`) so `--update-env` injects them; `pm2 save` then persists a
-  correct dump for reboots without needing a daemon `pm2 kill`.
+23 findings across performance / security / correctness / reuse, all resolved.
+Durable outcomes:
 
-## 2026-06-02 - FCM Android offline push
+- `server/lib/json-store.js`: cached atomic JSON store (tmp+rename, 0o600,
+  in-memory cache invalidated on write) — use it for any new JSON state file
+  instead of hand-rolling `loadAll`/`saveAll`.
+- `server/lib/subscription-store.js` (shared Web Push / FCM subscription
+  storage) and `server/lib/notify.js` (one call fans out to both push
+  channels) — new notification kinds should go through `notify.js`.
+- `server.js` was split into `server/routes/` (6 routers, see Project Shape).
+- Security hardening: file API refuses sensitive paths (`server/tokens.json`,
+  `.env`, `credentials/`, `~/.ssh`, CLI auth files) and honors the optional
+  `RELAY_FS_ROOTS` allowlist; token comparison is timing-safe; credential KDF
+  raised to PBKDF2 600k iterations; prompts are size-capped
+  (`PROMPT_MAX_BYTES`) because they ride as a single argv token; uploads
+  stream to a temp file instead of buffering in RAM; all outbound usage HTTP
+  has timeouts (`USAGE_HTTP_TIMEOUT_MS`).
+- Accepted trade-off: `chat-history*.json` stores raw unredacted content
+  (file mode 0o600); redaction applies only to export/search.
 
-- Added Firebase Cloud Messaging as the native offline push path for Android
-  quota-reset and scheduled-message alerts. It mirrors Web Push scoping:
-  `quota_reset` reaches all registered devices, while `quota_schedule_sent`
-  targets devices registered under the schedule's `workdir`; each token stores
-  its language for English/Chinese message bodies.
-- FCM is gated everywhere. APKs build without Firebase config because
-  `com.google.gms.google-services` is applied only when
-  `android/app/google-services.json` exists; web/desktop use no-op Dart stubs
-  and do not initialize Firebase.
-- To activate FCM, drop the Android app config at
-  `android/app/google-services.json`, put a backend service account JSON on the
-  host (for example `server/fcm-service-account.json`), and set
-  `FCM_SERVICE_ACCOUNT_FILE=/absolute/path/to/server/fcm-service-account.json`
-  in `server/.env`. The service account and runtime token store
-  (`server/fcm-tokens.json`) are gitignored.
+### Frontend (`lib/`, audited 2026-06-10, fixed 2026-06-11)
 
-## 2026-06-01 - Scheduled messages moved to a dedicated screen
+16 findings across freeze / performance / security / reuse, all resolved
+(15 code fixes + 1 accepted limitation). Durable outcomes:
 
-- Scheduling left the usage dialog and became its own left-drawer entry →
-  `lib/features/quota/quota_scheduler_screen.dart`: one row per claude/codex with
-  the agent name, its next 5-hour reset time, a message box, **Send**, and a
-  **Clear** button (only when a schedule is queued). The usage dialog is now
-  read-only (quota numbers + reset times). Cross-device: it re-syncs from
-  `quota_schedule_*` SSE events and preserves an unsent local draft on remote
-  sync (`_syncControllers`).
-- Pending uniqueness is now **per source per workdir** (each workspace keeps its
-  own pending draft); Send uses `replaceExisting: true` to overwrite in place
-  instead of hitting `409`. Note: since a reset is host-wide, all of a source's
-  per-workdir schedules fire on the same reset (intended trade-off).
-- Schedule events refetch only the schedule list, not `/api/usage` (quota
-  numbers don't change on a schedule edit), so the screen avoids the external
-  usage call on every save/event. `server/lib/usage.js` also parallelizes the
-  Claude+Codex providers and caches Claude usage for 60s.
-
-## 2026-06-01 - Multi-session, diagnostics, and scheduled quota messages
-
-- Named chat sessions per `workdir + agent`: scope key is now
-  `workdir\0agent\0sessionId`; the default `Main` session reuses the legacy
-  context key (no history migration). Capped at 8 sessions per context; `Main`
-  cannot be deleted (`server/lib/chat-sessions.js`, `cli_agents_drawer.dart`).
-- `GET /api/diagnostics` (`server/lib/diagnostics.js`) backs a fuller machine
-  status dialog: listener, public URL, token counts, CLI availability/login,
-  workdir access, storage files, web build, and live request/queue/SSE counts.
-- Scheduled quota messages (`server/lib/quota-schedules.js`): draft a message and
-  the watcher auto-sends it after the next 5-hour reset for that source.
-  (Entry point later moved to a dedicated screen — see the newer entry above.)
-  Hardening applied here — one pending schedule per source+workdir
-  (`409 SCHEDULE_EXISTS`), interrupted `running` schedules are reconciled to
-  `failed` on startup, and the JSON store prunes finished records to
-  `MAX_FINISHED` (50). `quota-schedules.json` is secret/gitignored.
-
-## 2026-06-01 - Unified File System, Downloads, and Cleanup
-
-- The Work directory screen was merged into the **File system** screen. One
-  drawer entry now browses by absolute path (up to filesystem root), sets the
-  work path via **Set as work path**, and uploads/downloads. The old
-  `work_directory_screen.dart` was removed.
-- Downloads stream with a progress bar driven by an app-level `DownloadManager`
-  so progress and the completion notification survive leaving the screen. Files
-  save to the system Downloads folder with no picker (Android via a MediaStore
-  platform channel; desktop via `getDownloadsDirectory`; the browser folder on
-  Web) and the save location is shown on screen.
-- Size caps: a download is rejected above 300 MB (a folder by its uncompressed
-  total, `DOWNLOAD_MAX_BYTES`); a single upload above 100 MB (`UPLOAD_MAX_BYTES`),
-  pre-checked in the app and enforced on the server.
-- Removed dead code now that the screens merged: routes `/api/fs/list`,
-  `/api/workdir/check`, `/api/workdir/reset`; backend client `listFiles`,
-  `checkWorkdir`, `resetWorkdir`; `listDirectory` in `server/lib/filesystem.js`;
-  and several unused i18n strings. Docs realigned to the merged screen and the
-  current API surface.
-
-## 2026-06-01 - Windows Backend Setup
-
-- Added `backends/windows/` PowerShell scripts for setup, start, stop, status,
-  and uninstall.
-- Windows setup supports direct mode, named Cloudflare Tunnel, and Cloudflare
-  Quick Tunnel, then generates the encrypted credential QR.
-- Windows services run as background processes and are restored at login by a
-  per-user Scheduled Task named `Relay Backend`.
-
-## 2026-05-31 - Named Cloudflare Tunnel Setup
-
-- Linux `setup.sh` and macOS `backends/macos/setup.sh` now prompt for three
-  network modes: direct/no tunnel, named Cloudflare Tunnel, or Quick Tunnel.
-- Named Cloudflare Tunnel mode creates/reuses a tunnel, routes DNS, writes a
-  local config under `server/cloudflared-config/`, and runs cloudflared under
-  PM2/LaunchAgent.
-- `server/ecosystem.config.js` reads `RELAY_TUNNEL_MODE`,
-  `CLOUDFLARED_BIN`, and `CLOUDFLARED_ARGS` from `.env` so PM2 can omit the
-  tunnel app, run named tunnel args, or run Quick Tunnel args.
-- `server/scripts/create-credential.js` prefers stable `PUBLIC_BASE_URL` for
-  named/direct mode, then falls back to Quick Tunnel log detection.
-
-## 2026-05-31 - Web Performance and Documentation Cleanup
-
-- Throttled high-frequency streaming assistant updates in
-  `lib/features/chat/bot_chat_controller.dart` to reduce Web rebuild pressure.
-- Assistant bubbles render lightweight plain text while a reply is streaming,
-  then render Markdown after the response is finalized. Final formatting is
-  unchanged.
-- Chat screen now reads the message list once per build and uses stable message
-  keys.
-- Card Mode swipe animations no longer call `setState` on the whole page every
-  animation frame.
-- README and ROADMAP files were tightened and updated to match the current
-  shared-session model.
-- Removed the old Card Mode implementation prompt document.
-
-## 2026-05-31 - Credential JSON and Cloudflare Quick Tunnel
-
-- `server/scripts/create-credential.js` generates both
-  `server/credentials/<machine>.relay.png` and
-  `server/credentials/<machine>.relay.json`.
-- The JSON file is for paste import; credential files remain git-ignored.
-- Credential creation auto-detects the current Cloudflare quick-tunnel URL from
-  PM2 logs unless `--url` is passed.
-- Generating a new credential removes old credential files, but does not revoke
-  existing device tokens.
-
-## 2026-05-31 - Shared Sessions by Workdir
-
-- Backend session scope is `workdir + agent`, not `deviceId + agent`.
-- Each client stores its current workdir locally and sends it with `X-Workdir`.
-- History, resumable CLI session IDs, queues, cancellation, and SSE broadcasts
-  are scoped by resolved workdir.
-- Same-scope concurrent messages are serialized because the underlying CLI
-  session is single-threaded.
-- The client mirrors remote in-flight work by polling backend history snapshots
-  when another device starts a turn in the same scope.
-
-## 2026-05-31 - File Browsing and Workdir UI
-
-- Work directory screen can browse folders upward/downward and hides dotfiles by
-  default.
-- File System screen can browse within the current workdir, upload files,
-  download files, and download folders as zip archives.
-- Web supports drag-and-drop upload.
-
-## 2026-05-30 - Agent Markdown Rendering
-
-- Assistant chat bubbles render Markdown for headings, emphasis, lists, quotes,
-  code blocks, and dividers.
-- User messages remain plain text.
-- CLI shorthand such as `###Title`, unclosed leading `**Title`, and legacy
-  `##text##` is normalized outside fenced code blocks.
+- `lib/core/backend/api_transport.dart`: the single HTTP pipeline (stores,
+  headers, error mapping) shared by `BackendClient` and `CardsService` — new
+  API callers should reuse it, not copy the connection logic.
+- Heavy work stays off the UI isolate: credential decrypt (PBKDF2 600k) runs
+  in `compute()` on native (Web uses async WebCrypto); history responses
+  >256KB are decoded in an isolate.
+- The shared `/api/events` SSE stream has a 90s idle timeout (3× the server's
+  30s heartbeat) so silently dead connections trigger the reconnect path; the
+  chat POST stream keeps its own 65-minute timeout.
+- Streaming deltas accumulate in per-request `StringBuffer`s and only
+  materialize on the existing 80ms-throttled notify.
+- `MachineCredentialsStore` / `DeviceIdStore` / `WorkdirStore` have **static**
+  in-memory caches (multiple store instances exist across BackendClient,
+  CardsService, and controllers). Any new write path in these stores must
+  invalidate the cache (`_invalidateCache()`).
+- Native file upload streams (`withReadStream` + `http.StreamedRequest`);
+  Web upload keeps bytes (browser limitation).
+- Shared utils to reuse instead of re-implementing:
+  `lib/core/util/error_text.dart` (`friendlyErrorText` for user-facing
+  errors), `lib/core/util/format_bytes.dart`, `time_format.dart`
+  (`formatShortTime` / `formatLongTime`).
+- Accepted limitation: Web file download buffers fully in memory
+  (browser Blob requirement; bounded by the 300 MB download cap). Native
+  downloads stream to disk.
 
 ## Build Flow
 

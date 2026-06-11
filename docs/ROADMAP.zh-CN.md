@@ -31,6 +31,14 @@
   （`server/lib/agent-turn.js`），供 `/api/chat` 和定时消息 runner 共用；给
   `history.js` 加内存缓存 + 防抖写盘，取代每个流式 delta 都整文件重读重写的做法；
   以及用单个 `resolveAgentScope(req, res)` 替换各请求 handler 里重复的 agent scope 前导代码。
+- 完整的后端完整性审查与修复（23 项审查发现全部解决）：带缓存的原子 JSON 存储、
+  常数时间 token 校验、文件 API 敏感路径拒绝清单 + 可选 `RELAY_FS_ROOTS` 允许列表、
+  流式上传、外发请求超时、更强的凭证 KDF，以及把 `server.js` 按域拆分到
+  `server/routes/` 路由模块。
+- 完整的前端完整性审查与修复（16 项审查发现全部解决）：凭证解密和大体积历史解码
+  移出 UI isolate、共享 SSE 事件流加空闲超时让断死连接能自动重连、流式 delta 改
+  缓冲拼接、凭证/设备/工作目录存储加缓存、文件列表惰性构建、native 上传改流式，
+  以及所有后端调用方共用一个 API transport。
 
 ## 规划
 
@@ -51,10 +59,6 @@
 
 ### 后续提升
 
-- 随着 API 面继续扩大，逐步把 `server/server.js` 中的路由拆到更聚焦的后端
-  route 模块里；保持现有 Express 行为稳定，同时降低长期维护风险。（共享
-  `runAgentTurn` 抽取和 `resolveAgentScope` 前导清理已经完成；剩下的是把
-  路由注册本身从 `server.js` 里拆出去。）
 - iOS 接入 Apple 推送通知服务(APNs)，把现有的离线推送(Web Push + FCM)扩展到
   被完全杀掉的 iOS app。
 - 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。**2026-06-04 已评估

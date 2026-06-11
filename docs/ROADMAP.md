@@ -45,6 +45,17 @@
   disk writes instead of full re-read/re-write on every streaming delta; and a
   single `resolveAgentScope(req, res)` replacing the duplicated agent-scope
   preamble across the request handlers.
+- Full backend integrity pass (23 audited findings fixed): cached atomic JSON
+  stores, timing-safe token checks, file-API sensitive-path denylist plus an
+  optional `RELAY_FS_ROOTS` allowlist, streaming uploads, outbound-request
+  timeouts, a stronger credential KDF, and `server.js` split into per-domain
+  route modules under `server/routes/`.
+- Full frontend integrity pass (16 audited findings resolved): credential
+  decryption and large history decoding moved off the UI isolate, an idle
+  timeout on the shared SSE event stream so dead connections reconnect,
+  buffered streaming deltas, cached credential/device/workdir stores, lazy
+  file lists, streaming native uploads, and a shared API transport reused by
+  all backend callers.
 
 ## Planned
 
@@ -68,11 +79,6 @@ Reuse boundaries:
 
 ### Later Improvements
 
-- Gradually split `server/server.js` routes into focused backend route modules
-  as the API surface grows, keeping the current Express behavior stable while
-  reducing long-term maintenance risk. (The shared `runAgentTurn` extraction and
-  `resolveAgentScope` preamble cleanup have already landed; the remaining work is
-  splitting the route registrations themselves out of `server.js`.)
 - Apple Push Notification service (APNs) for iOS, to extend the existing offline
   push (Web Push + FCM) to fully-killed iOS apps.
 - Better Antigravity quota support when an API or reliable CLI source is
