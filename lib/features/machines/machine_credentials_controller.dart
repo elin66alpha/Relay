@@ -4,12 +4,21 @@ import '../../core/credentials/credential_file_codec.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/storage/machine_credentials_store.dart';
 
+Future<MachineCredential> _decryptCredentialBytesInBackground(
+  Map<String, Object?> input,
+) {
+  return CredentialFileCodec().decrypt(
+    input['bytes']! as Uint8List,
+    passphrase: input['passphrase']! as String,
+  );
+}
+
 class MachineCredentialsController extends ChangeNotifier {
   MachineCredentialsController({
     MachineCredentialsStore? store,
     CredentialFileCodec? codec,
-  })  : _store = store ?? MachineCredentialsStore(),
-        _codec = codec ?? CredentialFileCodec();
+  }) : _store = store ?? MachineCredentialsStore(),
+       _codec = codec ?? CredentialFileCodec();
 
   final MachineCredentialsStore _store;
   final CredentialFileCodec _codec;
@@ -34,8 +43,9 @@ class MachineCredentialsController extends ChangeNotifier {
   Future<void> load() async {
     _credentials = await _store.readAll();
     _activeMachineId = await _store.readActiveId();
-    if (!_credentials
-        .any((MachineCredential item) => item.id == _activeMachineId)) {
+    if (!_credentials.any(
+      (MachineCredential item) => item.id == _activeMachineId,
+    )) {
       _activeMachineId = _credentials.isEmpty ? null : _credentials.first.id;
       if (_activeMachineId != null) {
         await _store.setActive(_activeMachineId!);
@@ -61,10 +71,13 @@ class MachineCredentialsController extends ChangeNotifier {
     Uint8List bytes, {
     required String passphrase,
   }) async {
-    return _codec.decrypt(
-      bytes,
-      passphrase: passphrase,
-    );
+    if (!kIsWeb && _codec.runtimeType == CredentialFileCodec) {
+      return compute(_decryptCredentialBytesInBackground, <String, Object?>{
+        'bytes': bytes,
+        'passphrase': passphrase,
+      });
+    }
+    return _codec.decrypt(bytes, passphrase: passphrase);
   }
 
   Future<void> saveCredential(MachineCredential credential) async {
