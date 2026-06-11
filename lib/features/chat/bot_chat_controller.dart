@@ -15,9 +15,8 @@ import '../../core/notifications/web_push.dart';
 import '../../core/settings/app_settings_controller.dart';
 
 class BotChatController extends ChangeNotifier {
-  BotChatController({
-    BackendClient? backendClient,
-  }) : _backendClient = backendClient ?? BackendClient();
+  BotChatController({BackendClient? backendClient})
+    : _backendClient = backendClient ?? BackendClient();
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -37,6 +36,7 @@ class BotChatController extends ChangeNotifier {
   final Map<String, List<AgentSession>> _sessionsByAgent =
       <String, List<AgentSession>>{};
   final Map<String, String> _activeSessionByAgent = <String, String>{};
+  final Map<String, StringBuffer> _streamBuffers = <String, StringBuffer>{};
   final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _historyLoading = false;
@@ -80,7 +80,8 @@ class BotChatController extends ChangeNotifier {
   // A read-only view over the live list (O(1)), not a copy. The chat screen
   // reads this on every (throttled) streaming rebuild, so copying the whole
   // history each time was O(n) churn that grew with the conversation.
-  List<ChatMessage> get messages => UnmodifiableListView<ChatMessage>(_messages);
+  List<ChatMessage> get messages =>
+      UnmodifiableListView<ChatMessage>(_messages);
   int get messageCount => _messages.length;
   bool get isThinking => _activeRequestId != null;
   bool get isHistoryLoading => _historyLoading;
@@ -147,8 +148,9 @@ class BotChatController extends ChangeNotifier {
     _loadingSessions.add(agentKey);
     notifyListeners();
     try {
-      final AgentSessionList result =
-          await _backendClient.fetchSessions(agentKey);
+      final AgentSessionList result = await _backendClient.fetchSessions(
+        agentKey,
+      );
       if (_machine?.id != machine.id) return null;
       _sessionsByAgent[agentKey] = result.sessions;
       _activeSessionByAgent[agentKey] = result.activeSession.id;
@@ -187,8 +189,10 @@ class BotChatController extends ChangeNotifier {
   Future<void> createSessionFor(CliAgent agent, {String name = ''}) async {
     final MachineCredential? machine = _machine;
     if (isThinking || machine == null) return;
-    final AgentSessionList result =
-        await _backendClient.createSession(agent.key, name);
+    final AgentSessionList result = await _backendClient.createSession(
+      agent.key,
+      name,
+    );
     if (_machine?.id != machine.id) return;
     _sessionsByAgent[agent.key] = result.sessions;
     _activeSessionByAgent[agent.key] = result.activeSession.id;
@@ -199,8 +203,10 @@ class BotChatController extends ChangeNotifier {
   Future<void> selectSession(CliAgent agent, String sessionId) async {
     final MachineCredential? machine = _machine;
     if (isThinking || machine == null || sessionId.isEmpty) return;
-    final AgentSessionList result =
-        await _backendClient.selectSession(agent.key, sessionId);
+    final AgentSessionList result = await _backendClient.selectSession(
+      agent.key,
+      sessionId,
+    );
     if (_machine?.id != machine.id) return;
     _sessionsByAgent[agent.key] = result.sessions;
     _activeSessionByAgent[agent.key] = result.activeSession.id;
@@ -211,8 +217,10 @@ class BotChatController extends ChangeNotifier {
   Future<void> deleteSession(CliAgent agent, String sessionId) async {
     final MachineCredential? machine = _machine;
     if (isThinking || machine == null || sessionId.isEmpty) return;
-    final AgentSessionList result =
-        await _backendClient.deleteSession(agent.key, sessionId);
+    final AgentSessionList result = await _backendClient.deleteSession(
+      agent.key,
+      sessionId,
+    );
     if (_machine?.id != machine.id) return;
     _sessionsByAgent[agent.key] = result.sessions;
     _activeSessionByAgent[agent.key] = result.activeSession.id;
@@ -268,6 +276,7 @@ class BotChatController extends ChangeNotifier {
   List<String> progressLinesFor(ChatMessage message) {
     if (message.metadata[_streamingKey] != true) return const <String>[];
     final Object? raw = message.metadata[_progressLinesKey];
+    if (raw is List<String>) return raw;
     if (raw is! List) return const <String>[];
     return raw.whereType<String>().toList(growable: false);
   }
@@ -286,43 +295,12 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _messages.clear();
-    _historyLoading = true;
-    final int loadSeq = ++_historyLoadSeq;
-    _lastError = null;
-    _isCancelling = false;
-    _activeRequestId = null;
-    _localStreamActive = false;
-    _reattachRequestId = null;
-    _remoteActive = false;
-    _remoteSettleTimer?.cancel();
-    _stopHistoryPolling();
-    notifyListeners();
-
-    // Check login state for the new context so the banner can warn up front.
-    unawaited(refreshAuthStatus());
-    _prefetchInactiveSessions();
-
-    // Pull the previous conversation so reopening the app shows it. Best-effort:
-    // ignore failures (offline / no history), and never clobber messages the
-    // user has already typed or sent while this was in flight.
-    try {
-      final String sessionId = await _ensureActiveSessionId(agent);
-      final List<ChatMessage>? history =
-          await _fetchHistoryIfCurrent(agent, machine, sessionId);
-      // Never clobber messages the user typed or sent while this was in flight.
-      if (history == null || _messages.isNotEmpty) return;
-      _applyHistorySnapshot(history);
-      if (isThinking) _startHistoryPolling();
-      notifyListeners();
-    } catch (_) {
-      // Leave the view empty when history can't be loaded.
-    } finally {
-      if (loadSeq == _historyLoadSeq) {
-        _historyLoading = false;
-        notifyListeners();
-      }
-    }
+    await _resetAndReloadConversation(
+      agent,
+      machine,
+      skipIfMessagesExist: true,
+      afterReset: _prefetchInactiveSessions,
+    );
   }
 
   Future<void> clearHistory() async {
@@ -341,6 +319,7 @@ class BotChatController extends ChangeNotifier {
     }
     _stopHistoryPolling();
     _messages.clear();
+    _clearStreamBuffers();
     _lastError = null;
     notifyListeners();
   }
@@ -400,8 +379,9 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> retry(ChatMessage message) async {
     if (isThinking || _machine == null || !isRetryable(message)) return;
-    final int index =
-        _messages.indexWhere((ChatMessage m) => m.id == message.id);
+    final int index = _messages.indexWhere(
+      (ChatMessage m) => m.id == message.id,
+    );
     if (index == -1) return;
     _messages[index] = message.copyWith(metadata: const <String, Object?>{});
     notifyListeners();
@@ -413,13 +393,15 @@ class BotChatController extends ChangeNotifier {
     Duration timeout = const Duration(seconds: 8),
   }) async {
     try {
-      final BackendDiagnostics diagnostics =
-          await _backendClient.diagnostics(timeout: timeout);
+      final BackendDiagnostics diagnostics = await _backendClient.diagnostics(
+        timeout: timeout,
+      );
       return diagnostics.toDisplayText(strings);
     } on BackendException catch (err) {
       if (err.status != 404) rethrow;
-      final BackendStatus status =
-          await _backendClient.status(timeout: timeout);
+      final BackendStatus status = await _backendClient.status(
+        timeout: timeout,
+      );
       return status.toDisplayText(strings);
     }
   }
@@ -522,8 +504,10 @@ class BotChatController extends ChangeNotifier {
   Future<WorkdirInfo> workdir() => _backendClient.workdir();
 
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
-    final WorkdirInfo info =
-        await _backendClient.setWorkdir(path, create: create);
+    final WorkdirInfo info = await _backendClient.setWorkdir(
+      path,
+      create: create,
+    );
     // Switching paths switches conversations: the session is keyed by
     // workdir + agent + chat session. Reconnect the event stream with the new
     // workdir and reload the shared history for this path so it shows immediately.
@@ -539,7 +523,22 @@ class BotChatController extends ChangeNotifier {
     final MachineCredential? machine = _machine;
     if (machine == null) return;
     final CliAgent agent = _agent;
+    await _resetAndReloadConversation(
+      agent,
+      machine,
+      skipIfMessagesExist: false,
+    );
+    _prefetchInactiveSessions();
+  }
+
+  Future<void> _resetAndReloadConversation(
+    CliAgent agent,
+    MachineCredential machine, {
+    required bool skipIfMessagesExist,
+    void Function()? afterReset,
+  }) async {
     _messages.clear();
+    _clearStreamBuffers();
     _historyLoading = true;
     final int loadSeq = ++_historyLoadSeq;
     _lastError = null;
@@ -552,11 +551,17 @@ class BotChatController extends ChangeNotifier {
     _stopHistoryPolling();
     notifyListeners();
     unawaited(refreshAuthStatus());
+    afterReset?.call();
     try {
       final String sessionId = await _ensureActiveSessionId(agent);
-      final List<ChatMessage>? history =
-          await _fetchHistoryIfCurrent(agent, machine, sessionId);
-      if (history == null) return;
+      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+        agent,
+        machine,
+        sessionId,
+      );
+      if (history == null || (skipIfMessagesExist && _messages.isNotEmpty)) {
+        return;
+      }
       _applyHistorySnapshot(history);
       if (isThinking) _startHistoryPolling();
       notifyListeners();
@@ -568,13 +573,9 @@ class BotChatController extends ChangeNotifier {
         notifyListeners();
       }
     }
-    _prefetchInactiveSessions();
   }
 
-  Future<FsListing> browseWorkdir(
-    String path, {
-    bool showHidden = false,
-  }) =>
+  Future<FsListing> browseWorkdir(String path, {bool showHidden = false}) =>
       _backendClient.browseWorkdir(path, showHidden: showHidden);
 
   Future<FsDownloadStream> openFileDownload(String path) =>
@@ -584,8 +585,7 @@ class BotChatController extends ChangeNotifier {
     required String path,
     required String name,
     required Uint8List bytes,
-  }) =>
-      _backendClient.uploadFile(path: path, name: name, bytes: bytes);
+  }) => _backendClient.uploadFile(path: path, name: name, bytes: bytes);
 
   void connectEvents() {
     _wantsEvents = true;
@@ -637,8 +637,10 @@ class BotChatController extends ChangeNotifier {
     MachineCredential machine,
     String sessionId,
   ) async {
-    final List<ChatMessage> history =
-        await _backendClient.fetchHistory(agent.key, sessionId: sessionId);
+    final List<ChatMessage> history = await _backendClient.fetchHistory(
+      agent.key,
+      sessionId: sessionId,
+    );
     if (_agent.key != agent.key ||
         _machine?.id != machine.id ||
         activeSessionId != sessionId) {
@@ -653,7 +655,32 @@ class BotChatController extends ChangeNotifier {
     _messages
       ..clear()
       ..addAll(history);
+    _seedStreamBuffersFromMessages();
     _restorePendingTurnFromHistory();
+  }
+
+  bool _historySnapshotMatchesCurrent(List<ChatMessage> history) {
+    if (history.length != _messages.length) return false;
+    if (history.isEmpty) return true;
+    final ChatMessage fetched = history.last;
+    final ChatMessage current = _messages.last;
+    return fetched.id == current.id &&
+        fetched.content.length == current.content.length &&
+        fetched.metadata[_streamingKey] == current.metadata[_streamingKey];
+  }
+
+  void _seedStreamBuffersFromMessages() {
+    _streamBuffers.clear();
+    for (final ChatMessage message in _messages) {
+      if (message.isUser || message.metadata[_streamingKey] != true) continue;
+      final String requestId = message.metadata[_requestIdKey] as String? ?? '';
+      if (requestId.isEmpty) continue;
+      _streamBuffers[requestId] = StringBuffer(message.content);
+    }
+  }
+
+  void _clearStreamBuffers() {
+    _streamBuffers.clear();
   }
 
   void _startHistoryPolling() {
@@ -679,13 +706,20 @@ class BotChatController extends ChangeNotifier {
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage>? history =
-          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+        agent,
+        machine,
+        sessionId,
+      );
       if (history == null || history.isEmpty) return;
       // Never clobber a turn our own POST stream is actively driving (that
       // stream is the smoother, authoritative source). Once it drops or is
       // absent (reattach / cold-start restore), polling becomes authoritative.
       if (_localStreamActive) return;
+      if (_historySnapshotMatchesCurrent(history)) {
+        if (!(isThinking || _remoteActive)) _stopHistoryPolling();
+        return;
+      }
       _applyHistorySnapshot(history);
       // If we reattached to a dropped turn, end the mirror once history shows it
       // finalized — even if the shared event stream missed agent_done while it
@@ -823,8 +857,11 @@ class BotChatController extends ChangeNotifier {
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage>? history =
-          await _fetchHistoryIfCurrent(agent, machine, sessionId);
+      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+        agent,
+        machine,
+        sessionId,
+      );
       // Bail if our own or a remote turn started while the fetch was in flight.
       if (history == null || isThinking || _remoteActive || history.isEmpty) {
         return;
@@ -856,7 +893,7 @@ class BotChatController extends ChangeNotifier {
     return _messages.length - 1;
   }
 
-  void _updateStreamingAssistant(
+  void _setStreamingAssistantContent(
     int assistantIndex, {
     required String content,
     required bool awaitingFirstToken,
@@ -870,7 +907,33 @@ class BotChatController extends ChangeNotifier {
         _awaitingFirstTokenKey: awaitingFirstToken,
       },
     );
-    _notifyStreamingUpdate();
+  }
+
+  void _flushStreamBuffer(String requestId) {
+    final StringBuffer? buffer = _streamBuffers[requestId];
+    if (buffer == null) return;
+    final int index = _assistantIndexForRequest(requestId);
+    if (index == -1) return;
+    final ChatMessage message = _messages[index];
+    if (isCancelled(message) || message.metadata[_streamingKey] != true) {
+      return;
+    }
+    final String content = buffer.toString();
+    if (message.content == content &&
+        message.metadata[_awaitingFirstTokenKey] == false) {
+      return;
+    }
+    _setStreamingAssistantContent(
+      index,
+      content: content,
+      awaitingFirstToken: false,
+    );
+  }
+
+  void _flushStreamBuffers() {
+    for (final String requestId in List<String>.of(_streamBuffers.keys)) {
+      _flushStreamBuffer(requestId);
+    }
   }
 
   void _finalizeAssistant(
@@ -905,19 +968,24 @@ class BotChatController extends ChangeNotifier {
   }) {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
+    _streamBuffers.remove(requestId);
+    final String metadataRequestId = metadata[_requestIdKey] as String? ?? '';
+    if (metadataRequestId.isNotEmpty && metadataRequestId != requestId) {
+      _streamBuffers.remove(metadataRequestId);
+    }
     _finalizeAssistant(
       index,
       text,
-      metadata: <String, Object?>{
-        _requestIdKey: requestId,
-        ...metadata,
-      },
+      metadata: <String, Object?>{_requestIdKey: requestId, ...metadata},
     );
   }
 
   void _discardAssistant(int assistantIndex) {
     if (assistantIndex >= _messages.length) return;
     _cancelStreamingNotifyTimer();
+    final String requestId =
+        _messages[assistantIndex].metadata[_requestIdKey] as String? ?? '';
+    if (requestId.isNotEmpty) _streamBuffers.remove(requestId);
     _messages.removeAt(assistantIndex);
     notifyListeners();
   }
@@ -940,16 +1008,28 @@ class BotChatController extends ChangeNotifier {
     // finalizes the authoritative answer, late SSE deltas must be ignored.
     if (isCancelled(current) || current.metadata[_streamingKey] != true) return;
 
-    _updateStreamingAssistant(
-      index,
-      content: '${current.content}$text',
-      awaitingFirstToken: false,
+    final StringBuffer buffer = _streamBuffers.putIfAbsent(
+      requestId,
+      () => StringBuffer(current.content),
     );
+    buffer.write(text);
+    if (current.metadata[_awaitingFirstTokenKey] == true) {
+      _messages[index] = current.copyWith(
+        metadata: <String, Object?>{
+          ...current.metadata,
+          _streamingKey: true,
+          _awaitingFirstTokenKey: false,
+        },
+      );
+    }
+    _notifyStreamingUpdate();
   }
 
   void _markAssistantCancelled(String requestId) {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
+    _flushStreamBuffer(requestId);
+    _streamBuffers.remove(requestId);
     _cancelStreamingNotifyTimer();
     final ChatMessage message = _messages[index];
     _messages[index] = message.copyWith(
@@ -969,6 +1049,7 @@ class BotChatController extends ChangeNotifier {
       _streamNotifyQueued = true;
       return;
     }
+    _flushStreamBuffers();
     notifyListeners();
     _streamNotifyTimer = Timer(const Duration(milliseconds: 80), () {
       _streamNotifyTimer = null;
@@ -986,10 +1067,13 @@ class BotChatController extends ChangeNotifier {
 
   int _assistantIndexForRequest(String requestId) {
     if (requestId.isEmpty) return -1;
-    return _messages.indexWhere(
-      (ChatMessage message) =>
-          !message.isUser && message.metadata[_requestIdKey] == requestId,
-    );
+    for (int i = _messages.length - 1; i >= 0; i -= 1) {
+      final ChatMessage message = _messages[i];
+      if (!message.isUser && message.metadata[_requestIdKey] == requestId) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   // Turn a thrown error into a message a user can act on. Low-level network
@@ -1112,8 +1196,8 @@ class BotChatController extends ChangeNotifier {
     if (event.type == 'quota_reset') {
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
-              event.data['message'] as String? ??
-              ''
+                event.data['message'] as String? ??
+                ''
           : event.data['message'] as String? ?? '';
       if (message.isEmpty) return;
       // Quota alerts prefer a system/browser notification. If the platform
@@ -1127,8 +1211,8 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
-              event.data['message'] as String? ??
-              ''
+                event.data['message'] as String? ??
+                ''
           : event.data['message'] as String? ?? '';
       if (message.isEmpty) return;
       unawaited(_showQuotaNotification(message));
@@ -1149,12 +1233,12 @@ class BotChatController extends ChangeNotifier {
     // Only mirror activity for the agent we are currently viewing.
     final Map<String, Object?> agentData =
         (event.data['agent'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
+        const <String, Object?>{};
     final String agentKey = agentData['key'] as String? ?? '';
     if (agentKey.isNotEmpty && agentKey != _agent.key) return;
     final Map<String, Object?> sessionData =
         (event.data['session'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
+        const <String, Object?>{};
     final String sessionId = sessionData['id'] as String? ?? '';
     // Only drop an event when we actually know which session we're viewing.
     // While sessions are still loading (activeSessionId == null) we let events
@@ -1202,8 +1286,9 @@ class BotChatController extends ChangeNotifier {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
 
-    final List<String> lines =
-        progressLinesFor(_messages[index]).toList(growable: true);
+    final List<String> lines = progressLinesFor(
+      _messages[index],
+    ).toList(growable: true);
     if (lines.isEmpty || lines.last != line) lines.add(line);
     while (lines.length > 6) {
       lines.removeAt(0);
@@ -1212,7 +1297,7 @@ class BotChatController extends ChangeNotifier {
     _messages[index] = _messages[index].copyWith(
       metadata: <String, Object?>{
         ..._messages[index].metadata,
-        _progressLinesKey: lines,
+        _progressLinesKey: List<String>.unmodifiable(lines),
       },
     );
     notifyListeners();

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../i18n/app_strings.dart';
@@ -22,6 +22,25 @@ class BackendException implements Exception {
 
   @override
   String toString() => 'BackendException(${status ?? '-'}): $message';
+}
+
+List<ChatMessage> _decodeHistoryMessages(String body) {
+  late final Object? decoded;
+  try {
+    decoded = jsonDecode(body);
+  } on FormatException {
+    throw BackendException('Backend returned non-JSON content.');
+  }
+  if (decoded is! Map) {
+    throw BackendException('历史响应格式不正确。');
+  }
+  final List<Object?> raw = decoded['messages'] is List
+      ? (decoded['messages'] as List).cast<Object?>()
+      : const <Object?>[];
+  return raw
+      .whereType<Map>()
+      .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
+      .toList(growable: false);
 }
 
 class BackendStatus {
@@ -96,10 +115,7 @@ class DeviceToken {
   final bool current;
   final String? revokedAt;
 
-  DeviceToken copyWith({
-    bool? revoked,
-    String? revokedAt,
-  }) {
+  DeviceToken copyWith({bool? revoked, String? revokedAt}) {
     return DeviceToken(
       id: id,
       label: label,
@@ -431,10 +447,7 @@ class ChatHistorySearchResult {
 }
 
 class ConversationExport {
-  const ConversationExport({
-    required this.fileName,
-    required this.markdown,
-  });
+  const ConversationExport({required this.fileName, required this.markdown});
 
   factory ConversationExport.fromJson(Map<String, Object?> json) {
     return ConversationExport(
@@ -609,10 +622,7 @@ class QuotaSchedule {
 }
 
 class BackendEvent {
-  const BackendEvent({
-    required this.type,
-    required this.data,
-  });
+  const BackendEvent({required this.type, required this.data});
 
   final String type;
   final Map<String, Object?> data;
@@ -642,9 +652,7 @@ class BackendClient {
     _httpClient.close();
   }
 
-  Future<bool> health({
-    Duration timeout = const Duration(seconds: 20),
-  }) async {
+  Future<bool> health({Duration timeout = const Duration(seconds: 20)}) async {
     final Object? decoded = await _requestJson(
       'GET',
       '/api/health',
@@ -885,8 +893,9 @@ class BackendClient {
     ChatReply? reply;
     BackendException? streamError;
     try {
-      await for (final BackendEvent event
-          in _parseSse(response.stream).timeout(const Duration(minutes: 65))) {
+      await for (final BackendEvent event in _parseSse(
+        response.stream,
+      ).timeout(const Duration(minutes: 65))) {
         if (event.type == 'ready' || event.type == 'heartbeat') continue;
         onEvent(event);
         if (event.type == 'agent_done') {
@@ -1070,17 +1079,32 @@ class BackendClient {
   }) async {
     final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
         '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
-    final Object? decoded = await _requestJson('GET', '/api/history?$query');
-    if (decoded is! Map) {
-      throw BackendException('历史响应格式不正确。');
+    final MachineCredential credential = await _requireCredential();
+    final Uri uri = _uri(credential, '/api/history?$query');
+    late final http.Response response;
+    try {
+      response = await _httpClient
+          .get(uri, headers: await _headers(credential))
+          .timeout(const Duration(seconds: 20));
+    } on BackendException {
+      rethrow;
+    } on TimeoutException {
+      throw BackendException(
+        'Timed out connecting to ${uri.host}.',
+        code: 'NETWORK_TIMEOUT',
+      );
+    } on http.ClientException catch (err) {
+      throw _networkExceptionFor(err, uri);
+    } catch (err) {
+      throw _networkExceptionFor(err, uri);
     }
-    final List<Object?> raw = decoded['messages'] is List
-        ? (decoded['messages'] as List).cast<Object?>()
-        : const <Object?>[];
-    return raw
-        .whereType<Map>()
-        .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
-        .toList(growable: false);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _exceptionFor(response.statusCode, response.body);
+    }
+    if (!kIsWeb && response.body.length > 256 * 1024) {
+      return compute(_decodeHistoryMessages, response.body);
+    }
+    return _decodeHistoryMessages(response.body);
   }
 
   Future<List<ChatHistorySearchResult>> searchHistory(
@@ -1113,8 +1137,10 @@ class BackendClient {
   }) async {
     final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
         '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
-    final Object? decoded =
-        await _requestJson('GET', '/api/history/export?$query');
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/history/export?$query',
+    );
     if (decoded is! Map) {
       throw BackendException('Invalid history export response.');
     }
@@ -1240,8 +1266,9 @@ class BackendClient {
     if (decoded is! Map) {
       throw BackendException('Invalid work directory update response.');
     }
-    final WorkdirInfo info =
-        WorkdirInfo.fromJson(decoded.cast<String, Object?>());
+    final WorkdirInfo info = WorkdirInfo.fromJson(
+      decoded.cast<String, Object?>(),
+    );
     // The backend only validates the path; this device owns its current workdir,
     // so persist the canonical path locally and send it on later requests.
     if (info.dir.isNotEmpty) {
@@ -1324,9 +1351,7 @@ class BackendClient {
     if (decoded is! Map || decoded['entry'] is! Map) {
       throw BackendException('Invalid file upload response.');
     }
-    return FsEntry.fromJson(
-      (decoded['entry'] as Map).cast<String, Object?>(),
-    );
+    return FsEntry.fromJson((decoded['entry'] as Map).cast<String, Object?>());
   }
 
   Stream<BackendEvent> streamEvents() async* {
@@ -1345,7 +1370,7 @@ class BackendClient {
       throw _exceptionFor(response.statusCode, text);
     }
 
-    yield* _parseSse(response.stream);
+    yield* _parseSse(response.stream.timeout(const Duration(seconds: 90)));
   }
 
   Stream<BackendEvent> _parseSse(Stream<List<int>> stream) async* {
@@ -1484,13 +1509,15 @@ class BackendClient {
 
   String _downloadFileName(Map<String, String> headers, String path) {
     final String disposition = headers['content-disposition'] ?? '';
-    final RegExpMatch? encoded =
-        RegExp(r"filename\*=UTF-8''([^;]+)").firstMatch(disposition);
+    final RegExpMatch? encoded = RegExp(
+      r"filename\*=UTF-8''([^;]+)",
+    ).firstMatch(disposition);
     if (encoded != null) {
       return Uri.decodeComponent(encoded.group(1)!);
     }
-    final RegExpMatch? plain =
-        RegExp(r'filename="?([^";]+)"?').firstMatch(disposition);
+    final RegExpMatch? plain = RegExp(
+      r'filename="?([^";]+)"?',
+    ).firstMatch(disposition);
     if (plain != null) return plain.group(1)!;
     final List<String> parts =
         path.split('/').where((String p) => p.isNotEmpty).toList();
