@@ -367,6 +367,12 @@ class AppStrings {
       : 'Timed out connecting to $host. Make sure the backend is online and the QR URL is still valid.';
   String credentialConnectionFailed(String host, Object err) =>
       isZh ? '无法连接到 $host：$err' : 'Could not connect to $host: $err';
+  String get plaintextCredentialTitle =>
+      isZh ? '使用明文 HTTP 连接？' : 'Use plaintext HTTP?';
+  String plaintextCredentialBody(String host) => isZh
+      ? '$host 使用 http://，请求、聊天内容、文件和 bearer token 会以明文传输。仅在可信局域网或自托管环境中继续。'
+      : '$host uses http://. Requests, chat content, files, and the bearer token will travel without encryption. Continue only on a trusted local or self-hosted network.';
+  String get continueImport => isZh ? '继续' : 'Continue';
   String get testingCredentialConnection =>
       isZh ? '正在验证后端连接...' : 'Testing backend connection...';
   String get credentialDecryptTimedOut => isZh
@@ -380,7 +386,7 @@ class AppStrings {
   String connectionFailed(Object err) =>
       isZh ? '连接失败：$err' : 'Connection failed: $err';
   // Human-readable message for a low-level network failure, keyed by the
-  // BackendException network code (see BackendClient._networkExceptionFor).
+  // BackendException network code (see ApiTransport.networkExceptionFor).
   String networkError(String? code) {
     switch (code) {
       case 'NETWORK_HOST_LOOKUP':

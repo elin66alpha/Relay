@@ -3,8 +3,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/app_strings.dart';
 import '../../core/models/card_model.dart';
 import '../../core/models/cli_agent.dart';
+import '../../core/util/error_text.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../chat/bot_chat_controller.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -43,9 +45,9 @@ class _CardDeckScreenState extends State<CardDeckScreen>
   bool _pendingRemove = false;
 
   final List<CardModel> _cards = <CardModel>[];
+  final ValueNotifier<Offset> _drag = ValueNotifier<Offset>(Offset.zero);
   bool _loading = true;
   String? _error;
-  Offset _drag = Offset.zero;
 
   @override
   void initState() {
@@ -60,7 +62,7 @@ class _CardDeckScreenState extends State<CardDeckScreen>
           if (_pendingRemove && _cards.isNotEmpty) _cards.removeAt(0);
           _pendingRemove = false;
           _slide = null;
-          _drag = Offset.zero;
+          _drag.value = Offset.zero;
         });
         _anim.reset();
       });
@@ -69,6 +71,7 @@ class _CardDeckScreenState extends State<CardDeckScreen>
 
   @override
   void dispose() {
+    _drag.dispose();
     _anim.dispose();
     if (widget.cardsService == null) _service.close();
     super.dispose();
@@ -91,7 +94,7 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = friendlyErrorText(context.l10n, err);
         _loading = false;
       });
     }
@@ -109,23 +112,24 @@ class _CardDeckScreenState extends State<CardDeckScreen>
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (_anim.isAnimating) return;
-    setState(() => _drag += details.delta);
+    _drag.value += details.delta;
   }
 
   void _onPanEnd(DragEndDetails details) {
     if (_anim.isAnimating || _cards.isEmpty) return;
-    final bool horizontal = _drag.dx.abs() >= _drag.dy.abs();
-    final double distance = horizontal ? _drag.dx.abs() : _drag.dy.abs();
+    final Offset drag = _drag.value;
+    final bool horizontal = drag.dx.abs() >= drag.dy.abs();
+    final double distance = horizontal ? drag.dx.abs() : drag.dy.abs();
     if (distance < _threshold) {
       _flyTo(Offset.zero, removeTopCard: false);
       return;
     }
     final CardModel card = _cards.first;
-    if (horizontal && _drag.dx > 0) {
+    if (horizontal && drag.dx > 0) {
       unawaited(_execute(card));
-    } else if (horizontal && _drag.dx < 0) {
+    } else if (horizontal && drag.dx < 0) {
       _dismiss(card, 'reject', const Offset(-700, 0));
-    } else if (!horizontal && _drag.dy < 0) {
+    } else if (!horizontal && drag.dy < 0) {
       unawaited(_defer(card));
     } else {
       _dismiss(card, 'irrelevant', const Offset(0, 700));
@@ -154,7 +158,7 @@ class _CardDeckScreenState extends State<CardDeckScreen>
 
   void _flyTo(Offset target, {required bool removeTopCard}) {
     _pendingRemove = removeTopCard;
-    _slide = Tween<Offset>(begin: _drag, end: target).animate(
+    _slide = Tween<Offset>(begin: _drag.value, end: target).animate(
       CurvedAnimation(parent: _anim, curve: Curves.easeOut),
     );
     _anim.forward(from: 0);
@@ -163,7 +167,8 @@ class _CardDeckScreenState extends State<CardDeckScreen>
   // Reject / Irrelevant: record feedback (best-effort) and fly the card off.
   void _dismiss(CardModel card, String gesture, Offset target) {
     unawaited(_service.sendFeedback(card.id, gesture).catchError((_) {}));
-    _flyTo(target.translate(_drag.dx, _drag.dy), removeTopCard: true);
+    final Offset drag = _drag.value;
+    _flyTo(target.translate(drag.dx, drag.dy), removeTopCard: true);
   }
 
   // Execute (right): reuse the existing chat send path on the card's agent.
@@ -345,10 +350,10 @@ class _CardDeckScreenState extends State<CardDeckScreen>
     return Positioned(
       top: 0,
       child: AnimatedBuilder(
-        animation: _anim,
+        animation: Listenable.merge(<Listenable>[_anim, _drag]),
         child: CardWidget(card: card),
         builder: (BuildContext context, Widget? child) {
-          final Offset drag = _slide?.value ?? _drag;
+          final Offset drag = _slide?.value ?? _drag.value;
           final bool horizontal = drag.dx.abs() >= drag.dy.abs();
           final double distance = horizontal ? drag.dx.abs() : drag.dy.abs();
           final double overlayOpacity = (distance / _threshold).clamp(0.0, 1.0);
