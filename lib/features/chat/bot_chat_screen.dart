@@ -318,90 +318,111 @@ class _BotChatScreenState extends State<BotChatScreen>
                 child: SizedBox(width: 320, child: sidebar),
               ),
             Expanded(
-              child: AnimatedBuilder(
-                animation: Listenable.merge(<Listenable>[
-                  widget.agentsController,
-                  widget.machinesController,
-                  widget.chatController,
-                ]),
-                builder: (BuildContext context, Widget? _) {
-                  final CliAgent agent = widget.agentsController.activeAgent;
-                  final List<ChatMessage> messages =
-                      widget.chatController.messages;
-                  final Widget conversationChild;
-                  if (widget.chatController.isHistoryLoading &&
-                      messages.isEmpty) {
-                    conversationChild =
-                        const Center(child: CircularProgressIndicator());
-                  } else if (messages.isEmpty) {
-                    conversationChild =
-                        _EmptyChatPlaceholder(agentName: agent.label);
-                  } else {
-                    conversationChild = ListView.builder(
-                      controller: _scroll,
-                      // Reversed: offset 0 is the bottom, so opening or switching
-                      // a conversation lands on the newest message instantly with
-                      // no scroll and no top-to-bottom jump, however long the
-                      // history is. itemBuilder walks messages back-to-front.
-                      reverse: true,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                      itemCount: messages.length,
-                      itemBuilder: (BuildContext context, int index) {
-                        final ChatMessage message =
-                            messages[messages.length - 1 - index];
-                        if (widget.chatController.isNoticeMessage(message)) {
-                          return _ChatNotice(text: message.content);
+              child: Column(
+                children: <Widget>[
+                  if (usePermanentSidebar)
+                    _DesktopChatHeader(
+                      agentsController: widget.agentsController,
+                      machinesController: widget.machinesController,
+                      chatController: widget.chatController,
+                      onSearch: _showHistorySearch,
+                    ),
+                  ListenableBuilder(
+                    listenable: Listenable.merge(<Listenable>[
+                      widget.agentsController,
+                      widget.chatController,
+                    ]),
+                    builder: (BuildContext context, Widget? _) {
+                      final CliAgent agent =
+                          widget.agentsController.activeAgent;
+                      if (widget.chatController.agentLoggedIn(agent.key) !=
+                          false) {
+                        return const SizedBox.shrink();
+                      }
+                      return _NotLoggedInBanner(
+                        agentLabel: agent.label,
+                        onRecheck: widget.chatController.refreshAuthStatus,
+                      );
+                    },
+                  ),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: Listenable.merge(<Listenable>[
+                        widget.agentsController,
+                        widget.chatController,
+                      ]),
+                      builder: (BuildContext context, Widget? _) {
+                        final CliAgent agent =
+                            widget.agentsController.activeAgent;
+                        final List<ChatMessage> messages =
+                            widget.chatController.messages;
+                        if (widget.chatController.isHistoryLoading &&
+                            messages.isEmpty) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
                         }
-                        // RepaintBoundary isolates each bubble's painting so a
-                        // streaming/animating bubble does not repaint the rest
-                        // of the visible history every frame.
-                        return RepaintBoundary(
-                          key: ValueKey<String>(message.id),
-                          child: _MessageBubble(
-                            message: message,
-                            retryable:
-                                widget.chatController.isRetryable(message),
-                            streaming:
-                                widget.chatController.isStreaming(message),
-                            awaitingFirstToken:
-                                widget.chatController.isAwaitingFirstToken(
+                        if (messages.isEmpty) {
+                          return _EmptyChatPlaceholder(agentName: agent.label);
+                        }
+                        return ListView.builder(
+                          controller: _scroll,
+                          // Reversed: offset 0 is the bottom, so opening or
+                          // switching a conversation lands on the newest message
+                          // instantly with no top-to-bottom jump.
+                          reverse: true,
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                          itemCount: messages.length,
+                          itemBuilder: (BuildContext context, int index) {
+                            final ChatMessage message =
+                                messages[messages.length - 1 - index];
+                            if (widget.chatController.isNoticeMessage(
                               message,
-                            ),
-                            errorDetail: widget.chatController.errorDetailFor(
-                              message,
-                            ),
-                            system: widget.chatController.isSystemMessage(
-                              message,
-                            ),
-                            cancelled:
-                                widget.chatController.isCancelled(message),
-                            progressLines:
-                                widget.chatController.progressLinesFor(
-                              message,
-                            ),
-                            onRetry: () => widget.chatController.retry(message),
-                          ),
+                            )) {
+                              return _ChatNotice(text: message.content);
+                            }
+                            // RepaintBoundary isolates each bubble's painting so
+                            // a streaming bubble does not repaint the visible
+                            // history every frame.
+                            return RepaintBoundary(
+                              key: ValueKey<String>(message.id),
+                              child: _MessageBubble(
+                                message: message,
+                                retryable:
+                                    widget.chatController.isRetryable(message),
+                                streaming:
+                                    widget.chatController.isStreaming(message),
+                                awaitingFirstToken: widget.chatController
+                                    .isAwaitingFirstToken(message),
+                                errorDetail:
+                                    widget.chatController.errorDetailFor(
+                                  message,
+                                ),
+                                system: widget.chatController.isSystemMessage(
+                                  message,
+                                ),
+                                cancelled:
+                                    widget.chatController.isCancelled(message),
+                                progressLines:
+                                    widget.chatController.progressLinesFor(
+                                  message,
+                                ),
+                                onRetry: () =>
+                                    widget.chatController.retry(message),
+                              ),
+                            );
+                          },
                         );
                       },
-                    );
-                  }
-                  return Column(
-                    children: <Widget>[
-                      if (usePermanentSidebar)
-                        _DesktopChatHeader(
-                          agentsController: widget.agentsController,
-                          machinesController: widget.machinesController,
-                          chatController: widget.chatController,
-                          onSearch: _showHistorySearch,
-                        ),
-                      if (widget.chatController.agentLoggedIn(agent.key) ==
-                          false)
-                        _NotLoggedInBanner(
-                          agentLabel: agent.label,
-                          onRecheck: widget.chatController.refreshAuthStatus,
-                        ),
-                      Expanded(child: conversationChild),
-                      _InputBar(
+                    ),
+                  ),
+                  ListenableBuilder(
+                    listenable: Listenable.merge(<Listenable>[
+                      widget.agentsController,
+                      widget.chatController,
+                    ]),
+                    builder: (BuildContext context, Widget? _) {
+                      return _InputBar(
                         controller: _input,
                         backend: widget.chatController.backend,
                         agentKey: widget.agentsController.activeAgent.key,
@@ -412,10 +433,10 @@ class _BotChatScreenState extends State<BotChatScreen>
                         onClear: _confirmClearHistory,
                         onCompress: _sendCompact,
                         onExportMarkdown: _exportMarkdown,
-                      ),
-                    ],
-                  );
-                },
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
           ],

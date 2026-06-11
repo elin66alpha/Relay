@@ -72,8 +72,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(4, 4, 4, 12),
+                                padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
                                 child: Text(
                                   context.l10n.currentMachine,
                                   style: TextStyle(
@@ -206,6 +205,10 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       }
       rethrow;
     }
+    if (_usesPlainHttp(credential)) {
+      final bool continueImport = await _confirmPlainHttpCredential(credential);
+      if (!continueImport) return;
+    }
     final BackendClient client = BackendClient();
     try {
       final bool ok = await client.healthFor(
@@ -229,6 +232,38 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     if (!widget.requireCredential) {
       _showMessage(context.l10n.imported(credential.displayName));
     }
+  }
+
+  bool _usesPlainHttp(MachineCredential credential) {
+    return Uri.tryParse(credential.baseUrl)?.scheme.toLowerCase() == 'http';
+  }
+
+  Future<bool> _confirmPlainHttpCredential(
+    MachineCredential credential,
+  ) async {
+    if (!mounted) return false;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(context.l10n.plaintextCredentialTitle),
+        content: Text(
+          context.l10n.plaintextCredentialBody(
+            credential.hostLabel,
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(context.l10n.continueImport),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   String _credentialConnectionMessage(

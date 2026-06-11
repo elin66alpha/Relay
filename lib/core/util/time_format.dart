@@ -14,3 +14,12 @@ String formatShortTime(BuildContext context, String? iso) {
   return '${_pad2(local.month)}/${_pad2(local.day)} '
       '${_pad2(local.hour)}:${_pad2(local.minute)}';
 }
+
+String formatLongTime(String? iso) {
+  if (iso == null || iso.isEmpty) return '';
+  final DateTime? parsed = DateTime.tryParse(iso);
+  if (parsed == null) return iso.replaceFirst('T', ' ').split('.').first;
+  final DateTime local = parsed.toLocal();
+  return '${local.year}-${_pad2(local.month)}-${_pad2(local.day)} '
+      '${_pad2(local.hour)}:${_pad2(local.minute)}:${_pad2(local.second)}';
+}
