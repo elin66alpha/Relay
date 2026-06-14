@@ -204,7 +204,7 @@ class CliAgentsDrawer extends StatelessWidget {
             : null;
     return <Widget>[
       ListTile(
-        leading: Icon(_iconFor(agent.key)),
+        leading: _agentIconFor(context, agent.key),
         title: Text(agent.label),
         selected: selectedAgent,
         trailing: IconButton(
@@ -367,11 +367,38 @@ class CliAgentsDrawer extends StatelessWidget {
 // "new session" button disables before the create call would be rejected.
 const int _maxSessionsPerAgent = 8;
 
-IconData _iconFor(String key) {
+Widget _agentIconFor(BuildContext context, String key) {
+  final String? assetPath = _agentIconAssetPath(
+    key,
+    Theme.of(context).brightness,
+  );
+  if (assetPath == null) return const Icon(Icons.code_rounded);
+  return SizedBox.square(
+    dimension: 28,
+    child: Image.asset(
+      assetPath,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      excludeFromSemantics: true,
+    ),
+  );
+}
+
+String? _agentIconAssetPath(String key, Brightness brightness) {
+  final bool useInverse = brightness == Brightness.dark;
   return switch (key) {
-    'codex' => Icons.terminal_rounded,
-    'agy' => Icons.auto_awesome_motion_outlined,
-    _ => Icons.code_rounded,
+    'claude' => 'assets/agent_icons/claude.png',
+    'codex' => useInverse
+        ? 'assets/agent_icons/codex_inverse.png'
+        : 'assets/agent_icons/codex.png',
+    'agy' => 'assets/agent_icons/agy.png',
+    'opencode' => useInverse
+        ? 'assets/agent_icons/opencode_inverse.png'
+        : 'assets/agent_icons/opencode.png',
+    'hermes' => useInverse
+        ? 'assets/agent_icons/hermes_inverse.png'
+        : 'assets/agent_icons/hermes.png',
+    _ => null,
   };
 }
 

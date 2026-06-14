@@ -8,6 +8,7 @@ import '../i18n/app_strings.dart';
 import '../models/agent_options.dart';
 import '../models/agent_session.dart';
 import '../models/chat_message.dart';
+import '../models/cli_agent.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
@@ -243,12 +244,23 @@ class ChatReply {
     required this.agentKey,
     required this.agentLabel,
     required this.content,
+    this.segments = const <MessageSegment>[],
   });
 
   final String requestId;
   final String agentKey;
   final String agentLabel;
   final String content;
+  final List<MessageSegment> segments;
+}
+
+List<MessageSegment> _segmentsFromMessage(Map<String, Object?> message) {
+  final Object? raw = message['segments'];
+  if (raw is! List) return const <MessageSegment>[];
+  return raw
+      .whereType<Map>()
+      .map((Map e) => MessageSegment.fromJson(e.cast<String, Object?>()))
+      .toList(growable: false);
 }
 
 class WorkdirInfo {
@@ -821,6 +833,7 @@ class BackendClient {
       agentKey: agent['key'] as String? ?? agentKey,
       agentLabel: agent['label'] as String? ?? agentKey,
       content: message['content'] as String? ?? '',
+      segments: _segmentsFromMessage(message),
     );
   }
 
@@ -843,17 +856,37 @@ class BackendClient {
     );
   }
 
+  /// Send a /btw side question. Always streams; the backend forks the main
+  /// conversation's session so the answer has its memory without disturbing it.
+  Future<ChatReply> sendBtwMessage({
+    required String agentKey,
+    required String sessionId,
+    required String prompt,
+    required String requestId,
+    required void Function(BackendEvent event) onEvent,
+  }) {
+    return _sendMessageStreamed(
+      agentKey: agentKey,
+      sessionId: sessionId,
+      prompt: prompt,
+      requestId: requestId,
+      onEvent: onEvent,
+      path: '/api/btw',
+    );
+  }
+
   Future<ChatReply> _sendMessageStreamed({
     required String agentKey,
     required String sessionId,
     required String prompt,
     required String requestId,
     required void Function(BackendEvent event) onEvent,
+    String path = '/api/chat',
   }) async {
     final MachineCredential credential = await _requireCredential();
     final http.Request request = http.Request(
       'POST',
-      _uri(credential, '/api/chat'),
+      _uri(credential, path),
     );
     request.headers.addAll(
       await _headers(credential, accept: 'text/event-stream'),
@@ -1089,6 +1122,36 @@ class BackendClient {
     return _decodeHistoryMessages(response.body);
   }
 
+  /// Fetches the /btw side conversation tied to the given main session.
+  Future<List<ChatMessage>> fetchBtwHistory(
+    String agentKey, {
+    required String sessionId,
+  }) async {
+    final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
+        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
+    final Object? decoded =
+        await _requestJson('GET', '/api/btw/history?$query');
+    if (decoded is! Map) {
+      throw BackendException('Invalid btw history response.');
+    }
+    final List<Object?> raw = decoded['messages'] is List
+        ? (decoded['messages'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+  }
+
+  /// Resets the /btw side conversation so the next question re-forks the main one.
+  Future<void> clearBtw(String agentKey, String sessionId) async {
+    await _requestJson(
+      'POST',
+      '/api/btw/clear',
+      body: <String, Object?>{'agent': agentKey, 'sessionId': sessionId},
+    );
+  }
+
   Future<List<ChatHistorySearchResult>> searchHistory(
     String query, {
     String? agentKey,
@@ -1145,6 +1208,23 @@ class BackendClient {
       }
     }
     return result;
+  }
+
+  /// The agents the backend host currently offers. Experimental agents
+  /// (opencode, hermes) appear only once their CLI is detected, so the app's
+  /// agent list tracks what is actually installed.
+  Future<List<CliAgent>> fetchAgents() async {
+    final Object? decoded = await _requestJson('GET', '/api/agents');
+    if (decoded is! Map) {
+      throw BackendException('Invalid agents response.');
+    }
+    final List<Object?> raw = decoded['agents'] is List
+        ? (decoded['agents'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => CliAgent.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
   }
 
   /// Catalog of selectable model/effort/permission options for an agent
@@ -1429,6 +1509,7 @@ class BackendClient {
       agentKey: agent['key'] as String? ?? agentKey,
       agentLabel: agent['label'] as String? ?? agentKey,
       content: message['content'] as String? ?? '',
+      segments: _segmentsFromMessage(message),
     );
   }
 

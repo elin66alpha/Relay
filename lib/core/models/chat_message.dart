@@ -2,6 +2,24 @@ enum ChatRole { user, assistant, system }
 
 String _newMessageId() => DateTime.now().microsecondsSinceEpoch.toString();
 
+/// One assistant message within a single turn. A turn can produce several of
+/// these — the agent's mid-task follow-up notes plus its final answer — and each
+/// carries the time the backend received it so the UI can show a per-message
+/// timestamp instead of collapsing everything into one block.
+class MessageSegment {
+  const MessageSegment({required this.text, this.createdAt});
+
+  factory MessageSegment.fromJson(Map<String, Object?> json) {
+    return MessageSegment(
+      text: json['text'] as String? ?? '',
+      createdAt: DateTime.tryParse(json['ts'] as String? ?? '')?.toLocal(),
+    );
+  }
+
+  final String text;
+  final DateTime? createdAt;
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -55,6 +73,17 @@ class ChatMessage {
   final Map<String, Object?> metadata;
 
   bool get isUser => role == ChatRole.user;
+
+  /// The per-message segments parsed from metadata, or an empty list when this
+  /// message was not split into segments (rendered as a single block then).
+  List<MessageSegment> get segments {
+    final Object? raw = metadata['segments'];
+    if (raw is! List) return const <MessageSegment>[];
+    return raw
+        .whereType<Map>()
+        .map((Map e) => MessageSegment.fromJson(e.cast<String, Object?>()))
+        .toList(growable: false);
+  }
 
   ChatMessage copyWith({
     String? content,

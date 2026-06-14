@@ -266,6 +266,12 @@ class AppStrings {
   String get agentModelTitle => isZh ? '选择模型' : 'Select model';
   String get agentEffortTitle => isZh ? '思考能力' : 'Effort level';
   String get agentPermissionTitle => isZh ? '权限模式' : 'Permission mode';
+  String get agentEffortMinimal => isZh ? '极低' : 'Minimal';
+  String get agentEffortLow => isZh ? '低' : 'Low';
+  String get agentEffortMedium => isZh ? '中' : 'Medium';
+  String get agentEffortHigh => isZh ? '高' : 'High';
+  String get agentEffortExtraHigh => isZh ? '极高' : 'Extra high';
+  String get agentEffortMax => isZh ? '最高' : 'Max';
   String get agentControlsUnsupported =>
       isZh ? '该智能体不支持此项' : 'Not supported by this agent';
   String get agentControlsLoadFailed =>
@@ -291,6 +297,26 @@ class AppStrings {
   String get retry => isZh ? '重试' : 'Retry';
   String get cancelled => isZh ? '已取消' : 'Cancelled';
   String get inputHint => isZh ? '输入消息' : 'Message';
+  String get inputHintFollowUp =>
+      isZh ? '输入跟进消息…' : 'Send a follow-up…';
+  String get queuedFollowUp => isZh ? '排队中' : 'Queued';
+  String agentProgressUpdates(int count) => isZh
+      ? '思索过程 · $count 条'
+      : 'Thinking · $count ${count == 1 ? 'update' : 'updates'}';
+  String get btwTitle => isZh ? 'BTW 副手' : 'BTW sidekick';
+  String get btwSubtitle => isZh
+      ? '基于当前对话记忆的只读旁支问答，不影响主任务'
+      : 'Read-only side questions with the current chat\'s memory';
+  String get btwHint => isZh ? '问一个旁支问题…' : 'Ask a side question…';
+  String get btwTooltip => isZh ? 'BTW 旁支提问' : 'Ask a side question (BTW)';
+  String get btwNeedsConversation =>
+      isZh ? '先发送一条消息再使用 BTW' : 'Send a message first to use BTW';
+  String get btwComingSoon =>
+      isZh ? '该智能体的 BTW 功能即将推出' : 'BTW is coming soon for this agent';
+  String get btwClearTitle => isZh ? '清空 BTW' : 'Clear BTW';
+  String get btwEmpty => isZh
+      ? '在这里向副手提问，它了解当前主对话的内容。'
+      : 'Ask the sidekick here — it knows the current conversation.';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';

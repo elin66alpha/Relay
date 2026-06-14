@@ -268,6 +268,67 @@ test('generic agent errors finalize history, broadcast agent_error, and return J
   assert.equal(messages[1].metadata.errorCode, 'BOOM');
 });
 
+test('multi-message turn keeps each segment with its own timestamp', async () => {
+  const response = fakeResponse();
+  const scopeChains = new Map([['scope', Promise.resolve()]]);
+  const harness = makeHarness(
+    async (onEvent) => {
+      onEvent({ type: 'delta', text: 'Looking into it' });
+      onEvent({ type: 'segment' });
+      onEvent({ type: 'delta', text: 'All done' });
+      // Claude's result event only carries the final message.
+      return 'All done';
+    },
+    { scopeChains },
+  );
+  const responder = createChatResponder({
+    req: reqWithAccept('text/event-stream'),
+    res: response,
+  });
+
+  await runAgentTurn(turnOptions({ responder, dependencies: harness.dependencies }));
+
+  const events = parseSse(response.writes).map((event) => event.event);
+  assert.deepEqual(events, [
+    'ready',
+    'agent_queued',
+    'agent_delta',
+    'agent_segment',
+    'agent_delta',
+    'agent_done',
+  ]);
+
+  const messages = harness.histories.get('scope');
+  const assistant = messages[1];
+  // The flat content keeps both messages (not just the runner's final result).
+  assert.equal(assistant.content, 'Looking into it\n\nAll done');
+  const segments = assistant.metadata.segments;
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].text, 'Looking into it');
+  assert.equal(segments[1].text, 'All done');
+  assert.ok(segments[0].ts && segments[1].ts, 'each segment carries a timestamp');
+
+  const done = parseSse(response.writes).find((event) => event.event === 'agent_done');
+  assert.equal(done.data.message.content, 'Looking into it\n\nAll done');
+  assert.equal(done.data.message.segments.length, 2);
+});
+
+test('single-message turn keeps the runner result and one timestamped segment', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    onEvent({ type: 'delta', text: 'partial' });
+    // Runner's authoritative content is fuller than what streamed.
+    return 'partial answer';
+  });
+
+  await runAgentTurn(turnOptions({ dependencies: harness.dependencies }));
+
+  const assistant = harness.histories.get('scope')[1];
+  assert.equal(assistant.content, 'partial answer');
+  assert.equal(assistant.metadata.segments.length, 1);
+  assert.equal(assistant.metadata.segments[0].text, 'partial answer');
+  assert.ok(assistant.metadata.segments[0].ts);
+});
+
 test('no-op responder broadcasts scheduled progress and does not require task notification', async () => {
   const harness = makeHarness(async (onEvent) => {
     onEvent({ type: 'progress', line: 'quota resumed' });

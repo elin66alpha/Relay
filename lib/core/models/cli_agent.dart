@@ -26,6 +26,9 @@ class CliAgent {
   }
 }
 
+/// The agents shown before the backend reports which CLIs are actually
+/// installed. The live list comes from `/api/agents`; experimental agents
+/// (opencode, hermes) only join it once detected on the host.
 const List<CliAgent> defaultCliAgents = <CliAgent>[
   CliAgent(
     key: 'claude',
@@ -44,8 +47,25 @@ const List<CliAgent> defaultCliAgents = <CliAgent>[
   ),
 ];
 
+/// Every agent the app knows how to label, including experimental ones that may
+/// not be visible yet. Used to resolve a key (from history, cards, etc.) to a
+/// display label regardless of current availability.
+const List<CliAgent> knownCliAgents = <CliAgent>[
+  ...defaultCliAgents,
+  CliAgent(
+    key: 'opencode',
+    label: 'OpenCode',
+    description: 'OpenCode CLI',
+  ),
+  CliAgent(
+    key: 'hermes',
+    label: 'Hermes',
+    description: 'Hermes CLI',
+  ),
+];
+
 CliAgent cliAgentByKey(String? key) {
-  for (final CliAgent agent in defaultCliAgents) {
+  for (final CliAgent agent in knownCliAgents) {
     if (agent.key == key) return agent;
   }
   return defaultCliAgents.first;

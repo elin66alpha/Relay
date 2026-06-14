@@ -63,6 +63,21 @@ const BASE_MODELS = {
     },
   ],
   agy: [],
+  // opencode models are `provider/model`; these free entries work without
+  // credentials. Live discovery isn't wired for opencode, so this static list
+  // (plus models-extra.json) is the catalog. Run `opencode models` for the full
+  // set, or add paid ids via models-extra.json.
+  opencode: [
+    { id: 'opencode/big-pickle', label: 'Big Pickle (free)', args: ['-m', 'opencode/big-pickle'] },
+    { id: 'opencode/deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (free)', args: ['-m', 'opencode/deepseek-v4-flash-free'] },
+    { id: 'opencode/north-mini-code-free', label: 'North Mini Code (free)', args: ['-m', 'opencode/north-mini-code-free'] },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (free)', args: ['-m', 'opencode/nemotron-3-ultra-free'] },
+    { id: 'opencode/mimo-v2.5-free', label: 'MiMo v2.5 (free)', args: ['-m', 'opencode/mimo-v2.5-free'] },
+  ],
+  // Hermes' model is `provider/model` and is normally set via `hermes setup` /
+  // config.yaml. Left empty so the configured default is used; pin specific ids
+  // via models-extra.json to expose a picker.
+  hermes: [],
 };
 
 const EFFORTS = {
@@ -80,8 +95,20 @@ const EFFORTS = {
     { id: 'low', label: 'Low', args: ['-c', 'model_reasoning_effort=low'] },
     { id: 'medium', label: 'Medium', args: ['-c', 'model_reasoning_effort=medium'] },
     { id: 'high', label: 'High', args: ['-c', 'model_reasoning_effort=high'] },
+    { id: 'xhigh', label: 'Extra high', args: ['-c', 'model_reasoning_effort=xhigh'] },
   ],
   agy: [],
+  // opencode exposes reasoning effort via `--variant`, but valid variants are
+  // model-specific (an unsupported one errors), so it stays opt-in with no
+  // default — selecting one adds `--variant <id>`.
+  opencode: [
+    { id: 'minimal', label: 'Minimal', args: ['--variant', 'minimal'] },
+    { id: 'medium', label: 'Medium', args: ['--variant', 'medium'] },
+    { id: 'high', label: 'High', args: ['--variant', 'high'] },
+    { id: 'max', label: 'Max', args: ['--variant', 'max'] },
+  ],
+  // Hermes has no per-invocation reasoning-effort flag.
+  hermes: [],
 };
 
 // Permission tiers. The bypass tier is listed first but is no longer the
@@ -154,6 +181,38 @@ const PERMISSIONS = {
       args: ['--sandbox'],
     },
   ],
+  // opencode `run` is non-interactive, so the default tier auto-approves (a
+  // prompt would hang). "Ask" leaves approvals to opencode (may block edits).
+  opencode: [
+    {
+      id: 'bypass',
+      label: 'Bypass (full auto)',
+      description: 'Auto-approve every tool, including edits and commands.',
+      args: ['--dangerously-skip-permissions'],
+    },
+    {
+      id: 'ask',
+      label: 'Ask',
+      description: 'Let opencode decide; some actions may be blocked.',
+      args: [],
+    },
+  ],
+  // Hermes' chat -q is non-interactive; --yolo bypasses approval prompts so the
+  // run can't hang. "Cautious" omits it (Hermes may block dangerous commands).
+  hermes: [
+    {
+      id: 'yolo',
+      label: 'Auto-approve (yolo)',
+      description: 'Bypass all approval prompts.',
+      args: ['--yolo'],
+    },
+    {
+      id: 'cautious',
+      label: 'Cautious',
+      description: 'Keep approvals; dangerous commands may be blocked.',
+      args: [],
+    },
+  ],
 };
 
 // claude/codex/agy CLI invocation + how to query/update each binary.
@@ -161,6 +220,9 @@ const CLI = {
   claude: { bin: 'claude', versionArgs: ['--version'], updateArgs: ['update'] },
   codex: { bin: 'codex', versionArgs: ['--version'], updateArgs: ['update'] },
   agy: { bin: 'agy', versionArgs: ['--version'], updateArgs: ['update'] },
+  // TODO(opencode/hermes): confirm version/update subcommands once installed.
+  opencode: { bin: 'opencode', versionArgs: ['--version'], updateArgs: ['upgrade'] },
+  hermes: { bin: 'hermes', versionArgs: ['--version'], updateArgs: ['update'] },
 };
 
 // The initial effort / permission for a never-configured scope. Every value is
@@ -174,13 +236,17 @@ const AGENT_DEFAULTS = {
   claude: { effort: 'high', permission: 'acceptEdits' },
   codex: { effort: 'medium', permission: 'workspace-write' },
   agy: { permission: 'sandbox' },
+  // Non-interactive defaults that can actually do work; effort stays unset
+  // (model-specific) and opencode's model default comes from the catalog.
+  opencode: { permission: 'bypass' },
+  hermes: { permission: 'yolo' },
 };
 
 // Agents whose model group gets an automatic default (the newest catalog entry).
 // agy is excluded: its discovered ids use an unverified --model arg, so leaving
 // it unset keeps the default run on agy's own built-in model; selection is
 // opt-in.
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex']);
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
 
 function defaultsFor(agentKey) {
   const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
@@ -215,8 +281,9 @@ function mergeExtraModels(agentKey, base) {
     let args = Array.isArray(item.args) ? item.args : null;
     if (!args) {
       if (agentKey === 'claude') args = ['--model', item.id];
-      else if (agentKey === 'codex') args = ['-m', item.id];
-      else args = [];
+      else if (agentKey === 'codex' || agentKey === 'opencode' || agentKey === 'hermes') {
+        args = ['-m', item.id];
+      } else args = [];
     }
     seen.add(item.id);
     merged.push({ id: item.id, label: item.label || item.id, args });

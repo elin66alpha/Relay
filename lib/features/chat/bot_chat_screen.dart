@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -15,11 +16,13 @@ import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/util/time_format.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
+import 'btw_dialog.dart';
 
 class BotChatScreen extends StatefulWidget {
   const BotChatScreen({
@@ -46,6 +49,8 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   bool _autoScrollQueued = false;
   int _lastMessageCount = 0;
+  bool _agentsSynced = false;
+  bool _agentsRefreshing = false;
 
   @override
   void initState() {
@@ -88,6 +93,24 @@ class _BotChatScreenState extends State<BotChatScreen>
     _syncContext();
   }
 
+  Future<void> _refreshAgents() async {
+    // Rapid context syncs can call this before the first fetch resolves; one
+    // in-flight request at a time is enough.
+    if (_agentsRefreshing) return;
+    _agentsRefreshing = true;
+    try {
+      final List<CliAgent> agents =
+          await widget.chatController.backend.fetchAgents();
+      if (!mounted) return;
+      widget.agentsController.syncAgents(agents);
+      _agentsSynced = true;
+    } catch (_) {
+      // Best-effort: keep the built-in list and retry on the next context sync.
+    } finally {
+      _agentsRefreshing = false;
+    }
+  }
+
   void _onSettingsChanged() {
     widget.chatController.setLanguage(widget.settingsController.language);
     widget.chatController.setNotificationPreferences(
@@ -107,6 +130,9 @@ class _BotChatScreenState extends State<BotChatScreen>
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) return;
+    // Pull the host's live agent list so experimental agents (opencode, hermes)
+    // appear automatically once their CLI is installed. Retries until it lands.
+    if (!_agentsSynced) unawaited(_refreshAgents());
     final bool hadMachine = widget.chatController.machine != null;
     final bool machineChanged = widget.chatController.machine?.id != machine.id;
     if (widget.chatController.agent.key != active.key || machineChanged) {
@@ -232,6 +258,35 @@ class _BotChatScreenState extends State<BotChatScreen>
     }
   }
 
+  Future<void> _showBtw() async {
+    final CliAgent agent = widget.agentsController.activeAgent;
+    // Codex and opencode buttons are reserved for a future equivalent (opencode
+    // can fork via --fork); only Claude is wired up today.
+    if (agent.key == 'codex' || agent.key == 'opencode') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.btwComingSoon)),
+      );
+      return;
+    }
+    if (agent.key != 'claude') return;
+    final String? sessionId = widget.chatController.activeSessionId;
+    if (widget.chatController.messageCount == 0 ||
+        sessionId == null ||
+        sessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.btwNeedsConversation)),
+      );
+      return;
+    }
+    await BtwDialog.show(
+      context,
+      backend: widget.chatController.backend,
+      agentKey: agent.key,
+      sessionId: sessionId,
+      language: widget.settingsController.language,
+    );
+  }
+
   Future<void> _exportMarkdown() async {
     try {
       final ConversationExport export =
@@ -296,6 +351,11 @@ class _BotChatScreenState extends State<BotChatScreen>
                 chatController: widget.chatController,
               ),
               actions: <Widget>[
+                _BtwButton(
+                  agentsController: widget.agentsController,
+                  chatController: widget.chatController,
+                  onPressed: _showBtw,
+                ),
                 _SearchButton(
                   chatController: widget.chatController,
                   onPressed: _showHistorySearch,
@@ -326,6 +386,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                       machinesController: widget.machinesController,
                       chatController: widget.chatController,
                       onSearch: _showHistorySearch,
+                      onBtw: _showBtw,
                     ),
                   ListenableBuilder(
                     listenable: Listenable.merge(<Listenable>[
@@ -403,12 +464,16 @@ class _BotChatScreenState extends State<BotChatScreen>
                                 ),
                                 cancelled:
                                     widget.chatController.isCancelled(message),
+                                queued:
+                                    widget.chatController.isQueued(message),
                                 progressLines:
                                     widget.chatController.progressLinesFor(
                                   message,
                                 ),
                                 onRetry: () =>
                                     widget.chatController.retry(message),
+                                onCancelQueued: () =>
+                                    widget.chatController.cancelQueued(message),
                               ),
                             );
                           },
@@ -452,12 +517,14 @@ class _DesktopChatHeader extends StatelessWidget {
     required this.machinesController,
     required this.chatController,
     required this.onSearch,
+    required this.onBtw,
   });
 
   final CliAgentsController agentsController;
   final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final VoidCallback onSearch;
+  final VoidCallback onBtw;
 
   @override
   Widget build(BuildContext context) {
@@ -479,6 +546,11 @@ class _DesktopChatHeader extends StatelessWidget {
                   machinesController: machinesController,
                   chatController: chatController,
                 ),
+              ),
+              _BtwButton(
+                agentsController: agentsController,
+                chatController: chatController,
+                onPressed: onBtw,
               ),
               _SearchButton(
                 chatController: chatController,
@@ -542,6 +614,46 @@ class _ChatTitle extends StatelessWidget {
                 ),
               ),
           ],
+        );
+      },
+    );
+  }
+}
+
+// The /btw sidekick entry point, sitting just left of search. Shown only for
+// agents that have (or will have) the feature: Claude works today; Codex and
+// opencode are reserved placeholders. It stays enabled while the main agent is
+// working — that is exactly when a quick side question is useful — but is
+// disabled until the conversation has something to fork from.
+class _BtwButton extends StatelessWidget {
+  const _BtwButton({
+    required this.agentsController,
+    required this.chatController,
+    required this.onPressed,
+  });
+
+  final CliAgentsController agentsController;
+  final BotChatController chatController;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[agentsController, chatController]),
+      builder: (BuildContext context, Widget? _) {
+        final String agentKey = agentsController.activeAgent.key;
+        const Set<String> btwAgents = <String>{'claude', 'codex', 'opencode'};
+        if (!btwAgents.contains(agentKey)) {
+          return const SizedBox.shrink();
+        }
+        // Reserved placeholders (codex, opencode) can always open to surface the
+        // "coming soon" notice; Claude needs an existing conversation to fork.
+        final bool canUse =
+            agentKey != 'claude' || chatController.messageCount > 0;
+        return IconButton(
+          icon: const Icon(Icons.lightbulb_outline_rounded),
+          tooltip: context.l10n.btwTooltip,
+          onPressed: canUse ? onPressed : null,
         );
       },
     );
@@ -885,7 +997,9 @@ class _InputBarState extends State<_InputBar> {
   }
 
   void _sendText() {
-    if (widget.isThinking || !_hasText) return;
+    // Sending is allowed even while a turn runs: the controller queues the text
+    // as a follow-up and auto-sends it when the conversation frees up.
+    if (!_hasText) return;
     _closeActions();
     widget.onSend();
   }
@@ -907,7 +1021,10 @@ class _InputBarState extends State<_InputBar> {
     final Widget input = _MessageTextField(
       focusNode: _inputFocus,
       controller: widget.controller,
-      enabled: !widget.isThinking,
+      enabled: true,
+      hintText: widget.isThinking
+          ? context.l10n.inputHintFollowUp
+          : context.l10n.inputHint,
       onTap: _closeActions,
     );
     return DecoratedBox(
@@ -941,24 +1058,27 @@ class _InputBarState extends State<_InputBar> {
                     SizedBox.square(
                       dimension: 44,
                       child: IconButton.filledTonal(
-                        onPressed: widget.isThinking
-                            ? canCancel
-                                ? widget.onCancel
-                                : null
-                            : _hasText
-                                ? _sendText
+                        // With text present, the button always sends (queuing a
+                        // follow-up while a turn runs). With no text mid-turn it
+                        // stops the turn; otherwise it opens the actions panel.
+                        onPressed: _hasText
+                            ? _sendText
+                            : widget.isThinking
+                                ? canCancel
+                                    ? widget.onCancel
+                                    : null
                                 : _toggleActions,
                         icon: Icon(
-                          widget.isThinking
-                              ? Icons.stop_rounded
-                              : _hasText
-                                  ? Icons.arrow_upward_rounded
+                          _hasText
+                              ? Icons.arrow_upward_rounded
+                              : widget.isThinking
+                                  ? Icons.stop_rounded
                                   : Icons.add_rounded,
                         ),
-                        tooltip: widget.isThinking
-                            ? context.l10n.stop
-                            : _hasText
-                                ? context.l10n.send
+                        tooltip: _hasText
+                            ? context.l10n.send
+                            : widget.isThinking
+                                ? context.l10n.stop
                                 : context.l10n.moreChatActions,
                       ),
                     ),
@@ -993,12 +1113,14 @@ class _MessageTextField extends StatelessWidget {
     required this.focusNode,
     required this.controller,
     required this.enabled,
+    required this.hintText,
     required this.onTap,
   });
 
   final FocusNode focusNode;
   final TextEditingController controller;
   final bool enabled;
+  final String hintText;
   final VoidCallback onTap;
 
   @override
@@ -1013,7 +1135,7 @@ class _MessageTextField extends StatelessWidget {
       maxLines: 6,
       textInputAction: TextInputAction.newline,
       decoration: InputDecoration(
-        hintText: context.l10n.inputHint,
+        hintText: hintText,
         filled: true,
         fillColor: colors.surface,
         border: OutlineInputBorder(
@@ -1129,8 +1251,10 @@ class _MessageBubble extends StatelessWidget {
     required this.errorDetail,
     required this.system,
     required this.cancelled,
+    required this.queued,
     required this.progressLines,
     required this.onRetry,
+    required this.onCancelQueued,
   });
 
   final ChatMessage message;
@@ -1140,8 +1264,10 @@ class _MessageBubble extends StatelessWidget {
   final String? errorDetail;
   final bool system;
   final bool cancelled;
+  final bool queued;
   final List<String> progressLines;
   final VoidCallback onRetry;
+  final VoidCallback onCancelQueued;
 
   @override
   Widget build(BuildContext context) {
@@ -1162,6 +1288,17 @@ class _MessageBubble extends StatelessWidget {
             color: colors.outlineVariant,
           );
 
+    // A turn can leave several assistant messages (mid-task follow-ups + a final
+    // answer); render them as separate, individually timestamped blocks. A single
+    // message keeps the simpler one-block layout with a single timestamp below.
+    final List<MessageSegment> segments = message.segments;
+    final bool segmented = !isUser && !system && segments.length > 1;
+    final DateTime stampTime = (!isUser &&
+            segments.isNotEmpty &&
+            segments.first.createdAt != null)
+        ? segments.first.createdAt!
+        : message.createdAt;
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
@@ -1175,7 +1312,8 @@ class _MessageBubble extends StatelessWidget {
             margin: const EdgeInsets.symmetric(vertical: 5),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
             decoration: BoxDecoration(
-              color: bubbleColor,
+              // A queued follow-up is dimmed until it is actually sent.
+              color: queued ? bubbleColor.withValues(alpha: 0.55) : bubbleColor,
               borderRadius: BorderRadius.circular(12),
               border: border,
             ),
@@ -1185,6 +1323,12 @@ class _MessageBubble extends StatelessWidget {
               children: <Widget>[
                 if (awaitingFirstToken && message.content.isEmpty)
                   _TypingDots(color: textColor)
+                else if (segmented)
+                  _SegmentedContent(
+                    segments: segments,
+                    color: textColor,
+                    formatInlineEmphasis: !streaming,
+                  )
                 else if (message.content.isNotEmpty)
                   _MessageText(
                     text: message.content,
@@ -1210,6 +1354,46 @@ class _MessageBubble extends StatelessWidget {
               ],
             ),
           ),
+          // A pending follow-up shows a "queued" affordance instead of a time:
+          // it has not been sent yet and can still be cancelled.
+          if (queued)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(Icons.schedule_rounded, size: 13, color: colors.outline),
+                  const SizedBox(width: 4),
+                  Text(
+                    context.l10n.queuedFollowUp,
+                    style: TextStyle(fontSize: 11, color: colors.outline),
+                  ),
+                  const SizedBox(width: 10),
+                  InkWell(
+                    onTap: onCancelQueued,
+                    child: Text(
+                      context.l10n.cancel,
+                      style: TextStyle(fontSize: 11, color: colors.primary),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          // Every message shows when it was sent/received. Segmented bubbles also
+          // carry an inline time per follow-up, so the trailing stamp is hidden
+          // for them to avoid duplicating the last segment's time.
+          else if (!segmented &&
+              !(awaitingFirstToken && message.content.isEmpty))
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
+              child: Text(
+                formatShortTime(context, stampTime.toIso8601String()),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: colors.outline,
+                ),
+              ),
+            ),
           if (retryable) ...<Widget>[
             if (errorDetail != null && errorDetail!.isNotEmpty)
               Padding(
@@ -1238,6 +1422,119 @@ class _MessageBubble extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// Renders a multi-message assistant turn. The final message is always shown in
+// full; the agent's earlier phased "thinking" reports are collapsed behind a
+// toggle so they don't drown out the result, but stay one tap away for anyone
+// who wants to follow the reasoning.
+class _SegmentedContent extends StatefulWidget {
+  const _SegmentedContent({
+    required this.segments,
+    required this.color,
+    required this.formatInlineEmphasis,
+  });
+
+  final List<MessageSegment> segments;
+  final Color color;
+  final bool formatInlineEmphasis;
+
+  @override
+  State<_SegmentedContent> createState() => _SegmentedContentState();
+}
+
+class _SegmentedContentState extends State<_SegmentedContent> {
+  bool _expanded = false;
+
+  Widget _segmentText(MessageSegment segment) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _MessageText(
+          text: segment.text,
+          color: widget.color,
+          formatInlineEmphasis: widget.formatInlineEmphasis,
+        ),
+        if (segment.createdAt != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              formatShortTime(context, segment.createdAt!.toIso8601String()),
+              style: TextStyle(
+                fontSize: 11,
+                color: widget.color.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<MessageSegment> nonEmpty = widget.segments
+        .where((MessageSegment s) => s.text.trim().isNotEmpty)
+        .toList(growable: false);
+    if (nonEmpty.isEmpty) return const SizedBox.shrink();
+    if (nonEmpty.length == 1) return _segmentText(nonEmpty.first);
+
+    final List<MessageSegment> earlier =
+        nonEmpty.sublist(0, nonEmpty.length - 1);
+    final MessageSegment last = nonEmpty.last;
+    final Color toggleColor = widget.color.withValues(alpha: 0.7);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  _expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 16,
+                  color: toggleColor,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  context.l10n.agentProgressUpdates(earlier.length),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: toggleColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded) ...<Widget>[
+          const SizedBox(height: 6),
+          for (final MessageSegment segment in earlier) ...<Widget>[
+            _segmentText(segment),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Divider(
+                height: 1,
+                thickness: 1,
+                color: widget.color.withValues(alpha: 0.15),
+              ),
+            ),
+          ],
+        ] else
+          const SizedBox(height: 8),
+        _segmentText(last),
+      ],
     );
   }
 }
