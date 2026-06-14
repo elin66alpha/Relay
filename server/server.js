@@ -16,6 +16,7 @@ const {
   getAgent,
   listAgents,
   runAgent,
+  runBtw,
   clearSession,
 } = require('./lib/agents');
 const {
@@ -97,6 +98,7 @@ const createSessionsRouter = require('./routes/sessions');
 const createQuotaRouter = require('./routes/quota');
 const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
+const createBtwRouter = require('./routes/btw');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -758,6 +760,7 @@ const routeContext = {
   resolveUploadTarget,
   revokeTokenById,
   runAgentTurn,
+  runBtw,
   runningScopes,
   safeDownloadName,
   scopeChains,
@@ -783,6 +786,7 @@ app.use(createMetaRouter(routeContext));
 app.use(createPushRouter(routeContext));
 app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
+app.use(createBtwRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 

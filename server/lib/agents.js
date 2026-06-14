@@ -103,6 +103,67 @@ function clearSession(sessionKey) {
   return true;
 }
 
+// Experimental agents (opencode, hermes) are only offered once their CLI is
+// actually present on the host, so the app hides them until installed. Some
+// installers (opencode) put the binary in a per-user dir that isn't on the
+// server's PATH, so detection scans PATH first, then known fallback locations.
+// Results are cached briefly so /api/agents stays fast.
+const LOCATE_BIN_TTL_MS = 60 * 1000;
+const locateBinCache = new Map();
+
+const BIN_FALLBACKS = {
+  opencode: [path.join(os.homedir(), '.opencode', 'bin', 'opencode')],
+  hermes: [path.join(os.homedir(), '.local', 'bin', 'hermes')],
+};
+
+function executableInPath(bin) {
+  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';')
+      : [''];
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const full = path.join(dir, bin + ext);
+      try {
+        fs.accessSync(full, fs.constants.X_OK);
+        return full;
+      } catch (_err) {
+        // Keep scanning.
+      }
+    }
+  }
+  return null;
+}
+
+// Resolve a CLI to a runnable path: PATH first (return the bare name so spawn
+// uses PATH), then per-user fallback locations (return the absolute path).
+// Returns null when the binary can't be found anywhere.
+function locateBin(bin) {
+  const cached = locateBinCache.get(bin);
+  if (cached && Date.now() - cached.at < LOCATE_BIN_TTL_MS) {
+    return cached.value;
+  }
+  let value = executableInPath(bin) ? bin : null;
+  if (!value) {
+    for (const candidate of BIN_FALLBACKS[bin] || []) {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        value = candidate;
+        break;
+      } catch (_err) {
+        // Try the next candidate.
+      }
+    }
+  }
+  locateBinCache.set(bin, { value, at: Date.now() });
+  return value;
+}
+
+function commandExists(bin) {
+  return locateBin(bin) !== null;
+}
+
 function emit(onEvent, event) {
   if (typeof onEvent !== 'function' || !event) return;
   try {
@@ -279,16 +340,35 @@ function toolBrief(name, input) {
   return `${name}${detail ? `: ${oneLine(detail, 80)}` : ''}`;
 }
 
-function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
+// Core Claude invocation shared by the normal chat runner and the /btw sidekick.
+// `resumeId` resumes that session (optionally forked so the original is left
+// untouched); when null a brand-new session is started. The resolved/forked
+// session id is persisted under `sessionKey`.
+function runClaudeInvocation({
+  prompt,
+  onEvent,
+  signal,
+  workdir,
+  settings,
+  sessionKey,
+  resumeId = null,
+  forkSession = false,
+  canRetry = true,
+  retry,
+}) {
   const cwd = workdir || getDefaultWorkdir();
-  const prior = getSession(sessionKey);
-  const resuming = !!(prior && prior.id);
+  const resuming = !!resumeId;
   // Resume reuses the saved session ID; new conversations use our UUID as
   // --session-id until the CLI reports the canonical ID.
-  let sessionId = resuming ? prior.id : crypto.randomUUID();
+  let sessionId = resuming ? resumeId : crypto.randomUUID();
   let finalText = '';
   let isError = false;
-  const emitDelta = makeDeltaEmitter(onEvent);
+  // A turn can contain several assistant messages (Claude's mid-task follow-up
+  // notes, then a final summary). Each distinct message id marks a new segment;
+  // emitting a `segment` boundary lets the app keep every message with its own
+  // timestamp instead of collapsing them into the final result text.
+  let emitDelta = makeDeltaEmitter(onEvent);
+  let currentMsgId = null;
 
   // model / effort / permission for this scope. buildArgs supplies the
   // permission flag too; an unconfigured scope defaults to the acceptEdits
@@ -301,8 +381,15 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
     '--verbose',
     ...buildArgs('claude', settings),
   ];
-  if (resuming) args.push('--resume', sessionId);
-  else args.push('--session-id', sessionId);
+  if (resuming) {
+    args.push('--resume', sessionId);
+    // Forking branches the conversation into a new session id, inheriting the
+    // original's full memory without writing back to it — this is how /btw asks
+    // a side question without disturbing the main task.
+    if (forkSession) args.push('--fork-session');
+  } else {
+    args.push('--session-id', sessionId);
+  }
   args.push(String(prompt));
 
   return finishRun(spawnStream({
@@ -324,6 +411,13 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
         event.message &&
         Array.isArray(event.message.content)
       ) {
+        const msgId = event.message.id || 'msg';
+        if (currentMsgId !== null && msgId !== currentMsgId) {
+          // Claude moved on to a fresh follow-up message in the same turn.
+          emit(onEvent, { type: 'segment' });
+          emitDelta = makeDeltaEmitter(onEvent);
+        }
+        currentMsgId = msgId;
         for (const block of event.message.content) {
           if (block.type === 'text' && block.text) {
             emitDelta(block.text);
@@ -340,7 +434,7 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
     finalize: ({ stderr }) => {
       const error = String(stderr).trim();
       if (finalText.trim()) {
-        if (!isError) setSession(sessionKey, { id: sessionId });
+        if (!isError && sessionKey) setSession(sessionKey, { id: sessionId });
         if (isError && isAuthError(finalText)) return { __authError: true };
         return `${isError ? 'Claude returned an error:\n' : ''}${finalText.trim()}`;
       }
@@ -351,16 +445,68 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
           error,
         )
       ) {
-        clearSession(sessionKey);
-        return { __retry: true };
+        if (canRetry) {
+          if (sessionKey) clearSession(sessionKey);
+          return { __retry: true };
+        }
       }
       if (isAuthError(error)) return { __authError: true };
       return error || '(claude produced no output)';
     },
-  }), {
-    agentKey: 'claude',
+  }), { agentKey: 'claude', onEvent, retry });
+}
+
+function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  const prior = getSession(sessionKey);
+  return runClaudeInvocation({
+    prompt,
     onEvent,
-    retry: () => runClaude(prompt, onEvent, sessionKey, signal, workdir, settings),
+    signal,
+    workdir,
+    settings,
+    sessionKey,
+    resumeId: prior && prior.id ? prior.id : null,
+    retry: () =>
+      runClaude(prompt, onEvent, sessionKey, signal, workdir, settings),
+  });
+}
+
+// The /btw sidekick: a read-only side question that inherits the main
+// conversation's memory. The first question forks the main Claude session (so it
+// sees everything so far without ever writing back to it); follow-up questions
+// resume that fork so the side chat stays coherent. Permission is forced to the
+// plan (read-only) tier — the sidekick never edits.
+function runBtw(prompt, onEvent, options = {}) {
+  const { mainSessionKey, btwSessionKey, signal, workdir, settings } = options;
+  const readOnlySettings = { ...(settings || {}), permission: 'plan' };
+  const btwPrior = getSession(btwSessionKey);
+  if (btwPrior && btwPrior.id) {
+    return runClaudeInvocation({
+      prompt,
+      onEvent,
+      signal,
+      workdir,
+      settings: readOnlySettings,
+      sessionKey: btwSessionKey,
+      resumeId: btwPrior.id,
+      // If the side fork is gone, clear it and re-fork from the main thread.
+      canRetry: true,
+      retry: () => runBtw(prompt, onEvent, options),
+    });
+  }
+  const mainPrior = getSession(mainSessionKey);
+  const mainSessionId = mainPrior && mainPrior.id ? mainPrior.id : null;
+  return runClaudeInvocation({
+    prompt,
+    onEvent,
+    signal,
+    workdir,
+    settings: readOnlySettings,
+    sessionKey: btwSessionKey,
+    resumeId: mainSessionId,
+    forkSession: !!mainSessionId,
+    // Forking from the main session: never clear the main session on failure.
+    canRetry: false,
   });
 }
 
@@ -418,7 +564,10 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
 
   let threadId = resuming ? prior.id : null;
   let sawTextDelta = false;
-  const emitDelta = makeDeltaEmitter(onEvent);
+  // Codex can emit several agent_message items in one turn; each completed
+  // message starts a new segment so follow-ups keep their own timestamp.
+  let emitDelta = makeDeltaEmitter(onEvent);
+  let pendingNewSegment = false;
 
   return finishRun(spawnStream({
     cmd: 'codex',
@@ -443,12 +592,19 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
             ? event.delta
             : '';
       if (event.type && String(event.type).includes('delta') && deltaText) {
+        if (pendingNewSegment) {
+          emit(onEvent, { type: 'segment' });
+          emitDelta = makeDeltaEmitter(onEvent);
+          pendingNewSegment = false;
+        }
         sawTextDelta = true;
         emitDelta(deltaText);
       }
       if (event.type !== 'item.completed' || !event.item) return;
       if (event.item.type === 'agent_message' && event.item.text) {
         if (sawTextDelta) emitDelta(event.item.text);
+        // The next agent_message (if any) belongs to a new segment.
+        pendingNewSegment = true;
       }
       const label = codexItemLabel(event.item);
       if (label) emit(onEvent, label);
@@ -497,9 +653,93 @@ const AGY_LAST_CONV = path.join(
   'last_conversations.json',
 );
 
+function agyReplyFromTranscript(lines, prompt) {
+  const expectedPrompt = String(prompt || '').trim();
+  if (!expectedPrompt) return '';
+
+  const events = [];
+  for (const line of lines) {
+    if (!String(line || '').trim()) {
+      events.push(null);
+      continue;
+    }
+    try {
+      events.push(JSON.parse(line));
+    } catch (_err) {
+      events.push(null);
+    }
+  }
+
+  let currentUserInputIndex = -1;
+  for (let i = 0; i < events.length; i++) {
+    const obj = events[i];
+    if (
+      obj &&
+      obj.source === 'USER_EXPLICIT' &&
+      obj.type === 'USER_INPUT' &&
+      typeof obj.content === 'string' &&
+      obj.content.trim() === expectedPrompt
+    ) {
+      currentUserInputIndex = i;
+    }
+  }
+  if (currentUserInputIndex === -1) return '';
+
+  let reply = '';
+  for (let i = currentUserInputIndex + 1; i < events.length; i++) {
+    const obj = events[i];
+    if (
+      obj &&
+      obj.source === 'MODEL' &&
+      obj.type === 'PLANNER_RESPONSE' &&
+      typeof obj.content === 'string' &&
+      obj.content.trim()
+    ) {
+      reply = obj.content.trim();
+    }
+  }
+  return reply;
+}
+
+function agyTranscriptPath(convId) {
+  if (!convId) return null;
+  const logDir = path.join(
+    os.homedir(),
+    '.gemini',
+    'antigravity-cli',
+    'brain',
+    convId,
+    '.system_generated',
+    'logs',
+  );
+  const fullPath = path.join(logDir, 'transcript_full.jsonl');
+  const normalPath = path.join(logDir, 'transcript.jsonl');
+  if (fs.existsSync(fullPath)) return fullPath;
+  if (fs.existsSync(normalPath)) return normalPath;
+  return null;
+}
+
+function readTranscriptLines(targetPath) {
+  return fs
+    .readFileSync(targetPath, 'utf-8')
+    .trim()
+    .split('\n');
+}
+
+function agyTranscriptSnapshot(convId) {
+  const targetPath = agyTranscriptPath(convId);
+  if (!targetPath) return null;
+  return {
+    path: targetPath,
+    lineCount: readTranscriptLines(targetPath).length,
+  };
+}
+
 function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
+  const priorConvId = prior && prior.id ? prior.id : null;
+  const priorTranscript = agyTranscriptSnapshot(priorConvId);
   emit(onEvent, 'Antigravity is working...');
   // agy exposes no model/effort; buildArgs only yields the permission flag
   // (default = --sandbox). The prompt goes last, after every flag, so prompt
@@ -534,41 +774,26 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
       }
 
       // agy --print can emit the entire resumed conversation to stdout. Read
-      // the transcript and return only the last MODEL PLANNER_RESPONSE.
+      // the transcript, but only trust a response that appears after this
+      // turn's USER_INPUT. Otherwise a stale transcript tail can make the app
+      // show the previous answer for the current prompt.
       if (convId) {
         try {
-          const logDir = path.join(
-            os.homedir(),
-            '.gemini',
-            'antigravity-cli',
-            'brain',
-            convId,
-            '.system_generated',
-            'logs',
-          );
-          const fullPath = path.join(logDir, 'transcript_full.jsonl');
-          const normalPath = path.join(logDir, 'transcript.jsonl');
-          const targetPath = fs.existsSync(fullPath) ? fullPath : normalPath;
-          if (fs.existsSync(targetPath)) {
-            const lines = fs
-              .readFileSync(targetPath, 'utf-8')
-              .trim()
-              .split('\n');
-            for (let i = lines.length - 1; i >= 0; i--) {
-              if (!lines[i].trim()) continue;
-              try {
-                const obj = JSON.parse(lines[i]);
-                if (
-                  obj.source === 'MODEL' &&
-                  obj.type === 'PLANNER_RESPONSE' &&
-                  obj.content
-                ) {
-                  return obj.content.trim();
-                }
-              } catch (_err) {
-                // Skip malformed transcript lines.
-              }
-            }
+          const targetPath = agyTranscriptPath(convId);
+          if (targetPath) {
+            const lines = readTranscriptLines(targetPath);
+            const parseOnlyNewLines =
+              priorConvId === convId &&
+              priorTranscript &&
+              priorTranscript.path === targetPath &&
+              lines.length >= priorTranscript.lineCount;
+            const transcriptReply = agyReplyFromTranscript(
+              parseOnlyNewLines
+                ? lines.slice(priorTranscript.lineCount)
+                : lines,
+              prompt,
+            );
+            if (transcriptReply) return transcriptReply;
           }
         } catch (_err) {
           // Fall back to stdout if transcript parsing fails.
@@ -581,6 +806,149 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
       return text || fallback(stdout, stderr, code, 'agy');
     },
   }), { agentKey: 'agy', onEvent });
+}
+
+// opencode: `run --format json` streams JSON events (one per line). Each carries
+// the sessionID (captured for resume) and `type:"text"` parts hold the assistant
+// output; a new messageID marks a follow-up message (segment). Model / effort
+// (--variant) / permission flags come from buildArgs; -s resumes a session.
+function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  const cwd = workdir || getDefaultWorkdir();
+  const bin = locateBin('opencode') || 'opencode';
+  const prior = getSession(sessionKey);
+  const resuming = !!(prior && prior.id);
+  let sessionId = resuming ? prior.id : null;
+  // Accumulate the streamed text so a single-message turn has an authoritative
+  // result; multi-message turns are rebuilt from segments by agent-turn.
+  let finalText = '';
+  const onDelta = (event) => {
+    if (event && event.type === 'delta' && event.text) finalText += event.text;
+    onEvent(event);
+  };
+  let emitDelta = makeDeltaEmitter(onDelta);
+  let currentMsgId = null;
+
+  const args = [
+    'run',
+    '--format',
+    'json',
+    ...buildArgs('opencode', settings),
+    '--dir',
+    cwd,
+  ];
+  if (resuming) args.push('--session', sessionId);
+  args.push(String(prompt));
+
+  return finishRun(spawnStream({
+    cmd: bin,
+    args,
+    cwd,
+    label: 'opencode',
+    signal,
+    onLine: (line) => {
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch (_err) {
+        return;
+      }
+      if (event.sessionID) sessionId = event.sessionID;
+      const part = event.part || {};
+      if (event.type === 'text' && typeof part.text === 'string' && part.text) {
+        const msgId = part.messageID || 'msg';
+        if (currentMsgId !== null && msgId !== currentMsgId) {
+          emit(onEvent, { type: 'segment' });
+          emitDelta = makeDeltaEmitter(onDelta);
+        }
+        currentMsgId = msgId;
+        emitDelta(part.text);
+      } else if (event.type === 'tool' || part.type === 'tool') {
+        const name = part.tool || part.name || event.tool || 'tool';
+        emit(onEvent, `Tool: ${oneLine(name, 60)}`);
+      }
+    },
+    finalize: ({ code, stdout, stderr }) => {
+      if (finalText.trim()) {
+        if (sessionId) setSession(sessionKey, { id: sessionId });
+        return finalText.trim();
+      }
+      const error = String(stderr).trim();
+      if (
+        resuming &&
+        /session.*(not found|does not exist)|no.*session|unknown session/i.test(
+          error,
+        )
+      ) {
+        clearSession(sessionKey);
+        return { __retry: true };
+      }
+      if (isAuthError(error) || isAuthError(stdout)) return { __authError: true };
+      return fallback(stdout, stderr, code, 'opencode');
+    },
+  }), {
+    agentKey: 'opencode',
+    onEvent,
+    retry: () =>
+      runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings),
+  });
+}
+
+// hermes: `chat -q <prompt> -Q` is the programmatic mode — it prints a
+// `session_id: <id>` line (captured for resume) followed by the final response.
+// --resume continues a stored session (verified to carry context). It is not a
+// streaming protocol, so the reply lands as one segment.
+function runHermes(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  const cwd = workdir || getDefaultWorkdir();
+  const bin = locateBin('hermes') || 'hermes';
+  const prior = getSession(sessionKey);
+  const resuming = !!(prior && prior.id);
+  emit(onEvent, 'Hermes is working...');
+
+  const args = ['chat', '-q', String(prompt), '-Q', ...buildArgs('hermes', settings)];
+  if (resuming) args.push('--resume', prior.id);
+
+  return finishRun(spawnStream({
+    cmd: bin,
+    args,
+    cwd,
+    label: 'hermes',
+    onLine: null,
+    signal,
+    finalize: ({ code, stdout, stderr }) => {
+      const error = String(stderr).trim();
+      // The reply is the clean stdout; hermes prints `session_id: <id>` and the
+      // "↻ Resumed session ..." banner to stderr.
+      const sidMatch = error.match(/session_id:\s*(\S+)/);
+      const sid = sidMatch ? sidMatch[1] : null;
+      const text = String(stdout)
+        .split(/\r?\n/)
+        .filter((line) => !/^\s*↻/.test(line))
+        .join('\n')
+        .trim();
+      if (text) {
+        if (sid) setSession(sessionKey, { id: sid });
+        return text;
+      }
+      // A stored session can vanish (e.g. record_sessions disabled). Drop it and
+      // retry once without --resume.
+      if (
+        resuming &&
+        /session.*(not found|does not exist)|no.*session|unknown session/i.test(
+          error,
+        )
+      ) {
+        clearSession(sessionKey);
+        return { __retry: true };
+      }
+      if (isAuthError(stdout) || isAuthError(error)) return { __authError: true };
+      return fallback(stdout, stderr, code, 'hermes');
+    },
+  }), {
+    agentKey: 'hermes',
+    onEvent,
+    retry: () =>
+      runHermes(prompt, onEvent, sessionKey, signal, workdir, settings),
+  });
 }
 
 const AGENTS = {
@@ -602,16 +970,42 @@ const AGENTS = {
     description: 'Antigravity CLI',
     run: runAgy,
   },
+  // Experimental: hidden from the app until their CLI is detected on the host.
+  opencode: {
+    key: 'opencode',
+    label: 'OpenCode',
+    description: 'OpenCode CLI',
+    run: runOpencode,
+    bin: 'opencode',
+    experimental: true,
+  },
+  hermes: {
+    key: 'hermes',
+    label: 'Hermes',
+    description: 'Hermes CLI',
+    run: runHermes,
+    bin: 'hermes',
+    experimental: true,
+  },
 };
 
 const DEFAULT_AGENT = 'claude';
 
+// Experimental agents only appear once their binary is on PATH; the stable
+// agents are always listed.
+function isAgentAvailable(agent) {
+  if (!agent.experimental) return true;
+  return commandExists(agent.bin || agent.key);
+}
+
 function listAgents() {
-  return Object.values(AGENTS).map(({ key, label, description }) => ({
-    key,
-    label,
-    description,
-  }));
+  return Object.values(AGENTS)
+    .filter(isAgentAvailable)
+    .map(({ key, label, description }) => ({
+      key,
+      label,
+      description,
+    }));
 }
 
 function getAgent(key) {
@@ -643,6 +1037,8 @@ module.exports = {
   listAgents,
   getAgent,
   runAgent,
+  runBtw,
   getSession,
   clearSession,
+  agyReplyFromTranscript,
 };

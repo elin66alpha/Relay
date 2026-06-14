@@ -242,6 +242,14 @@ async function runAgentTurn(options) {
     });
   }
 
+  // Ordered list of assistant messages within this turn. Each entry is one
+  // "segment" ({ ts, text }): the agent's mid-task follow-up notes and its final
+  // answer become distinct, individually timestamped messages instead of being
+  // collapsed into a single result string. Persisted in metadata.segments.
+  const segments = [];
+  const serializeSegments = () =>
+    segments.map((segment) => ({ ts: segment.ts, text: segment.text }));
+
   const updateAssistantHistory = (updater) => {
     if (!recordHistory) return;
     updateHistoryMessage(scopeKey, historyAssistantId, (message) => {
@@ -284,6 +292,10 @@ async function runAgentTurn(options) {
   };
 
   const persistDelta = (text) => {
+    if (segments.length === 0) {
+      segments.push({ ts: new Date().toISOString(), text: '' });
+    }
+    segments[segments.length - 1].text += text;
     updateAssistantHistory((message) => ({
       ...message,
       content: `${message.content}${text}`,
@@ -293,8 +305,30 @@ async function runAgentTurn(options) {
         ...baseHistoryMetadata,
         streaming: true,
         awaitingFirstToken: false,
+        segments: serializeSegments(),
       },
     }));
+  };
+
+  // A new assistant message started inside the same turn. Open a fresh segment
+  // (its own arrival timestamp) and separate it from the previous one in the
+  // flat content so search/export still reads naturally.
+  const persistSegmentBoundary = () => {
+    segments.push({ ts: new Date().toISOString(), text: '' });
+    updateAssistantHistory((message) => {
+      const separator = message.content ? '\n\n' : '';
+      return {
+        ...message,
+        content: `${message.content}${separator}`,
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          ...message.metadata,
+          ...baseHistoryMetadata,
+          streaming: true,
+          segments: serializeSegments(),
+        },
+      };
+    });
   };
 
   const finalizeAssistantHistory = (content, metadata = {}) => {
@@ -305,6 +339,7 @@ async function runAgentTurn(options) {
       metadata: {
         ...message.metadata,
         ...baseHistoryMetadata,
+        ...(segments.length ? { segments: serializeSegments() } : {}),
         ...metadata,
         streaming: false,
         awaitingFirstToken: false,
@@ -336,6 +371,25 @@ async function runAgentTurn(options) {
           requestId,
           deviceId,
           line,
+        });
+      }
+      return;
+    }
+    if (event.type === 'segment') {
+      persistSegmentBoundary();
+      const handled = responder.event('agent_segment', directEventPayload({
+        requestId,
+        deviceId,
+        agent,
+        session,
+      }));
+      if (!handled) {
+        broadcastScope('agent_segment', {
+          scopeWorkdir: workdir,
+          agent,
+          session,
+          requestId,
+          deviceId,
         });
       }
       return;
@@ -414,7 +468,31 @@ async function runAgentTurn(options) {
         text: content,
       });
     }
-    const finalContent = finalizeContent({ content, streamedText });
+    // A multi-message turn (mid-task follow-ups + a final answer) is fully
+    // captured only by the joined segment text, so it supersedes a runner's
+    // single result string. For a single-message turn the runner's content is
+    // authoritative (it can be fuller than what streamed, e.g. codex's -o file),
+    // so we keep it and reconcile the lone segment to match.
+    const multiSegment = segments.length > 1;
+    const baseContent = multiSegment
+      ? segments
+          .map((segment) => segment.text)
+          .join('\n\n')
+          .trim()
+      : content;
+    const finalContent = finalizeContent({
+      content: baseContent,
+      rawContent: content,
+      streamedText,
+      segments,
+    });
+    if (!multiSegment) {
+      // Collapse to a single segment whose text is exactly the final content, so
+      // the app renders one timestamped message that matches finalContent.
+      const ts = segments.length ? segments[0].ts : new Date().toISOString();
+      segments.length = 0;
+      if (finalContent) segments.push({ ts, text: finalContent });
+    }
     touchChatSession(contextKey, session.id);
     if (finalizeBeforeDone) {
       finalizeAssistantHistory(finalContent);
@@ -446,7 +524,8 @@ async function runAgentTurn(options) {
       session: sessionPayload(session),
       message: {
         role: 'assistant',
-        content,
+        content: finalContent,
+        segments: serializeSegments(),
         createdAt: completedAt,
       },
     };

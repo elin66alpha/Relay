@@ -9,12 +9,14 @@ git; finished work should be summarized here briefly, not narrated.
 - Flutter client for Android, iOS, Web, and desktop runner projects.
 - Node.js backend in `server/`: entry `server.js` (~900 lines: config,
   middleware, shared state, schedulers, static serving) plus per-domain route
-  modules in `server/routes/{meta,push,fs,chat,sessions,quota}.js` — each
+  modules in `server/routes/{meta,push,fs,chat,btw,sessions,quota}.js` — each
   exports a `createXxxRouter(ctx)` factory receiving shared state through
   `routeContext`.
 - OS setup lives in `backends/` (Linux PM2, macOS LaunchAgent, Windows
   PowerShell/Scheduled Task).
-- Supported CLI agents: Claude Code, Codex, and Antigravity (`agy`).
+- Supported CLI agents: Claude Code, Codex, Antigravity (`agy`), plus
+  experimental OpenCode and Hermes — the latter two are hidden from the UI
+  until their binary is detected on PATH or per-user fallback locations.
 - Clients connect by importing an encrypted credential QR / payload and entering
   the user-chosen password.
 - All protected APIs require a revocable bearer token from `server/tokens.json`.
@@ -32,6 +34,18 @@ git; finished work should be summarized here briefly, not narrated.
   see `server/.env.example` (`VAPID_*`, `FCM_SERVICE_ACCOUNT_FILE`) and
   `android/app/google-services.json`; the Gradle Google Services plugin is
   applied only when that JSON exists, so APKs build without Firebase config.
+- Agent icons live in `assets/agent_icons/` as PNGs with light/dark variants
+  (registered in `pubspec.yaml` under `flutter.assets`); the CLI agent drawer
+  loads them via `Image.asset()` instead of icon font glyphs.
+- Multi-segment messages: a single agent turn can contain several assistant
+  messages (mid-task follow-ups + a final answer). Each is tracked as a
+  `{ ts, text }` segment in the message metadata. The backend emits `segment`
+  SSE events; the frontend renders them with collapsible "thinking" sections.
+- BTW (by the way) sidekick: a read-only `/api/btw` endpoint that forks the
+  main Claude session so the user can ask a side question without disturbing
+  the active task. It lives under agent key `btw:claude` and uses the `plan`
+  permission tier. History and the forked session never leak into the main
+  conversation. Currently Claude-only; Codex is reserved for future support.
 
 ## Operating Principles
 
@@ -177,6 +191,7 @@ not generated any token yet, protected API routes return
   `POST /api/push/unsubscribe`, `POST /api/push/fcm/register`,
   `POST /api/push/fcm/unregister`
 - Cards: `GET /api/cards`, `POST /api/cards/feedback`, `POST /api/cards/refresh`
+- BTW: `POST /api/btw` (SSE when `Accept: text/event-stream`), `GET /api/btw/history`, `POST /api/btw/cancel`, `POST /api/btw/clear`
 
 ## Environment / Ops Gotchas
 
@@ -194,6 +209,10 @@ not generated any token yet, protected API routes return
 - **Windows builds** have two toolchain quirks (non-ASCII project path breaks
   Flutter/MSBuild; VS 2026 MSVC rejects `flutter_local_notifications_windows`).
   See "Windows build gotchas" in `DESKTOP.md` for the workarounds.
+- **Experimental agent binary detection** scans PATH first, then per-user
+  fallback dirs (`~/.opencode/bin/opencode`, `~/.local/bin/hermes`). Results
+  are cached for 60s. The `listAgents()` filter skips agents whose binary
+  can't be found, so the app only shows agents the host actually has.
 
 ## Code Integrity Passes
 
@@ -258,6 +277,7 @@ Durable outcomes:
 Use `./scripts/build_flow.sh` for the local full build flow:
 
 1. Flutter dependency check, analysis, and tests.
-2. Node syntax checks.
+ 2. Node syntax checks (auto-discovers all `server/**/*.js` via `find`).
+ 3. Server test suite run.
 3. Web build and PM2 backend restart.
 4. Android debug APK build and `adb install -r`.

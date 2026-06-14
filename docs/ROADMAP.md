@@ -56,6 +56,16 @@
   buffered streaming deltas, cached credential/device/workdir stores, lazy
   file lists, streaming native uploads, and a shared API transport reused by
   all backend callers.
+- Experimental CLI agents (OpenCode, Hermes) with binary detection, session
+  resume, model/effort/permission trees, and dynamic listing — agents appear
+  in the UI only when their CLI is installed on the host.
+- BTW (by the way) sidekick: read-only `/api/btw` endpoint that forks the
+  main Claude session for side questions without disturbing the active task.
+- Multi-segment messages: each assistant follow-up gets its own timestamp and
+  is rendered as a collapsible block in the frontend; the backend emits
+  `segment` SSE events and tracks `{ ts, text }` entries in message metadata.
+- Agent icons: per-agent PNG assets with light/dark variants, replacing the
+  icon font glyphs in the agent drawer.
 
 ## Planned
 

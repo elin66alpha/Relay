@@ -39,6 +39,13 @@
   移出 UI isolate、共享 SSE 事件流加空闲超时让断死连接能自动重连、流式 delta 改
   缓冲拼接、凭证/设备/工作目录存储加缓存、文件列表惰性构建、native 上传改流式，
   以及所有后端调用方共用一个 API transport。
+- Experimental CLI agent（OpenCode、Hermes），含 binary 检测、session resume、
+  模型/effort/权限配置树、动态列表（只有安装后才在 UI 显示）。
+- BTW (by the way) 旁路提问：只读 `/api/btw` 端点，fork 主 Claude session，
+  不干扰主任务。
+- 多段消息：每条 assistant 回复独立时间戳，前端可折叠展示；后端发送 `segment`
+  SSE 事件，消息元数据中记录 `{ ts, text }` 段。
+- Agent 图标：每个 agent 独立 PNG 资源（含亮/暗主题），替换原图标字体。
 
 ## 规划
 

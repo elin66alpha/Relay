@@ -50,6 +50,26 @@ String _groupTitle(AppStrings l10n, String group) {
   }
 }
 
+String _optionLabel(AppStrings l10n, String group, AgentOption option) {
+  if (group != 'effort') return option.label;
+  switch (option.id) {
+    case 'minimal':
+      return l10n.agentEffortMinimal;
+    case 'low':
+      return l10n.agentEffortLow;
+    case 'medium':
+      return l10n.agentEffortMedium;
+    case 'high':
+      return l10n.agentEffortHigh;
+    case 'xhigh':
+      return l10n.agentEffortExtraHigh;
+    case 'max':
+      return l10n.agentEffortMax;
+    default:
+      return option.label;
+  }
+}
+
 class AgentControlsButtons extends StatefulWidget {
   const AgentControlsButtons({
     required this.backend,
@@ -383,7 +403,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
                       color:
                           selected ? colors.primary : colors.onSurfaceVariant,
                     ),
-                    title: Text(option.label),
+                    title: Text(_optionLabel(l10n, widget.group, option)),
                     subtitle: option.description == null
                         ? null
                         : Text(option.description!),

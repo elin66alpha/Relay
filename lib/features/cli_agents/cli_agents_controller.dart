@@ -6,7 +6,9 @@ import '../../core/models/cli_agent.dart';
 class CliAgentsController extends ChangeNotifier {
   static const String _activeAgentKey = 'relay.active_cli_agent.v1';
 
-  final List<CliAgent> _agents = defaultCliAgents;
+  // Starts with the built-in agents and is replaced by the backend's live list
+  // (which includes experimental agents only once their CLI is installed).
+  List<CliAgent> _agents = defaultCliAgents;
   String _activeAgentKeyValue = defaultCliAgents.first.key;
   bool _isLoaded = false;
 
@@ -23,6 +25,22 @@ class CliAgentsController extends ChangeNotifier {
       _activeAgentKeyValue = _agents.first.key;
     }
     _isLoaded = true;
+    notifyListeners();
+  }
+
+  /// Replace the agent list with the backend's live set. Keeps the current
+  /// selection when it still exists; otherwise falls back to the first agent.
+  void syncAgents(List<CliAgent> agents) {
+    if (agents.isEmpty) return;
+    final List<String> nextKeys =
+        agents.map((CliAgent a) => a.key).toList(growable: false);
+    final List<String> currentKeys =
+        _agents.map((CliAgent a) => a.key).toList(growable: false);
+    if (listEquals(nextKeys, currentKeys)) return;
+    _agents = List<CliAgent>.unmodifiable(agents);
+    if (!_agents.any((CliAgent a) => a.key == _activeAgentKeyValue)) {
+      _activeAgentKeyValue = _agents.first.key;
+    }
     notifyListeners();
   }
 

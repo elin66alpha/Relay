@@ -28,6 +28,8 @@ class BotChatController extends ChangeNotifier {
   static const String _requestIdKey = 'requestId';
   static const String _progressLinesKey = 'progressLines';
   static const String _cancelledKey = 'cancelled';
+  static const String _segmentsKey = 'segments';
+  static const String _queuedKey = 'queued';
 
   final BackendClient _backendClient;
 
@@ -38,8 +40,17 @@ class BotChatController extends ChangeNotifier {
       <String, List<AgentSession>>{};
   final Map<String, String> _activeSessionByAgent = <String, String>{};
   final Map<String, StringBuffer> _streamBuffers = <String, StringBuffer>{};
+  // Per-request live segments mirroring the backend: the agent's mid-task
+  // follow-up notes and its final answer are kept as separate, individually
+  // timestamped messages instead of one growing block.
+  final Map<String, List<_StreamSegment>> _streamSegments =
+      <String, List<_StreamSegment>>{};
   final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
+  // Ids of follow-up messages typed while a turn was running, in send order.
+  // They show as pending bubbles and are sent automatically, one at a time, as
+  // each turn finishes — so the composer behaves like Claude Code / Codex.
+  final List<String> _pendingQueue = <String>[];
   bool _historyLoading = false;
   // Increments on each context-switch load. The finally only clears the
   // spinner when its captured seq is still the latest, so a slow earlier load
@@ -321,6 +332,7 @@ class BotChatController extends ChangeNotifier {
     _stopHistoryPolling();
     _messages.clear();
     _clearStreamBuffers();
+    _pendingQueue.clear();
     _lastError = null;
     notifyListeners();
   }
@@ -351,12 +363,54 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> sendUserText(String rawText) async {
     final String text = rawText.trim();
-    if (text.isEmpty || isThinking || _machine == null) return;
+    if (text.isEmpty || _machine == null) return;
 
     final ChatMessage userMessage = ChatMessage.user(text);
+    // A turn is already running (ours or mirrored): hold this as a pending
+    // follow-up and let it auto-send when the conversation frees up.
+    if (isThinking || _remoteActive) {
+      _messages.add(
+        userMessage.copyWith(metadata: <String, Object?>{_queuedKey: true}),
+      );
+      _pendingQueue.add(userMessage.id);
+      notifyListeners();
+      return;
+    }
+
     _messages.add(userMessage);
     notifyListeners();
     await _runTurn(_agent, userMessage);
+  }
+
+  bool isQueued(ChatMessage message) =>
+      message.metadata[_queuedKey] == true &&
+      _pendingQueue.contains(message.id);
+
+  /// Remove a not-yet-sent follow-up from the queue.
+  void cancelQueued(ChatMessage message) {
+    if (!isQueued(message)) return;
+    _pendingQueue.remove(message.id);
+    _messages.removeWhere((ChatMessage m) => m.id == message.id);
+    notifyListeners();
+  }
+
+  // Send the next pending follow-up if the conversation is idle. Safe to call
+  // from any turn-end path; the guards make it a no-op while anything is active.
+  Future<void> _maybeDrainQueue() async {
+    if (_machine == null || isThinking || _localStreamActive || _remoteActive) {
+      return;
+    }
+    while (_pendingQueue.isNotEmpty) {
+      final String id = _pendingQueue.removeAt(0);
+      final int index = _messages.indexWhere((ChatMessage m) => m.id == id);
+      if (index == -1) continue; // cancelled before its turn came up
+      // Promote the pending bubble to a normal sent message.
+      _messages[index] =
+          _messages[index].copyWith(metadata: const <String, Object?>{});
+      notifyListeners();
+      await _runTurn(_agent, _messages[index]);
+      return; // remaining items drain when this turn ends
+    }
   }
 
   Future<void> cancelActiveTurn() async {
@@ -540,6 +594,7 @@ class BotChatController extends ChangeNotifier {
   }) async {
     _messages.clear();
     _clearStreamBuffers();
+    _pendingQueue.clear();
     _historyLoading = true;
     final int loadSeq = ++_historyLoadSeq;
     _lastError = null;
@@ -667,9 +722,17 @@ class BotChatController extends ChangeNotifier {
   // Replace the visible conversation with a freshly fetched snapshot and re-derive
   // any in-flight turn from it.
   void _applyHistorySnapshot(List<ChatMessage> history) {
+    // Locally-queued follow-ups aren't in server history yet; keep them (at the
+    // end, preserving order) so a snapshot refresh never drops pending input.
+    final List<ChatMessage> pending = _pendingQueue.isEmpty
+        ? const <ChatMessage>[]
+        : _messages
+            .where((ChatMessage m) => _pendingQueue.contains(m.id))
+            .toList(growable: false);
     _messages
       ..clear()
-      ..addAll(history);
+      ..addAll(history)
+      ..addAll(pending);
     _seedStreamBuffersFromMessages();
     _restorePendingTurnFromHistory();
   }
@@ -686,16 +749,29 @@ class BotChatController extends ChangeNotifier {
 
   void _seedStreamBuffersFromMessages() {
     _streamBuffers.clear();
+    _streamSegments.clear();
     for (final ChatMessage message in _messages) {
       if (message.isUser || message.metadata[_streamingKey] != true) continue;
       final String requestId = message.metadata[_requestIdKey] as String? ?? '';
       if (requestId.isEmpty) continue;
       _streamBuffers[requestId] = StringBuffer(message.content);
+      final List<MessageSegment> seeded = message.segments;
+      if (seeded.isNotEmpty) {
+        _streamSegments[requestId] = seeded
+            .map((MessageSegment s) {
+              final _StreamSegment live =
+                  _StreamSegment(s.createdAt ?? message.createdAt);
+              live.buffer.write(s.text);
+              return live;
+            })
+            .toList();
+      }
     }
   }
 
   void _clearStreamBuffers() {
     _streamBuffers.clear();
+    _streamSegments.clear();
   }
 
   void _startHistoryPolling() {
@@ -778,6 +854,9 @@ class BotChatController extends ChangeNotifier {
       _remoteActive = false;
       unawaited(_refreshHistorySnapshot());
       if (!isThinking) _stopHistoryPolling();
+      // A turn we were only mirroring (e.g. a reattached one) just finished;
+      // release any follow-ups queued while it ran.
+      unawaited(_maybeDrainQueue());
     });
   }
 
@@ -800,6 +879,15 @@ class BotChatController extends ChangeNotifier {
         requestId: requestId,
         onEvent: _handleEvent,
       );
+      final List<Map<String, Object?>> replySegments = reply.segments
+          .map(
+            (MessageSegment s) => <String, Object?>{
+              if (s.createdAt != null)
+                'ts': s.createdAt!.toUtc().toIso8601String(),
+              'text': s.text,
+            },
+          )
+          .toList(growable: false);
       _finalizeAssistantByRequestId(
         requestId,
         reply.content,
@@ -807,6 +895,7 @@ class BotChatController extends ChangeNotifier {
           _requestIdKey: reply.requestId,
           'agentKey': reply.agentKey,
           'agentLabel': reply.agentLabel,
+          if (replySegments.isNotEmpty) _segmentsKey: replySegments,
         },
       );
     } catch (err) {
@@ -844,7 +933,12 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
       // A remote turn may have started and finished on this scope while ours was
       // in flight (we skip mirroring then). Catch up to the shared truth now.
-      if (!reattach) unawaited(_catchUpHistory());
+      if (!reattach) {
+        unawaited(_catchUpHistory());
+        // The conversation is free again: send the next queued follow-up. (A
+        // reattached turn is still running, so its queue drains when it ends.)
+        unawaited(_maybeDrainQueue());
+      }
     }
   }
 
@@ -912,6 +1006,7 @@ class BotChatController extends ChangeNotifier {
     int assistantIndex, {
     required String content,
     required bool awaitingFirstToken,
+    List<Map<String, Object?>>? segments,
   }) {
     if (assistantIndex >= _messages.length) return;
     _messages[assistantIndex] = _messages[assistantIndex].copyWith(
@@ -920,8 +1015,24 @@ class BotChatController extends ChangeNotifier {
         ..._messages[assistantIndex].metadata,
         _streamingKey: true,
         _awaitingFirstTokenKey: awaitingFirstToken,
+        if (segments != null) _segmentsKey: segments,
       },
     );
+  }
+
+  // Serialize the live segments for a request into the metadata shape the UI and
+  // the backend share: a list of { ts, text }.
+  List<Map<String, Object?>> _serializeStreamSegments(String requestId) {
+    final List<_StreamSegment>? segments = _streamSegments[requestId];
+    if (segments == null || segments.isEmpty) return const <Map<String, Object?>>[];
+    return segments
+        .map(
+          (_StreamSegment s) => <String, Object?>{
+            'ts': s.createdAt.toIso8601String(),
+            'text': s.buffer.toString(),
+          },
+        )
+        .toList(growable: false);
   }
 
   void _flushStreamBuffer(String requestId) {
@@ -938,10 +1049,13 @@ class BotChatController extends ChangeNotifier {
         message.metadata[_awaitingFirstTokenKey] == false) {
       return;
     }
+    final List<Map<String, Object?>> segments =
+        _serializeStreamSegments(requestId);
     _setStreamingAssistantContent(
       index,
       content: content,
       awaitingFirstToken: false,
+      segments: segments.isEmpty ? null : segments,
     );
   }
 
@@ -983,15 +1097,25 @@ class BotChatController extends ChangeNotifier {
   }) {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
+    // _finalizeAssistant replaces metadata wholesale, so carry the segments
+    // forward: prefer the authoritative ones from the reply, else keep what
+    // streamed (covers older backends that don't return segments).
+    final Object? existingSegments = _messages[index].metadata[_segmentsKey];
     _streamBuffers.remove(requestId);
+    _streamSegments.remove(requestId);
     final String metadataRequestId = metadata[_requestIdKey] as String? ?? '';
     if (metadataRequestId.isNotEmpty && metadataRequestId != requestId) {
       _streamBuffers.remove(metadataRequestId);
+      _streamSegments.remove(metadataRequestId);
     }
     _finalizeAssistant(
       index,
       text,
-      metadata: <String, Object?>{_requestIdKey: requestId, ...metadata},
+      metadata: <String, Object?>{
+        if (existingSegments != null) _segmentsKey: existingSegments,
+        _requestIdKey: requestId,
+        ...metadata,
+      },
     );
   }
 
@@ -1000,7 +1124,10 @@ class BotChatController extends ChangeNotifier {
     _cancelStreamingNotifyTimer();
     final String requestId =
         _messages[assistantIndex].metadata[_requestIdKey] as String? ?? '';
-    if (requestId.isNotEmpty) _streamBuffers.remove(requestId);
+    if (requestId.isNotEmpty) {
+      _streamBuffers.remove(requestId);
+      _streamSegments.remove(requestId);
+    }
     _messages.removeAt(assistantIndex);
     notifyListeners();
   }
@@ -1028,6 +1155,14 @@ class BotChatController extends ChangeNotifier {
       () => StringBuffer(current.content),
     );
     buffer.write(text);
+    // Append to the open segment, opening the first one on the first delta (the
+    // backend only emits an explicit boundary for the 2nd+ message in a turn).
+    final List<_StreamSegment> segments = _streamSegments.putIfAbsent(
+      requestId,
+      () => <_StreamSegment>[_StreamSegment(DateTime.now())],
+    );
+    if (segments.isEmpty) segments.add(_StreamSegment(DateTime.now()));
+    segments.last.buffer.write(text);
     if (current.metadata[_awaitingFirstTokenKey] == true) {
       _messages[index] = current.copyWith(
         metadata: <String, Object?>{
@@ -1040,11 +1175,31 @@ class BotChatController extends ChangeNotifier {
     _notifyStreamingUpdate();
   }
 
+  // The agent started a new follow-up message in the same turn. Open a fresh
+  // segment and separate it from the previous one in the flat buffer.
+  void _appendSegmentBoundary(String requestId) {
+    if (requestId.isEmpty) return;
+    final int index = _assistantIndexForRequest(requestId);
+    if (index == -1) return;
+    final ChatMessage current = _messages[index];
+    if (isCancelled(current) || current.metadata[_streamingKey] != true) return;
+    final StringBuffer buffer = _streamBuffers.putIfAbsent(
+      requestId,
+      () => StringBuffer(current.content),
+    );
+    if (buffer.isNotEmpty) buffer.write('\n\n');
+    _streamSegments
+        .putIfAbsent(requestId, () => <_StreamSegment>[])
+        .add(_StreamSegment(DateTime.now()));
+    _notifyStreamingUpdate();
+  }
+
   void _markAssistantCancelled(String requestId) {
     final int index = _assistantIndexForRequest(requestId);
     if (index == -1) return;
     _flushStreamBuffer(requestId);
     _streamBuffers.remove(requestId);
+    _streamSegments.remove(requestId);
     _cancelStreamingNotifyTimer();
     final ChatMessage message = _messages[index];
     _messages[index] = message.copyWith(
@@ -1165,6 +1320,9 @@ class BotChatController extends ChangeNotifier {
       case 'agent_delta':
         _appendDelta(event.data);
         return;
+      case 'agent_segment':
+        _appendSegmentBoundary(event.data['requestId'] as String? ?? '');
+        return;
       case 'agent_progress':
         _appendProgress(event.data);
         return;
@@ -1262,6 +1420,7 @@ class BotChatController extends ChangeNotifier {
       case 'agent_start':
       case 'agent_queued':
       case 'agent_delta':
+      case 'agent_segment':
       case 'agent_progress':
         _beginRemoteMirror();
         return;
@@ -1309,4 +1468,14 @@ class BotChatController extends ChangeNotifier {
     );
     notifyListeners();
   }
+}
+
+/// A live, in-progress assistant segment held while a turn streams. Serialized
+/// into the message's `metadata['segments']` so the bubble can show each
+/// follow-up message with its own arrival time.
+class _StreamSegment {
+  _StreamSegment(this.createdAt);
+
+  final DateTime createdAt;
+  final StringBuffer buffer = StringBuffer();
 }

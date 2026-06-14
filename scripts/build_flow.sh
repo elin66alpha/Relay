@@ -41,15 +41,13 @@ run flutter pub get
 run flutter analyze --no-pub
 run flutter test --no-pub
 
-for file in \
-  server/server.js \
-  server/lib/history.js \
-  server/lib/filesystem.js \
-  server/lib/tokens.js \
-  server/lib/credential-file.js \
-  server/scripts/create-credential.js; do
+# Syntax-check every backend JS file (not a hand-maintained subset that silently
+# skips new files), then run the server test suite. Both gate the build so a
+# broken or regressed backend never ships.
+for file in $(find server -name '*.js' -not -path '*/node_modules/*'); do
   run node --check "$file"
 done
+run npm --prefix server test
 
 # --no-web-resources-cdn: bundle CanvasKit locally instead of loading it from
 # gstatic.com. The CDN is unreachable on some networks (e.g. mainland China),

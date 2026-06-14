@@ -275,6 +275,12 @@ module.exports = function createChatRouter(ctx) {
       }
       const cleared = clearSession(scopeKey);
       clearHistory(scopeKey);
+      // Drop the /btw side chat derived from this session too (scope agent
+      // `btw:<agent>`, keyed by the same session id) so it never outlives the
+      // main conversation it forked from. No-op for agents without a side chat.
+      const btwScopeKey = scopeKeyFor(`btw:${agent.key}`, workdir, chatSession.id);
+      clearSession(btwScopeKey);
+      clearHistory(btwScopeKey);
       touchChatSession(contextKey, chatSession.id);
       return res.json({
         ok: true,
@@ -291,6 +297,10 @@ module.exports = function createChatRouter(ctx) {
         const scopeKey = scopeKeyFor(agent.key, workdir, chatSession.id);
         if (clearSession(scopeKey)) cleared += 1;
         clearHistory(scopeKey);
+        // Also clear the derived /btw side chat (see single-session path above).
+        const btwScopeKey = scopeKeyFor(`btw:${agent.key}`, workdir, chatSession.id);
+        clearSession(btwScopeKey);
+        clearHistory(btwScopeKey);
       }
     }
     return res.json({ ok: true, workdir, cleared });
