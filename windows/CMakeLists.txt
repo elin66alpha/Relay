@@ -57,6 +57,11 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# MSVC 14.51 errors on this plugin's transitive <experimental/coroutine> include.
+if(TARGET flutter_local_notifications_windows)
+  target_compile_definitions(flutter_local_notifications_windows PRIVATE
+    "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
+endif()
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
