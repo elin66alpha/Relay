@@ -120,7 +120,9 @@ module.exports = function createChatRouter(ctx) {
     }
 
     const runState = activeRequests.get(requestId);
-    if (!runState) {
+    // A group round shares activeRequests but has no single agent; it is cancelled
+    // through /api/group/chat/cancel, so ignore it here.
+    if (!runState || runState.group) {
       return res.status(404).json({
         error: 'request not found',
         code: 'REQUEST_NOT_FOUND',

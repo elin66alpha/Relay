@@ -36,7 +36,7 @@ class AgentOptionsCatalog {
 
   final String agent;
 
-  /// Whether the agent supports each group at all (agy has no model/effort).
+  /// Whether the agent supports each group at all.
   final Map<String, bool> supports;
 
   final List<AgentOption> model;

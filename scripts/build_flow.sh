@@ -17,12 +17,15 @@ run() {
 wait_for_web() {
   printf '\n==> waiting for %s\n' "$WEB_URL"
   for attempt in {1..20}; do
-    if curl -fsS -I "$WEB_URL"; then
+    # Silence the expected "connection refused" while the freshly restarted
+    # server is still binding the port; only the progress line is shown.
+    if curl -fsS -I "$WEB_URL" >/dev/null 2>&1; then
       return 0
     fi
     printf 'web not ready yet (%s/20)\n' "$attempt"
     sleep 1
   done
+  # All retries exhausted: surface the real error (server failed to come up).
   curl -sS -I "$WEB_URL"
 }
 

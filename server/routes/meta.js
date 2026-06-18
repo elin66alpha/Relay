@@ -20,12 +20,10 @@ module.exports = function createMetaRouter(ctx) {
     authStatus,
     bearerToken,
     buildDiagnostics,
-    cards,
     describeAgent,
     eventClients,
     eventWorkdir,
     formatUptime,
-    generateCardsForWorkdir,
     getAgent,
     getDefaultWorkdir,
     getSettings,
@@ -83,7 +81,7 @@ module.exports = function createMetaRouter(ctx) {
   }
 
   // Catalog of selectable model/effort/permission options for one agent
-  // (capability-aware; agy has no model/effort). Static, so no workdir needed.
+  // (capability-aware). Static, so no workdir needed.
   router.get('/api/agent-options', (req, res) => {
     const agent = getAgent(String(req.query.agent || '').trim());
     if (!agent) {
@@ -269,35 +267,6 @@ module.exports = function createMetaRouter(ctx) {
       if (remaining > 0) workdirPresence.set(workdir, remaining);
       else workdirPresence.delete(workdir);
     });
-  });
-
-  // --- Card Mode (additive secondary surface; does not touch chat) ---
-  router.get('/api/cards', (req, res) => {
-    const workdir = eventWorkdir(req);
-    return res.json({ workdir, cards: cards.getActiveCards(workdir) });
-  });
-
-  router.post('/api/cards/feedback', (req, res) => {
-    const workdir = eventWorkdir(req);
-    const cardId = String(req.body.cardId || '').trim();
-    const gesture = String(req.body.gesture || '').trim();
-    const deferUntil = req.body.deferUntil ? String(req.body.deferUntil) : null;
-    if (!cardId || !gesture) {
-      return res.status(400).json({ error: 'cardId and gesture are required' });
-    }
-    if (!cards.applyFeedback(cardId, gesture, deferUntil, workdir)) {
-      return res.status(400).json({ error: 'unknown card or gesture' });
-    }
-    return res.json({ ok: true });
-  });
-
-  router.post('/api/cards/refresh', (req, res) => {
-    const workdir = eventWorkdir(req);
-    const generated = cards.replaceGeneratedCards(
-      generateCardsForWorkdir(workdir),
-      workdir,
-    );
-    return res.json({ workdir, generated });
   });
 
   return router;

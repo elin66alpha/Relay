@@ -25,9 +25,11 @@ test('defaultsFor derives the model from the newest catalog entry', () => {
   });
 });
 
-test('defaultsFor leaves model unset for agents without a model picker', () => {
-  // agy exposes no model/effort; only a permission default.
-  assert.deepEqual(defaultsFor('agy'), { permission: 'sandbox' });
+test('defaultsFor derives the agy model from its catalog', () => {
+  assert.deepEqual(defaultsFor('agy'), {
+    model: 'gemini-3-5-flash-medium',
+    permission: 'sandbox',
+  });
 });
 
 // --- buildArgs --------------------------------------------------------------
@@ -78,9 +80,11 @@ test('buildArgs falls back to defaults for forged/unknown option ids (no arg inj
   ]);
 });
 
-test('buildArgs skips groups the agent does not support', () => {
-  // agy has no model/effort groups: only the permission flag appears.
-  assert.deepEqual(buildArgs('agy', {}), ['--sandbox']);
+test('buildArgs maps agy model and permission to its CLI flags', () => {
+  assert.deepEqual(buildArgs('agy', {}), [
+    '--model', 'Gemini 3.5 Flash (Medium)',
+    '--sandbox',
+  ]);
 });
 
 test('buildArgs maps opencode model/effort/permission to its CLI flags', () => {
@@ -119,9 +123,9 @@ test('normalizeSettings keeps valid ids and repairs invalid ones to defaults', (
   );
 });
 
-test('normalizeSettings drops groups the agent does not support', () => {
+test('normalizeSettings keeps agy model and drops unsupported effort', () => {
   const out = normalizeSettings('agy', { model: 'whatever', permission: 'sandbox' });
-  assert.equal('model' in out, false);
+  assert.equal(out.model, 'gemini-3-5-flash-medium');
   assert.equal('effort' in out, false);
   assert.equal(out.permission, 'sandbox');
 });
@@ -140,5 +144,5 @@ test('describeAgent advertises supported groups and strips internal args', () =>
   }
 
   const agy = describeAgent('agy');
-  assert.deepEqual(agy.supports, { model: false, effort: false, permission: true });
+  assert.deepEqual(agy.supports, { model: true, effort: false, permission: true });
 });

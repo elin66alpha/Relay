@@ -33,9 +33,34 @@ class AppStrings {
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
-  String get cardMode => isZh ? '卡片模式' : 'Card Mode';
-  String get cardModeSubtitle =>
-      isZh ? '基于对话历史的行动建议' : 'Suggested actions from your chats';
+  String get groupChat => isZh ? '蜂群' : 'Swarm';
+  String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
+  String get newGroup => isZh ? '新建蜂群' : 'New swarm';
+  String get groupName => isZh ? '蜂群名称' : 'Swarm name';
+  String get groupMembers => isZh ? '成员' : 'Members';
+  String get manageMembers => isZh ? '管理成员' : 'Manage members';
+  String get deleteGroup => isZh ? '删除蜂群' : 'Delete swarm';
+  String get deleteGroupConfirm =>
+      isZh ? '删除该蜂群及其聊天记录？' : 'Delete this swarm and its transcript?';
+  String get clearTranscript => isZh ? '清空记录' : 'Clear transcript';
+  String get noGroups => isZh ? '还没有蜂群' : 'No swarms yet';
+  String get groupEmptyHint => isZh
+      ? '用 @ 召唤成员，例如 @claude 或 @all'
+      : 'Mention a member with @, e.g. @claude or @all';
+  String get groupComposerHint =>
+      isZh ? '输入消息，用 @ 召唤成员' : 'Message — use @ to summon members';
+  String get selectMembers =>
+      isZh ? '请至少选择一个成员。' : 'Select at least one member.';
+  String get swarmWorkTree => isZh ? '工作目录 (work tree)' : 'Work tree';
+  String get swarmWorkTreeDefault =>
+      isZh ? '默认（当前工作区）' : 'Default (current workspace)';
+  String get swarmChooseWorkTree => isZh ? '选择工作目录' : 'Choose work tree';
+  String get swarmConfigureMembers =>
+      isZh ? '配置成员' : 'Configure members';
+  String get swarmConfigureMembersHint => isZh
+      ? '为每个成员选择模型、思考深度与权限'
+      : 'Pick a model, reasoning effort, and permission per member';
+  String get browse => isZh ? '浏览' : 'Browse';
   String get usage => isZh ? '额度' : 'Usage';
   String get usageQuery => isZh ? '额度查询' : 'Quota usage';
   String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
@@ -297,8 +322,7 @@ class AppStrings {
   String get retry => isZh ? '重试' : 'Retry';
   String get cancelled => isZh ? '已取消' : 'Cancelled';
   String get inputHint => isZh ? '输入消息' : 'Message';
-  String get inputHintFollowUp =>
-      isZh ? '输入跟进消息…' : 'Send a follow-up…';
+  String get inputHintFollowUp => isZh ? '输入跟进消息…' : 'Send a follow-up…';
   String get queuedFollowUp => isZh ? '排队中' : 'Queued';
   String agentProgressUpdates(int count) => isZh
       ? '思索过程 · $count 条'
@@ -311,8 +335,6 @@ class AppStrings {
   String get btwTooltip => isZh ? 'BTW 旁支提问' : 'Ask a side question (BTW)';
   String get btwNeedsConversation =>
       isZh ? '先发送一条消息再使用 BTW' : 'Send a message first to use BTW';
-  String get btwComingSoon =>
-      isZh ? '该智能体的 BTW 功能即将推出' : 'BTW is coming soon for this agent';
   String get btwClearTitle => isZh ? '清空 BTW' : 'Clear BTW';
   String get btwEmpty => isZh
       ? '在这里向副手提问，它了解当前主对话的内容。'

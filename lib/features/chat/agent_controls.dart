@@ -6,8 +6,8 @@ import '../../core/models/agent_options.dart';
 
 /// Per-agent Model / Effort / Permission controls shown in the chat composer's
 /// "+" drawer. Capability-aware: only groups the agent supports are rendered
-/// (agy has no model/effort). Selections persist to the backend keyed by the
-/// current workdir+agent scope, so every device in that scope shares them.
+/// for the current workdir+agent scope, so every device in that scope shares
+/// them.
 
 const List<String> _groupOrder = <String>['model', 'effort', 'permission'];
 
