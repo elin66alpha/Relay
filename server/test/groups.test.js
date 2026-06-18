@@ -88,6 +88,34 @@ test('createGroup stores the work tree and per-member configs, dropping junk', (
   assert.deepEqual(updated.memberConfigs, { codex: { permission: 'workspace-write' } });
 });
 
+test('member configs keep swarm-scoped nickname and prompt, bounded and trimmed', () => {
+  const workspace = '/tmp/wd-persona';
+  const group = groups.createGroup(workspace, 'Persona', ['claude', 'codex'], {
+    memberConfigs: {
+      claude: {
+        model: 'm1',
+        nickname: '  Lead  Dev  ',
+        prompt: '  Own the API layer.  ',
+      },
+      codex: { nickname: '', prompt: '   ' }, // blank -> nothing kept
+    },
+  });
+  assert.deepEqual(group.memberConfigs.claude, {
+    model: 'm1',
+    nickname: 'Lead Dev',
+    prompt: 'Own the API layer.',
+  });
+  assert.equal(group.memberConfigs.codex, undefined, 'blank persona keeps nothing');
+
+  const longGroup = groups.createGroup(workspace, 'Long', ['claude'], {
+    memberConfigs: {
+      claude: { nickname: 'n'.repeat(200), prompt: 'p'.repeat(5000) },
+    },
+  });
+  assert.equal(longGroup.memberConfigs.claude.nickname.length, 80);
+  assert.equal(longGroup.memberConfigs.claude.prompt.length, 4000);
+});
+
 test('deleteGroup removes only the targeted group', () => {
   const workdir = '/tmp/wd-delete';
   const a = groups.createGroup(workdir, 'A', ['claude']);

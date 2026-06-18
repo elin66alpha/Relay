@@ -94,20 +94,24 @@ function lineFor(message, labelFor) {
 }
 
 // Build the prompt handed to the agent taking the floor: a header that states it
-// is in a group and it is now its turn, then each delta message labeled with its
+// is in a group and it is now its turn, an optional `persona` line carrying the
+// user's per-member work instructions, then each delta message labeled with its
 // speaker. Bounded to maxBytes by keeping the most recent messages and noting any
 // omission, so a long silence cannot produce a prompt that exceeds the argv cap.
 function buildGroupPrompt({
   selfLabel,
+  persona,
   delta,
   labelFor,
   maxBytes = DEFAULT_MAX_PROMPT_BYTES,
 }) {
   const name = String(selfLabel || 'this agent');
+  const role = typeof persona === 'string' ? persona.trim() : '';
   const header =
     `You are "${name}" in a group chat with a human and possibly other AI agents. ` +
     'Each line below is prefixed with its speaker. Reply only as yourself, ' +
-    'addressing the conversation; it is now your turn to respond.';
+    'addressing the conversation; it is now your turn to respond.' +
+    (role ? `\n\nYour role in this swarm: ${role}` : '');
   const footer = `(It is now your turn, ${name}.)`;
   const omitted = '[earlier messages omitted]';
 

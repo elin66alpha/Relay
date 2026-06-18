@@ -61,6 +61,24 @@ class AppStrings {
   String get swarmConfigureMembersHint => isZh
       ? '为每个成员选择模型、思考深度与权限'
       : 'Pick a model, reasoning effort, and permission per member';
+  String get memberNickname => isZh ? '昵称（仅本蜂群）' : 'Nickname (this swarm)';
+  String get memberNicknameHint =>
+      isZh ? '留空则用默认名称' : 'Leave blank to use the default name';
+  String get memberPrompt => isZh ? '工作 / 提示词' : 'Task / prompt';
+  String get memberPromptHint => isZh
+      ? '这个成员在本蜂群里的工作内容，仅在此蜂群生效'
+      : "This member's job in this swarm — applies only here";
+  String editMemberTitle(String label) =>
+      isZh ? '配置 $label' : 'Configure $label';
+  String get saveSwarmTemplate => isZh ? '保存为模板' : 'Save as template';
+  String get importSwarmTemplate => isZh ? '导入模板' : 'Import template';
+  String get swarmTemplateSaved => isZh ? '模板已下载' : 'Template downloaded';
+  String swarmTemplateImported(String name) =>
+      isZh ? '已从模板创建「$name」' : 'Created "$name" from template';
+  String get swarmTemplateInvalid =>
+      isZh ? '模板文件无效' : 'Invalid template file';
+  String swarmTemplateFailed(Object err) =>
+      isZh ? '模板操作失败：$err' : 'Template operation failed: $err';
   String get browse => isZh ? '浏览' : 'Browse';
   String get usage => isZh ? '额度' : 'Usage';
   String get usageQuery => isZh ? '额度查询' : 'Quota usage';

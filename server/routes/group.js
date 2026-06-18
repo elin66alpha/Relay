@@ -154,16 +154,20 @@ module.exports = function createGroupRouter(ctx) {
     }
   }
 
-  // Per-member model/effort/permission, each normalized to valid ids for that
-  // agent (unknown ids fall back to the agent's defaults). Only current members
-  // are kept, so a config can never reference a dropped member.
+  // Per-member config: model/effort/permission normalized to valid ids for that
+  // agent (unknown ids fall back to defaults), plus the free-text swarm-scoped
+  // `nickname` and `prompt` passed through (groups.js bounds their length). Only
+  // current members are kept, so a config can never reference a dropped member.
   function normalizeConfigs(rawConfigs, members) {
     const out = {};
     if (!rawConfigs || typeof rawConfigs !== 'object') return out;
     for (const memberKey of members) {
       const raw = rawConfigs[memberKey];
       if (raw && typeof raw === 'object') {
-        out[memberKey] = normalizeSettings(memberKey, raw);
+        const config = normalizeSettings(memberKey, raw);
+        if (typeof raw.nickname === 'string') config.nickname = raw.nickname;
+        if (typeof raw.prompt === 'string') config.prompt = raw.prompt;
+        out[memberKey] = config;
       }
     }
     return out;
@@ -341,7 +345,16 @@ module.exports = function createGroupRouter(ctx) {
     // device that can see the swarm can cancel the round.
     const runWorkdir = runWorkdirOf(group, workdir);
     const scopeKey = groupScopeKeyFor(runWorkdir, group.id);
-    const mentions = parseMentions(prompt, group.members, labelFor);
+    // A member's display name inside this swarm: its user-set nickname when
+    // present, otherwise the agent's default label. Used for @mention matching,
+    // the speaker labels in each prompt, and the recorded message attribution so
+    // a renamed member reads consistently everywhere.
+    const groupLabelFor = (agentKey) => {
+      const nickname = group.memberConfigs[agentKey] &&
+        group.memberConfigs[agentKey].nickname;
+      return (typeof nickname === 'string' && nickname) || labelFor(agentKey);
+    };
+    const mentions = parseMentions(prompt, group.members, groupLabelFor);
     const abortController = new AbortController();
     const runState = {
       requestId,
@@ -415,10 +428,12 @@ module.exports = function createGroupRouter(ctx) {
         // Plan B: feed this member only what happened since it last spoke, each
         // line labeled with its speaker. Its own resumable session has the rest.
         const delta = deltaSince(snapshot, memberKey);
+        const memberConfig = group.memberConfigs[memberKey] || {};
         const groupPrompt = buildGroupPrompt({
-          selfLabel: memberAgent.label,
+          selfLabel: groupLabelFor(memberKey),
+          persona: memberConfig.prompt,
           delta,
-          labelFor,
+          labelFor: groupLabelFor,
           maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
         });
         return { memberKey, memberAgent, memberSessionKey, groupPrompt, index };
@@ -456,6 +471,9 @@ module.exports = function createGroupRouter(ctx) {
         deviceId,
         historyMetadata: {
           author: memberKey,
+          // Record the swarm-scoped display name so the transcript attributes the
+          // reply to the member's nickname (falls back to the agent label).
+          agentLabel: groupLabelFor(memberKey),
           summonedBy: HUMAN_AUTHOR,
           groupId: group.id,
           groupName: group.name,
