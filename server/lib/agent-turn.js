@@ -183,6 +183,10 @@ async function runAgentTurn(options) {
     onBeforeError,
     prompt,
     recordHistory = true,
+    // When false, the caller records the user/human message itself (group chat
+    // records one human message per round, not one per summoned agent). The
+    // streaming assistant bubble is still recorded under recordHistory.
+    recordUserMessage = true,
     requestId,
     responder = createNoopResponder(),
     runState = {},
@@ -217,14 +221,16 @@ async function runAgentTurn(options) {
   };
 
   if (recordHistory) {
-    upsertHistoryMessage(scopeKey, {
-      id: historyUserId,
-      role: 'user',
-      content: prompt,
-      agent: agent.key,
-      createdAt,
-      metadata: baseHistoryMetadata,
-    });
+    if (recordUserMessage) {
+      upsertHistoryMessage(scopeKey, {
+        id: historyUserId,
+        role: 'user',
+        content: prompt,
+        agent: agent.key,
+        createdAt,
+        metadata: baseHistoryMetadata,
+      });
+    }
     upsertHistoryMessage(scopeKey, {
       id: historyAssistantId,
       role: 'assistant',

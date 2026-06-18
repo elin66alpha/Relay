@@ -59,8 +59,17 @@
 - Experimental CLI agents (OpenCode, Hermes) with binary detection, session
   resume, model/effort/permission trees, and dynamic listing — agents appear
   in the UI only when their CLI is installed on the host.
-- BTW (by the way) sidekick: read-only `/api/btw` endpoint that forks the
-  main Claude session for side questions without disturbing the active task.
+- BTW (by the way) sidekick: read-only `/api/btw` endpoint for side questions
+  without disturbing the active task — Claude forks its native CLI session, while
+  Codex and Antigravity run side sessions cloned from the main conversation.
+- Swarm (multi-agent group chat, shown as **Swarm** / 蜂群): named swarms of agent
+  members share one transcript and answer `@mentions` in turn (serialized, one
+  speaker at a time; each member fed only the delta since it last spoke). Each
+  swarm pins its own work tree and per-member model/effort/permission, is listed
+  per workspace (several per workspace, each on its chosen work tree), and appears
+  as always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
+- Antigravity model selection: `agy` exposes its model catalog via `--model`, so
+  swarms and solo chats can pin a specific Gemini / Claude / GPT-OSS model.
 - Multi-segment messages: each assistant follow-up gets its own timestamp and
   is rendered as a collapsible block in the frontend; the backend emits
   `segment` SSE events and tracks `{ ts, text }` entries in message metadata.
@@ -91,15 +100,9 @@ Reuse boundaries:
 
 - Apple Push Notification service (APNs) for iOS, to extend the existing offline
   push (Web Push + FCM) to fully-killed iOS apps.
-- Better Antigravity quota support when an API or reliable CLI source is
-  available. **Evaluated 2026-06-04 (agy 1.0.5): not implemented on purpose.**
-  agy is built on Gemini Code Assist (`cloudcode-pa.googleapis.com`), and its
-  only quota path is the undocumented internal `v1internal` API (e.g.
-  `FetchQuotaStatus` / `GetUsageAndQuota` / `v1internal/credits`). That model is
-  credit-based and multi-dimensional (prompt / flow / flex / FCA credits across
-  tiers, `can_buy_more_credits`), with no clean "5-hour / weekly remaining"
-  value to map onto the existing usage UI, and it would require reverse-
-  engineering protobuf/gRPC schemas with no stability guarantee. The in-session
-  `/credits` `/limits` `/usage` slash commands are interactive-only (not
-  scriptable subcommands). Revisit when Google ships an official, scriptable
-  quota source; until then keep `usage.js` reporting agy as `not_available_yet`.
+- Antigravity quota is now wired through the local `agy` language-server RPC
+  (`RetrieveUserQuotaSummary`), which returns model-group buckets with exact
+  remaining fractions for the 5-hour and weekly windows. Remaining limitation:
+  the source is local to a running Antigravity CLI instance, not an official
+  public REST API; `/api/usage` can use a cached value when present, otherwise it
+  reports a clear "start agy once" error if the local RPC is unreachable.

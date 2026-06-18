@@ -48,7 +48,7 @@ const List<CliAgent> defaultCliAgents = <CliAgent>[
 ];
 
 /// Every agent the app knows how to label, including experimental ones that may
-/// not be visible yet. Used to resolve a key (from history, cards, etc.) to a
+/// not be visible yet. Used to resolve a key (from history, swarms, etc.) to a
 /// display label regardless of current availability.
 const List<CliAgent> knownCliAgents = <CliAgent>[
   ...defaultCliAgents,

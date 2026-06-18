@@ -260,15 +260,8 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   Future<void> _showBtw() async {
     final CliAgent agent = widget.agentsController.activeAgent;
-    // Codex and opencode buttons are reserved for a future equivalent (opencode
-    // can fork via --fork); only Claude is wired up today.
-    if (agent.key == 'codex' || agent.key == 'opencode') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.btwComingSoon)),
-      );
-      return;
-    }
-    if (agent.key != 'claude') return;
+    const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
+    if (!btwAgents.contains(agent.key)) return;
     final String? sessionId = widget.chatController.activeSessionId;
     if (widget.chatController.messageCount == 0 ||
         sessionId == null ||
@@ -620,11 +613,9 @@ class _ChatTitle extends StatelessWidget {
   }
 }
 
-// The /btw sidekick entry point, sitting just left of search. Shown only for
-// agents that have (or will have) the feature: Claude works today; Codex and
-// opencode are reserved placeholders. It stays enabled while the main agent is
-// working — that is exactly when a quick side question is useful — but is
-// disabled until the conversation has something to fork from.
+// The /btw sidekick entry point, sitting just left of search. It stays enabled
+// while the main agent is working — that is exactly when a quick side question
+// is useful. Empty conversations surface the normal "needs conversation" hint.
 class _BtwButton extends StatelessWidget {
   const _BtwButton({
     required this.agentsController,
@@ -642,18 +633,14 @@ class _BtwButton extends StatelessWidget {
       animation: Listenable.merge(<Listenable>[agentsController, chatController]),
       builder: (BuildContext context, Widget? _) {
         final String agentKey = agentsController.activeAgent.key;
-        const Set<String> btwAgents = <String>{'claude', 'codex', 'opencode'};
+        const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
         if (!btwAgents.contains(agentKey)) {
           return const SizedBox.shrink();
         }
-        // Reserved placeholders (codex, opencode) can always open to surface the
-        // "coming soon" notice; Claude needs an existing conversation to fork.
-        final bool canUse =
-            agentKey != 'claude' || chatController.messageCount > 0;
         return IconButton(
           icon: const Icon(Icons.lightbulb_outline_rounded),
           tooltip: context.l10n.btwTooltip,
-          onPressed: canUse ? onPressed : null,
+          onPressed: onPressed,
         );
       },
     );

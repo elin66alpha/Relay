@@ -32,6 +32,7 @@ class BotChatController extends ChangeNotifier {
   static const String _queuedKey = 'queued';
 
   final BackendClient _backendClient;
+  String? _activeWorkdir;
 
   CliAgent _agent = defaultCliAgents.first;
   MachineCredential? _machine;
@@ -104,6 +105,9 @@ class BotChatController extends ChangeNotifier {
   // Exposed so the composer's per-agent Model/Effort/Permission controls can
   // reach the same backend client (and thus the same workdir scope).
   BackendClient get backend => _backendClient;
+  // The work directory last switched to, so workspace-scoped UI (e.g. the swarm
+  // drawer list) can reload when it changes without re-fetching on every notify.
+  String? get activeWorkdir => _activeWorkdir;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
   int get quotaScheduleRevision => _quotaScheduleRevision;
@@ -563,6 +567,7 @@ class BotChatController extends ChangeNotifier {
       path,
       create: create,
     );
+    _activeWorkdir = info.dir;
     // Switching paths switches conversations: the session is keyed by
     // workdir + agent + chat session. Reconnect the event stream with the new
     // workdir and reload the shared history for this path so it shows immediately.

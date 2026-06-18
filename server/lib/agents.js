@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -33,6 +33,10 @@ function appendCapped(buffer, text) {
 // Keys are scoped by workdir + agent + optional chat session id. clearSession
 // lets the app start a fresh machine-side conversation after history is cleared.
 const SESSION_FILE = path.join(__dirname, '..', 'agent-sessions.json');
+const CODEX_STATE_DB = path.join(os.homedir(), '.codex', 'state_5.sqlite');
+const AGY_ROOT = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class AgentCancelledError extends Error {
   constructor() {
@@ -101,6 +105,81 @@ function clearSession(sessionKey) {
     delete sessions[sessionKey];
   });
   return true;
+}
+
+function sqlIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function sqlLiteral(value) {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : 'NULL';
+  }
+  if (typeof value === 'boolean') return value ? '1' : '0';
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function sqliteRun(dbPath, sql, options = {}) {
+  const args = [];
+  if (options.json) args.push('-json');
+  args.push(dbPath, sql);
+  const result = spawnSync('sqlite3', args, {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || '').trim();
+    throw new Error(detail || `sqlite3 exited with code ${result.status}`);
+  }
+  return String(result.stdout || '');
+}
+
+function sqliteJson(dbPath, sql) {
+  const raw = sqliteRun(dbPath, sql, { json: true }).trim();
+  return raw ? JSON.parse(raw) : [];
+}
+
+function sqliteExec(dbPath, sql) {
+  sqliteRun(dbPath, `PRAGMA busy_timeout=5000; ${sql}`);
+}
+
+function copySqliteDatabase(srcPath, destPath) {
+  try {
+    sqliteExec(srcPath, `VACUUM INTO ${sqlLiteral(destPath)};`);
+  } catch (_err) {
+    fs.copyFileSync(srcPath, destPath, fs.constants.COPYFILE_EXCL);
+  }
+}
+
+function replaceExactTextInFile(filePath, from, to) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  if (!text.includes(from)) return;
+  fs.writeFileSync(filePath, text.split(from).join(to));
+}
+
+function replaceExactTextInTree(rootDir, from, to) {
+  if (!fs.existsSync(rootDir)) return;
+  const stack = [rootDir];
+  while (stack.length) {
+    const current = stack.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!/\.(json|jsonl|md|txt|log)$/i.test(entry.name)) continue;
+      try {
+        replaceExactTextInFile(entryPath, from, to);
+      } catch (_err) {
+        // Best-effort cleanup of visible text references inside the copied tree.
+      }
+    }
+  }
 }
 
 // Experimental agents (opencode, hermes) are only offered once their CLI is
@@ -390,7 +469,7 @@ function runClaudeInvocation({
   } else {
     args.push('--session-id', sessionId);
   }
-  args.push(String(prompt));
+  args.push('--', String(prompt));
 
   return finishRun(spawnStream({
     cmd: 'claude',
@@ -510,6 +589,13 @@ function runBtw(prompt, onEvent, options = {}) {
   });
 }
 
+function runBtwAgent(agentKey, prompt, onEvent, options = {}) {
+  if (agentKey === 'claude') return runBtw(prompt, onEvent, options);
+  if (agentKey === 'codex') return runCodexBtw(prompt, onEvent, options);
+  if (agentKey === 'agy') return runAgyBtw(prompt, onEvent, options);
+  throw new Error(`BTW is not available for ${agentKey || 'this agent'}`);
+}
+
 function codexItemLabel(item) {
   const type = item.type || item.item_type;
   if (type === 'command_execution') {
@@ -531,7 +617,142 @@ function codexItemLabel(item) {
   return null;
 }
 
-function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
+function codexRolloutCopy(parentRolloutPath, parentThreadId, childThreadId) {
+  const source = fs.readFileSync(parentRolloutPath, 'utf8');
+  const hasTrailingNewline = source.endsWith('\n');
+  const rawLines = hasTrailingNewline
+    ? source.slice(0, -1).split('\n')
+    : source.split('\n');
+  const lines = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    if (!line.trim()) continue;
+    try {
+      JSON.parse(line);
+      lines.push(line.split(parentThreadId).join(childThreadId));
+    } catch (_err) {
+      // If the source thread is actively being written, the last line may be a
+      // partial JSON record. Drop that one so the child rollout stays readable.
+      if (i !== rawLines.length - 1 || hasTrailingNewline) {
+        lines.push(line.split(parentThreadId).join(childThreadId));
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function codexChildRolloutPath(parentRolloutPath, parentThreadId, childThreadId) {
+  const dir = path.dirname(parentRolloutPath);
+  const base = path.basename(parentRolloutPath);
+  if (base.includes(parentThreadId)) {
+    return path.join(dir, base.split(parentThreadId).join(childThreadId));
+  }
+  const stamp = new Date()
+    .toISOString()
+    .replace(/\.\d+Z$/, '')
+    .replace(/:/g, '-');
+  return path.join(dir, `rollout-${stamp}-${childThreadId}.jsonl`);
+}
+
+function cloneCodexThread(parentThreadId) {
+  if (!UUID_RE.test(String(parentThreadId || ''))) {
+    throw new Error('Cannot fork Codex BTW: main Codex session id is invalid.');
+  }
+  if (!fs.existsSync(CODEX_STATE_DB)) {
+    throw new Error('Cannot fork Codex BTW: Codex state database was not found.');
+  }
+
+  const rows = sqliteJson(
+    CODEX_STATE_DB,
+    `SELECT * FROM threads WHERE id = ${sqlLiteral(parentThreadId)} LIMIT 1;`,
+  );
+  const parent = rows[0];
+  if (!parent) {
+    throw new Error('Cannot fork Codex BTW: main Codex thread was not found.');
+  }
+  if (!parent.rollout_path || !fs.existsSync(parent.rollout_path)) {
+    throw new Error(
+      'Cannot fork Codex BTW: main Codex rollout file was not found.',
+    );
+  }
+
+  const childThreadId = crypto.randomUUID();
+  const childRolloutPath = codexChildRolloutPath(
+    parent.rollout_path,
+    parentThreadId,
+    childThreadId,
+  );
+  fs.mkdirSync(path.dirname(childRolloutPath), { recursive: true });
+  fs.writeFileSync(
+    childRolloutPath,
+    codexRolloutCopy(parent.rollout_path, parentThreadId, childThreadId),
+    { flag: 'wx' },
+  );
+
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
+  const child = {
+    ...parent,
+    id: childThreadId,
+    rollout_path: childRolloutPath,
+    created_at: now,
+    updated_at: now,
+    created_at_ms: nowMs,
+    updated_at_ms: nowMs,
+    tokens_used: 0,
+    archived: 0,
+    archived_at: null,
+    title: parent.title ? `BTW: ${parent.title}` : 'BTW side conversation',
+    preview: parent.preview ? `BTW: ${parent.preview}` : '',
+  };
+  const columns = Object.keys(child);
+  const insertThread = [
+    `INSERT INTO threads (${columns.map(sqlIdentifier).join(', ')})`,
+    `VALUES (${columns
+      .map((column) => sqlLiteral(child[column]))
+      .join(', ')});`,
+  ].join(' ');
+  const insertTools = [
+    'INSERT OR IGNORE INTO thread_dynamic_tools',
+    '(thread_id, position, name, description, input_schema, defer_loading,',
+    'namespace)',
+    `SELECT ${sqlLiteral(childThreadId)}, position, name, description,`,
+    'input_schema, defer_loading, namespace',
+    `FROM thread_dynamic_tools WHERE thread_id = ${sqlLiteral(parentThreadId)};`,
+  ].join(' ');
+  const insertEdge = [
+    'INSERT OR REPLACE INTO thread_spawn_edges',
+    '(parent_thread_id, child_thread_id, status)',
+    `VALUES (${sqlLiteral(parentThreadId)},`,
+    `${sqlLiteral(childThreadId)}, 'active');`,
+  ].join(' ');
+  try {
+    sqliteExec(
+      CODEX_STATE_DB,
+      `BEGIN IMMEDIATE; ${insertThread} ${insertTools} ${insertEdge} COMMIT;`,
+    );
+  } catch (err) {
+    // The transaction is atomic, but the rollout file was written first. If the
+    // insert fails there is no thread row referencing it, so drop the orphan.
+    try {
+      fs.unlinkSync(childRolloutPath);
+    } catch (_err) {
+      // Already gone.
+    }
+    throw err;
+  }
+  return childThreadId;
+}
+
+function runCodex(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  retryOverride,
+) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const resuming = !!(prior && prior.id);
@@ -553,12 +774,13 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   // The resume subcommand does not support -C, so spawn cwd selects the repo;
   // new sessions still pass -C explicitly.
   const args = resuming
-    ? ['exec', 'resume', ...common, prior.id, String(prompt)]
+    ? ['exec', 'resume', ...common, prior.id, '--', String(prompt)]
     : [
         'exec',
         ...common,
         '-C',
         cwd,
+        '--',
         String(prompt),
       ];
 
@@ -638,20 +860,92 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   }), {
     agentKey: 'codex',
     onEvent,
-    retry: () => runCodex(prompt, onEvent, sessionKey, signal, workdir, settings),
+    retry:
+      retryOverride ||
+      (() => runCodex(prompt, onEvent, sessionKey, signal, workdir, settings)),
   });
+}
+
+function runCodexBtw(prompt, onEvent, options = {}) {
+  const { mainSessionKey, btwSessionKey, signal, workdir, settings } = options;
+  const readOnlySettings = { ...(settings || {}), permission: 'read-only' };
+  const btwPrior = getSession(btwSessionKey);
+  if (!btwPrior || !btwPrior.id) {
+    const mainPrior = getSession(mainSessionKey);
+    const mainThreadId = mainPrior && mainPrior.id ? mainPrior.id : null;
+    if (mainThreadId) {
+      const childThreadId = cloneCodexThread(mainThreadId);
+      setSession(btwSessionKey, {
+        id: childThreadId,
+        parentId: mainThreadId,
+        forkedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return runCodex(
+    prompt,
+    onEvent,
+    btwSessionKey,
+    signal,
+    workdir,
+    readOnlySettings,
+    () => runCodexBtw(prompt, onEvent, options),
+  );
 }
 
 // agy cannot take an explicit new session ID. It records the latest
 // conversation per cwd in last_conversations.json, which we read after a run
 // and reuse with --conversation next time.
 const AGY_LAST_CONV = path.join(
-  os.homedir(),
-  '.gemini',
-  'antigravity-cli',
+  AGY_ROOT,
   'cache',
   'last_conversations.json',
 );
+const AGY_CONVERSATIONS_DIR = path.join(AGY_ROOT, 'conversations');
+const AGY_BRAIN_DIR = path.join(AGY_ROOT, 'brain');
+
+function cloneAgyConversation(parentConversationId) {
+  if (!UUID_RE.test(String(parentConversationId || ''))) {
+    throw new Error(
+      'Cannot fork Antigravity BTW: main conversation id is invalid.',
+    );
+  }
+  const childConversationId = crypto.randomUUID();
+  const srcDb = path.join(AGY_CONVERSATIONS_DIR, `${parentConversationId}.db`);
+  const destDb = path.join(AGY_CONVERSATIONS_DIR, `${childConversationId}.db`);
+  if (!fs.existsSync(srcDb)) {
+    throw new Error(
+      'Cannot fork Antigravity BTW: main conversation database was not found.',
+    );
+  }
+
+  fs.mkdirSync(AGY_CONVERSATIONS_DIR, { recursive: true });
+  copySqliteDatabase(srcDb, destDb);
+  try {
+    sqliteExec(
+      destDb,
+      `UPDATE trajectory_meta SET cascade_id = ${sqlLiteral(childConversationId)}
+       WHERE cascade_id = ${sqlLiteral(parentConversationId)};`,
+    );
+  } catch (_err) {
+    // The filename is the primary lookup key. If metadata rewriting fails, keep
+    // the cloned database; agy can still resume it by --conversation.
+  }
+
+  const srcPb = path.join(AGY_CONVERSATIONS_DIR, `${parentConversationId}.pb`);
+  const destPb = path.join(AGY_CONVERSATIONS_DIR, `${childConversationId}.pb`);
+  if (fs.existsSync(srcPb) && !fs.existsSync(destPb)) {
+    fs.copyFileSync(srcPb, destPb, fs.constants.COPYFILE_EXCL);
+  }
+
+  const srcBrain = path.join(AGY_BRAIN_DIR, parentConversationId);
+  const destBrain = path.join(AGY_BRAIN_DIR, childConversationId);
+  if (fs.existsSync(srcBrain) && !fs.existsSync(destBrain)) {
+    fs.cpSync(srcBrain, destBrain, { recursive: true, errorOnExist: true });
+    replaceExactTextInTree(destBrain, parentConversationId, childConversationId);
+  }
+  return childConversationId;
+}
 
 function agyReplyFromTranscript(lines, prompt) {
   const expectedPrompt = String(prompt || '').trim();
@@ -735,23 +1029,35 @@ function agyTranscriptSnapshot(convId) {
   };
 }
 
+// Assemble agy's argv. Pure and exported so the prompt-placement contract is
+// pinned by a regression test without spawning the binary.
+//
+// The one thing that matters here: agy's --print/--prompt is a VALUE flag — it
+// takes the prompt as its argument, not a trailing positional. A bare `--print`
+// followed by other flags swallows the next one (e.g. --sandbox) as the prompt
+// and drops the user's message. So the prompt must ride as a single
+// `--print=<prompt>` token; the `=` form also keeps a prompt that starts with
+// '-' or spans multiple lines safely inside the value. buildArgs supplies the
+// selected model (--model) plus the permission flag (default --sandbox).
+function buildAgyArgs({ settings, cwd, conversationId, prompt }) {
+  const args = [...buildArgs('agy', settings), '--add-dir', cwd];
+  if (conversationId) args.push('--conversation', conversationId);
+  args.push(`--print=${String(prompt)}`);
+  return args;
+}
+
 function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
   const priorConvId = prior && prior.id ? prior.id : null;
   const priorTranscript = agyTranscriptSnapshot(priorConvId);
   emit(onEvent, 'Antigravity is working...');
-  // agy exposes no model/effort; buildArgs only yields the permission flag
-  // (default = --sandbox). The prompt goes last, after every flag, so prompt
-  // text starting with '-' can never be parsed as an option.
-  const args = [
-    '--print',
-    ...buildArgs('agy', settings),
-    '--add-dir',
+  const args = buildAgyArgs({
+    settings,
     cwd,
-  ];
-  if (prior && prior.id) args.push('--conversation', prior.id);
-  args.push(String(prompt));
+    conversationId: priorConvId,
+    prompt,
+  });
   return finishRun(spawnStream({
     cmd: 'agy',
     args,
@@ -808,6 +1114,25 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
   }), { agentKey: 'agy', onEvent });
 }
 
+function runAgyBtw(prompt, onEvent, options = {}) {
+  const { mainSessionKey, btwSessionKey, signal, workdir, settings } = options;
+  const sandboxSettings = { ...(settings || {}), permission: 'sandbox' };
+  const btwPrior = getSession(btwSessionKey);
+  if (!btwPrior || !btwPrior.id) {
+    const mainPrior = getSession(mainSessionKey);
+    const mainConversationId = mainPrior && mainPrior.id ? mainPrior.id : null;
+    if (mainConversationId) {
+      const childConversationId = cloneAgyConversation(mainConversationId);
+      setSession(btwSessionKey, {
+        id: childConversationId,
+        parentId: mainConversationId,
+        forkedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return runAgy(prompt, onEvent, btwSessionKey, signal, workdir, sandboxSettings);
+}
+
 // opencode: `run --format json` streams JSON events (one per line). Each carries
 // the sessionID (captured for resume) and `type:"text"` parts hold the assistant
 // output; a new messageID marks a follow-up message (segment). Model / effort
@@ -837,7 +1162,7 @@ function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
     cwd,
   ];
   if (resuming) args.push('--session', sessionId);
-  args.push(String(prompt));
+  args.push('--', String(prompt));
 
   return finishRun(spawnStream({
     cmd: bin,
@@ -1038,7 +1363,9 @@ module.exports = {
   getAgent,
   runAgent,
   runBtw,
+  runBtwAgent,
   getSession,
   clearSession,
   agyReplyFromTranscript,
+  buildAgyArgs,
 };

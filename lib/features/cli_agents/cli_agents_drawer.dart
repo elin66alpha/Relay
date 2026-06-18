@@ -3,15 +3,16 @@ import 'package:flutter/material.dart';
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/agent_session.dart';
+import '../../core/models/group.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
 import '../chat/bot_chat_controller.dart';
+import '../chat/group_chat_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../machines/machine_credentials_screen.dart';
 import '../settings/app_settings_screen.dart';
-import '../cards/card_deck_screen.dart';
 import '../filesystem/file_system_screen.dart';
 import '../quota/quota_scheduler_screen.dart';
 import '../quota/quota_usage_screen.dart';
@@ -129,26 +130,11 @@ class CliAgentsDrawer extends StatelessWidget {
                       activeMachine,
                     ),
                   const Divider(height: 16),
-                  ListTile(
-                    leading: const Icon(Icons.style_outlined),
-                    title: Text(context.l10n.cardMode),
-                    subtitle: Text(
-                      context.l10n.cardModeSubtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () {
-                      if (closeOnAction) Navigator.of(context).pop();
-                      Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) => CardDeckScreen(
-                            agentsController: agentsController,
-                            chatController: chatController,
-                            machinesController: machinesController,
-                          ),
-                        ),
-                      );
-                    },
+                  SwarmDrawerSection(
+                    agentsController: agentsController,
+                    settingsController: settingsController,
+                    chatController: chatController,
+                    closeOnAction: closeOnAction,
                   ),
                 ],
               ),
@@ -400,6 +386,122 @@ String? _agentIconAssetPath(String key, Brightness brightness) {
         : 'assets/agent_icons/hermes.png',
     _ => null,
   };
+}
+
+/// The Swarm drawer entry plus an always-visible list of the workspace's swarms
+/// as sub-entries. Tapping the header opens the swarm screen on its most-recent
+/// swarm (or the create flow when there are none); tapping a sub-entry opens
+/// directly into that swarm. The list reloads whenever the user returns from the
+/// swarm screen, so creates/deletes there are reflected here.
+class SwarmDrawerSection extends StatefulWidget {
+  const SwarmDrawerSection({
+    required this.agentsController,
+    required this.settingsController,
+    required this.chatController,
+    required this.closeOnAction,
+    super.key,
+  });
+
+  final CliAgentsController agentsController;
+  final AppSettingsController settingsController;
+  final BotChatController chatController;
+  final bool closeOnAction;
+
+  @override
+  State<SwarmDrawerSection> createState() => _SwarmDrawerSectionState();
+}
+
+class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
+  List<ChatGroup> _swarms = const <ChatGroup>[];
+  String? _lastWorkdir;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastWorkdir = widget.chatController.activeWorkdir;
+    widget.chatController.addListener(_onControllerChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    widget.chatController.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  // The chat controller notifies often (every streaming delta); only reload the
+  // swarm list when the work directory actually changed, since swarms are keyed
+  // to the workspace.
+  void _onControllerChanged() {
+    final String? workdir = widget.chatController.activeWorkdir;
+    if (workdir != _lastWorkdir) {
+      _lastWorkdir = workdir;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    try {
+      final List<ChatGroup> swarms = await widget.chatController.backend.fetchGroups();
+      if (mounted) setState(() => _swarms = swarms);
+    } on BackendException {
+      // Best-effort: a failed fetch just leaves the last-known list in place.
+    }
+  }
+
+  Future<void> _openSwarm(BuildContext context, {String? groupId}) async {
+    if (widget.closeOnAction) Navigator.of(context).pop();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => GroupChatScreen(
+          agentsController: widget.agentsController,
+          settingsController: widget.settingsController,
+          initialGroupId: groupId,
+        ),
+      ),
+    );
+    // The roster may have changed on that screen; refresh the sub-entries.
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    return Column(
+      children: <Widget>[
+        ListTile(
+          leading: const Icon(Icons.groups_outlined),
+          title: Text(strings.groupChat),
+          subtitle: Text(
+            strings.groupChatSubtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () => _openSwarm(context),
+        ),
+        for (final ChatGroup swarm in _swarms)
+          Padding(
+            padding: const EdgeInsets.only(left: 28),
+            child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              leading: const Icon(Icons.forum_outlined, size: 18),
+              title: Text(
+                swarm.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                swarm.memberLabels.join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => _openSwarm(context, groupId: swarm.id),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class ActiveMachineStatusTile extends StatefulWidget {

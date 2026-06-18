@@ -9,6 +9,7 @@ import '../models/agent_options.dart';
 import '../models/agent_session.dart';
 import '../models/chat_message.dart';
 import '../models/cli_agent.dart';
+import '../models/group.dart';
 import '../models/machine_credential.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
@@ -622,6 +623,13 @@ class BackendEvent {
   final Map<String, Object?> data;
 }
 
+class GroupHistory {
+  const GroupHistory({required this.group, required this.messages});
+
+  final ChatGroup group;
+  final List<ChatMessage> messages;
+}
+
 class BackendClient {
   BackendClient({
     MachineCredentialsStore? credentialsStore,
@@ -1152,6 +1160,128 @@ class BackendClient {
     );
   }
 
+  // --- Group chat (multi-agent) ---------------------------------------------
+
+  List<ChatGroup> _groupsFrom(Object? decoded) {
+    if (decoded is! Map) throw BackendException('Invalid groups response.');
+    final List<Object?> raw = decoded['groups'] is List
+        ? (decoded['groups'] as List).cast<Object?>()
+        : const <Object?>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => ChatGroup.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+  }
+
+  Future<List<ChatGroup>> fetchGroups() async {
+    return _groupsFrom(await _requestJson('GET', '/api/groups'));
+  }
+
+  Future<List<ChatGroup>> createGroup(
+    String name,
+    List<String> members, {
+    String workdir = '',
+    Map<String, Map<String, String>> configs =
+        const <String, Map<String, String>>{},
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/groups',
+      body: <String, Object?>{
+        'name': name,
+        'members': members,
+        if (workdir.isNotEmpty) 'workdir': workdir,
+        if (configs.isNotEmpty) 'configs': configs,
+      },
+    );
+    return _groupsFrom(decoded);
+  }
+
+  Future<List<ChatGroup>> setGroupMembers(
+    String groupId,
+    List<String> members, {
+    Map<String, Map<String, String>> configs =
+        const <String, Map<String, String>>{},
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/groups/members',
+      body: <String, Object?>{
+        'groupId': groupId,
+        'members': members,
+        if (configs.isNotEmpty) 'configs': configs,
+      },
+    );
+    return _groupsFrom(decoded);
+  }
+
+  Future<List<ChatGroup>> deleteGroup(String groupId) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/groups/delete',
+      body: <String, Object?>{'groupId': groupId},
+    );
+    return _groupsFrom(decoded);
+  }
+
+  Future<GroupHistory> fetchGroupHistory(String groupId) async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/group/history?groupId=${Uri.encodeQueryComponent(groupId)}',
+    );
+    if (decoded is! Map) throw BackendException('Invalid group history.');
+    final List<Object?> raw = decoded['messages'] is List
+        ? (decoded['messages'] as List).cast<Object?>()
+        : const <Object?>[];
+    return GroupHistory(
+      group: ChatGroup.fromJson(
+        (decoded['group'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{},
+      ),
+      messages: raw
+          .whereType<Map>()
+          .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
+          .toList(growable: false),
+    );
+  }
+
+  /// Post a human message to a group. Sent as plain JSON (not SSE): the per-agent
+  /// turn deltas are mirrored to every device on the shared `/api/events` stream,
+  /// tagged with `groupId`, so the UI renders from there. Awaiting this resolves
+  /// when the whole round (every summoned member) finishes.
+  Future<void> sendGroupMessage({
+    required String groupId,
+    required String prompt,
+    required String requestId,
+  }) async {
+    await _requestJson(
+      'POST',
+      '/api/group/chat',
+      body: <String, Object?>{
+        'groupId': groupId,
+        'prompt': prompt,
+        'requestId': requestId,
+      },
+      timeout: const Duration(minutes: 65),
+    );
+  }
+
+  Future<void> cancelGroupMessage(String requestId) async {
+    await _requestJson(
+      'POST',
+      '/api/group/chat/cancel',
+      body: <String, Object?>{'requestId': requestId},
+    );
+  }
+
+  Future<void> clearGroup(String groupId) async {
+    await _requestJson(
+      'POST',
+      '/api/group/clear',
+      body: <String, Object?>{'groupId': groupId},
+    );
+  }
+
   Future<List<ChatHistorySearchResult>> searchHistory(
     String query, {
     String? agentKey,
@@ -1227,8 +1357,7 @@ class BackendClient {
         .toList(growable: false);
   }
 
-  /// Catalog of selectable model/effort/permission options for an agent
-  /// (capability-aware; agy reports no model/effort).
+  /// Catalog of selectable model/effort/permission options for an agent.
   Future<AgentOptionsCatalog> fetchAgentOptions(String agentKey) async {
     final Object? decoded = await _requestJson(
       'GET',

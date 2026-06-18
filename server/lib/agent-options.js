@@ -5,8 +5,8 @@
 // exact CLI argv tokens it maps to, so agents.js can splice them into a spawn
 // without knowing agent-specific flag shapes.
 //
-// Capability-aware: agy (Antigravity) exposes no model/effort selection in its
-// CLI, so those groups are empty for it and the client hides those entries.
+// Capability-aware: each agent only exposes the controls supported by its CLI.
+// Antigravity (`agy`) supports --model and permission flags, but no effort flag.
 //
 // Every group is an explicit, named choice — there is no opaque "default" entry,
 // so the user always knows exactly which model, reasoning effort, and permission
@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { discoverModels } = require('./model-discovery');
+const { configuredAgyModel } = require('./agy-paths');
 
 // Static fallback model catalog. The live list normally comes from
 // model-discovery (which reads what the installed CLI actually ships, newest
@@ -62,7 +63,48 @@ const BASE_MODELS = {
       args: ['-m', 'gpt-5.4-mini'],
     },
   ],
-  agy: [],
+  agy: [
+    {
+      id: 'gemini-3-5-flash-medium',
+      label: 'Gemini 3.5 Flash (Medium)',
+      args: ['--model', 'Gemini 3.5 Flash (Medium)'],
+    },
+    {
+      id: 'gemini-3-5-flash-high',
+      label: 'Gemini 3.5 Flash (High)',
+      args: ['--model', 'Gemini 3.5 Flash (High)'],
+    },
+    {
+      id: 'gemini-3-5-flash-low',
+      label: 'Gemini 3.5 Flash (Low)',
+      args: ['--model', 'Gemini 3.5 Flash (Low)'],
+    },
+    {
+      id: 'gemini-3-1-pro-low',
+      label: 'Gemini 3.1 Pro (Low)',
+      args: ['--model', 'Gemini 3.1 Pro (Low)'],
+    },
+    {
+      id: 'gemini-3-1-pro-high',
+      label: 'Gemini 3.1 Pro (High)',
+      args: ['--model', 'Gemini 3.1 Pro (High)'],
+    },
+    {
+      id: 'claude-sonnet-4-6-thinking',
+      label: 'Claude Sonnet 4.6 (Thinking)',
+      args: ['--model', 'Claude Sonnet 4.6 (Thinking)'],
+    },
+    {
+      id: 'claude-opus-4-6-thinking',
+      label: 'Claude Opus 4.6 (Thinking)',
+      args: ['--model', 'Claude Opus 4.6 (Thinking)'],
+    },
+    {
+      id: 'gpt-oss-120b-medium',
+      label: 'GPT-OSS 120B (Medium)',
+      args: ['--model', 'GPT-OSS 120B (Medium)'],
+    },
+  ],
   // opencode models are `provider/model`; these free entries work without
   // credentials. Live discovery isn't wired for opencode, so this static list
   // (plus models-extra.json) is the catalog. Run `opencode models` for the full
@@ -242,17 +284,35 @@ const AGENT_DEFAULTS = {
   hermes: { permission: 'yolo' },
 };
 
-// Agents whose model group gets an automatic default (the newest catalog entry).
-// agy is excluded: its discovered ids use an unverified --model arg, so leaving
-// it unset keeps the default run on agy's own built-in model; selection is
-// opt-in.
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
+// Agents whose model group gets an automatic default (the newest catalog entry
+// or the CLI's configured default when available).
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'agy', 'opencode']);
+
+function modelDiscoveryDisabled() {
+  return (
+    process.env.RELAY_MODEL_DISCOVERY === '0' ||
+    process.env.RELAY_MODEL_DISCOVERY === 'false'
+  );
+}
+
+function configuredAgyModelId(models) {
+  if (modelDiscoveryDisabled()) return null;
+  const configured = configuredAgyModel();
+  if (!configured) return null;
+  const match = models.find((model) => model.label === configured);
+  return match ? match.id : null;
+}
 
 function defaultsFor(agentKey) {
   const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
   if (MODEL_DEFAULT_AGENTS.has(agentKey)) {
     const models = modelsFor(agentKey);
-    if (models.length) defaults.model = models[0].id;
+    if (models.length) {
+      defaults.model =
+        agentKey === 'agy'
+          ? configuredAgyModelId(models) || models[0].id
+          : models[0].id;
+    }
   }
   return defaults;
 }
@@ -338,7 +398,7 @@ function pick(list, id, fallbackId) {
 }
 
 // Normalize an arbitrary settings object to valid ids for the agent, dropping
-// selections the agent doesn't support (e.g. model/effort on agy).
+// selections the agent doesn't support.
 function normalizeSettings(agentKey, settings) {
   const groups = groupsFor(agentKey);
   const defaults = defaultsFor(agentKey);

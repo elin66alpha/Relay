@@ -206,6 +206,15 @@ class _UsageQuotaRow extends StatelessWidget {
 
   final UsageQuota quota;
 
+  String _formatPercent(BuildContext context, double? percent) {
+    if (percent == null) return context.l10n.unknown;
+    final double clamped = percent.clamp(0, 100).toDouble();
+    if ((clamped - clamped.round()).abs() < 0.05) {
+      return '${clamped.round()}%';
+    }
+    return '${clamped.toStringAsFixed(1)}%';
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
@@ -215,8 +224,7 @@ class _UsageQuotaRow extends StatelessWidget {
       _ => quota.label,
     };
     final double? percent = quota.remainingPercent;
-    final String percentText =
-        percent == null ? context.l10n.unknown : '${percent.round()}%';
+    final String percentText = _formatPercent(context, percent);
     final double? value =
         percent == null ? null : (percent / 100).clamp(0.0, 1.0).toDouble();
     return Padding(

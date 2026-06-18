@@ -41,8 +41,15 @@
   以及所有后端调用方共用一个 API transport。
 - Experimental CLI agent（OpenCode、Hermes），含 binary 检测、session resume、
   模型/effort/权限配置树、动态列表（只有安装后才在 UI 显示）。
-- BTW (by the way) 旁路提问：只读 `/api/btw` 端点，fork 主 Claude session，
-  不干扰主任务。
+- BTW (by the way) 旁路提问：只读 `/api/btw` 端点，不干扰主任务——Claude fork
+  其原生 CLI session，Codex 与 Antigravity 则克隆主对话另起只读旁路 session。
+- 蜂群（多智能体群聊，界面名 **Swarm** / 蜂群）：命名的蜂群成员共享一份记录，
+  按 `@` 召唤依次发言（串行、单一发言权；每个成员只收到上次发言以来的增量）。
+  每个蜂群固定自己的工作目录（work tree）和各成员的模型/思考深度/权限，按工作区
+  列出（同一工作区可有多个蜂群，各自选定 work tree），并作为常显子项出现在左侧
+  抽屉。详见 `docs/group-chat.md`。
+- Antigravity 模型选择：`agy` 通过 `--model` 暴露模型目录，蜂群与单聊均可固定到
+  具体的 Gemini / Claude / GPT-OSS 模型。
 - 多段消息：每条 assistant 回复独立时间戳，前端可折叠展示；后端发送 `segment`
   SSE 事件，消息元数据中记录 `{ ts, text }` 段。
 - Agent 图标：每个 agent 独立 PNG 资源（含亮/暗主题），替换原图标字体。
@@ -68,12 +75,8 @@
 
 - iOS 接入 Apple 推送通知服务(APNs)，把现有的离线推送(Web Push + FCM)扩展到
   被完全杀掉的 iOS app。
-- 等 Antigravity 有可靠 API 或 CLI 来源后补充额度支持。**2026-06-04 已评估
-  (agy 1.0.5):刻意暂不实现。** agy 基于 Gemini Code Assist
-  (`cloudcode-pa.googleapis.com`),唯一的配额路径是未公开的内部 `v1internal`
-  接口(如 `FetchQuotaStatus` / `GetUsageAndQuota` / `v1internal/credits`)。其
-  配额是基于信用额度的多维模型(prompt / flow / flex / FCA 等多种 credits,分
-  档位、可加购),没有能干净映射到现有"5 小时 / 周剩余"额度 UI 的单一数值,且需
-  逆向 protobuf/gRPC schema、无稳定性保证。会话内的 `/credits` `/limits`
-  `/usage` 斜杠命令只在交互式 TUI 里(不可脚本化)。待 Google 提供官方、可脚本化
-  的配额来源再做;在此之前 `usage.js` 继续把 agy 报告为 `not_available_yet`。
+- Antigravity 额度已通过本地 `agy` language-server RPC
+  (`RetrieveUserQuotaSummary`) 接入,该接口返回按模型组划分的 5 小时/周额度
+  bucket 和精确 remaining fraction。当前限制:来源依赖正在运行的 Antigravity
+  CLI 本地实例,不是官方公开 REST API;`/api/usage` 有缓存时可展示缓存,没有缓存
+  且本地 RPC 不可达时会明确提示先启动一次 `agy`。

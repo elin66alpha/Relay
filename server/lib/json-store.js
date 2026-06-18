@@ -1,7 +1,7 @@
 'use strict';
 
 // Shared JSON-file store used by the small persistence modules (tokens, agent
-// sessions, chat sessions, agent settings, cards, quota schedules). It folds
+// sessions, chat sessions, agent settings, swarms, quota schedules). It folds
 // three concerns that were previously copy-pasted into each module:
 //
 //   * an in-memory cache keyed by the file's size+mtime, so repeated reads on a

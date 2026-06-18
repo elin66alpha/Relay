@@ -9,7 +9,7 @@ git; finished work should be summarized here briefly, not narrated.
 - Flutter client for Android, iOS, Web, and desktop runner projects.
 - Node.js backend in `server/`: entry `server.js` (~900 lines: config,
   middleware, shared state, schedulers, static serving) plus per-domain route
-  modules in `server/routes/{meta,push,fs,chat,btw,sessions,quota}.js` — each
+  modules in `server/routes/{meta,push,fs,chat,btw,group,sessions,quota}.js` — each
   exports a `createXxxRouter(ctx)` factory receiving shared state through
   `routeContext`.
 - OS setup lives in `backends/` (Linux PM2, macOS LaunchAgent, Windows
@@ -41,11 +41,16 @@ git; finished work should be summarized here briefly, not narrated.
   messages (mid-task follow-ups + a final answer). Each is tracked as a
   `{ ts, text }` segment in the message metadata. The backend emits `segment`
   SSE events; the frontend renders them with collapsible "thinking" sections.
-- BTW (by the way) sidekick: a read-only `/api/btw` endpoint that forks the
-  main Claude session so the user can ask a side question without disturbing
-  the active task. It lives under agent key `btw:claude` and uses the `plan`
-  permission tier. History and the forked session never leak into the main
-  conversation. Currently Claude-only; Codex is reserved for future support.
+- BTW (by the way) sidekick: a read-only `/api/btw` endpoint for Claude, Codex,
+  and Antigravity side questions without disturbing the active task. Claude
+  forks its native CLI session; Codex and Antigravity run side sessions seeded
+  with the main Relay transcript. Side history and sessions live under
+  `btw:<agent>` keys and never leak into the main conversation.
+- Swarm (multi-agent group chat, shown as "Swarm" / 蜂群; `group` in code): named
+  swarms of agent members share one transcript and answer `@mentions` in turn.
+  Each swarm pins its own work tree and per-member model/effort/permission, is
+  listed per workspace (several per workspace, on different work trees), and
+  appears as always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
 
 ## Operating Principles
 
@@ -190,8 +195,8 @@ not generated any token yet, protected API routes return
 - Push: `GET /api/push/config`, `POST /api/push/subscribe`,
   `POST /api/push/unsubscribe`, `POST /api/push/fcm/register`,
   `POST /api/push/fcm/unregister`
-- Cards: `GET /api/cards`, `POST /api/cards/feedback`, `POST /api/cards/refresh`
 - BTW: `POST /api/btw` (SSE when `Accept: text/event-stream`), `GET /api/btw/history`, `POST /api/btw/cancel`, `POST /api/btw/clear`
+- Swarm (group chat): `GET`+`POST /api/groups` (`{name, members, workdir?, configs?}`), `POST /api/groups/members`, `POST /api/groups/delete`, `GET /api/group/history`, `POST /api/group/clear`, `POST /api/group/chat` (SSE when `Accept: text/event-stream`), `POST /api/group/chat/cancel`
 
 ## Environment / Ops Gotchas
 
@@ -248,8 +253,8 @@ Durable outcomes:
 (15 code fixes + 1 accepted limitation). Durable outcomes:
 
 - `lib/core/backend/api_transport.dart`: the single HTTP pipeline (stores,
-  headers, error mapping) shared by `BackendClient` and `CardsService` — new
-  API callers should reuse it, not copy the connection logic.
+  headers, error mapping) shared by every API caller — new callers should reuse
+  it, not copy the connection logic.
 - Heavy work stays off the UI isolate: credential decrypt (PBKDF2 600k) runs
   in `compute()` on native (Web uses async WebCrypto); history responses
   >256KB are decoded in an isolate.
@@ -259,9 +264,9 @@ Durable outcomes:
 - Streaming deltas accumulate in per-request `StringBuffer`s and only
   materialize on the existing 80ms-throttled notify.
 - `MachineCredentialsStore` / `DeviceIdStore` / `WorkdirStore` have **static**
-  in-memory caches (multiple store instances exist across BackendClient,
-  CardsService, and controllers). Any new write path in these stores must
-  invalidate the cache (`_invalidateCache()`).
+  in-memory caches (multiple store instances exist across BackendClient and
+  controllers). Any new write path in these stores must invalidate the cache
+  (`_invalidateCache()`).
 - Native file upload streams (`withReadStream` + `http.StreamedRequest`);
   Web upload keeps bytes (browser limitation).
 - Shared utils to reuse instead of re-implementing:

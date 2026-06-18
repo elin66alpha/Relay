@@ -3,16 +3,14 @@
 const express = require('express');
 
 // The /btw sidekick. A side question that inherits the main conversation's
-// memory (by forking its Claude session) but never touches the main task or its
-// files. It runs in its own scope so it can answer while the main turn is still
-// working. History and the forked session are stored under a dedicated agent
-// key so they never leak into the main conversation's history or search.
-const BTW_SCOPE_AGENT = 'btw:claude';
+// memory but never touches the main task. Each supported CLI forks or clones
+// its own native session storage into a dedicated `btw:<agent>` scope so the
+// side chat never writes back to the main conversation.
+const BTW_SUPPORTED = new Set(['claude', 'codex', 'agy']);
 
-// Only agents whose CLI can fork a session keep their own side memory. Claude
-// supports it today; Codex is reserved (its button is shown in the app but the
-// backend declines until its equivalent is wired up).
-const BTW_SUPPORTED = new Set(['claude']);
+function btwScopeAgent(agentKey) {
+  return `btw:${agentKey}`;
+}
 
 module.exports = function createBtwRouter(ctx) {
   const {
@@ -28,7 +26,7 @@ module.exports = function createBtwRouter(ctx) {
     readHistory,
     resolveAgentScope,
     runAgentTurn,
-    runBtw,
+    runBtwAgent,
     runningScopes,
     scopeChains,
     scopeKeyFor,
@@ -54,9 +52,12 @@ module.exports = function createBtwRouter(ctx) {
       }),
     });
     if (!scope) return null;
-    // The fork source is the main conversation's Claude session; the side chat
-    // gets its own scope for history + its own forked session.
-    const btwScopeKey = scopeKeyFor(BTW_SCOPE_AGENT, scope.workdir, scope.session.id);
+    // The side chat gets its own scope for history + its own fork/session.
+    const btwScopeKey = scopeKeyFor(
+      btwScopeAgent(agentKey),
+      scope.workdir,
+      scope.session.id,
+    );
     return { ...scope, mainSessionKey: scope.scopeKey, btwScopeKey };
   }
 
@@ -111,11 +112,12 @@ module.exports = function createBtwRouter(ctx) {
     // stream — otherwise the main chat on this (or another) device would mistake
     // the sidekick's events for activity on the main conversation and start
     // mirroring it.
+    const baseDependencies = agentTurnDependencies();
     const dependencies = {
-      ...agentTurnDependencies(),
+      ...baseDependencies,
       broadcastScope: () => {},
       runAgent: (_agentKey, p, onEvent, opts) =>
-        runBtw(p, onEvent, {
+        runBtwAgent(agentKey, p, onEvent, {
           mainSessionKey,
           btwSessionKey: opts.sessionKey,
           signal: opts.signal,
@@ -127,7 +129,7 @@ module.exports = function createBtwRouter(ctx) {
     try {
       await runAgentTurn({
         agent,
-        agentKey: 'claude',
+        agentKey,
         contextKey,
         dependencies,
         deviceId,

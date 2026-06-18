@@ -17,6 +17,7 @@ const {
   listAgents,
   runAgent,
   runBtw,
+  runBtwAgent,
   clearSession,
 } = require('./lib/agents');
 const {
@@ -90,8 +91,6 @@ const {
   markQuotaScheduleSent,
   reconcileRunningSchedules,
 } = require('./lib/quota-schedules');
-const cards = require('./lib/cards');
-const { generateCardsForWorkdir } = require('./lib/chat-learner');
 const createFsRouter = require('./routes/fs');
 const createChatRouter = require('./routes/chat');
 const createSessionsRouter = require('./routes/sessions');
@@ -99,6 +98,7 @@ const createQuotaRouter = require('./routes/quota');
 const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
 const createBtwRouter = require('./routes/btw');
+const createGroupRouter = require('./routes/group');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -718,7 +718,6 @@ const routeContext = {
   buildDiagnostics,
   buildUsageReport,
   cancelQuotaSchedule,
-  cards,
   clearHistory,
   clearSession,
   createChatResponder,
@@ -732,7 +731,6 @@ const routeContext = {
   finalizeStaleStreamingHistory,
   formatUptime,
   fs,
-  generateCardsForWorkdir,
   getAgent,
   getDefaultWorkdir,
   getSettings,
@@ -761,6 +759,7 @@ const routeContext = {
   revokeTokenById,
   runAgentTurn,
   runBtw,
+  runBtwAgent,
   runningScopes,
   safeDownloadName,
   scopeChains,
@@ -777,6 +776,7 @@ const routeContext = {
   streamUploadToFile,
   touchChatSession,
   uploadedEntry,
+  upsertHistoryMessage,
   validateWorkdir,
   workdirBusy,
   workdirPresence,
@@ -787,6 +787,7 @@ app.use(createPushRouter(routeContext));
 app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
 app.use(createBtwRouter(routeContext));
+app.use(createGroupRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 
@@ -861,18 +862,6 @@ app.listen(PORT, HOST, () => {
   if (staleHistoryCount > 0) {
     flushHistory();
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);
-  }
-  // Card Mode: seed suggestions once if none are pending yet.
-  try {
-    const defaultWorkdir = getDefaultWorkdir();
-    if (cards.pendingCountForWorkdir(defaultWorkdir) === 0) {
-      cards.replaceGeneratedCards(
-        generateCardsForWorkdir(defaultWorkdir),
-        defaultWorkdir,
-      );
-    }
-  } catch (_err) {
-    // Non-fatal; Card Mode is a secondary feature.
   }
   if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
     console.log(`serving Flutter web from ${WEB_BUILD_DIR}`);

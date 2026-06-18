@@ -53,6 +53,14 @@ function makeCtx(overrides = {}) {
       session: { id: 'sess-canonical' },
       scopeKey: scopeKeyFor(agentKey, '/repo', 'sess-canonical'),
     }),
+    MAX_PROMPT_BYTES: 1024 * 1024,
+    activeRequests: new Map(),
+    agentTurnDependencies: () => ({
+      runAgent() {
+        throw new Error('base runAgent should not be called by /api/btw');
+      },
+    }),
+    createChatResponder: () => ({}),
     clearSession: (key) => {
       cleared.sessions.push(key);
       return true;
@@ -61,9 +69,15 @@ function makeCtx(overrides = {}) {
       cleared.histories.push(key);
     },
     finalizeStaleStreamingHistory: (key) => finalized.push(key),
+    normalizeDeviceId: () => 'device-test',
+    randomUUID: () => 'request-generated',
     readHistory: (key) => {
       reads.push(key);
       return [];
+    },
+    runAgentTurn: async () => {},
+    runBtwAgent() {
+      throw new Error('runBtwAgent was not stubbed');
     },
     sessionPayload: (session) => session,
     ...overrides.ctx,
@@ -109,6 +123,131 @@ test('btw clear and history resolve to the same side-chat scope key', async () =
   assert.equal(reads[0], cleared.sessions[0]);
 });
 
+test('btw clear uses an agent-specific side scope for codex', async () => {
+  const { ctx, cleared } = makeCtx();
+  const router = createBtwRouter(ctx);
+  const clear = handlerFor(router, 'post', '/api/btw/clear');
+
+  const res = fakeResponse();
+  await clear({ body: { agent: 'codex', sessionId: 'sess-requested' } }, res);
+
+  assert.equal(res.jsonBody.ok, true);
+  assert.deepEqual(cleared.sessions, [
+    scopeKeyFor('btw:codex', '/repo', 'sess-canonical'),
+  ]);
+});
+
+test('btw post uses the native agent side runner for codex without transcript seeding', async () => {
+  const calls = [];
+  const { ctx } = makeCtx({
+    ctx: {
+      runBtwAgent: (agentKey, prompt, _onEvent, options) => {
+        calls.push({ agentKey, prompt, options });
+        return 'side answer';
+      },
+      runAgentTurn: async (options) => {
+        await options.dependencies.runAgent(
+          options.agentKey,
+          options.prompt,
+          () => {},
+          {
+            sessionKey: options.scopeKey,
+            signal: options.signal,
+            workdir: options.workdir,
+            settings: { permission: 'workspace-write' },
+          },
+        );
+      },
+    },
+  });
+  const router = createBtwRouter(ctx);
+  const post = handlerFor(router, 'post', '/api/btw');
+
+  await post(
+    {
+      body: {
+        agent: 'codex',
+        prompt: 'what did the main task decide?',
+        requestId: 'req-1',
+        sessionId: 'sess-requested',
+      },
+      get: () => '',
+    },
+    fakeResponse(),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].agentKey, 'codex');
+  assert.equal(calls[0].prompt, 'what did the main task decide?');
+  assert.equal(
+    calls[0].options.mainSessionKey,
+    scopeKeyFor('codex', '/repo', 'sess-canonical'),
+  );
+  assert.equal(
+    calls[0].options.btwSessionKey,
+    scopeKeyFor('btw:codex', '/repo', 'sess-canonical'),
+  );
+  assert.equal(calls[0].options.settings.permission, 'workspace-write');
+  assert.ok(
+    !calls[0].prompt.includes('Main chat transcript'),
+    'Codex BTW must not be seeded with a Relay transcript prompt',
+  );
+});
+
+test('btw post uses the native agent side runner for agy without transcript seeding', async () => {
+  const calls = [];
+  const { ctx } = makeCtx({
+    ctx: {
+      runBtwAgent: (agentKey, prompt, _onEvent, options) => {
+        calls.push({ agentKey, prompt, options });
+        return 'side answer';
+      },
+      runAgentTurn: async (options) => {
+        await options.dependencies.runAgent(
+          options.agentKey,
+          options.prompt,
+          () => {},
+          {
+            sessionKey: options.scopeKey,
+            signal: options.signal,
+            workdir: options.workdir,
+            settings: { permission: 'sandbox' },
+          },
+        );
+      },
+    },
+  });
+  const router = createBtwRouter(ctx);
+  const post = handlerFor(router, 'post', '/api/btw');
+
+  await post(
+    {
+      body: {
+        agent: 'agy',
+        prompt: 'side question',
+        requestId: 'req-agy',
+        sessionId: 'sess-requested',
+      },
+      get: () => '',
+    },
+    fakeResponse(),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].agentKey, 'agy');
+  assert.equal(calls[0].prompt, 'side question');
+  assert.equal(
+    calls[0].options.mainSessionKey,
+    scopeKeyFor('agy', '/repo', 'sess-canonical'),
+  );
+  assert.equal(
+    calls[0].options.btwSessionKey,
+    scopeKeyFor('btw:agy', '/repo', 'sess-canonical'),
+  );
+  assert.equal(calls[0].options.settings.permission, 'sandbox');
+  assert.ok(!calls[0].prompt.includes('Main chat transcript'));
+});
+
 test('btw clear refuses while a side question is running', async () => {
   const runningScopes = new Set([
     scopeKeyFor('btw:claude', '/repo', 'sess-canonical'),
@@ -131,7 +270,7 @@ test('btw clear rejects unsupported agents before touching any scope', async () 
   const clear = handlerFor(router, 'post', '/api/btw/clear');
 
   const res = fakeResponse();
-  await clear({ body: { agent: 'codex', sessionId: 'sess-requested' } }, res);
+  await clear({ body: { agent: 'opencode', sessionId: 'sess-requested' } }, res);
 
   assert.equal(res.statusCode, 400);
   assert.equal(res.jsonBody.code, 'BTW_UNSUPPORTED');

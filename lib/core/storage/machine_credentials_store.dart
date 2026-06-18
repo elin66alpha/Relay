@@ -20,8 +20,8 @@ class MachineCredentialsStore {
   static void resetCacheForTest() => _invalidateCache();
 
   // The cache is static (shared by every store instance), so any write must
-  // drop it for all readers — BackendClient and CardsService hold their own
-  // instances of this store.
+  // drop it for all readers — multiple components hold their own instances of
+  // this store.
   static void _invalidateCache() {
     _cachedCredentials = null;
     _activeIdLoaded = false;
