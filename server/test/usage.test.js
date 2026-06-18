@@ -59,7 +59,7 @@ test('normalizeAgyQuotaSummary selects Gemini quota group for Gemini models', ()
     'Gemini 3.5 Flash (High)',
   );
 
-  assert.equal(out.plan, 'Gemini 3.5 Flash (High) / Gemini Models');
+  assert.equal(out.plan, 'Gemini Models');
   assert.equal(out.five_hour.resets_at, '2026-06-17T23:12:49.000Z');
   assert.equal(out.seven_day.resets_at, '2026-06-19T03:26:58.000Z');
   assert.equal(Number(out.five_hour.utilization.toFixed(5)), 7.39701);
@@ -72,7 +72,7 @@ test('normalizeAgyQuotaSummary selects third-party quota group for Claude/GPT mo
     'Claude Sonnet 4.6 (Thinking)',
   );
 
-  assert.equal(out.plan, 'Claude Sonnet 4.6 (Thinking) / Claude and GPT models');
+  assert.equal(out.plan, 'Claude and GPT models');
   assert.equal(out.five_hour.resets_at, '2026-06-18T02:19:41.000Z');
   assert.equal(out.seven_day.resets_at, '2026-06-24T21:19:41.000Z');
   assert.equal(out.five_hour.utilization, 25);
@@ -84,4 +84,18 @@ test('normalizeAgyQuotaSummary rejects missing quota groups', () => {
     () => normalizeAgyQuotaSummary({ response: { groups: [] } }, 'Gemini 3.5 Flash (High)'),
     /did not include quota groups/,
   );
+});
+
+test('normalizeAgyQuotaSummary prefers compact subscription labels', () => {
+  const out = normalizeAgyQuotaSummary(
+    {
+      response: {
+        plan: 'Google AI Pro',
+        groups: SAMPLE_AGY_SUMMARY.response.groups,
+      },
+    },
+    'Gemini 3.5 Flash (High)',
+  );
+
+  assert.equal(out.plan, 'Pro');
 });

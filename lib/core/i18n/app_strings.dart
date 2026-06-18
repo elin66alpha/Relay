@@ -30,6 +30,9 @@ class AppStrings {
   bool get isZh => appLanguage == AppLanguage.zh;
 
   String get appName => 'Relay';
+  String get home => isZh ? '首页' : 'Home';
+  String get backHome => isZh ? '回到首页' : 'Back to Home';
+  String get gettingStarted => isZh ? '开始使用' : 'Getting started';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
@@ -44,9 +47,8 @@ class AppStrings {
       isZh ? '删除该蜂群及其聊天记录？' : 'Delete this swarm and its transcript?';
   String get clearTranscript => isZh ? '清空记录' : 'Clear transcript';
   String get noGroups => isZh ? '还没有蜂群' : 'No swarms yet';
-  String get groupEmptyHint => isZh
-      ? '用 @ 召唤成员，例如 @claude 或 @all'
-      : 'Mention a member with @, e.g. @claude or @all';
+  String get groupEmptyHint =>
+      isZh ? '用 @ 召唤成员，例如 @claude' : 'Mention a member with @, e.g. @claude';
   String get groupComposerHint =>
       isZh ? '输入消息，用 @ 召唤成员' : 'Message — use @ to summon members';
   String get selectMembers =>
@@ -55,8 +57,7 @@ class AppStrings {
   String get swarmWorkTreeDefault =>
       isZh ? '默认（当前工作区）' : 'Default (current workspace)';
   String get swarmChooseWorkTree => isZh ? '选择工作目录' : 'Choose work tree';
-  String get swarmConfigureMembers =>
-      isZh ? '配置成员' : 'Configure members';
+  String get swarmConfigureMembers => isZh ? '配置成员' : 'Configure members';
   String get swarmConfigureMembersHint => isZh
       ? '为每个成员选择模型、思考深度与权限'
       : 'Pick a model, reasoning effort, and permission per member';
@@ -171,7 +172,11 @@ class AppStrings {
   String get revokedDeviceToken => isZh ? '已吊销' : 'Revoked';
   String tokenCreatedAt(String value) => isZh ? '创建：$value' : 'Created: $value';
   String tokenRevokedAt(String value) => isZh ? '吊销：$value' : 'Revoked: $value';
+  String tokenUsedBy(String value) => isZh ? '使用端：$value' : 'Used by: $value';
+  String tokenLastUsedAt(String value) =>
+      isZh ? '最近使用：$value' : 'Last used: $value';
   String get revokeToken => isZh ? '吊销' : 'Revoke';
+  String get deleteToken => isZh ? '删除' : 'Delete';
   String get revokeCurrentTokenTitle =>
       isZh ? '吊销当前设备 Token？' : 'Revoke this device token?';
   String get revokeCurrentTokenBody => isZh
@@ -180,6 +185,9 @@ class AppStrings {
   String tokenRevoked(String label) => isZh ? '已吊销 $label。' : 'Revoked $label.';
   String tokenRevokeFailed(Object err) =>
       isZh ? '吊销 Token 失败：$err' : 'Token revoke failed: $err';
+  String tokenDeleted(String label) => isZh ? '已删除 $label。' : 'Deleted $label.';
+  String tokenDeleteFailed(Object err) =>
+      isZh ? '删除 Token 失败：$err' : 'Token delete failed: $err';
   String get fileSystem => isZh ? '文件系统' : 'File system';
   String get currentFolder => isZh ? '当前文件夹' : 'Current folder';
   String get parentFolder => isZh ? '上一级' : 'Parent folder';
@@ -341,6 +349,26 @@ class AppStrings {
       : 'Ask the sidekick here — it knows the current conversation.';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
+  String get chooseConversationTarget => isZh
+      ? '请在左侧抽屉里选择蜂群或 CLI 智能体来开始工作'
+      : 'Choose a swarm or CLI agent from the left drawer to start';
+  String get homeSubtitle => isZh
+      ? '从这里查看机器状态，并快速回到最近的蜂群或智能体会话。'
+      : 'Check the machine status and jump back into recent swarm or agent sessions.';
+  String get recentSwarms => isZh ? '最近使用的蜂群' : 'Recent swarms';
+  String get recentAgentSessions =>
+      isZh ? '最近使用的智能体会话' : 'Recent agent sessions';
+  String get noRecentSwarms => isZh
+      ? '还没有蜂群。可以从左侧栏创建一个。'
+      : 'No swarms yet. Create one from the left drawer.';
+  String get noRecentAgentSessions => isZh
+      ? '还没有智能体会话。可以从左侧栏选择一个 CLI 智能体开始。'
+      : 'No agent sessions yet. Choose a CLI agent from the left drawer to start.';
+  String agentSessionLabel(String agent, String session) =>
+      isZh ? '$agent · $session' : '$agent · $session';
+  String get gettingStartedHomeHint => isZh
+      ? '第一次使用或忘记流程时，从这里快速查看步骤。'
+      : 'Use this when you are new or want a quick reminder.';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
@@ -365,15 +393,21 @@ class AppStrings {
   String get notifications => isZh ? '通知' : 'Notifications';
   String get quotaAlerts => isZh ? '额度刷新提醒' : 'Quota reset alerts';
   String get taskAlerts => isZh ? '任务完成提醒' : 'Task completion alerts';
+  String get tutorial => isZh ? '教程' : 'Tutorial';
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';
+  String get fontSize => isZh ? '字体大小' : 'Font size';
+  String get fontSizeDescription =>
+      isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';
+  String fontScalePercent(int value) => '$value%';
+  String get resetFontSize => isZh ? '重置字体大小' : 'Reset font size';
   String get license => isZh ? '许可' : 'License';
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
   String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
-      ? '用于连接本机 Claude Code、Codex 与 Antigravity CLI 智能体的私有控制台。'
-      : 'Private control surface for local Claude Code, Codex, and Antigravity CLI agents.';
+      ? '用于连接本机 Claude Code、Codex、Antigravity、OpenCode 和 Hermes CLI 智能体的私有控制台。'
+      : 'Private control surface for local Claude Code, Codex, Antigravity, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get online => isZh ? '在线' : 'Online';

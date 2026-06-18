@@ -21,10 +21,19 @@ class GroupChatController extends ChangeNotifier {
       : _client = backendClient ?? BackendClient();
 
   static const String _streamingKey = 'streaming';
+  static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
+  static const String _segmentsKey = 'segments';
+  static const String _cancelledKey = 'cancelled';
   static const String _authorKey = 'author';
   static const String _agentLabelKey = 'agentLabel';
 
   final BackendClient _client;
+  // Per-request live segments mirroring the single-agent chat: a member's
+  // mid-task follow-up notes and its final answer are kept as separate,
+  // individually timestamped messages instead of one growing block, so the
+  // bubble can show per-segment times and collapse the earlier ones.
+  final Map<String, List<_StreamSegment>> _streamSegments =
+      <String, List<_StreamSegment>>{};
   final Random _random = Random();
   AppLanguage _language = AppLanguage.en;
   AppStrings get _strings => AppStrings(_language);
@@ -74,17 +83,17 @@ class GroupChatController extends ChangeNotifier {
       // Honor a requested swarm (drawer sub-entry) on first load, then forget it.
       if (_initialGroupId != null) {
         _selected = _groups.cast<ChatGroup?>().firstWhere(
-          (ChatGroup? g) => g?.id == _initialGroupId,
-          orElse: () => _selected,
-        );
+              (ChatGroup? g) => g?.id == _initialGroupId,
+              orElse: () => _selected,
+            );
         _initialGroupId = null;
       }
       // Keep the selection if it still exists; otherwise pick the first group.
       if (_selected != null) {
         _selected = _groups.cast<ChatGroup?>().firstWhere(
-          (ChatGroup? g) => g?.id == _selected!.id,
-          orElse: () => null,
-        );
+              (ChatGroup? g) => g?.id == _selected!.id,
+              orElse: () => null,
+            );
       }
       _selected ??= _groups.isNotEmpty ? _groups.first : null;
     } on BackendException catch (err) {
@@ -100,6 +109,7 @@ class GroupChatController extends ChangeNotifier {
     if (_selected?.id == group.id) return;
     _selected = group;
     _messages.clear();
+    _streamSegments.clear();
     _safeNotify();
     await _loadHistory(group.id);
   }
@@ -190,11 +200,12 @@ class GroupChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> send(String rawText) async {
+  Future<bool> send(String rawText) async {
     final ChatGroup? group = _selected;
     final String text = rawText.trim();
-    if (group == null || text.isEmpty || sending) return;
+    if (group == null || text.isEmpty || sending) return false;
     final String requestId = _newRequestId();
+    bool sent = false;
     _activeRequestId = requestId;
     _error = null;
     // Optimistic human bubble with the id the backend will use, so the echoed
@@ -215,15 +226,19 @@ class GroupChatController extends ChangeNotifier {
         prompt: text,
         requestId: requestId,
       );
+      sent = true;
     } on BackendException catch (err) {
       if (err.code != 'AGENT_CANCELLED') {
         _error = friendlyErrorText(_strings, err);
+      } else {
+        sent = true;
       }
     } finally {
       _activeRequestId = null;
       _safeNotify();
       await _loadHistory(group.id);
     }
+    return sent;
   }
 
   Future<void> cancel() async {
@@ -242,6 +257,9 @@ class GroupChatController extends ChangeNotifier {
     try {
       final GroupHistory history = await _client.fetchGroupHistory(groupId);
       if (_selected?.id != groupId) return;
+      // Authoritative history (which already carries per-segment timestamps)
+      // supersedes any live segments still buffered for this round.
+      _streamSegments.clear();
       _messages
         ..clear()
         ..addAll(history.messages);
@@ -303,28 +321,23 @@ class GroupChatController extends ChangeNotifier {
         final String requestId = data['requestId'] as String? ?? '';
         final String text = data['text'] as String? ?? '';
         if (requestId.isEmpty || text.isEmpty) return;
-        final ChatMessage bubble = _ensureBubble(data);
-        _upsert(bubble.copyWith(content: bubble.content + text));
+        _appendDelta(data, requestId, text);
         _safeNotify();
         break;
       case 'agent_segment':
-        final ChatMessage bubble = _ensureBubble(data);
-        _upsert(bubble.copyWith(content: '${bubble.content}\n\n'));
+        final String requestId = data['requestId'] as String? ?? '';
+        if (requestId.isEmpty) return;
+        _openSegmentBoundary(data, requestId);
+        _safeNotify();
+        break;
+      case 'agent_cancelled':
+        _stopStreaming(data['requestId'] as String? ?? '', cancelled: true);
         _safeNotify();
         break;
       case 'agent_done':
-      case 'agent_cancelled':
       case 'agent_error':
-        final String requestId = data['requestId'] as String? ?? '';
-        final int index = _indexOf(requestId);
-        if (index != -1) {
-          final ChatMessage bubble = _messages[index];
-          final Map<String, Object?> metadata =
-              Map<String, Object?>.from(bubble.metadata)
-                ..[_streamingKey] = false;
-          _messages[index] = bubble.copyWith(metadata: metadata);
-          _safeNotify();
-        }
+        _stopStreaming(data['requestId'] as String? ?? '');
+        _safeNotify();
         break;
       case 'group_done':
       case 'group_cancelled':
@@ -354,12 +367,88 @@ class GroupChatController extends ChangeNotifier {
       createdAt: DateTime.now(),
       metadata: <String, Object?>{
         _streamingKey: true,
+        _awaitingFirstTokenKey: true,
         _authorKey: agent['key'] as String? ?? '',
         _agentLabelKey: agent['label'] as String? ?? '',
       },
     );
     _messages.add(bubble);
     return bubble;
+  }
+
+  // Append streamed text to the request's bubble, opening the first segment on
+  // the first delta and clearing the awaiting-first-token state.
+  void _appendDelta(Map<String, Object?> data, String requestId, String text) {
+    final ChatMessage bubble = _ensureBubble(data);
+    final List<_StreamSegment> segments = _streamSegments.putIfAbsent(
+      requestId,
+      () => <_StreamSegment>[_StreamSegment(DateTime.now())],
+    );
+    if (segments.isEmpty) segments.add(_StreamSegment(DateTime.now()));
+    segments.last.buffer.write(text);
+    _writeBubble(bubble, requestId);
+  }
+
+  // The member started a new follow-up message in the same turn: open a fresh
+  // segment so it shows as its own timestamped block under the collapse toggle.
+  void _openSegmentBoundary(Map<String, Object?> data, String requestId) {
+    final ChatMessage bubble = _ensureBubble(data);
+    _streamSegments
+        .putIfAbsent(requestId, () => <_StreamSegment>[])
+        .add(_StreamSegment(DateTime.now()));
+    _writeBubble(bubble, requestId);
+  }
+
+  // Reflect the live segments into the bubble's flat content + segments metadata,
+  // so a single-segment turn renders as one block and a multi-segment one shows
+  // each follow-up with its own time behind the collapse toggle.
+  void _writeBubble(ChatMessage bubble, String requestId) {
+    final List<_StreamSegment> segments =
+        _streamSegments[requestId] ?? const <_StreamSegment>[];
+    final String content =
+        segments.map((_StreamSegment s) => s.buffer.toString()).join('\n\n');
+    _upsert(
+      bubble.copyWith(
+        content: content,
+        metadata: <String, Object?>{
+          ...bubble.metadata,
+          _streamingKey: true,
+          _awaitingFirstTokenKey: false,
+          _segmentsKey: _serializeSegments(requestId),
+        },
+      ),
+    );
+  }
+
+  List<Map<String, Object?>> _serializeSegments(String requestId) {
+    final List<_StreamSegment> segments =
+        _streamSegments[requestId] ?? const <_StreamSegment>[];
+    return segments
+        .map(
+          (_StreamSegment s) => <String, Object?>{
+            'ts': s.createdAt.toIso8601String(),
+            'text': s.buffer.toString(),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  // End a member's live stream. Final segments are reconciled from authoritative
+  // history when the round reloads; this just settles the live bubble's state.
+  void _stopStreaming(String requestId, {bool cancelled = false}) {
+    if (requestId.isEmpty) return;
+    _streamSegments.remove(requestId);
+    final int index = _indexOf(requestId);
+    if (index == -1) return;
+    final ChatMessage bubble = _messages[index];
+    _messages[index] = bubble.copyWith(
+      metadata: <String, Object?>{
+        ...bubble.metadata,
+        _streamingKey: false,
+        _awaitingFirstTokenKey: false,
+        if (cancelled) _cancelledKey: true,
+      },
+    );
   }
 
   int _indexOf(String id) =>
@@ -378,7 +467,7 @@ class GroupChatController extends ChangeNotifier {
       DateTime.tryParse(raw as String? ?? '') ?? DateTime.now();
 
   String _newRequestId() {
-    final int a = _random.nextInt(1 << 32);
+    final int a = _random.nextInt(0x100000000);
     final int b = DateTime.now().microsecondsSinceEpoch;
     return 'g-$b-$a';
   }
@@ -396,4 +485,14 @@ class GroupChatController extends ChangeNotifier {
     _client.close();
     super.dispose();
   }
+}
+
+/// A live, in-progress assistant segment held while a member's reply streams.
+/// Serialized into the message's `metadata['segments']` so the bubble can show
+/// each follow-up message with its own arrival time.
+class _StreamSegment {
+  _StreamSegment(this.createdAt);
+
+  final DateTime createdAt;
+  final StringBuffer buffer = StringBuffer();
 }

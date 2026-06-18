@@ -319,6 +319,25 @@ class BotChatController extends ChangeNotifier {
     );
   }
 
+  void goHome() {
+    if (isThinking || _remoteActive) return;
+    if (_machine == null && _messages.isEmpty && !_historyLoading) return;
+    _machine = null;
+    _messages.clear();
+    _clearStreamBuffers();
+    _pendingQueue.clear();
+    _historyLoading = false;
+    _lastError = null;
+    _isCancelling = false;
+    _activeRequestId = null;
+    _localStreamActive = false;
+    _reattachRequestId = null;
+    _remoteActive = false;
+    _remoteSettleTimer?.cancel();
+    _stopHistoryPolling();
+    notifyListeners();
+  }
+
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
     final String sessionId = await _ensureActiveSessionId(agent);
@@ -519,6 +538,9 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> revokeDeviceToken(String id) =>
       _backendClient.revokeDeviceToken(id);
+
+  Future<void> deleteDeviceToken(String id) =>
+      _backendClient.deleteDeviceToken(id);
 
   Future<List<ChatHistorySearchResult>> searchHistory(
     String query, {
@@ -762,14 +784,12 @@ class BotChatController extends ChangeNotifier {
       _streamBuffers[requestId] = StringBuffer(message.content);
       final List<MessageSegment> seeded = message.segments;
       if (seeded.isNotEmpty) {
-        _streamSegments[requestId] = seeded
-            .map((MessageSegment s) {
-              final _StreamSegment live =
-                  _StreamSegment(s.createdAt ?? message.createdAt);
-              live.buffer.write(s.text);
-              return live;
-            })
-            .toList();
+        _streamSegments[requestId] = seeded.map((MessageSegment s) {
+          final _StreamSegment live =
+              _StreamSegment(s.createdAt ?? message.createdAt);
+          live.buffer.write(s.text);
+          return live;
+        }).toList();
       }
     }
   }
@@ -1029,7 +1049,9 @@ class BotChatController extends ChangeNotifier {
   // the backend share: a list of { ts, text }.
   List<Map<String, Object?>> _serializeStreamSegments(String requestId) {
     final List<_StreamSegment>? segments = _streamSegments[requestId];
-    if (segments == null || segments.isEmpty) return const <Map<String, Object?>>[];
+    if (segments == null || segments.isEmpty) {
+      return const <Map<String, Object?>>[];
+    }
     return segments
         .map(
           (_StreamSegment s) => <String, Object?>{
@@ -1396,6 +1418,7 @@ class BotChatController extends ChangeNotifier {
 
     final String requestId = event.data['requestId'] as String? ?? '';
     if (requestId.isEmpty) return;
+    if (_machine == null) return;
     // Ignore the echo of our own turn only while our POST stream is actively
     // driving it. If that stream dropped, these shared events are how we learn
     // the still-running turn progressed and finished.

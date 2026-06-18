@@ -21,6 +21,7 @@ module.exports = function createMetaRouter(ctx) {
     bearerToken,
     buildDiagnostics,
     describeAgent,
+    deleteRevokedTokenById,
     eventClients,
     eventWorkdir,
     formatUptime,
@@ -198,6 +199,21 @@ module.exports = function createMetaRouter(ctx) {
         current: String(revoked.token || '') === bearerToken(req),
       },
     });
+  });
+
+  router.post('/api/tokens/:id/delete', (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const deleted = deleteRevokedTokenById(id);
+    if (deleted === null) {
+      return res.status(404).json({ error: 'token not found' });
+    }
+    if (deleted === false) {
+      return res.status(409).json({
+        error: 'token must be revoked before deletion',
+        code: 'TOKEN_NOT_REVOKED',
+      });
+    }
+    res.json({ ok: true, id: deleted.id || id });
   });
 
   router.get('/api/status', (req, res) => {

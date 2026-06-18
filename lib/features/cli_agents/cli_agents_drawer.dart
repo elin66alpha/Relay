@@ -111,6 +111,13 @@ class CliAgentsDrawer extends StatelessWidget {
                     },
                   ),
                   const Divider(height: 16),
+                  SwarmDrawerSection(
+                    agentsController: agentsController,
+                    settingsController: settingsController,
+                    chatController: chatController,
+                    closeOnAction: closeOnAction,
+                  ),
+                  const Divider(height: 16),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                     child: Text(
@@ -129,17 +136,25 @@ class CliAgentsDrawer extends StatelessWidget {
                       activeKey,
                       activeMachine,
                     ),
-                  const Divider(height: 16),
-                  SwarmDrawerSection(
-                    agentsController: agentsController,
-                    settingsController: settingsController,
-                    chatController: chatController,
-                    closeOnAction: closeOnAction,
-                  ),
                 ],
               ),
             ),
             const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.home_rounded),
+              title: Text(context.l10n.backHome),
+              selected: chatController.machine == null,
+              onTap: () {
+                if (chatController.isThinking) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
+                  );
+                  return;
+                }
+                chatController.goHome();
+                if (closeOnAction) Navigator.of(context).pop();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.folder_open_outlined),
               title: Text(context.l10n.fileSystem),
@@ -181,7 +196,8 @@ class CliAgentsDrawer extends StatelessWidget {
     String activeKey,
     MachineCredential? activeMachine,
   ) {
-    final bool selectedAgent = agent.key == activeKey;
+    final bool selectedAgent =
+        chatController.machine != null && agent.key == activeKey;
     final List<AgentSession> sessions = chatController.sessionsFor(agent.key);
     final String? activeSessionId = selectedAgent
         ? chatController.activeSessionId
@@ -304,6 +320,9 @@ class CliAgentsDrawer extends StatelessWidget {
     if (name == null || !context.mounted) return;
     try {
       await agentsController.setActive(agent.key);
+      if (chatController.machine == null) {
+        await chatController.loadFor(agent, activeMachine);
+      }
       await chatController.createSessionFor(agent, name: name);
     } catch (err) {
       if (!context.mounted) return;
@@ -442,7 +461,8 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
 
   Future<void> _load() async {
     try {
-      final List<ChatGroup> swarms = await widget.chatController.backend.fetchGroups();
+      final List<ChatGroup> swarms =
+          await widget.chatController.backend.fetchGroups();
       if (mounted) setState(() => _swarms = swarms);
     } on BackendException {
       // Best-effort: a failed fetch just leaves the last-known list in place.
@@ -750,6 +770,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
   late Future<List<DeviceToken>> _tokensFuture;
   List<DeviceToken> _tokens = const <DeviceToken>[];
   final Set<String> _revoking = <String>{};
+  final Set<String> _deleting = <String>{};
 
   @override
   void initState() {
@@ -833,6 +854,42 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
     }
   }
 
+  Future<void> _delete(DeviceToken token) async {
+    if (!token.revoked || _deleting.contains(token.id)) return;
+    setState(() {
+      _deleting.add(token.id);
+    });
+    try {
+      await widget.chatController.deleteDeviceToken(token.id);
+      if (!mounted) return;
+      final List<DeviceToken> next = _tokens
+          .where((DeviceToken item) => item.id != token.id)
+          .toList(growable: false);
+      setState(() {
+        _tokens = next;
+        _tokensFuture = Future<List<DeviceToken>>.value(next);
+      });
+      final String label = token.label.isEmpty ? token.id : token.label;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.tokenDeleted(label))),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.tokenDeleteFailed(err)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deleting.remove(token.id);
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<DeviceToken>>(
@@ -880,8 +937,10 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
               for (final DeviceToken token in tokens)
                 _DeviceTokenRow(
                   token: token,
-                  revoking: _revoking.contains(token.id),
+                  busy: _revoking.contains(token.id) ||
+                      _deleting.contains(token.id),
                   onRevoke: () => _revoke(token),
+                  onDelete: () => _delete(token),
                 ),
           ],
         );
@@ -893,17 +952,20 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
 class _DeviceTokenRow extends StatelessWidget {
   const _DeviceTokenRow({
     required this.token,
-    required this.revoking,
+    required this.busy,
     required this.onRevoke,
+    required this.onDelete,
   });
 
   final DeviceToken token;
-  final bool revoking;
+  final bool busy;
   final VoidCallback onRevoke;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final String deviceInfo = _tokenDeviceInfo(token);
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: DecoratedBox(
@@ -964,11 +1026,23 @@ class _DeviceTokenRow extends StatelessWidget {
                         ),
                         style: TextStyle(color: colors.outline, fontSize: 12),
                       ),
+                    if (!token.revoked && deviceInfo.isNotEmpty)
+                      Text(
+                        context.l10n.tokenUsedBy(deviceInfo),
+                        style: TextStyle(color: colors.outline, fontSize: 12),
+                      ),
+                    if (!token.revoked && token.lastUsedAt != null)
+                      Text(
+                        context.l10n.tokenLastUsedAt(
+                          formatShortTime(context, token.lastUsedAt),
+                        ),
+                        style: TextStyle(color: colors.outline, fontSize: 12),
+                      ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              if (revoking)
+              if (busy)
                 const SizedBox(
                   width: 24,
                   height: 24,
@@ -976,8 +1050,12 @@ class _DeviceTokenRow extends StatelessWidget {
                 )
               else
                 TextButton(
-                  onPressed: token.revoked ? null : onRevoke,
-                  child: Text(context.l10n.revokeToken),
+                  onPressed: token.revoked ? onDelete : onRevoke,
+                  child: Text(
+                    token.revoked
+                        ? context.l10n.deleteToken
+                        : context.l10n.revokeToken,
+                  ),
                 ),
             ],
           ),
@@ -985,6 +1063,16 @@ class _DeviceTokenRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _tokenDeviceInfo(DeviceToken token) {
+  final String deviceId = token.lastDeviceId;
+  final String shortId =
+      deviceId.length <= 8 ? deviceId : '${deviceId.substring(0, 8)}...';
+  if (token.lastDeviceName.isNotEmpty && shortId.isNotEmpty) {
+    return '${token.lastDeviceName} ($shortId)';
+  }
+  return token.lastDeviceName.isNotEmpty ? token.lastDeviceName : shortId;
 }
 
 class _TokenBadge extends StatelessWidget {

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/machine_credential.dart';
+import '../platform/client_device_name.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
 import '../storage/workdir_store.dart';
@@ -131,12 +132,14 @@ class ApiTransport {
     String contentType = 'application/json',
   }) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
+    final String deviceName = clientDeviceName();
     final String? workdir = await _workdirStore.read();
     return <String, String>{
       'Accept': accept,
       'Content-Type': contentType,
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
+      'X-Device-Name': deviceName,
       if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
     };
   }

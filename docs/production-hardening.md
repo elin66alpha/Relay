@@ -19,7 +19,8 @@ stable URL, a small attack surface, and a clear recovery path.
   source control. They contain deployment identity, access tokens, and encrypted
   credential exports.
 - Generate a separate credential for each user/device. Revoke old device tokens
-  from `server/tokens.json` instead of sharing one long-lived token.
+  from `server/tokens.json`, then delete revoked entries after verification,
+  instead of sharing one long-lived token.
 
 ## Reverse Proxy Checklist
 
@@ -55,10 +56,9 @@ stable URL, a small attack surface, and a clear recovery path.
 
 - After changing `PUBLIC_BASE_URL`, run the credential script again and import
   the new credential in the app.
-- After rotating or revoking tokens, verify old devices fail and current devices
-  still pass `GET /api/health`.
+- After rotating, revoking, or deleting tokens, verify old devices fail and
+  current devices still pass `GET /api/health`.
 - Watch server logs during long agent turns and file transfers; stream endpoints
   should stay connected instead of completing early.
 - Keep a rollback path for tunnel/proxy changes: the local backend should still
   answer on `http://127.0.0.1:<PORT>` from the backend host.
-

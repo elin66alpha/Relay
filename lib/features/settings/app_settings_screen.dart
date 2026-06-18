@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
+import 'getting_started_screen.dart';
+
+const String _applicationVersion = '0.11.0';
+const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
   const AppSettingsScreen({
@@ -18,6 +22,7 @@ class AppSettingsScreen extends StatelessWidget {
       builder: (BuildContext context, Widget? _) {
         final AppLanguage currentLanguage = settingsController.language;
         final ThemeMode currentThemeMode = settingsController.themeMode;
+        final double currentFontScale = settingsController.fontScale;
 
         return Scaffold(
           appBar: AppBar(
@@ -45,42 +50,54 @@ class AppSettingsScreen extends StatelessWidget {
                           ),
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: SegmentedButton<ThemeMode>(
-                                  segments: <ButtonSegment<ThemeMode>>[
-                                    ButtonSegment<ThemeMode>(
-                                      value: ThemeMode.system,
-                                      icon: const Icon(
-                                        Icons.settings_suggest_outlined,
-                                      ),
-                                      label: Text(context.l10n.systemTheme),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: SegmentedButton<ThemeMode>(
+                                      segments: <ButtonSegment<ThemeMode>>[
+                                        ButtonSegment<ThemeMode>(
+                                          value: ThemeMode.system,
+                                          icon: const Icon(
+                                            Icons.settings_suggest_outlined,
+                                          ),
+                                          label: Text(context.l10n.systemTheme),
+                                        ),
+                                        ButtonSegment<ThemeMode>(
+                                          value: ThemeMode.light,
+                                          icon: const Icon(
+                                            Icons.light_mode_outlined,
+                                          ),
+                                          label: Text(context.l10n.lightTheme),
+                                        ),
+                                        ButtonSegment<ThemeMode>(
+                                          value: ThemeMode.dark,
+                                          icon: const Icon(
+                                            Icons.dark_mode_outlined,
+                                          ),
+                                          label: Text(context.l10n.darkTheme),
+                                        ),
+                                      ],
+                                      selected: <ThemeMode>{currentThemeMode},
+                                      onSelectionChanged:
+                                          (Set<ThemeMode> selected) {
+                                        settingsController
+                                            .setThemeMode(selected.first);
+                                      },
                                     ),
-                                    ButtonSegment<ThemeMode>(
-                                      value: ThemeMode.light,
-                                      icon: const Icon(
-                                        Icons.light_mode_outlined,
-                                      ),
-                                      label: Text(context.l10n.lightTheme),
-                                    ),
-                                    ButtonSegment<ThemeMode>(
-                                      value: ThemeMode.dark,
-                                      icon: const Icon(
-                                        Icons.dark_mode_outlined,
-                                      ),
-                                      label: Text(context.l10n.darkTheme),
-                                    ),
-                                  ],
-                                  selected: <ThemeMode>{currentThemeMode},
-                                  onSelectionChanged:
-                                      (Set<ThemeMode> selected) {
-                                    settingsController
-                                        .setThemeMode(selected.first);
-                                  },
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 16),
+                                const Divider(height: 1),
+                                const SizedBox(height: 16),
+                                _buildFontScaleSlider(
+                                  context,
+                                  currentFontScale,
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -157,6 +174,29 @@ class AppSettingsScreen extends StatelessWidget {
                             ],
                           ),
                         ),
+                        _buildSectionTitle(context, context.l10n.tutorial),
+                        Card(
+                          elevation: 0,
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerLow,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            leading: const Icon(Icons.school_outlined),
+                            title: Text(context.l10n.gettingStarted),
+                            subtitle: Text(context.l10n.gettingStartedHomeHint),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.of(context).push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const GettingStartedScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                         _buildSectionTitle(context, context.l10n.about),
                         Card(
                           elevation: 0,
@@ -169,7 +209,9 @@ class AppSettingsScreen extends StatelessWidget {
                           child: ListTile(
                             leading: const Icon(Icons.info_outline),
                             title: Text(context.l10n.aboutApp),
-                            subtitle: Text('${context.l10n.version} 0.1.0+1'),
+                            subtitle: Text(
+                              '${context.l10n.version} $_applicationVersion',
+                            ),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => _showAbout(context),
                           ),
@@ -183,6 +225,93 @@ class AppSettingsScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildFontScaleSlider(BuildContext context, double value) {
+    final ThemeData theme = Theme.of(context);
+    final int percent = (value * 100).round();
+    final bool canReset =
+        (value - AppSettingsController.defaultFontScale).abs() > 0.001;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Icon(Icons.format_size_outlined),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    context.l10n.fontSize,
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${context.l10n.fontSizeDescription} · '
+                    '${context.l10n.fontScalePercent(percent)}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: context.l10n.resetFontSize,
+              onPressed: canReset
+                  ? () {
+                      settingsController.setFontScale(
+                        AppSettingsController.defaultFontScale,
+                      );
+                    }
+                  : null,
+              icon: const Icon(Icons.restart_alt),
+            ),
+          ],
+        ),
+        Slider(
+          value: value,
+          min: AppSettingsController.minFontScale,
+          max: AppSettingsController.maxFontScale,
+          divisions: _fontScaleDivisions,
+          label: context.l10n.fontScalePercent(percent),
+          onChanged: settingsController.setFontScale,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Text(
+                context.l10n.fontScalePercent(
+                  (AppSettingsController.minFontScale * 100).round(),
+                ),
+                style: theme.textTheme.labelSmall,
+              ),
+              Text(
+                context.l10n.fontScalePercent(
+                  (AppSettingsController.defaultFontScale * 100).round(),
+                ),
+                style: theme.textTheme.labelSmall,
+              ),
+              Text(
+                context.l10n.fontScalePercent(
+                  (AppSettingsController.maxFontScale * 100).round(),
+                ),
+                style: theme.textTheme.labelSmall,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -205,7 +334,7 @@ class AppSettingsScreen extends StatelessWidget {
     showAboutDialog(
       context: context,
       applicationName: context.l10n.appName,
-      applicationVersion: '0.1.0+1',
+      applicationVersion: _applicationVersion,
       applicationLegalese: context.l10n.copyright,
       children: <Widget>[
         const SizedBox(height: 8),

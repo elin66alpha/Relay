@@ -53,10 +53,10 @@ test('parseMentions matches by label slug as well as agent key', () => {
   assert.deepEqual(parseMentions('@ClaudeCode look here', members, labelFor), ['claude']);
 });
 
-test('parseMentions expands @all / @everyone to all members in member order', () => {
+test('parseMentions ignores broad @all / @everyone aliases', () => {
   const members = ['claude', 'codex', 'agy'];
-  assert.deepEqual(parseMentions('@all huddle up', members, labelFor), members);
-  assert.deepEqual(parseMentions('@everyone huddle up', members, labelFor), members);
+  assert.deepEqual(parseMentions('@all huddle up', members, labelFor), []);
+  assert.deepEqual(parseMentions('@everyone huddle up', members, labelFor), []);
 });
 
 test('deltaSince returns everything for an agent that never spoke', () => {

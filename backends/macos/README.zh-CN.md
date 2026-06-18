@@ -6,7 +6,7 @@ macOS 后端复用 `server/` 里的 Node 后端核心，并把服务安装为
 ## 前置要求
 
 - macOS，Node.js 18 或更新版本。
-- Mac 上已经安装并登录 Claude Code / Codex / Antigravity CLI。
+- Mac 上已经安装并登录至少一个支持的 CLI agent：Claude Code、Codex、Antigravity、OpenCode 或 Hermes。
 - 使用正式 Cloudflare Tunnel 或 Quick Tunnel 模式时需要 `cloudflared`：
 
 ```bash

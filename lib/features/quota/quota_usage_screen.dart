@@ -127,19 +127,31 @@ class _UsageAgentPanel extends StatelessWidget {
           Row(
             children: <Widget>[
               Expanded(
+                flex: 2,
                 child: Text(
                   agent.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
                   ),
                 ),
               ),
-              if (agent.detail.isNotEmpty)
-                Text(
-                  agent.detail,
-                  style: TextStyle(color: colors.outline, fontSize: 12),
+              if (agent.detail.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    agent.detail,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    textAlign: TextAlign.end,
+                    style: TextStyle(color: colors.outline, fontSize: 12),
+                  ),
                 ),
+              ],
             ],
           ),
           if (agent.asOf != null || agent.stale) ...<Widget>[

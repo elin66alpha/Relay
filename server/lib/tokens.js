@@ -16,6 +16,8 @@ const store = createJsonStore(TOKENS_FILE, {
   trailingNewline: true,
 });
 
+const TOKEN_USE_WRITE_INTERVAL_MS = 60 * 1000;
+
 function readTokenRecords() {
   const decoded = store.load();
   return Array.isArray(decoded) ? decoded.filter((item) => item && item.token) : [];
@@ -77,6 +79,51 @@ function createToken({ label }) {
   return record;
 }
 
+function cleanClientInfoValue(value, maxLength) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function markTokenUsed(token, { deviceId, deviceName, now = new Date() } = {}) {
+  const clean = String(token || '').trim();
+  if (!clean) return null;
+
+  const records = readTokenRecords();
+  const index = records.findIndex(
+    (record) => record && !record.revoked && String(record.token || '') === clean,
+  );
+  if (index === -1) return null;
+
+  const record = records[index];
+  const nextDeviceId = cleanClientInfoValue(deviceId, 80);
+  const nextDeviceName = cleanClientInfoValue(deviceName, 160);
+  const nextTime = now instanceof Date ? now : new Date(now);
+  const nextTimeMs = nextTime.getTime();
+  const lastTimeMs = Date.parse(record.lastUsedAt || '');
+  const sameDevice =
+    String(record.lastDeviceId || '') === nextDeviceId &&
+    String(record.lastDeviceName || '') === nextDeviceName;
+  if (
+    sameDevice &&
+    Number.isFinite(lastTimeMs) &&
+    Number.isFinite(nextTimeMs) &&
+    nextTimeMs - lastTimeMs < TOKEN_USE_WRITE_INTERVAL_MS
+  ) {
+    return record;
+  }
+
+  records[index] = {
+    ...record,
+    lastUsedAt: nextTime.toISOString(),
+    lastDeviceId: nextDeviceId,
+    lastDeviceName: nextDeviceName,
+  };
+  writeTokenRecords(records);
+  return records[index];
+}
+
 function listTokenSummaries({ currentToken } = {}) {
   const current = tokenRecordForToken(currentToken);
   return readTokenRecords().map((record) => ({
@@ -85,6 +132,9 @@ function listTokenSummaries({ currentToken } = {}) {
     createdAt: record.createdAt || '',
     revoked: !!record.revoked,
     revokedAt: record.revokedAt || '',
+    lastUsedAt: record.lastUsedAt || '',
+    lastDeviceId: record.lastDeviceId || '',
+    lastDeviceName: record.lastDeviceName || '',
     current: !!(current && current.id && record.id === current.id),
   }));
 }
@@ -125,11 +175,28 @@ function revokeToken(idOrToken) {
   return records[index];
 }
 
+function deleteRevokedTokenById(id) {
+  const target = String(id || '').trim();
+  if (!target) return null;
+
+  const records = readTokenRecords();
+  const index = records.findIndex((record) => record.id === target);
+  if (index === -1) return null;
+  if (!records[index].revoked) return false;
+
+  const deleted = records[index];
+  records.splice(index, 1);
+  writeTokenRecords(records);
+  return deleted;
+}
+
 module.exports = {
   createToken,
+  deleteRevokedTokenById,
   hasConfiguredToken,
   isTokenAllowed,
   listTokenSummaries,
+  markTokenUsed,
   revokeToken,
   revokeTokenById,
   tokenRecordForToken,

@@ -694,6 +694,38 @@ function agyBucketQuota(bucket) {
   };
 }
 
+function compactAgyPlanLabel(value) {
+  if (value == null || typeof value === 'object') return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  const tier = /\b(pro|max|ultra|free|plus|business|enterprise|teams?)\b/i.exec(
+    text,
+  );
+  if (tier) {
+    return tier[1].charAt(0).toUpperCase() + tier[1].slice(1).toLowerCase();
+  }
+  return text.length <= 24 ? text : '';
+}
+
+function agyPlanLabel(response, group) {
+  for (const source of [response, group]) {
+    for (const field of [
+      'subscriptionType',
+      'subscriptionTier',
+      'subscriptionLevel',
+      'planType',
+      'planTier',
+      'plan',
+      'tier',
+      'accountTier',
+    ]) {
+      const label = compactAgyPlanLabel(source && source[field]);
+      if (label) return label;
+    }
+  }
+  return compactAgyPlanLabel(group && group.displayName) || '';
+}
+
 function normalizeAgyQuotaSummary(body, modelLabel = configuredAgyModel()) {
   const response = body && body.response ? body.response : body;
   const groups = Array.isArray(response && response.groups) ? response.groups : [];
@@ -707,7 +739,7 @@ function normalizeAgyQuotaSummary(body, modelLabel = configuredAgyModel()) {
     throw new Error('Antigravity quota summary did not include quota buckets.');
   }
   return {
-    plan: [modelLabel, group.displayName].filter(Boolean).join(' / '),
+    plan: agyPlanLabel(response, group),
     five_hour: fiveHour,
     seven_day: sevenDay,
   };

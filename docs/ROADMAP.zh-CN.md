@@ -5,15 +5,15 @@
 ## 已实现
 
 - 仅通过二维码导入凭证，密码由用户自己设置。
-- 每台设备独立 token，可在 `server/tokens.json` 中吊销。
+- 每台设备独立 token，可在 `server/tokens.json` 中创建、吊销、记录最近使用设备，并删除已吊销的 token。
 - 每个 `workdir + agent` 下支持多个命名持久会话，各自保留聊天历史和可续接 CLI 上下文。
 - Claude Code 和 Codex 的 assistant 文本 SSE 流式显示；Web 端对长回复期间的高频 UI 更新做节流。
 - 长任务取消。
 - 同一 `workdir + agent + session` 会话内的并发消息自动排队。
-- 主题和语言切换。
+- 主题、语言和全局字体大小切换。
 - 当前主流程默认英文，可切换中文。
-- 抽屉清理、机器状态、关于弹窗。
-- 只读额度弹窗显示 Claude Code 和 Codex 的 5 小时、本周剩余额度。
+- 抽屉清理、首页导航页、机器状态、“开始使用”教程和关于弹窗（版本 0.11）。
+- 只读额度弹窗显示 Claude Code、Codex 和 Antigravity 的 5 小时、本周剩余额度。
 - 额度刷新提醒改为系统原生通知（Android / iOS / macOS / Windows），发送到通知栏而非聊天消息框。
 - 额度刷新定时消息独立成左栏**“定时消息”**页:可按工作区为下一次 Claude Code 或 Codex 5 小时额度刷新预设一条消息,后端检测到刷新后自动发送;同一工作区多设备同步,并提供“清除已排程”取消。
 - 通过 `GET /api/diagnostics` 和机器状态弹窗提供更完整的后端诊断。
@@ -44,15 +44,17 @@
 - BTW (by the way) 旁路提问：只读 `/api/btw` 端点，不干扰主任务——Claude fork
   其原生 CLI session，Codex 与 Antigravity 则克隆主对话另起只读旁路 session。
 - 蜂群（多智能体群聊，界面名 **Swarm** / 蜂群）：命名的蜂群成员共享一份记录，
-  按 `@` 召唤依次发言（串行、单一发言权；每个成员只收到上次发言以来的增量）。
-  每个蜂群固定自己的工作目录（work tree）和各成员的模型/思考深度/权限，按工作区
-  列出（同一工作区可有多个蜂群，各自选定 work tree），并作为常显子项出现在左侧
-  抽屉。详见 `docs/group-chat.md`。
+  按 `@` 召唤发言；同一条人类消息里被召唤的多个成员会基于同一份记录快照并行运行，
+  同时每个成员自己的蜂群 session 仍按自身队列串行。每个蜂群固定自己的工作目录
+  （work tree）和各成员的模型/思考深度/权限，按工作区列出（同一工作区可有多个
+  蜂群，各自选定 work tree），并作为常显子项出现在左侧抽屉。详见
+  `docs/group-chat.md`。
 - Antigravity 模型选择：`agy` 通过 `--model` 暴露模型目录，蜂群与单聊均可固定到
   具体的 Gemini / Claude / GPT-OSS 模型。
 - 多段消息：每条 assistant 回复独立时间戳，前端可折叠展示；后端发送 `segment`
   SSE 事件，消息元数据中记录 `{ ts, text }` 段。
 - Agent 图标：每个 agent 独立 PNG 资源（含亮/暗主题），替换原图标字体。
+- 支持 BTW 的 agent 统一使用紧凑的 `BTW` 文字图标，不再使用灯泡隐喻。
 
 ## 规划
 
