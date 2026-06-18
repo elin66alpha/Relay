@@ -88,18 +88,25 @@ class DeviceToken {
     required this.createdAt,
     required this.revoked,
     required this.current,
+    required this.lastDeviceId,
+    required this.lastDeviceName,
     this.revokedAt,
+    this.lastUsedAt,
   });
 
   factory DeviceToken.fromJson(Map<String, Object?> json) {
     final String revokedAt = json['revokedAt'] as String? ?? '';
+    final String lastUsedAt = json['lastUsedAt'] as String? ?? '';
     return DeviceToken(
       id: json['id'] as String? ?? '',
       label: json['label'] as String? ?? '',
       createdAt: json['createdAt'] as String? ?? '',
       revoked: json['revoked'] as bool? ?? false,
       current: json['current'] as bool? ?? false,
+      lastDeviceId: json['lastDeviceId'] as String? ?? '',
+      lastDeviceName: json['lastDeviceName'] as String? ?? '',
       revokedAt: revokedAt.isEmpty ? null : revokedAt,
+      lastUsedAt: lastUsedAt.isEmpty ? null : lastUsedAt,
     );
   }
 
@@ -108,7 +115,10 @@ class DeviceToken {
   final String createdAt;
   final bool revoked;
   final bool current;
+  final String lastDeviceId;
+  final String lastDeviceName;
   final String? revokedAt;
+  final String? lastUsedAt;
 
   DeviceToken copyWith({bool? revoked, String? revokedAt}) {
     return DeviceToken(
@@ -117,7 +127,10 @@ class DeviceToken {
       createdAt: createdAt,
       revoked: revoked ?? this.revoked,
       current: current,
+      lastDeviceId: lastDeviceId,
+      lastDeviceName: lastDeviceName,
       revokedAt: revokedAt ?? this.revokedAt,
+      lastUsedAt: lastUsedAt,
     );
   }
 }
@@ -726,6 +739,14 @@ class BackendClient {
     await _requestJson(
       'POST',
       '/api/tokens/${Uri.encodeComponent(id)}/revoke',
+      timeout: const Duration(seconds: 20),
+    );
+  }
+
+  Future<void> deleteDeviceToken(String id) async {
+    await _requestJson(
+      'POST',
+      '/api/tokens/${Uri.encodeComponent(id)}/delete',
       timeout: const Duration(seconds: 20),
     );
   }

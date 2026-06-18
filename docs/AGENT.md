@@ -19,9 +19,14 @@ git; finished work should be summarized here briefly, not narrated.
   until their binary is detected on PATH or per-user fallback locations.
 - Clients connect by importing an encrypted credential QR / payload and entering
   the user-chosen password.
-- All protected APIs require a revocable bearer token from `server/tokens.json`.
+- All protected APIs require a revocable bearer token from `server/tokens.json`;
+  token summaries track the last device id/name and last-used time, and revoked
+  tokens can be deleted from the app.
 - Sessions are keyed by `workdir + agent + session`; devices in the same scope
   share chat history, the resumable CLI session, and in-flight progress.
+- The authenticated default screen is Home: it shows the active machine, recent
+  swarms, recent agent sessions, and a Getting started entry. The same tutorial
+  also lives under Settings -> Tutorial, above About.
 - Setup offers three network modes: no tunnel/direct public address, named
   Cloudflare Tunnel, and Cloudflare Quick Tunnel.
 - App identity: bundle id / applicationId / namespace `dev.relay.app` (verify
@@ -45,12 +50,16 @@ git; finished work should be summarized here briefly, not narrated.
   and Antigravity side questions without disturbing the active task. Claude
   forks its native CLI session; Codex and Antigravity run side sessions seeded
   with the main Relay transcript. Side history and sessions live under
-  `btw:<agent>` keys and never leak into the main conversation.
+  `btw:<agent>` keys and never leak into the main conversation. Supported agents
+  use the text `BTW` affordance in the Flutter UI.
 - Swarm (multi-agent group chat, shown as "Swarm" / 蜂群; `group` in code): named
-  swarms of agent members share one transcript and answer `@mentions` in turn.
-  Each swarm pins its own work tree and per-member model/effort/permission, is
-  listed per workspace (several per workspace, on different work trees), and
-  appears as always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
+  swarms of agent members share one transcript and answer `@mentions`. Members
+  mentioned in the same human message run in parallel from one transcript
+  snapshot, while each member's own group session still serializes against
+  itself. Each swarm pins its own work tree and per-member
+  model/effort/permission, is listed per workspace (several per workspace, on
+  different work trees), and appears as always-visible sub-entries in the left
+  drawer. See `docs/group-chat.md`.
 
 ## Operating Principles
 
@@ -180,7 +189,8 @@ not generated any token yet, protected API routes return
 
 - Meta: `GET /api/health`, `GET /api/status`, `GET /api/diagnostics`,
   `GET /api/agents`, `GET /api/auth/status`, `GET /api/events` (SSE),
-  `GET /api/tokens`, `POST /api/tokens/:id/revoke`
+  `GET /api/tokens`, `POST /api/tokens/:id/revoke`,
+  `POST /api/tokens/:id/delete`
 - Agent config: `GET /api/agent-options`, `GET`+`POST /api/agent-settings`,
   `GET /api/agent-version`, `POST /api/agent-update`
 - Chat: `POST /api/chat` (SSE when `Accept: text/event-stream`),

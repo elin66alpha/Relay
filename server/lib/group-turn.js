@@ -36,9 +36,9 @@ function authorOf(message) {
 }
 
 // Ordered, de-duplicated list of member agent keys the human summoned in this
-// message. `@all` / `@everyone` expands to every member in member order. Tokens
-// match a member by its agent key or by the slug of its display label, so both
-// `@claude` and `@Claude Code` resolve. Only current members can be summoned.
+// message. Tokens match a member by its agent key or by the slug of its display
+// label, so both `@claude` and `@Claude Code` resolve. Only current members can
+// be summoned; broad aliases such as `@all` are intentionally ignored.
 function parseMentions(prompt, members, labelFor) {
   const text = String(prompt || '');
   const list = Array.isArray(members) ? members : [];
@@ -54,10 +54,6 @@ function parseMentions(prompt, members, labelFor) {
   let match;
   while ((match = re.exec(text)) !== null) {
     const token = match[1].toLowerCase();
-    if (token === 'all' || token === 'everyone') {
-      for (const member of list) add(member);
-      continue;
-    }
     const target = list.find(
       (member) =>
         member.toLowerCase() === token ||

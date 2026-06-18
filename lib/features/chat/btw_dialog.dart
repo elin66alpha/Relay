@@ -138,7 +138,15 @@ class _BtwDialogState extends State<BtwDialog> {
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       child: Row(
         children: <Widget>[
-          Icon(Icons.lightbulb_outline_rounded, color: colors.primary),
+          Text(
+            'BTW',
+            style: TextStyle(
+              color: colors.primary,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0,
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

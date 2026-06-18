@@ -191,6 +191,11 @@ async function runAgentTurn(options) {
     responder = createNoopResponder(),
     runState = {},
     scopeKey,
+    // The key turns are serialized on (enqueueScope + runningScopes). Defaults to
+    // scopeKey so single-agent chat is unchanged. Group chat passes each member's
+    // own session key instead, so members summoned in one message run in parallel
+    // while history still lives under the shared group scopeKey.
+    concurrencyKey = scopeKey,
     session,
     signal,
     workdir,
@@ -432,7 +437,8 @@ async function runAgentTurn(options) {
     requestId,
     deviceId,
   });
-  const willQueue = runningScopes.has(scopeKey) || scopeChains.has(scopeKey);
+  const willQueue =
+    runningScopes.has(concurrencyKey) || scopeChains.has(concurrencyKey);
   if (willQueue) {
     broadcastScope('agent_queued', {
       scopeWorkdir: workdir,
@@ -450,10 +456,10 @@ async function runAgentTurn(options) {
   }
 
   try {
-    const content = await enqueueScope(scopeKey, async () => {
+    const content = await enqueueScope(concurrencyKey, async () => {
       // The turn may have been cancelled while waiting its turn in the queue.
       if (runState.cancelled) throw new AgentCancelledError();
-      runningScopes.add(scopeKey);
+      runningScopes.add(concurrencyKey);
       try {
         return await runAgent(agentKey, prompt, emitRunEvent, {
           sessionKey: scopeKey,
@@ -462,7 +468,7 @@ async function runAgentTurn(options) {
           settings: getSettings(agentKey, contextKey),
         });
       } finally {
-        runningScopes.delete(scopeKey);
+        runningScopes.delete(concurrencyKey);
       }
     });
     if (responder.streaming && !streamedText.trim()) {

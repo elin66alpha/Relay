@@ -7,7 +7,8 @@ Relay at login.
 ## Requirements
 
 - Windows 10/11 with Node.js 18 or newer.
-- Claude Code / Codex / Antigravity CLIs installed and logged in on Windows.
+- At least one supported CLI agent installed and logged in on Windows: Claude
+  Code, Codex, Antigravity, OpenCode, or Hermes.
 - `cloudflared` for Cloudflare Tunnel or Quick Tunnel mode.
 - PowerShell. Windows PowerShell 5.1 is enough; PowerShell 7 also works.
 

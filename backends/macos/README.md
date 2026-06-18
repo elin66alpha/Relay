@@ -6,7 +6,8 @@ LaunchAgent services under `~/Library/LaunchAgents`.
 ## Requirements
 
 - macOS with Node.js 18 or newer.
-- Claude Code / Codex / Antigravity CLIs installed and logged in on the Mac.
+- At least one supported CLI agent installed and logged in on the Mac: Claude
+  Code, Codex, Antigravity, OpenCode, or Hermes.
 - `cloudflared` for Cloudflare Tunnel or Quick Tunnel mode:
 
 ```bash

@@ -5,17 +5,20 @@
 ## Implemented
 
 - QR-only credential import with user-chosen password.
-- Per-device token creation and revocation through `server/tokens.json`.
+- Per-device token creation, revocation, recent-use tracking, and revoked-token
+  deletion through `server/tokens.json`.
 - Multiple named persistent sessions per `workdir + agent`, each with separate
   chat history and resumable CLI context.
 - SSE streaming for Claude Code and Codex assistant text, with throttled Web UI
   updates during long replies.
 - Long-task cancellation.
 - Concurrent turns on the same `workdir + agent + session` are queued.
-- Theme and language switching.
+- Theme, language, and app-wide font-size switching.
 - English-first active app flow with Chinese toggle.
-- Drawer cleanup, machine status, and About dialog.
-- Read-only quota dialog showing remaining Claude Code and Codex 5-hour and weekly quotas.
+- Drawer cleanup, Home navigation page, machine status, Getting started tutorial,
+  and About dialog (version 0.11).
+- Read-only quota dialog showing remaining Claude Code, Codex, and Antigravity
+  5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list on Android, iOS, macOS, and Windows.
 - Scheduled quota-ready messages on a dedicated **Scheduled messages** drawer
   screen: per workspace, store a prompt for the next Claude Code or Codex 5-hour
@@ -63,11 +66,12 @@
   without disturbing the active task — Claude forks its native CLI session, while
   Codex and Antigravity run side sessions cloned from the main conversation.
 - Swarm (multi-agent group chat, shown as **Swarm** / 蜂群): named swarms of agent
-  members share one transcript and answer `@mentions` in turn (serialized, one
-  speaker at a time; each member fed only the delta since it last spoke). Each
-  swarm pins its own work tree and per-member model/effort/permission, is listed
-  per workspace (several per workspace, each on its chosen work tree), and appears
-  as always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
+  members share one transcript and answer `@mentions`; members mentioned in the
+  same human message run in parallel from the same transcript snapshot, while
+  each member's own group session still queues against itself. Each swarm pins
+  its own work tree and per-member model/effort/permission, is listed per
+  workspace (several per workspace, each on its chosen work tree), and appears as
+  always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
 - Antigravity model selection: `agy` exposes its model catalog via `--model`, so
   swarms and solo chats can pin a specific Gemini / Claude / GPT-OSS model.
 - Multi-segment messages: each assistant follow-up gets its own timestamp and
@@ -75,6 +79,8 @@
   `segment` SSE events and tracks `{ ts, text }` entries in message metadata.
 - Agent icons: per-agent PNG assets with light/dark variants, replacing the
   icon font glyphs in the agent drawer.
+- BTW affordance now uses a compact text `BTW` icon for every agent that supports
+  the sidekick instead of a lightbulb metaphor.
 
 ## Planned
 

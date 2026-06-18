@@ -42,17 +42,10 @@ class _BotAppState extends State<BotApp> {
     try {
       await widget.machinesController.load();
       await widget.agentsController.load();
-      MachineCredential? activeMachine =
+      final MachineCredential? activeMachine =
           widget.machinesController.activeMachine;
       if (activeMachine != null) {
-        final bool authorized = await _activeMachineIsAuthorized(activeMachine);
-        if (!authorized) activeMachine = null;
-      }
-      if (activeMachine != null) {
-        widget.chatController.loadFor(
-          widget.agentsController.activeAgent,
-          activeMachine,
-        );
+        await _activeMachineIsAuthorized(activeMachine);
       }
     } catch (error, stackTrace) {
       FlutterError.reportError(
@@ -109,6 +102,18 @@ class _BotAppState extends State<BotApp> {
             theme: AppTheme.light(),
             darkTheme: AppTheme.dark(),
             themeMode: widget.settingsController.themeMode,
+            builder: (BuildContext context, Widget? child) {
+              final MediaQueryData mediaQuery = MediaQuery.of(context);
+              final double systemScale = mediaQuery.textScaler.scale(1);
+              return MediaQuery(
+                data: mediaQuery.copyWith(
+                  textScaler: TextScaler.linear(
+                    systemScale * widget.settingsController.fontScale,
+                  ),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              );
+            },
             home: _isStarting
                 ? const _Splash()
                 : AnimatedBuilder(

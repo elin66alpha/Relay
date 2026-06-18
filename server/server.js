@@ -37,9 +37,11 @@ const {
   uploadedEntry,
 } = require('./lib/filesystem');
 const {
+  deleteRevokedTokenById,
   hasConfiguredToken,
   isTokenAllowed,
   listTokenSummaries,
+  markTokenUsed,
   revokeTokenById,
 } = require('./lib/tokens');
 const { buildUsageReport } = require('./lib/usage');
@@ -212,7 +214,7 @@ app.use((req, res, next) => {
   if (CORS_ALLOW_ORIGIN !== '*') res.setHeader('Vary', 'Origin');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Device-Id, X-Workdir',
+    'Content-Type, Authorization, X-Device-Id, X-Device-Name, X-Workdir',
   );
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -232,6 +234,10 @@ function requireAuth(req, res, next) {
   if (!isTokenAllowed(token)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
+  markTokenUsed(token, {
+    deviceId: normalizeDeviceId(req.get('x-device-id')),
+    deviceName: req.get('x-device-name'),
+  });
   return next();
 }
 
@@ -724,6 +730,7 @@ const routeContext = {
   createChatSession,
   createQuotaSchedule,
   deleteChatSession,
+  deleteRevokedTokenById,
   describeAgent,
   eventClients,
   eventWorkdir,

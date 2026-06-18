@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
@@ -7,14 +7,17 @@ import '../../core/models/agent_options.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/group.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/util/time_format.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import 'chat_content.dart';
 import 'group_chat_controller.dart';
 
 /// Multi-agent group chat. Owns its own [GroupChatController] for the lifetime of
 /// the screen (one extra SSE subscription while open). Summon agents by mentioning
-/// them in the composer (`@claude`, `@all`); one human message can fan out to
-/// several agents, each replying in turn.
+/// them in the composer (`@claude`); one human message can fan out to several
+/// agents, each replying in turn.
 class GroupChatScreen extends StatefulWidget {
   const GroupChatScreen({
     required this.agentsController,
@@ -36,6 +39,7 @@ class GroupChatScreen extends StatefulWidget {
 class _GroupChatScreenState extends State<GroupChatScreen> {
   late final GroupChatController _controller;
   final TextEditingController _input = TextEditingController();
+  final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
 
   @override
@@ -65,6 +69,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   void dispose() {
     _controller.removeListener(_onChange);
     _controller.dispose();
+    _inputFocus.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -73,10 +78,35 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   List<CliAgent> get _agents => widget.agentsController.agents;
 
   Future<void> _send() async {
+    if (_controller.sending) return;
     final String text = _input.text;
     if (text.trim().isEmpty) return;
     _input.clear();
-    await _controller.send(text);
+    final bool sent = await _controller.send(text);
+    if (!sent && mounted && _input.text.isEmpty) {
+      _input.text = text;
+      _input.selection = TextSelection.collapsed(offset: text.length);
+    }
+  }
+
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (!usesHardwareKeyboard || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final LogicalKeyboardKey key = event.logicalKey;
+    if (key != LogicalKeyboardKey.enter &&
+        key != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    final HardwareKeyboard keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    _send();
+    return KeyEventResult.handled;
   }
 
   void _insertMention(String agentKey) {
@@ -93,6 +123,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       text: next,
       selection: TextSelection.collapsed(offset: offset + insert.length),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocus.requestFocus();
+    });
   }
 
   @override
@@ -214,11 +247,6 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         onPressed: () => _insertMention(member),
                       ),
                     ),
-                  if (group.members.length > 1)
-                    ActionChip(
-                      label: const Text('@all'),
-                      onPressed: () => _insertMention('all'),
-                    ),
                 ],
               ),
             ),
@@ -227,17 +255,22 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
                 Expanded(
-                  child: TextField(
-                    controller: _input,
-                    minLines: 1,
-                    maxLines: 5,
-                    textInputAction: TextInputAction.newline,
-                    decoration: InputDecoration(
-                      hintText: strings.groupComposerHint,
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
+                  child: usesHardwareKeyboard
+                      ? Focus(
+                          onKeyEvent: _handleComposerKey,
+                          child: _GroupComposerField(
+                            focusNode: _inputFocus,
+                            controller: _input,
+                            hintText: strings.groupComposerHint,
+                            onSubmitted: _send,
+                          ),
+                        )
+                      : _GroupComposerField(
+                          focusNode: _inputFocus,
+                          controller: _input,
+                          hintText: strings.groupComposerHint,
+                          onSubmitted: null,
+                        ),
                 ),
                 const SizedBox(width: 8),
                 sending
@@ -375,7 +408,38 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     );
     if (confirmed == true) await _controller.deleteGroup(group);
   }
+}
 
+class _GroupComposerField extends StatelessWidget {
+  const _GroupComposerField({
+    required this.focusNode,
+    required this.controller,
+    required this.hintText,
+    required this.onSubmitted,
+  });
+
+  final FocusNode focusNode;
+  final TextEditingController controller;
+  final String hintText;
+  final VoidCallback? onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      focusNode: focusNode,
+      controller: controller,
+      onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+      minLines: 1,
+      maxLines: 5,
+      textInputAction:
+          onSubmitted == null ? TextInputAction.newline : TextInputAction.send,
+      decoration: InputDecoration(
+        hintText: hintText,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+    );
+  }
 }
 
 class _SwarmForm {
@@ -434,7 +498,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   late final Set<String> _selected = <String>{...widget.initialMembers};
   late String _workdir = widget.initialWorkdir;
   // Selected option ids per agent, seeded from the swarm being edited.
-  late final Map<String, Map<String, String>> _configs = <String, Map<String, String>>{
+  late final Map<String, Map<String, String>> _configs =
+      <String, Map<String, String>>{
     for (final MapEntry<String, Map<String, String>> e
         in widget.initialConfigs.entries)
       e.key: <String, String>{...e.value},
@@ -672,7 +737,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
         onChanged: (String? id) {
           if (id == null) return;
           setState(() {
-            _configs.putIfAbsent(agentKey, () => <String, String>{})[group] = id;
+            _configs.putIfAbsent(agentKey, () => <String, String>{})[group] =
+                id;
           });
         },
         items: <DropdownMenuItem<String>>[
@@ -831,6 +897,8 @@ class _MessageBubble extends StatelessWidget {
             ? message.metadata['agentLabel'] as String
             : groupAuthorLabel(author);
     final bool streaming = message.metadata['streaming'] == true;
+    final bool awaitingFirstToken =
+        message.metadata['awaitingFirstToken'] == true;
     final bool cancelled = message.metadata['cancelled'] == true;
     final Color bubbleColor = isHuman
         ? theme.colorScheme.primaryContainer
@@ -838,6 +906,17 @@ class _MessageBubble extends StatelessWidget {
     final Color textColor = isHuman
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onSurface;
+
+    // Per-segment timestamps + collapse, shared with the single-agent chat: a
+    // multi-message reply shows each follow-up with its own time, the earlier
+    // ones folded behind a toggle. The leading spinner becomes typing dots.
+    final List<MessageSegment> segments = message.segments;
+    final bool segmented = !isHuman && segments.length > 1;
+    final bool awaiting = awaitingFirstToken && message.content.isEmpty;
+    final DateTime stampTime =
+        (!isHuman && segments.isNotEmpty && segments.first.createdAt != null)
+            ? segments.first.createdAt!
+            : message.createdAt;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -864,22 +943,61 @@ class _MessageBubble extends StatelessWidget {
               color: bubbleColor,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: streaming && message.content.isEmpty
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (awaiting)
+                  TypingDots(color: textColor)
+                else if (isHuman)
+                  SelectableText(
+                    message.content,
+                    style:
+                        theme.textTheme.bodyMedium?.copyWith(color: textColor),
                   )
-                : MarkdownBody(
-                    data: message.content.isEmpty && cancelled
-                        ? '_cancelled_'
-                        : message.content,
-                    selectable: true,
-                    styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-                      p: theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                    ),
+                else if (segmented)
+                  SegmentedContent(
+                    segments: segments,
+                    color: textColor,
+                    formatInlineEmphasis: !streaming,
+                  )
+                else if (message.content.isNotEmpty)
+                  MessageText(
+                    text: message.content,
+                    color: textColor,
+                    formatInlineEmphasis: !streaming,
+                  )
+                else if (cancelled)
+                  MessageText(
+                    text: '_cancelled_',
+                    color: textColor,
+                    formatInlineEmphasis: true,
                   ),
+                if (cancelled && message.content.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 8),
+                  MessageStatus(
+                    icon: Icons.stop_circle_outlined,
+                    text: context.l10n.cancelled,
+                    color: textColor,
+                  ),
+                ],
+              ],
+            ),
           ),
+          // Every message shows when it was sent/received. Segmented bubbles
+          // carry an inline time per follow-up, so the trailing stamp is hidden
+          // for them to avoid duplicating the last segment's time.
+          if (!segmented && !awaiting)
+            Padding(
+              padding: const EdgeInsets.only(left: 6, right: 6, top: 2),
+              child: Text(
+                formatShortTime(context, stampTime.toIso8601String()),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ),
         ],
       ),
     );

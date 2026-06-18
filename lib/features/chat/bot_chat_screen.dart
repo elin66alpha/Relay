@@ -5,12 +5,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
+import '../../core/models/group.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
@@ -20,9 +20,12 @@ import '../../core/util/time_format.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
+import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
 import 'btw_dialog.dart';
+import 'chat_content.dart';
+import 'group_chat_screen.dart';
 
 class BotChatScreen extends StatefulWidget {
   const BotChatScreen({
@@ -133,6 +136,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     // Pull the host's live agent list so experimental agents (opencode, hermes)
     // appear automatically once their CLI is installed. Retries until it lands.
     if (!_agentsSynced) unawaited(_refreshAgents());
+    if (widget.chatController.machine == null) return;
     final bool hadMachine = widget.chatController.machine != null;
     final bool machineChanged = widget.chatController.machine?.id != machine.id;
     if (widget.chatController.agent.key != active.key || machineChanged) {
@@ -387,6 +391,9 @@ class _BotChatScreenState extends State<BotChatScreen>
                       widget.chatController,
                     ]),
                     builder: (BuildContext context, Widget? _) {
+                      if (widget.chatController.machine == null) {
+                        return const SizedBox.shrink();
+                      }
                       final CliAgent agent =
                           widget.agentsController.activeAgent;
                       if (widget.chatController.agentLoggedIn(agent.key) !=
@@ -406,6 +413,14 @@ class _BotChatScreenState extends State<BotChatScreen>
                         widget.chatController,
                       ]),
                       builder: (BuildContext context, Widget? _) {
+                        if (widget.chatController.machine == null) {
+                          return _HomeNavigationPage(
+                            agentsController: widget.agentsController,
+                            chatController: widget.chatController,
+                            machinesController: widget.machinesController,
+                            settingsController: widget.settingsController,
+                          );
+                        }
                         final CliAgent agent =
                             widget.agentsController.activeAgent;
                         final List<ChatMessage> messages =
@@ -457,8 +472,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                                 ),
                                 cancelled:
                                     widget.chatController.isCancelled(message),
-                                queued:
-                                    widget.chatController.isQueued(message),
+                                queued: widget.chatController.isQueued(message),
                                 progressLines:
                                     widget.chatController.progressLinesFor(
                                   message,
@@ -480,6 +494,9 @@ class _BotChatScreenState extends State<BotChatScreen>
                       widget.chatController,
                     ]),
                     builder: (BuildContext context, Widget? _) {
+                      if (widget.chatController.machine == null) {
+                        return const SizedBox.shrink();
+                      }
                       return _InputBar(
                         controller: _input,
                         backend: widget.chatController.backend,
@@ -577,18 +594,21 @@ class _ChatTitle extends StatelessWidget {
         chatController,
       ]),
       builder: (BuildContext context, Widget? _) {
+        final bool hasChatTarget = chatController.machine != null;
         final MachineCredential? machine = machinesController.activeMachine;
         final AgentSession? session = chatController.activeSession;
         final String subtitle = <String>[
-          if (machine != null) machine.displayName,
-          if (session != null) session.name,
+          if (hasChatTarget && machine != null) machine.displayName,
+          if (hasChatTarget && session != null) session.name,
         ].join(' - ');
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Text(
-              agentsController.activeAgent.label,
+              hasChatTarget
+                  ? agentsController.activeAgent.label
+                  : context.l10n.home,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -630,15 +650,30 @@ class _BtwButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[agentsController, chatController]),
+      animation:
+          Listenable.merge(<Listenable>[agentsController, chatController]),
       builder: (BuildContext context, Widget? _) {
+        if (chatController.machine == null) {
+          return const SizedBox.shrink();
+        }
         final String agentKey = agentsController.activeAgent.key;
         const Set<String> btwAgents = <String>{'claude', 'codex', 'agy'};
         if (!btwAgents.contains(agentKey)) {
           return const SizedBox.shrink();
         }
         return IconButton(
-          icon: const Icon(Icons.lightbulb_outline_rounded),
+          icon: const SizedBox(
+            width: 32,
+            child: Text(
+              'BTW',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
           tooltip: context.l10n.btwTooltip,
           onPressed: onPressed,
         );
@@ -661,6 +696,9 @@ class _SearchButton extends StatelessWidget {
     return AnimatedBuilder(
       animation: chatController,
       builder: (BuildContext context, Widget? _) {
+        if (chatController.machine == null) {
+          return const SizedBox.shrink();
+        }
         return IconButton(
           icon: const Icon(Icons.search_rounded),
           tooltip: context.l10n.searchChats,
@@ -732,6 +770,357 @@ class _EmptyChatPlaceholder extends StatelessWidget {
       ),
     );
   }
+}
+
+class _HomeNavigationPage extends StatefulWidget {
+  const _HomeNavigationPage({
+    required this.agentsController,
+    required this.chatController,
+    required this.machinesController,
+    required this.settingsController,
+  });
+
+  final CliAgentsController agentsController;
+  final BotChatController chatController;
+  final MachineCredentialsController machinesController;
+  final AppSettingsController settingsController;
+
+  @override
+  State<_HomeNavigationPage> createState() => _HomeNavigationPageState();
+}
+
+class _HomeNavigationPageState extends State<_HomeNavigationPage> {
+  bool _loading = false;
+  List<ChatGroup> _swarms = const <ChatGroup>[];
+  List<_RecentAgentSession> _agentSessions = const <_RecentAgentSession>[];
+  String? _lastMachineId;
+  String _lastAgentKeys = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.agentsController.addListener(_onSourceChanged);
+    widget.machinesController.addListener(_onSourceChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_refresh());
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.agentsController.removeListener(_onSourceChanged);
+    widget.machinesController.removeListener(_onSourceChanged);
+    super.dispose();
+  }
+
+  void _onSourceChanged() {
+    final String? machineId = widget.machinesController.activeMachine?.id;
+    final String agentKeys =
+        widget.agentsController.agents.map((CliAgent a) => a.key).join('|');
+    if (machineId == _lastMachineId && agentKeys == _lastAgentKeys) {
+      setState(() {});
+      return;
+    }
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final MachineCredential? machine = widget.machinesController.activeMachine;
+    final List<CliAgent> agents = widget.agentsController.agents;
+    _lastMachineId = machine?.id;
+    _lastAgentKeys = agents.map((CliAgent a) => a.key).join('|');
+    if (machine == null) {
+      if (!mounted) return;
+      setState(() {
+        _swarms = const <ChatGroup>[];
+        _agentSessions = const <_RecentAgentSession>[];
+        _loading = false;
+      });
+      return;
+    }
+
+    setState(() => _loading = true);
+    List<ChatGroup> swarms = const <ChatGroup>[];
+    try {
+      swarms = await widget.chatController.backend.fetchGroups();
+    } catch (_) {
+      swarms = const <ChatGroup>[];
+    }
+
+    final List<_RecentAgentSession> sessions = <_RecentAgentSession>[];
+    await Future.wait<void>(
+      agents.map((CliAgent agent) async {
+        try {
+          final AgentSessionList list =
+              await widget.chatController.backend.fetchSessions(agent.key);
+          for (final AgentSession session in list.sessions) {
+            sessions.add(_RecentAgentSession(agent: agent, session: session));
+          }
+        } catch (_) {
+          // A missing CLI or offline backend should not break the home page.
+        }
+      }),
+    );
+    sessions.sort(
+      (_RecentAgentSession a, _RecentAgentSession b) =>
+          b.session.updatedAt.compareTo(a.session.updatedAt),
+    );
+    if (!mounted) return;
+    setState(() {
+      _swarms = swarms.take(5).toList(growable: false);
+      _agentSessions = sessions.take(6).toList(growable: false);
+      _loading = false;
+    });
+  }
+
+  Future<void> _openSwarm(ChatGroup swarm) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => GroupChatScreen(
+          agentsController: widget.agentsController,
+          settingsController: widget.settingsController,
+          initialGroupId: swarm.id,
+        ),
+      ),
+    );
+    if (mounted) unawaited(_refresh());
+  }
+
+  Future<void> _openAgentSession(_RecentAgentSession entry) async {
+    final MachineCredential? machine = widget.machinesController.activeMachine;
+    if (machine == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.importOrChooseMachine)),
+      );
+      return;
+    }
+    if (widget.chatController.isThinking) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
+      );
+      return;
+    }
+    await widget.agentsController.setActive(entry.agent.key);
+    await widget.chatController.loadFor(entry.agent, machine);
+    await widget.chatController.selectSession(entry.agent, entry.session.id);
+  }
+
+  void _openGettingStarted() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const GettingStartedScreen()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ThemeData theme = Theme.of(context);
+    final MachineCredential? machine = widget.machinesController.activeMachine;
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        children: <Widget>[
+          Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 840),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    strings.home,
+                    style: theme.textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    strings.homeSubtitle,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_loading) const LinearProgressIndicator(minHeight: 2),
+                  if (_loading) const SizedBox(height: 12),
+                  Text(
+                    strings.currentMachine,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (machine == null)
+                    _HomeSectionCard(
+                      child: ListTile(
+                        leading: const Icon(Icons.link_off_rounded),
+                        title: Text(strings.notConnected),
+                        subtitle: Text(strings.importOrChooseMachine),
+                      ),
+                    )
+                  else
+                    ActiveMachineStatusTile(
+                      activeMachine: machine,
+                      chatController: widget.chatController,
+                    ),
+                  const SizedBox(height: 12),
+                  _HomeSectionCard(
+                    child: ListTile(
+                      leading: const Icon(Icons.school_outlined),
+                      title: Text(strings.gettingStarted),
+                      subtitle: Text(strings.gettingStartedHomeHint),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _openGettingStarted,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeSection(
+                    title: strings.recentSwarms,
+                    emptyText: strings.noRecentSwarms,
+                    children: <Widget>[
+                      for (final ChatGroup swarm in _swarms)
+                        ListTile(
+                          leading: const Icon(Icons.groups_outlined),
+                          title: Text(
+                            swarm.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            swarm.memberLabels.join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openSwarm(swarm),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeSection(
+                    title: strings.recentAgentSessions,
+                    emptyText: strings.noRecentAgentSessions,
+                    children: <Widget>[
+                      for (final _RecentAgentSession entry in _agentSessions)
+                        ListTile(
+                          leading: const Icon(Icons.smart_toy_outlined),
+                          title: Text(
+                            strings.agentSessionLabel(
+                              entry.agent.label,
+                              entry.session.name,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            formatShortTime(
+                              context,
+                              entry.session.updatedAt.toIso8601String(),
+                            ),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openAgentSession(entry),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    strings.chooseConversationTarget,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeSection extends StatelessWidget {
+  const _HomeSection({
+    required this.title,
+    required this.emptyText,
+    required this.children,
+  });
+
+  final String title;
+  final String emptyText;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _HomeSectionCard(
+          child: children.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    emptyText,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : Column(
+                  children: <Widget>[
+                    for (int index = 0; index < children.length; index += 1)
+                      Column(
+                        children: <Widget>[
+                          if (index > 0) const Divider(height: 1),
+                          children[index],
+                        ],
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeSectionCard extends StatelessWidget {
+  const _HomeSectionCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: child,
+    );
+  }
+}
+
+class _RecentAgentSession {
+  const _RecentAgentSession({
+    required this.agent,
+    required this.session,
+  });
+
+  final CliAgent agent;
+  final AgentSession session;
 }
 
 class _HistorySearchDialog extends StatefulWidget {
@@ -1280,11 +1669,10 @@ class _MessageBubble extends StatelessWidget {
     // message keeps the simpler one-block layout with a single timestamp below.
     final List<MessageSegment> segments = message.segments;
     final bool segmented = !isUser && !system && segments.length > 1;
-    final DateTime stampTime = (!isUser &&
-            segments.isNotEmpty &&
-            segments.first.createdAt != null)
-        ? segments.first.createdAt!
-        : message.createdAt;
+    final DateTime stampTime =
+        (!isUser && segments.isNotEmpty && segments.first.createdAt != null)
+            ? segments.first.createdAt!
+            : message.createdAt;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -1309,22 +1697,22 @@ class _MessageBubble extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 if (awaitingFirstToken && message.content.isEmpty)
-                  _TypingDots(color: textColor)
+                  TypingDots(color: textColor)
                 else if (segmented)
-                  _SegmentedContent(
+                  SegmentedContent(
                     segments: segments,
                     color: textColor,
                     formatInlineEmphasis: !streaming,
                   )
                 else if (message.content.isNotEmpty)
-                  _MessageText(
+                  MessageText(
                     text: message.content,
                     color: textColor,
                     formatInlineEmphasis: !isUser && !streaming,
                   ),
                 if (progressLines.isNotEmpty) ...<Widget>[
                   if (message.content.isNotEmpty) const SizedBox(height: 8),
-                  _ProgressLines(
+                  ProgressLines(
                     lines: progressLines,
                     color: textColor,
                   ),
@@ -1332,7 +1720,7 @@ class _MessageBubble extends StatelessWidget {
                 if (cancelled) ...<Widget>[
                   if (message.content.isNotEmpty || progressLines.isNotEmpty)
                     const SizedBox(height: 8),
-                  _MessageStatus(
+                  MessageStatus(
                     icon: Icons.stop_circle_outlined,
                     text: context.l10n.cancelled,
                     color: textColor,
@@ -1408,454 +1796,6 @@ class _MessageBubble extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-// Renders a multi-message assistant turn. The final message is always shown in
-// full; the agent's earlier phased "thinking" reports are collapsed behind a
-// toggle so they don't drown out the result, but stay one tap away for anyone
-// who wants to follow the reasoning.
-class _SegmentedContent extends StatefulWidget {
-  const _SegmentedContent({
-    required this.segments,
-    required this.color,
-    required this.formatInlineEmphasis,
-  });
-
-  final List<MessageSegment> segments;
-  final Color color;
-  final bool formatInlineEmphasis;
-
-  @override
-  State<_SegmentedContent> createState() => _SegmentedContentState();
-}
-
-class _SegmentedContentState extends State<_SegmentedContent> {
-  bool _expanded = false;
-
-  Widget _segmentText(MessageSegment segment) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _MessageText(
-          text: segment.text,
-          color: widget.color,
-          formatInlineEmphasis: widget.formatInlineEmphasis,
-        ),
-        if (segment.createdAt != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Text(
-              formatShortTime(context, segment.createdAt!.toIso8601String()),
-              style: TextStyle(
-                fontSize: 11,
-                color: widget.color.withValues(alpha: 0.6),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final List<MessageSegment> nonEmpty = widget.segments
-        .where((MessageSegment s) => s.text.trim().isNotEmpty)
-        .toList(growable: false);
-    if (nonEmpty.isEmpty) return const SizedBox.shrink();
-    if (nonEmpty.length == 1) return _segmentText(nonEmpty.first);
-
-    final List<MessageSegment> earlier =
-        nonEmpty.sublist(0, nonEmpty.length - 1);
-    final MessageSegment last = nonEmpty.last;
-    final Color toggleColor = widget.color.withValues(alpha: 0.7);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(
-                  _expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  size: 16,
-                  color: toggleColor,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  context.l10n.agentProgressUpdates(earlier.length),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: toggleColor,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_expanded) ...<Widget>[
-          const SizedBox(height: 6),
-          for (final MessageSegment segment in earlier) ...<Widget>[
-            _segmentText(segment),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Divider(
-                height: 1,
-                thickness: 1,
-                color: widget.color.withValues(alpha: 0.15),
-              ),
-            ),
-          ],
-        ] else
-          const SizedBox(height: 8),
-        _segmentText(last),
-      ],
-    );
-  }
-}
-
-class _MessageText extends StatefulWidget {
-  const _MessageText({
-    required this.text,
-    required this.color,
-    required this.formatInlineEmphasis,
-  });
-
-  final String text;
-  final Color color;
-  final bool formatInlineEmphasis;
-
-  @override
-  State<_MessageText> createState() => _MessageTextState();
-}
-
-class _MessageTextState extends State<_MessageText> {
-  // Parsing markdown is the costly part of a finished assistant bubble. The
-  // chat subtree rebuilds ~12x/sec during a streaming turn, so we cache the
-  // built widget and return the same instance unless something it depends on
-  // changed. Returning an identical Widget lets Flutter skip rebuilding the
-  // MarkdownBody (and re-parsing) entirely. We rebuild on prop changes
-  // (didUpdateWidget) and on theme changes (didChangeDependencies).
-  Widget? _cached;
-
-  @override
-  void didUpdateWidget(_MessageText oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.text != widget.text ||
-        oldWidget.color != widget.color ||
-        oldWidget.formatInlineEmphasis != widget.formatInlineEmphasis) {
-      _cached = null;
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Theme (and thus the markdown style sheet) may have changed.
-    _cached = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _cached ??= _buildContent(context);
-  }
-
-  Widget _buildContent(BuildContext context) {
-    final TextStyle style = TextStyle(
-      color: widget.color,
-      height: 1.45,
-      fontSize: 15,
-    );
-    if (!widget.formatInlineEmphasis) {
-      return SelectableText(widget.text, style: style);
-    }
-    return MarkdownBody(
-      data: _normalizeAgentMarkdown(widget.text),
-      selectable: true,
-      softLineBreak: true,
-      styleSheet: _markdownStyleSheet(context, widget.color, style),
-    );
-  }
-}
-
-MarkdownStyleSheet _markdownStyleSheet(
-  BuildContext context,
-  Color color,
-  TextStyle base,
-) {
-  final ColorScheme colors = Theme.of(context).colorScheme;
-  final Color codeBackground = colors.surface.withValues(alpha: 0.55);
-  final Color borderColor = color.withValues(alpha: 0.20);
-  return MarkdownStyleSheet(
-    p: base,
-    pPadding: EdgeInsets.zero,
-    strong: base.copyWith(fontWeight: FontWeight.w700),
-    em: base.copyWith(fontStyle: FontStyle.italic),
-    h1: base.copyWith(
-      fontSize: 21,
-      fontWeight: FontWeight.w800,
-      height: 1.25,
-    ),
-    h1Padding: const EdgeInsets.only(top: 4, bottom: 6),
-    h2: base.copyWith(
-      fontSize: 19,
-      fontWeight: FontWeight.w800,
-      height: 1.28,
-    ),
-    h2Padding: const EdgeInsets.only(top: 4, bottom: 5),
-    h3: base.copyWith(
-      fontSize: 17,
-      fontWeight: FontWeight.w700,
-      height: 1.30,
-    ),
-    h3Padding: const EdgeInsets.only(top: 3, bottom: 4),
-    h4: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
-    h4Padding: const EdgeInsets.only(top: 3, bottom: 3),
-    h5: base.copyWith(fontWeight: FontWeight.w700),
-    h5Padding: const EdgeInsets.only(top: 2, bottom: 2),
-    h6: base.copyWith(fontWeight: FontWeight.w700),
-    h6Padding: const EdgeInsets.only(top: 2, bottom: 2),
-    blockSpacing: 8,
-    listIndent: 22,
-    listBullet: base,
-    code: base.copyWith(fontStyle: FontStyle.italic),
-    codeblockPadding: const EdgeInsets.all(9),
-    codeblockDecoration: BoxDecoration(
-      color: codeBackground,
-      borderRadius: BorderRadius.circular(7),
-      border: Border.all(color: borderColor),
-    ),
-    blockquote: base.copyWith(color: color.withValues(alpha: 0.78)),
-    blockquotePadding: const EdgeInsets.only(left: 10),
-    blockquoteDecoration: BoxDecoration(
-      border: Border(
-        left: BorderSide(
-          color: color.withValues(alpha: 0.45),
-          width: 3,
-        ),
-      ),
-    ),
-    horizontalRuleDecoration: BoxDecoration(
-      border: Border(top: BorderSide(color: borderColor)),
-    ),
-  );
-}
-
-String _normalizeAgentMarkdown(String raw) {
-  final List<String> output = <String>[];
-  bool inFence = false;
-  String? fenceMarker;
-  for (final String line in raw.split('\n')) {
-    final String trimmed = line.trimLeft();
-    final String? marker = trimmed.startsWith('```')
-        ? '```'
-        : trimmed.startsWith('~~~')
-            ? '~~~'
-            : null;
-    if (marker != null) {
-      if (!inFence) {
-        inFence = true;
-        fenceMarker = marker;
-      } else if (fenceMarker == marker) {
-        inFence = false;
-        fenceMarker = null;
-      }
-      output.add(line);
-      continue;
-    }
-    output.add(inFence ? line : _normalizeMarkdownLine(line));
-  }
-  return output.join('\n');
-}
-
-String _normalizeMarkdownLine(String line) {
-  final RegExpMatch? heading =
-      RegExp(r'^( {0,3})(#{1,6})(?!#)\s*(.*?)\s*#*\s*$').firstMatch(line);
-  if (heading != null) {
-    final String content = (heading.group(3) ?? '').trim();
-    if (content.isNotEmpty) {
-      return '${heading.group(1)}${heading.group(2)} $content';
-    }
-  }
-
-  String value = line.replaceAllMapped(
-    RegExp(r'##([^#\n]+?)##'),
-    (Match match) => '*${match.group(1)}*',
-  );
-
-  final RegExpMatch? boldPrefix =
-      RegExp(r'^(\s*)\*\*\s*(\S.*)$').firstMatch(value);
-  if (boldPrefix == null) return value;
-  final String leadingWhitespace = boldPrefix.group(1) ?? '';
-  final int contentStart = leadingWhitespace.length + 2;
-  if (value.indexOf('**', contentStart) != -1) return value;
-  value = '$leadingWhitespace**${boldPrefix.group(2)}**';
-  return value;
-}
-
-class _ProgressLines extends StatelessWidget {
-  const _ProgressLines({
-    required this.lines,
-    required this.color,
-  });
-
-  final List<String> lines;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        for (final String line in lines)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.55),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    line,
-                    style: TextStyle(
-                      color: color.withValues(alpha: 0.72),
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _MessageStatus extends StatelessWidget {
-  const _MessageStatus({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(
-          icon,
-          size: 14,
-          color: color.withValues(alpha: 0.68),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          text,
-          style: TextStyle(
-            color: color.withValues(alpha: 0.72),
-            fontSize: 12,
-            height: 1.2,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TypingDots extends StatefulWidget {
-  const _TypingDots({required this.color});
-
-  final Color color;
-
-  @override
-  State<_TypingDots> createState() => _TypingDotsState();
-}
-
-class _TypingDotsState extends State<_TypingDots>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  double _opacity(double t, int i) {
-    final double offset = i * 0.18;
-    final double phase = (t - offset) % 1.0;
-    final double wrapped = phase < 0 ? phase + 1.0 : phase;
-    if (wrapped < 0.5) return 0.35 + 0.65 * (wrapped * 2);
-    return 0.35 + 0.65 * ((1.0 - wrapped) * 2);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 20,
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (BuildContext context, Widget? _) {
-          final double t = _ctrl.value;
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: List<Widget>.generate(3, (int i) {
-              return Padding(
-                padding: EdgeInsets.only(right: i < 2 ? 4 : 0),
-                child: Opacity(
-                  opacity: _opacity(t, i),
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: widget.color,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              );
-            }),
-          );
-        },
       ),
     );
   }

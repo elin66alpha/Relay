@@ -393,67 +393,96 @@ module.exports = function createGroupRouter(ctx) {
     });
 
     const base = agentTurnDependencies();
-    const turns = [];
-    try {
-      for (let i = 0; i < mentions.length; i += 1) {
-        if (runState.cancelled) break;
-        const memberKey = mentions[i];
+    // Snapshot the transcript once — after the human message, before any member
+    // reply. Every member summoned in THIS message is fed the same delta, so a
+    // batch of @mentions runs in parallel without any member seeing a sibling's
+    // in-flight reply. (A later message still sees the earlier replies, because it
+    // snapshots after they were recorded — cross-round stays collaborative.)
+    const snapshot = readHistory(scopeKey);
+    // Mark the group scope busy for the whole round. Members serialize on their
+    // own session keys (so they run concurrently), so this group scope key is what
+    // the delete/clear/history routes consult to tell the round is still running.
+    runningScopes.add(scopeKey);
+
+    // Freeze every summoned member's prompt up front, from the one snapshot, so a
+    // member's prompt can never absorb a sibling's reply even as those replies
+    // stream into the shared transcript once the turns start running.
+    const plans = mentions
+      .map((memberKey, index) => {
         const memberAgent = getAgent(memberKey);
-        if (!memberAgent) continue;
+        if (!memberAgent) return null;
         const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
         // Plan B: feed this member only what happened since it last spoke, each
         // line labeled with its speaker. Its own resumable session has the rest.
-        const delta = deltaSince(readHistory(scopeKey), memberKey);
+        const delta = deltaSince(snapshot, memberKey);
         const groupPrompt = buildGroupPrompt({
           selfLabel: memberAgent.label,
           delta,
           labelFor,
           maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
         });
-        const dependencies = {
-          ...base,
-          // Tag every shared-stream event with the group so only clients viewing
-          // this group react to it.
-          broadcastScope: (type, payload) =>
-            base.broadcastScope(type, { ...payload, groupId: group.id }),
-          // The swarm pins each member's model/effort/permission itself, so use
-          // its config instead of the member's solo-chat agent-settings store.
-          getSettings: (agentKey) =>
-            normalizeSettings(agentKey, group.memberConfigs[agentKey] || {}),
-          // History lives under the group scope, but the CLI must resume the
-          // member's own private group session — not the group scope key.
-          runAgent: (agentKey, p, onEvent, opts) =>
-            base.runAgent(agentKey, p, onEvent, { ...opts, sessionKey: memberSessionKey }),
-        };
-        // eslint-disable-next-line no-await-in-loop
-        const result = await runAgentTurn({
-          agent: memberAgent,
-          agentKey: memberKey,
-          contextKey: sessionContextKeyFor(memberKey, runWorkdir),
-          dependencies,
-          deviceId,
-          historyMetadata: {
-            author: memberKey,
-            summonedBy: HUMAN_AUTHOR,
-            groupId: group.id,
-            groupName: group.name,
-          },
-          notifyTaskCompletion,
-          prompt: groupPrompt,
-          recordHistory: true,
-          recordUserMessage: false,
-          requestId: `${requestId}.${i}.${memberKey}`,
-          responder,
-          runState,
-          scopeKey,
-          session: { id: group.id, name: group.name },
-          signal: abortController.signal,
-          workdir: runWorkdir,
-        });
-        turns.push({ agent: memberKey, status: result && result.status });
-        if (result && result.status === 'cancelled') break;
-      }
+        return { memberKey, memberAgent, memberSessionKey, groupPrompt, index };
+      })
+      .filter(Boolean);
+
+    // One summoned member's turn. The assistant placeholder is recorded
+    // synchronously (before the first await), so kicking these off in mention
+    // order keeps the transcript ordered even though replies arrive in parallel.
+    const runMember = async ({ memberKey, memberAgent, memberSessionKey, groupPrompt, index }) => {
+      const dependencies = {
+        ...base,
+        // Tag every shared-stream event with the group so only clients viewing
+        // this group react to it.
+        broadcastScope: (type, payload) =>
+          base.broadcastScope(type, { ...payload, groupId: group.id }),
+        // The swarm pins each member's model/effort/permission itself, so use
+        // its config instead of the member's solo-chat agent-settings store.
+        getSettings: (agentKey) =>
+          normalizeSettings(agentKey, group.memberConfigs[agentKey] || {}),
+        // History lives under the group scope, but the CLI must resume the
+        // member's own private group session — not the group scope key.
+        runAgent: (agentKey, p, onEvent, opts) =>
+          base.runAgent(agentKey, p, onEvent, { ...opts, sessionKey: memberSessionKey }),
+      };
+      const result = await runAgentTurn({
+        agent: memberAgent,
+        agentKey: memberKey,
+        contextKey: sessionContextKeyFor(memberKey, runWorkdir),
+        // Serialize each member only against its own group session — not the
+        // shared group scope — so members summoned together run in parallel while
+        // their replies still land in the one group transcript (scopeKey).
+        concurrencyKey: memberSessionKey,
+        dependencies,
+        deviceId,
+        historyMetadata: {
+          author: memberKey,
+          summonedBy: HUMAN_AUTHOR,
+          groupId: group.id,
+          groupName: group.name,
+        },
+        notifyTaskCompletion,
+        prompt: groupPrompt,
+        recordHistory: true,
+        recordUserMessage: false,
+        requestId: `${requestId}.${index}.${memberKey}`,
+        responder,
+        runState,
+        scopeKey,
+        session: { id: group.id, name: group.name },
+        signal: abortController.signal,
+        workdir: runWorkdir,
+      });
+      return { agent: memberKey, status: result && result.status };
+    };
+
+    let turns = [];
+    try {
+      const settled = runState.cancelled
+        ? []
+        : await Promise.all(plans.map((plan) => runMember(plan)));
+      turns = settled.filter(Boolean);
     } finally {
+      runningScopes.delete(scopeKey);
       activeRequests.delete(requestId);
     }
 

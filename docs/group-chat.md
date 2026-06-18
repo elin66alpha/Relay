@@ -19,8 +19,10 @@ These three choices are fixed for the first version:
    agent keeps its own resumable CLI session; between its turns the orchestrator
    injects only what happened in the group since it last spoke. The full group
    transcript is never re-sent on every turn.
-3. **Turns are serialized.** A group has one floor; exactly one agent speaks at a
-   time, through a turn queue. No parallel speakers.
+3. **A mentioned batch fans out in parallel.** One human message can mention
+   several members. Those members receive the same transcript snapshot and run
+   concurrently, while each member's own group session is still serialized
+   against itself so its private CLI memory remains coherent.
 
 ## Core Model: Group Chat Is Orchestrated, Not Shared Memory
 
@@ -76,27 +78,31 @@ Persist group state with `server/lib/json-store.js` (in-memory cache + atomic
 A single round, from a human message to the group becoming idle again:
 
 1. **Human posts a message.** If it `@mentions` one or more agents, those agents
-   are enqueued in mention order. A message with no mention does not start any
-   agent turn (it is recorded and waits for the human to summon someone).
-2. **Floor acquisition.** The orchestrator serializes group turns through the
-   existing per-scope tail-promise mechanism (`scopeChains` in `server.js`), so a
-   group behaves like a single serialized stream: one speaker at a time.
-3. **Context assembly (plan B).** For the agent taking the floor, build a prompt
-   containing only the **delta** since that agent last spoke — the new group
-   messages, each clearly labeled with its speaker (human or other agent's name)
-   and a marker that it is now this agent's turn. The agent's own resumable
-   session supplies everything it already knew.
-4. **Run + stream.** Spawn through the normal `runAgent(..., { workdir, settings
-   })` path; stream `segment` events over SSE. Group SSE events carry the
-   `groupId` (in addition to `scopeWorkdir`) so only clients viewing that group
-   receive them.
-5. **Append + attribute.** The reply is written to the group transcript with
-   `author = agentKey` and `summonedBy = human`.
-6. **Next in queue.** If more agents were mentioned, the next one takes the
-   floor. When the queue drains, the group returns to **idle / waiting for
-   human**. This idle state is the termination condition.
+   are selected for the round. A message with no mention does not start any agent
+   turn (it is recorded and waits for the human to summon someone).
+2. **Snapshot.** The orchestrator snapshots the transcript once, immediately
+   after the human message is recorded and before any member replies. Every
+   member summoned in this round builds its prompt from that same snapshot.
+3. **Context assembly (plan B).** For each summoned member, build a prompt
+   containing only the **delta** since that member last spoke — the new group
+   messages from the snapshot, each clearly labeled with its speaker (human or
+   another agent's name) and a marker that it is now this member's turn. The
+   member's own resumable session supplies everything it already knew.
+4. **Run + stream.** Spawn each summoned member through the normal
+   `runAgent(..., { workdir, settings })` path; stream `segment` events over SSE.
+   Group SSE events carry the `groupId` (in addition to `scopeWorkdir`) so only
+   clients viewing that group receive them. The group scope is marked busy for
+   the whole round, but each member queues on its own member-session key, so
+   different members in the same round can run concurrently.
+5. **Append + attribute.** Each reply is written to the group transcript with
+   `author = agentKey` and `summonedBy = human`. Placeholders are inserted in
+   mention order before the first await, which keeps transcript ordering stable
+   even when replies finish in parallel.
+6. **Round completion.** When all member turns settle, the group returns to
+   **idle / waiting for human**. This idle state is the termination condition.
 
-The human can post again at any time; new mentions append to the queue.
+After the round returns to idle, the human can post another message and summon
+the next batch.
 
 ## Speaker Labeling In Prompts
 
@@ -123,7 +129,8 @@ conversation.
 
 ## Reused Machinery
 
-- **Serialization**: `scopeChains` tail promises in `server.js`.
+- **Per-member serialization**: `scopeChains` tail promises in `server.js`, keyed
+  by each member's group session for concurrent swarm rounds.
 - **Streaming + per-message rendering**: SSE `segment` events.
 - **Per-member options**: `server/lib/agent-options.js` `buildArgs`.
 - **Agent execution**: `server/lib/agents.js` `runAgent` and per-agent runners,
@@ -137,21 +144,21 @@ conversation.
   small by injecting only the delta; a very large delta (an agent that has been
   silent for a long time) must still be bounded or summarized before it hits the
   cap.
-- **Cost.** One human message can fan out into several agent turns, multiplying
-  token usage and time across multiple accounts. Surface the expected cost and
-  apply a per-round turn budget; the existing quota watch already tracks usage.
+- **Cost and parallel load.** One human message can fan out into several
+  concurrent agent turns, multiplying token usage and backend load across
+  multiple accounts. Surface the expected cost and apply a per-round turn budget;
+  the existing quota watch already tracks usage.
 - **Divergent memory.** Each agent only knows what it was told via injected
   deltas, so members' private memories diverge by design. Labeling and consistent
   delta injection are what keep the shared conversation coherent.
-- **Termination.** The group is done when the turn queue is empty; there is no
-  agent-initiated continuation in the manual-summon version, which keeps the stop
-  condition simple.
+- **Termination.** The group is done when all member promises in the current
+  round settle; there is no agent-initiated continuation in the manual-summon
+  version, which keeps the stop condition simple.
 
 ## Out Of Scope (First Version)
 
 - Agent-initiated summon chains (`@agent` emitted by an agent) and the loop /
   depth / budget guards they require.
-- Parallel speakers.
 - Facilitator / round-robin auto turn-taking.
 
 ## Backend Implementation (v1)
@@ -165,21 +172,25 @@ turn pipeline unchanged:
   capped (`MAX_MEMBERS`) and so is the number of groups per workspace.
   `memberConfigs` are structurally sanitized here (the route normalizes the ids),
   so the module stays agent-agnostic.
-- `server/lib/group-turn.js` — pure helpers: `parseMentions` (`@key`, `@label`,
-  `@all`), `deltaSince` (plan B), and `buildGroupPrompt` (speaker-labeled, byte
-  bounded). No I/O, so the labeling is unit-tested directly.
+- `server/lib/group-turn.js` — pure helpers: `parseMentions` (`@key`, `@label`),
+  `deltaSince` (plan B), and `buildGroupPrompt` (speaker-labeled, byte bounded).
+  No I/O, so the labeling is unit-tested directly.
 - `server/routes/group.js` — endpoints + the round orchestrator. On create it
   validates the chosen work tree (`validateWorkdir`) and normalizes each member's
-  config (`normalizeSettings`). It records the human message once, then runs each
-  summoned member through `runAgentTurn` serialized on the group scope key
-  (`${workdir}\0group:${groupId}`, keyed on the swarm's work tree). Three
+  config (`normalizeSettings`). It records the human message once, snapshots the
+  transcript, freezes one prompt plan per summoned member from that snapshot, and
+  runs those member turns with `Promise.all`. The shared group scope key
+  (`${workdir}\0group:${groupId}`, keyed on the swarm's work tree) is marked busy
+  for the round so clear/delete/history routes can see active work, while each
+  member turn passes `concurrencyKey = ${workdir}\0${agentKey}\0${groupId}` to
+  `runAgentTurn`. That keeps each member's private CLI session serialized against
+  itself without forcing different summoned members to wait on each other. Three
   dependency overrides do all the group-specific work: `runAgent` resumes the
-  member's own group session (`${workdir}\0${agentKey}\0${groupId}`) so private
-  memory is preserved while history lands on the group transcript, `getSettings`
-  returns the swarm's `memberConfigs[agent]` instead of the solo-chat store, and
-  `broadcastScope` tags every event with `groupId`. `recordUserMessage: false`
-  (a new `runAgentTurn` option) keeps the per-member delta prompt out of the
-  transcript.
+  member's own group session so private memory is preserved while history lands
+  on the group transcript, `getSettings` returns the swarm's
+  `memberConfigs[agent]` instead of the solo-chat store, and `broadcastScope`
+  tags every event with `groupId`. `recordUserMessage: false` keeps the
+  per-member delta prompt out of the transcript.
 
 **Endpoints** (all under `requireAuth`, workdir from `X-Workdir`):
 
@@ -233,10 +244,11 @@ changes (it watches `BotChatController.activeWorkdir`).
   replace the live ones.
 - `lib/features/chat/group_chat_screen.dart` — transcript with per-speaker
   attribution, a group switcher, create/manage-members/clear/delete actions, and
-  a composer with one-tap `@member` / `@all` mention chips. The create form
-  (`_SwarmFormDialog`) lets the user pick the work tree (a directory browser over
-  `/api/workdir/browse`) and, per selected member, its model / effort / permission
-  (catalogs fetched lazily via `fetchAgentOptions`).
+  a composer with one-tap `@member` mention chips. Tapping a chip inserts the
+  mention and returns focus to the composer so the user can keep typing. The
+  create form (`_SwarmFormDialog`) lets the user pick the work tree (a directory
+  browser over `/api/workdir/browse`) and, per selected member, its model / effort
+  / permission (catalogs fetched lazily via `fetchAgentOptions`).
 
 The backend client gained `fetchGroups` / `createGroup` / `setGroupMembers` /
 `deleteGroup` / `fetchGroupHistory` / `sendGroupMessage` / `cancelGroupMessage` /

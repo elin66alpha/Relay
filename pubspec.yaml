@@ -2,7 +2,7 @@ name: relay
 description: "A dedicated Flutter chat client for local Claude Code, Codex, and Antigravity CLI agents."
 publish_to: "none"
 
-version: 0.1.0+1
+version: 0.11.0+11
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
