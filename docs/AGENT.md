@@ -59,7 +59,7 @@ git; finished work should be summarized here briefly, not narrated.
   itself. Each swarm pins its own work tree and per-member
   model/effort/permission, is listed per workspace (several per workspace, on
   different work trees), and appears as always-visible sub-entries in the left
-  drawer. See `docs/group-chat.md`.
+  drawer. See `docs/handbook.md`.
 
 ## Operating Principles
 
@@ -223,7 +223,7 @@ not generated any token yet, protected API routes return
   shell so `--update-env` injects them, then `pm2 save`.
 - **Windows builds** have two toolchain quirks (non-ASCII project path breaks
   Flutter/MSBuild; VS 2026 MSVC rejects `flutter_local_notifications_windows`).
-  See "Windows build gotchas" in `DESKTOP.md` for the workarounds.
+  See "Windows build gotchas" in `docs/handbook.md` for the workarounds.
 - **Experimental agent binary detection** scans PATH first, then per-user
   fallback dirs (`~/.opencode/bin/opencode`, `~/.local/bin/hermes`). Results
   are cached for 60s. The `listAgents()` filter skips agents whose binary
