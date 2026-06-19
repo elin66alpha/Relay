@@ -16,8 +16,10 @@ import '../storage/machine_credentials_store.dart';
 import '../storage/workdir_store.dart';
 import '../util/format_bytes.dart';
 import 'api_transport.dart';
+import 'sse_codec.dart';
 
 export 'api_transport.dart' show BackendException;
+export 'sse_codec.dart' show BackendEvent;
 
 List<ChatMessage> _decodeHistoryMessages(String body) {
   late final Object? decoded;
@@ -488,6 +490,7 @@ class UsageQuota {
     required this.label,
     required this.remainingPercent,
     required this.resetsAt,
+    this.expired = false,
   });
 
   factory UsageQuota.fromJson(Map<String, Object?> json) {
@@ -496,6 +499,7 @@ class UsageQuota {
       label: json['label'] as String? ?? '',
       remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
       resetsAt: json['resetsAt'] as String?,
+      expired: json['expired'] as bool? ?? false,
     );
   }
 
@@ -503,6 +507,11 @@ class UsageQuota {
   final String label;
   final double? remainingPercent;
   final String? resetsAt;
+
+  /// True when this is a stale cached bucket whose reset window has already
+  /// passed, so [remainingPercent] no longer reflects reality and the UI should
+  /// show a "window reset, awaiting refresh" hint instead of the old number.
+  final bool expired;
 }
 
 class UsageAgent {
@@ -627,13 +636,6 @@ class QuotaSchedule {
   final String? error;
 
   bool get canCancel => status == 'pending';
-}
-
-class BackendEvent {
-  const BackendEvent({required this.type, required this.data});
-
-  final String type;
-  final Map<String, Object?> data;
 }
 
 class GroupHistory {
@@ -937,7 +939,7 @@ class BackendClient {
     ChatReply? reply;
     BackendException? streamError;
     try {
-      await for (final BackendEvent event in _parseSse(
+      await for (final BackendEvent event in decodeSse(
         response.stream,
       ).timeout(const Duration(minutes: 65))) {
         if (event.type == 'ready' || event.type == 'heartbeat') continue;
@@ -1618,29 +1620,7 @@ class BackendClient {
       throw _exceptionFor(response.statusCode, text);
     }
 
-    yield* _parseSse(response.stream.timeout(const Duration(seconds: 90)));
-  }
-
-  Stream<BackendEvent> _parseSse(Stream<List<int>> stream) async* {
-    String eventType = 'message';
-    final StringBuffer data = StringBuffer();
-    await for (final String line
-        in stream.transform(utf8.decoder).transform(const LineSplitter())) {
-      if (line.isEmpty) {
-        if (data.isNotEmpty) {
-          yield BackendEvent(type: eventType, data: _decodeEventData(data));
-        }
-        eventType = 'message';
-        data.clear();
-        continue;
-      }
-      if (line.startsWith('event:')) {
-        eventType = line.substring(6).trim();
-      } else if (line.startsWith('data:')) {
-        if (data.isNotEmpty) data.writeln();
-        data.write(line.substring(5).trimLeft());
-      }
-    }
+    yield* decodeSse(response.stream.timeout(const Duration(seconds: 90)));
   }
 
   ChatReply _chatReplyFromStreamDone(
@@ -1726,13 +1706,4 @@ class BackendClient {
   BackendException _networkExceptionFor(Object err, Uri uri) =>
       _transport.networkExceptionFor(err, uri);
 
-  Map<String, Object?> _decodeEventData(StringBuffer data) {
-    try {
-      final Object? decoded = jsonDecode(data.toString());
-      if (decoded is Map) return decoded.cast<String, Object?>();
-    } on FormatException {
-      // Fall through.
-    }
-    return <String, Object?>{'text': data.toString()};
-  }
 }

@@ -48,7 +48,7 @@
   同时每个成员自己的蜂群 session 仍按自身队列串行。每个蜂群固定自己的工作目录
   （work tree）和各成员的模型/思考深度/权限，按工作区列出（同一工作区可有多个
   蜂群，各自选定 work tree），并作为常显子项出现在左侧抽屉。详见
-  `docs/group-chat.md`。
+  `docs/handbook.md`。
 - Antigravity 模型选择：`agy` 通过 `--model` 暴露模型目录，蜂群与单聊均可固定到
   具体的 Gemini / Claude / GPT-OSS 模型。
 - 多段消息：每条 assistant 回复独立时间戳，前端可折叠展示；后端发送 `segment`
