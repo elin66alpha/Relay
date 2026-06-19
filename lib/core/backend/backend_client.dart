@@ -490,6 +490,7 @@ class UsageQuota {
     required this.label,
     required this.remainingPercent,
     required this.resetsAt,
+    this.expired = false,
   });
 
   factory UsageQuota.fromJson(Map<String, Object?> json) {
@@ -498,6 +499,7 @@ class UsageQuota {
       label: json['label'] as String? ?? '',
       remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
       resetsAt: json['resetsAt'] as String?,
+      expired: json['expired'] as bool? ?? false,
     );
   }
 
@@ -505,6 +507,11 @@ class UsageQuota {
   final String label;
   final double? remainingPercent;
   final String? resetsAt;
+
+  /// True when this is a stale cached bucket whose reset window has already
+  /// passed, so [remainingPercent] no longer reflects reality and the UI should
+  /// show a "window reset, awaiting refresh" hint instead of the old number.
+  final bool expired;
 }
 
 class UsageAgent {

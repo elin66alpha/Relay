@@ -90,6 +90,8 @@ class AppStrings {
   String get refreshAt => isZh ? '刷新' : 'Refresh';
   String usageAsOf(String value) => isZh ? '截至 $value' : 'As of $value';
   String get usageStale => isZh ? '上次成功结果' : 'Stale';
+  String get quotaWindowReset =>
+      isZh ? '配额窗口已重置，等待最新数据' : 'Window reset — awaiting fresh data';
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
