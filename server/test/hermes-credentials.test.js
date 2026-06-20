@@ -34,6 +34,14 @@ test('updateModelProviderYaml inserts or replaces model.provider', () => {
     updateModelProviderYaml('model:\n  provider: anthropic\nfoo: true', 'openrouter'),
     'model:\n  provider: openrouter\nfoo: true',
   );
+  assert.equal(
+    updateModelProviderYaml('model: anthropic/claude-sonnet-4\nfoo: true', 'openrouter'),
+    'model:\n  default: anthropic/claude-sonnet-4\n  provider: openrouter\nfoo: true',
+  );
+  assert.equal(
+    updateModelProviderYaml('model: old-model\nfoo: true', 'openrouter').match(/^model:/gm)?.length,
+    1,
+  );
 });
 
 test('writeHermesApiKey writes credential pool and model provider atomically', () => {

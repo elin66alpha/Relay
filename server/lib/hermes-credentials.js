@@ -51,15 +51,23 @@ function validateProvider(provider) {
 function updateModelProviderYaml(text, provider) {
   const lines = String(text || '').split(/\r?\n/);
   let modelIndex = -1;
+  let modelValue = '';
   for (let i = 0; i < lines.length; i += 1) {
-    if (/^model:\s*$/.test(lines[i])) {
+    const match = /^model\s*:\s*(.*)$/.exec(lines[i]);
+    if (match) {
       modelIndex = i;
+      modelValue = match[1].trim();
       break;
     }
   }
   if (modelIndex === -1) {
     const prefix = lines.length && lines[lines.length - 1] !== '' ? [''] : [];
     return [...lines, ...prefix, 'model:', `  provider: ${provider}`].join('\n');
+  }
+  if (modelValue) {
+    lines[modelIndex] = 'model:';
+    lines.splice(modelIndex + 1, 0, `  default: ${modelValue}`, `  provider: ${provider}`);
+    return lines.join('\n');
   }
   let insertAt = modelIndex + 1;
   for (let i = modelIndex + 1; i < lines.length; i += 1) {
