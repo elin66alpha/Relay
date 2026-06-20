@@ -21,6 +21,7 @@ import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
+import '../machines/machine_credentials_screen.dart';
 import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
@@ -914,6 +915,18 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
     );
   }
 
+  void _openCredentials() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => MachineCredentialsScreen(
+          machinesController: widget.machinesController,
+          agentsController: widget.agentsController,
+          backendClient: widget.chatController.backend,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
@@ -969,6 +982,16 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
                       activeMachine: machine,
                       chatController: widget.chatController,
                     ),
+                  const SizedBox(height: 12),
+                  _HomeSectionCard(
+                    child: ListTile(
+                      leading: const Icon(Icons.vpn_key_outlined),
+                      title: Text(strings.manageCredentials),
+                      subtitle: Text(strings.manageCredentialsHomeHint),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _openCredentials,
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   _HomeSectionCard(
                     child: ListTile(

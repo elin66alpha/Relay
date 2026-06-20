@@ -35,6 +35,9 @@ class AppStrings {
   String get gettingStarted => isZh ? '开始使用' : 'Getting started';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
+  String get manageCredentialsHomeHint => isZh
+      ? '登录 CLI 智能体或配置 Hermes API key'
+      : 'Log in CLI agents or configure a Hermes API key';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
   String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
@@ -109,9 +112,10 @@ class AppStrings {
   String diagnosticsWorkdirLine({
     required bool exists,
     required bool writable,
-  }) => isZh
-      ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
-      : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
+  }) =>
+      isZh
+          ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
+          : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
   String diagnosticsDefaultWorkdirLine(String value) =>
       isZh ? '默认工作目录：$value' : 'Default workdir: $value';
   String diagnosticsTransferLimitLine(String upload, String download) => isZh
@@ -121,17 +125,19 @@ class AppStrings {
     required bool configured,
     required int active,
     required int total,
-  }) => isZh
-      ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
-      : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
+  }) =>
+      isZh
+          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
+          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
   String diagnosticsRequestLine({
     required int active,
     required int running,
     required int queued,
     required int sse,
-  }) => isZh
-      ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
-      : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
+  }) =>
+      isZh
+          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
+          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
   String diagnosticsWebBuildLine(bool exists) => isZh
       ? 'Web 构建：${exists ? '存在' : '缺失'}'
       : 'Web build: ${exists ? 'present' : 'missing'}';
@@ -145,11 +151,10 @@ class AppStrings {
     final String login = loggedIn == null
         ? (isZh ? '登录未知' : 'login unknown')
         : (loggedIn
-              ? (isZh ? '已登录' : 'logged in')
-              : (isZh ? '未登录' : 'not logged in'));
-    final String cli = available
-        ? (isZh ? '可执行' : 'available')
-        : (isZh ? '未找到' : 'not found');
+            ? (isZh ? '已登录' : 'logged in')
+            : (isZh ? '未登录' : 'not logged in'));
+    final String cli =
+        available ? (isZh ? '可执行' : 'available') : (isZh ? '未找到' : 'not found');
     final String suffix = path.isEmpty ? '' : ' ($path)';
     return '- $label: $cli, $login$suffix';
   }
@@ -160,9 +165,10 @@ class AppStrings {
     required bool exists,
     required bool writable,
     required String size,
-  }) => isZh
-      ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
-      : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
+  }) =>
+      isZh
+          ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
+          : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
   String get deviceTokens => isZh ? '设备 Token' : 'Device tokens';
   String get noDeviceTokens => isZh ? '没有设备 Token。' : 'No device tokens.';
   String get currentDeviceToken => isZh ? '当前设备' : 'Current device';
@@ -274,6 +280,45 @@ class AppStrings {
   }
 
   String get recheck => isZh ? '重新检查' : 'Recheck';
+  String get login => isZh ? '登录' : 'Log in';
+  String get loginAgain => isZh ? '重新登录' : 'Log in again';
+  String get configureApiKey => isZh ? '配置 API key' : 'Configure API key';
+  String get updateApiKey => isZh ? '更新 API key' : 'Update API key';
+  String get optionalApiKey => isZh ? 'API key 可选' : 'API key optional';
+  String get agentReady => isZh ? '已就绪' : 'Ready';
+  String get copy => isZh ? '复制' : 'Copy';
+  String get copied => isZh ? '已复制。' : 'Copied.';
+  String agentLoginTitle(String agent) =>
+      isZh ? '登录 $agent' : 'Log in to $agent';
+  String get agentLoginStarting =>
+      isZh ? '正在启动 CLI 登录...' : 'Starting CLI login...';
+  String get agentLoginWaitingForUrl => isZh
+      ? '等待 CLI 输出授权链接。'
+      : 'Waiting for the CLI to print an authorization URL.';
+  String get agentLoginOpenUrl => isZh
+      ? '在浏览器中打开此链接，完成授权后把代码粘贴回来。'
+      : 'Open this link in a browser, authorize, then paste the code here.';
+  String get agentLoginCode => isZh ? '授权代码' : 'Authorization code';
+  String get agentLoginCodeHint =>
+      isZh ? '粘贴 CLI 要求的代码' : 'Paste the code requested by the CLI';
+  String get agentLoginSubmit => isZh ? '提交代码' : 'Submit code';
+  String get agentLoginSubmitting => isZh ? '正在提交代码...' : 'Submitting code...';
+  String get agentLoginDone =>
+      isZh ? '登录完成。状态会在刷新后更新。' : 'Login complete. Status will refresh.';
+  String get agentLoginOutput => isZh ? 'CLI 输出' : 'CLI output';
+  String agentLoginFailed(Object err) =>
+      isZh ? '登录失败：$err' : 'Login failed: $err';
+  String get apiProvider => isZh ? '供应商' : 'Provider';
+  String get apiKey => isZh ? 'API key' : 'API key';
+  String apiKeyTitle(String agent) =>
+      isZh ? '配置 $agent API key' : 'Configure $agent API key';
+  String get apiKeyHint =>
+      isZh ? '此值只会写入后端主机。' : 'This value is written only on the backend host.';
+  String get saveApiKey => isZh ? '保存 API key' : 'Save API key';
+  String apiKeySaved(String agent) =>
+      isZh ? '已保存 $agent API key。' : 'Saved $agent API key.';
+  String agentStatusRefreshFailed(Object err) =>
+      isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
   String get scanQr => isZh ? '扫描二维码' : 'Scan QR code';
   String get pasteCredential => isZh ? '粘贴凭证' : 'Paste credential';

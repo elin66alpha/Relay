@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/backend/backend_client.dart';
@@ -15,18 +16,21 @@ import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import 'agent_login_flow_controller.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
   const MachineCredentialsScreen({
     required this.machinesController,
     this.agentsController,
+    this.backendClient,
     this.requireCredential = false,
     super.key,
   });
 
   final MachineCredentialsController machinesController;
   final CliAgentsController? agentsController;
+  final BackendClient? backendClient;
   final bool requireCredential;
 
   @override
@@ -37,6 +41,23 @@ class MachineCredentialsScreen extends StatefulWidget {
 class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   bool _isImporting = false;
   bool _isTesting = false;
+  late final BackendClient _backendClient;
+  late final bool _ownsBackendClient;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsBackendClient = widget.backendClient == null;
+    _backendClient = widget.backendClient ?? BackendClient();
+  }
+
+  @override
+  void dispose() {
+    if (_ownsBackendClient) {
+      unawaited(_backendClient.close());
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,8 +71,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
         // Camera QR scanning only exists on mobile. Desktop (and web) have no
         // mobile_scanner implementation, so they import via image upload or
         // paste instead.
-        final bool showCameraScan =
-            !kIsWeb &&
+        final bool showCameraScan = !kIsWeb &&
             (defaultTargetPlatform == TargetPlatform.android ||
                 defaultTargetPlatform == TargetPlatform.iOS);
         return Scaffold(
@@ -114,6 +134,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 const SizedBox(height: 18),
                                 _AgentCredentialStatusSection(
                                   agentsController: widget.agentsController!,
+                                  onLogin: _startAgentLogin,
+                                  onApiKey: _configureAgentApiKey,
+                                  onRefresh: _refreshAgents,
                                 ),
                               ],
                             ],
@@ -171,16 +194,15 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (bytes == null || bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
-      final String raw =
-          await compute<Uint8List, String>(
-            decodeCredentialQrImage,
-            bytes,
-          ).timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw MachineCredentialException(
-              context.l10n.credentialQrDecodeTimedOut,
-            ),
-          );
+      final String raw = await compute<Uint8List, String>(
+        decodeCredentialQrImage,
+        bytes,
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw MachineCredentialException(
+          context.l10n.credentialQrDecodeTimedOut,
+        ),
+      );
       if (raw.trim().isEmpty) {
         throw MachineCredentialException(context.l10n.invalidQr);
       }
@@ -282,8 +304,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     return switch (err.code) {
       'NETWORK_HOST_LOOKUP' => context.l10n.credentialHostLookupFailed(host),
       'NETWORK_CONNECTION_REFUSED' => context.l10n.credentialConnectionRefused(
-        host,
-      ),
+          host,
+        ),
       'NETWORK_UNREACHABLE' => context.l10n.credentialNetworkUnreachable(host),
       'NETWORK_TIMEOUT' => context.l10n.credentialConnectionTimedOut(host),
       _ => context.l10n.credentialConnectionFailed(host, err.message),
@@ -384,6 +406,52 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     }
   }
 
+  Future<void> _refreshAgents() async {
+    final CliAgentsController? controller = widget.agentsController;
+    if (controller == null) return;
+    try {
+      final List<CliAgent> agents = await _backendClient.fetchAgents();
+      if (!mounted) return;
+      controller.syncAgents(agents);
+    } catch (err) {
+      _showMessage(context.l10n.agentStatusRefreshFailed(err), error: true);
+    }
+  }
+
+  Future<void> _startAgentLogin(CliAgent agent) async {
+    final bool? changed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => _AgentLoginDialog(
+        agent: agent,
+        backendClient: _backendClient,
+      ),
+    );
+    if (changed == true) {
+      await _refreshAgents();
+    }
+  }
+
+  Future<void> _configureAgentApiKey(CliAgent agent) async {
+    if (agent.key != 'hermes') return;
+    final bool? changed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => _ApiKeyDialog(
+        agent: agent,
+        onSave: (String provider, String apiKey) {
+          return _backendClient.saveAgentApiKey(
+            agent: agent.key,
+            provider: provider,
+            apiKey: apiKey,
+          );
+        },
+      ),
+    );
+    if (changed == true) {
+      _showMessage(context.l10n.apiKeySaved(agent.label));
+      await _refreshAgents();
+    }
+  }
+
   Future<void> _confirmDelete(MachineCredential credential) async {
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -425,8 +493,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     final String message = err is MachineCredentialException
         ? err.message
         : err is BackendException
-        ? err.message
-        : err.toString();
+            ? err.message
+            : err.toString();
     await showDialog<void>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -444,9 +512,17 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
 }
 
 class _AgentCredentialStatusSection extends StatelessWidget {
-  const _AgentCredentialStatusSection({required this.agentsController});
+  const _AgentCredentialStatusSection({
+    required this.agentsController,
+    required this.onLogin,
+    required this.onApiKey,
+    required this.onRefresh,
+  });
 
   final CliAgentsController agentsController;
+  final ValueChanged<CliAgent> onLogin;
+  final ValueChanged<CliAgent> onApiKey;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -459,13 +535,24 @@ class _AgentCredentialStatusSection extends StatelessWidget {
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-              child: Text(
-                context.l10n.cliAgents,
-                style: TextStyle(
-                  color: theme.colorScheme.outline,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      context.l10n.cliAgents,
+                      style: TextStyle(
+                        color: theme.colorScheme.outline,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: context.l10n.recheck,
+                    onPressed: () => unawaited(onRefresh()),
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
               ),
             ),
             Card(
@@ -477,14 +564,14 @@ class _AgentCredentialStatusSection extends StatelessWidget {
               ),
               child: Column(
                 children: <Widget>[
-                  for (
-                    int index = 0;
-                    index < agentsController.agents.length;
-                    index += 1
-                  )
+                  for (int index = 0;
+                      index < agentsController.agents.length;
+                      index += 1)
                     _AgentCredentialStatusTile(
                       agent: agentsController.agents[index],
                       showDivider: index > 0,
+                      onLogin: onLogin,
+                      onApiKey: onApiKey,
                     ),
                 ],
               ),
@@ -500,29 +587,414 @@ class _AgentCredentialStatusTile extends StatelessWidget {
   const _AgentCredentialStatusTile({
     required this.agent,
     required this.showDivider,
+    required this.onLogin,
+    required this.onApiKey,
   });
 
   final CliAgent agent;
   final bool showDivider;
+  final ValueChanged<CliAgent> onLogin;
+  final ValueChanged<CliAgent> onApiKey;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final AppStrings strings = context.l10n;
     final bool usable = isCliAgentSelectable(agent);
     final Color? textColor = usable ? null : theme.colorScheme.onSurfaceVariant;
+    final String? subtitle = usable
+        ? _readySubtitle(strings, agent)
+        : agentUnavailableMessage(strings, agent);
     return Column(
       children: <Widget>[
         if (showDivider) const Divider(height: 1),
         ListTile(
           dense: true,
           title: Text(agent.label, style: TextStyle(color: textColor)),
-          subtitle: usable
+          subtitle: subtitle == null
               ? null
               : Text(
-                  agentUnavailableMessage(context.l10n, agent),
+                  subtitle,
                   style: TextStyle(color: theme.colorScheme.outline),
                 ),
-          trailing: AgentStatusLights(agent: agent),
+          trailing: Wrap(
+            spacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              AgentStatusLights(agent: agent),
+              _AgentCredentialAction(
+                agent: agent,
+                onLogin: onLogin,
+                onApiKey: onApiKey,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String? _readySubtitle(AppStrings strings, CliAgent agent) {
+    if (agent.key == 'opencode') return strings.optionalApiKey;
+    if (agent.authKind == 'apiKey') return strings.agentReady;
+    if (agent.authKind == 'oauth') return strings.agentReady;
+    return null;
+  }
+}
+
+class _AgentCredentialAction extends StatelessWidget {
+  const _AgentCredentialAction({
+    required this.agent,
+    required this.onLogin,
+    required this.onApiKey,
+  });
+
+  final CliAgent agent;
+  final ValueChanged<CliAgent> onLogin;
+  final ValueChanged<CliAgent> onApiKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    if (!agent.installed) {
+      return OutlinedButton(
+        onPressed: null,
+        child: Text(strings.unavailable),
+      );
+    }
+    if (agent.authKind == 'oauth') {
+      return FilledButton(
+        onPressed: () => onLogin(agent),
+        child: Text(agent.authed ? strings.loginAgain : strings.login),
+      );
+    }
+    if (agent.key == 'hermes') {
+      return FilledButton(
+        onPressed: () => onApiKey(agent),
+        child:
+            Text(agent.authed ? strings.updateApiKey : strings.configureApiKey),
+      );
+    }
+    if (agent.key == 'opencode') {
+      return OutlinedButton(
+        onPressed: null,
+        child: Text(strings.optionalApiKey),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+class _AgentLoginDialog extends StatefulWidget {
+  const _AgentLoginDialog({
+    required this.agent,
+    required this.backendClient,
+  });
+
+  final CliAgent agent;
+  final BackendClient backendClient;
+
+  @override
+  State<_AgentLoginDialog> createState() => _AgentLoginDialogState();
+}
+
+class _AgentLoginDialogState extends State<_AgentLoginDialog> {
+  late final AgentLoginFlowController _flow;
+  final TextEditingController _code = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _flow = AgentLoginFlowController(
+      startLogin: widget.backendClient.streamAgentLogin,
+      submitCode: (String sessionId, String code) {
+        return widget.backendClient.submitAgentLoginCode(
+          sessionId: sessionId,
+          code: code,
+        );
+      },
+    )..addListener(_onFlowChanged);
+    _code.addListener(_onFlowChanged);
+    unawaited(_flow.start(widget.agent.key));
+  }
+
+  @override
+  void dispose() {
+    _flow.removeListener(_onFlowChanged);
+    _flow.dispose();
+    _code.removeListener(_onFlowChanged);
+    _code.dispose();
+    super.dispose();
+  }
+
+  void _onFlowChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _submit() async {
+    final String code = _code.text.trim();
+    if (code.isEmpty) return;
+    await _flow.submitCode(code);
+  }
+
+  void _close() {
+    Navigator.of(context).pop(_flow.phase == AgentLoginPhase.done);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ThemeData theme = Theme.of(context);
+    final bool submitting = _flow.phase == AgentLoginPhase.submitting;
+    final bool done = _flow.phase == AgentLoginPhase.done;
+    final bool hasCode = _code.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(strings.agentLoginTitle(widget.agent.label)),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (_flow.phase == AgentLoginPhase.starting ||
+                  _flow.phase == AgentLoginPhase.waitingForUrl ||
+                  submitting) ...<Widget>[
+                const LinearProgressIndicator(minHeight: 2),
+                const SizedBox(height: 12),
+              ],
+              Text(_statusText(strings)),
+              if (_flow.url != null && _flow.url!.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(strings.agentLoginOpenUrl),
+                const SizedBox(height: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: SelectableText(
+                      _flow.url!,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: _flow.url!));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(strings.copied)),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded),
+                    label: Text(strings.copy),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: _code,
+                enabled: !done && _flow.phase != AgentLoginPhase.error,
+                decoration: InputDecoration(
+                  labelText: strings.agentLoginCode,
+                  hintText: strings.agentLoginCodeHint,
+                ),
+                onSubmitted: (_) => unawaited(_submit()),
+              ),
+              if (_flow.output.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  strings.agentLoginOutput,
+                  style: theme.textTheme.labelMedium,
+                ),
+                const SizedBox(height: 6),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: SelectableText(
+                      _flow.output,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+              ],
+              if (_flow.phase == AgentLoginPhase.error) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  strings.agentLoginFailed(_flow.error ?? strings.unknown),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _close,
+          child: Text(done ? strings.close : strings.cancel),
+        ),
+        if (!done)
+          FilledButton(
+            onPressed: _flow.canSubmitCode && hasCode && !submitting
+                ? () => unawaited(_submit())
+                : null,
+            child: Text(
+              submitting
+                  ? strings.agentLoginSubmitting
+                  : strings.agentLoginSubmit,
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _statusText(AppStrings strings) {
+    return switch (_flow.phase) {
+      AgentLoginPhase.idle ||
+      AgentLoginPhase.starting =>
+        strings.agentLoginStarting,
+      AgentLoginPhase.waitingForUrl => strings.agentLoginWaitingForUrl,
+      AgentLoginPhase.readyForCode => strings.agentLoginOpenUrl,
+      AgentLoginPhase.submitting => strings.agentLoginSubmitting,
+      AgentLoginPhase.done => strings.agentLoginDone,
+      AgentLoginPhase.error => strings.agentLoginFailed(
+          _flow.error ?? strings.unknown,
+        ),
+    };
+  }
+}
+
+class _ApiKeyDialog extends StatefulWidget {
+  const _ApiKeyDialog({
+    required this.agent,
+    required this.onSave,
+  });
+
+  final CliAgent agent;
+  final Future<void> Function(String provider, String apiKey) onSave;
+
+  @override
+  State<_ApiKeyDialog> createState() => _ApiKeyDialogState();
+}
+
+class _ApiKeyDialogState extends State<_ApiKeyDialog> {
+  static const List<String> _providers = <String>[
+    'openrouter',
+    'anthropic',
+    'openai',
+    'google',
+    'xai',
+    'deepseek',
+    'kimi',
+    'zai',
+    'minimax',
+    'qwen',
+  ];
+
+  final TextEditingController _apiKey = TextEditingController();
+  String _provider = _providers.first;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _apiKey.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final String key = _apiKey.text.trim();
+    if (key.isEmpty) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(_provider, key);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err is BackendException ? err.message : err.toString();
+        _saving = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ThemeData theme = Theme.of(context);
+    final bool canSave = _apiKey.text.trim().isNotEmpty && !_saving;
+    return AlertDialog(
+      title: Text(strings.apiKeyTitle(widget.agent.label)),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            DropdownButtonFormField<String>(
+              initialValue: _provider,
+              decoration: InputDecoration(labelText: strings.apiProvider),
+              items: <DropdownMenuItem<String>>[
+                for (final String provider in _providers)
+                  DropdownMenuItem<String>(
+                    value: provider,
+                    child: Text(provider),
+                  ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (String? value) {
+                      if (value == null) return;
+                      setState(() => _provider = value);
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKey,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              enabled: !_saving,
+              decoration: InputDecoration(
+                labelText: strings.apiKey,
+                helperText: strings.apiKeyHint,
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => unawaited(_save()),
+            ),
+            if (_saving) ...<Widget>[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(minHeight: 2),
+            ],
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+            ],
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(
+          onPressed: canSave ? () => unawaited(_save()) : null,
+          child: Text(strings.saveApiKey),
         ),
       ],
     );

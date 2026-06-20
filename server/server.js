@@ -101,6 +101,7 @@ const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
 const createBtwRouter = require('./routes/btw');
 const createGroupRouter = require('./routes/group');
+const createAgentAuthRouter = require('./routes/agent-auth');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -795,6 +796,7 @@ app.use(createFsRouter(routeContext));
 app.use(createChatRouter(routeContext));
 app.use(createBtwRouter(routeContext));
 app.use(createGroupRouter(routeContext));
+app.use(createAgentAuthRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 
