@@ -9,6 +9,7 @@ const path = require('path');
 const { commandExists } = require('./agents');
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
+const SESSION_MAX_RUNNING_MS = 15 * 60 * 1000;
 const URL_RE = /https?:\/\/[^\s"'<>]+/g;
 const AGY_TOKEN_RELATIVE = [
   '.gemini',
@@ -55,6 +56,8 @@ function createAgentLoginManager(options = {}) {
   const fsModule = options.fs || fs;
   const homeDir = options.homeDir || os.homedir();
   const pollIntervalMs = options.pollIntervalMs || 1000;
+  const sessionTtlMs = options.sessionTtlMs || SESSION_TTL_MS;
+  const maxRunningMs = options.maxRunningMs || SESSION_MAX_RUNNING_MS;
 
   function sessionPayload(session) {
     return {
@@ -136,11 +139,34 @@ function createAgentLoginManager(options = {}) {
     });
   }
 
+  function killChild(session) {
+    if (!session.child || typeof session.child.kill !== 'function') return;
+    try {
+      session.child.kill('SIGTERM');
+    } catch (_err) {
+      // The child may already have exited; finish() still records the terminal state.
+    }
+  }
+
+  function abortSession(session, message) {
+    if (session.status !== 'running') return;
+    killChild(session);
+    finish(session, 'error', message);
+  }
+
   function cleanup() {
     const now = nowFn();
     for (const [id, session] of sessions.entries()) {
-      if (session.status === 'running') continue;
-      if (now - (session.finishedAt || session.createdAt) > SESSION_TTL_MS) {
+      if (
+        session.status === 'running'
+        && now - session.createdAt > maxRunningMs
+      ) {
+        abortSession(session, 'Login session timed out.');
+      }
+      if (
+        session.status !== 'running'
+        && now - (session.finishedAt || session.createdAt) > sessionTtlMs
+      ) {
         sessions.delete(id);
       }
     }
@@ -236,11 +262,18 @@ function createAgentLoginManager(options = {}) {
   }
 
   function subscribe(sessionId, listener) {
+    cleanup();
     const session = sessions.get(sessionId);
     if (!session) return () => {};
     session.listeners.add(listener);
     replay(session, listener);
-    return () => session.listeners.delete(listener);
+    return () => {
+      if (!session.listeners.has(listener)) return;
+      session.listeners.delete(listener);
+      if (session.status === 'running' && session.listeners.size === 0) {
+        abortSession(session, 'Login client disconnected.');
+      }
+    };
   }
 
   function submitCode(sessionId, code) {
@@ -265,6 +298,7 @@ function createAgentLoginManager(options = {}) {
   }
 
   function status(sessionId) {
+    cleanup();
     const session = sessions.get(sessionId);
     if (!session) return null;
     return {

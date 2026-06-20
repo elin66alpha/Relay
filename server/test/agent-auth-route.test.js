@@ -9,6 +9,7 @@ const createAgentAuthRouter = require('../routes/agent-auth');
 let server;
 let base;
 const submitted = [];
+let unsubscribeCount = 0;
 
 const loginManager = {
   start(agent) {
@@ -31,7 +32,12 @@ const loginManager = {
       type: 'login_done',
       data: { sessionId: 'session-1', agent: 'codex' },
     });
-    return () => {};
+    let unsubscribed = false;
+    return () => {
+      if (unsubscribed) return;
+      unsubscribed = true;
+      unsubscribeCount += 1;
+    };
   },
   submitCode(sessionId, code) {
     submitted.push({ sessionId, code });
@@ -68,6 +74,7 @@ after(() => {
 });
 
 test('login start streams SSE events from the login manager', async () => {
+  unsubscribeCount = 0;
   const response = await fetch(`${base}/api/agent-auth/login/start?agent=codex`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/event-stream/);
@@ -76,6 +83,7 @@ test('login start streams SSE events from the login manager', async () => {
   assert.match(text, /event: login_url/);
   assert.match(text, /https:\/\/example\.test\/login/);
   assert.match(text, /event: login_done/);
+  assert.equal(unsubscribeCount, 1);
 });
 
 test('submit code forwards the code to the login manager without echoing it', async () => {

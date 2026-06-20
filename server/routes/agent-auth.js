@@ -45,15 +45,18 @@ module.exports = function createAgentAuthRouter(ctx = {}) {
       'X-Accel-Buffering': 'no',
     });
     let unsubscribe = () => {};
+    let terminalEventReplayed = false;
     unsubscribe = loginManager.subscribe(session.id, (event) => {
       writeStreamEvent(res, event.type, event.data);
       if (event.type === 'login_done' || event.type === 'login_error') {
         clearAgentStatusCache();
         if (!res.writableEnded) res.end();
+        terminalEventReplayed = true;
         unsubscribe();
       }
     });
-    req.on('close', unsubscribe);
+    if (terminalEventReplayed) unsubscribe();
+    req.on('close', () => unsubscribe());
     return undefined;
   });
 

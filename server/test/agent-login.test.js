@@ -24,6 +24,10 @@ function fakeChild() {
       this.writes.push(value);
     },
   };
+  child.killedSignal = '';
+  child.kill = (signal) => {
+    child.killedSignal = signal;
+  };
   return child;
 }
 
@@ -110,6 +114,49 @@ test('agy login completes when the browser OAuth token file appears', async () =
   );
   assert.ok(events.some((event) => event.type === 'login_done'));
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('login manager kills a running login when the last listener disconnects', () => {
+  const child = fakeChild();
+  const manager = createAgentLoginManager({
+    commandExists: () => true,
+    randomUUID: () => 'login-disconnect',
+    spawn() {
+      return child;
+    },
+  });
+
+  const session = manager.start('codex');
+  const unsubscribe = manager.subscribe(session.id, () => {});
+  unsubscribe();
+
+  const status = manager.status(session.id);
+  assert.equal(child.killedSignal, 'SIGTERM');
+  assert.equal(status.status, 'error');
+  assert.match(status.error, /client disconnected/i);
+});
+
+test('login manager cleanup reaps expired running sessions', () => {
+  let now = 1000;
+  const child = fakeChild();
+  const manager = createAgentLoginManager({
+    commandExists: () => true,
+    maxRunningMs: 50,
+    now: () => now,
+    randomUUID: () => 'login-timeout',
+    spawn() {
+      return child;
+    },
+  });
+
+  const session = manager.start('codex');
+  now += 51;
+  manager.cleanup();
+
+  const status = manager.status(session.id);
+  assert.equal(child.killedSignal, 'SIGTERM');
+  assert.equal(status.status, 'error');
+  assert.match(status.error, /timed out/i);
 });
 
 test('login manager rejects unsupported and missing CLIs clearly', () => {
