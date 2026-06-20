@@ -10,6 +10,7 @@ const { test } = require('node:test');
 const {
   agyTokenPath,
   createAgentLoginManager,
+  selectLoginUrl,
   scriptCommand,
 } = require('../lib/agent-login');
 
@@ -38,6 +39,23 @@ test('scriptCommand quotes login args for script -qfec', () => {
   );
 });
 
+test('selectLoginUrl prefers auth URLs over incidental links', () => {
+  assert.deepEqual(
+    selectLoginUrl('codex', [
+      'https://docs.example.test/setup',
+      'https://auth.openai.com/oauth/authorize?client_id=codex',
+    ]).url,
+    'https://auth.openai.com/oauth/authorize?client_id=codex',
+  );
+  assert.deepEqual(
+    selectLoginUrl('agy', [
+      'https://example.test/help',
+      'https://accounts.google.com/o/oauth2/auth?client_id=agy.',
+    ]).url,
+    'https://accounts.google.com/o/oauth2/auth?client_id=agy',
+  );
+});
+
 test('login manager streams URL events and writes submitted code to PTY stdin', () => {
   let spawned;
   const child = fakeChild();
@@ -54,7 +72,11 @@ test('login manager streams URL events and writes submitted code to PTY stdin', 
   const events = [];
   manager.subscribe(session.id, (event) => events.push(event));
 
-  child.stdout.emit('data', 'Open https://example.test/device to continue\n');
+  child.stdout.emit(
+    'data',
+    'Docs https://example.test/docs Open https://auth.openai.com/oauth/authorize?client_id=codex to continue\n',
+  );
+  child.stderr.emit('data', 'Troubleshooting: https://example.test/help\n');
   manager.submitCode(session.id, 'abc123');
   child.emit('exit', 0);
 
@@ -69,7 +91,11 @@ test('login manager streams URL events and writes submitted code to PTY stdin', 
   assert.ok(events.some((event) => event.type === 'login_started'));
   assert.deepEqual(
     events.find((event) => event.type === 'login_url').data.url,
-    'https://example.test/device',
+    'https://auth.openai.com/oauth/authorize?client_id=codex',
+  );
+  assert.equal(
+    events.filter((event) => event.type === 'login_url').at(-1).data.url,
+    'https://auth.openai.com/oauth/authorize?client_id=codex',
   );
   assert.ok(events.some((event) => event.type === 'login_done'));
 });

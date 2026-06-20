@@ -11,11 +11,19 @@ const { commandExists } = require('./agents');
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const SESSION_MAX_RUNNING_MS = 15 * 60 * 1000;
 const URL_RE = /https?:\/\/[^\s"'<>]+/g;
+const URL_TRAILING_PUNCT_RE = /[),.;]+$/;
 const AGY_TOKEN_RELATIVE = [
   '.gemini',
   'antigravity-cli',
   'antigravity-oauth-token',
 ];
+
+const AUTH_HOSTS = {
+  claude: ['anthropic.com', 'claude.ai'],
+  codex: ['openai.com', 'chatgpt.com'],
+  agy: ['accounts.google.com', 'google.com'],
+};
+const AUTH_URL_RE = /(auth|authorize|device|login|oauth|verify)/i;
 
 const LOGIN_COMMANDS = {
   claude: ['claude', 'auth', 'login', '--claudeai'],
@@ -45,6 +53,47 @@ function scriptCommand(args) {
 
 function redactLoginText(text) {
   return String(text || '').replace(URL_RE, '[login URL]');
+}
+
+function normalizeUrl(value) {
+  return String(value || '').replace(URL_TRAILING_PUNCT_RE, '');
+}
+
+function hostMatches(hostname, expectedHost) {
+  return hostname === expectedHost || hostname.endsWith(`.${expectedHost}`);
+}
+
+function loginUrlScore(agent, value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return Number.NEGATIVE_INFINITY;
+  try {
+    const parsed = new URL(normalized);
+    const hostname = parsed.hostname.toLowerCase();
+    let score = parsed.protocol === 'https:' ? 10 : 0;
+    if ((AUTH_HOSTS[agent] || []).some((host) => hostMatches(hostname, host))) {
+      score += 1000;
+    }
+    const authText = `${hostname}${parsed.pathname}${parsed.search}`;
+    if (AUTH_URL_RE.test(authText)) score += 200;
+    score += Math.min(authText.length, 300);
+    return score;
+  } catch (_err) {
+    return normalized.length;
+  }
+}
+
+function selectLoginUrl(agent, urls) {
+  let best = '';
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const rawUrl of urls) {
+    const url = normalizeUrl(rawUrl);
+    const score = loginUrlScore(agent, url);
+    if (score > bestScore) {
+      best = url;
+      bestScore = score;
+    }
+  }
+  return { url: best, score: bestScore };
 }
 
 function createAgentLoginManager(options = {}) {
@@ -116,8 +165,14 @@ function createAgentLoginManager(options = {}) {
     const text = String(chunk || '');
     session.output += text;
     const urls = text.match(URL_RE) || [];
-    if (urls.length > 0 && session.url !== urls[0]) {
-      session.url = urls[0];
+    const selectedUrl = selectLoginUrl(session.agent, urls);
+    if (
+      selectedUrl.url
+      && selectedUrl.url !== session.url
+      && selectedUrl.score >= session.urlScore
+    ) {
+      session.url = selectedUrl.url;
+      session.urlScore = selectedUrl.score;
       emit(session, 'login_url', { url: session.url });
     }
     if (!session.codeSubmitted && text.trim()) {
@@ -200,6 +255,7 @@ function createAgentLoginManager(options = {}) {
       agent,
       status: 'running',
       url: '',
+      urlScore: Number.NEGATIVE_INFINITY,
       output: '',
       error: '',
       codeSubmitted: false,
@@ -319,5 +375,6 @@ module.exports = {
   LOGIN_COMMANDS,
   agyTokenPath,
   createAgentLoginManager,
+  selectLoginUrl,
   scriptCommand,
 };
