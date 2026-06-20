@@ -323,12 +323,13 @@ function createAgentLoginManager(options = {}) {
     if (!session) return () => {};
     session.listeners.add(listener);
     replay(session, listener);
+    // Only drop the listener on disconnect — do NOT kill the login. The CLI
+    // completes the OAuth flow on its own in the PTY, and the user typically has
+    // to leave the app (backgrounding it, which drops this SSE) to authorize in a
+    // browser. Killing here would abort a login at the worst moment. Abandoned
+    // sessions are still reaped by the maxRunningMs timeout in cleanup().
     return () => {
-      if (!session.listeners.has(listener)) return;
       session.listeners.delete(listener);
-      if (session.status === 'running' && session.listeners.size === 0) {
-        abortSession(session, 'Login client disconnected.');
-      }
     };
   }
 

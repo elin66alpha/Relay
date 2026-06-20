@@ -142,7 +142,7 @@ test('agy login completes when the browser OAuth token file appears', async () =
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('login manager kills a running login when the last listener disconnects', () => {
+test('login manager keeps a running login alive when the last listener disconnects', () => {
   const child = fakeChild();
   const manager = createAgentLoginManager({
     commandExists: () => true,
@@ -156,10 +156,12 @@ test('login manager kills a running login when the last listener disconnects', (
   const unsubscribe = manager.subscribe(session.id, () => {});
   unsubscribe();
 
+  // Disconnecting (e.g. the app backgrounded to authorize in a browser) must not
+  // kill the login; the CLI finishes the OAuth flow on its own. The session is
+  // only reaped later by the maxRunningMs timeout.
   const status = manager.status(session.id);
-  assert.equal(child.killedSignal, 'SIGTERM');
-  assert.equal(status.status, 'error');
-  assert.match(status.error, /client disconnected/i);
+  assert.equal(child.killedSignal, '');
+  assert.equal(status.status, 'running');
 });
 
 test('login manager cleanup reaps expired running sessions', () => {
