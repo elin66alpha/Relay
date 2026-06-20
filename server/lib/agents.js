@@ -297,6 +297,12 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // Decode as UTF-8 at the stream layer so Node's StringDecoder buffers any
+    // multi-byte character (e.g. a 3-byte Chinese glyph) that straddles a chunk
+    // boundary. Calling chunk.toString() per-chunk would split it and emit U+FFFD
+    // replacement characters (the "���" tofu) into the output.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
 
     let stdout = '';
     let stderr = '';

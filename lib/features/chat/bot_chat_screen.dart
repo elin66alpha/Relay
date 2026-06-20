@@ -486,6 +486,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                                     widget.chatController.retry(message),
                                 onCancelQueued: () =>
                                     widget.chatController.cancelQueued(message),
+                                onOptionSelected: (String option) =>
+                                    widget.chatController.sendUserText(option),
                               ),
                             );
                           },
@@ -1678,6 +1680,21 @@ class _ChatNotice extends StatelessWidget {
   }
 }
 
+// The turn's persisted execution steps, minus agy's generic "working" ping which
+// carries no information once the answer is in (agy's real reasoning is folded
+// from its plan preamble instead).
+List<String> _persistedSteps(ChatMessage message) {
+  final Object? raw = message.metadata['progressLines'];
+  if (raw is! List) return const <String>[];
+  return raw
+      .whereType<String>()
+      .where(
+        (String line) =>
+            line.trim().isNotEmpty && line != 'Antigravity is working...',
+      )
+      .toList(growable: false);
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
@@ -1691,6 +1708,7 @@ class _MessageBubble extends StatelessWidget {
     required this.progressLines,
     required this.onRetry,
     required this.onCancelQueued,
+    required this.onOptionSelected,
   });
 
   final ChatMessage message;
@@ -1704,6 +1722,7 @@ class _MessageBubble extends StatelessWidget {
   final List<String> progressLines;
   final VoidCallback onRetry;
   final VoidCallback onCancelQueued;
+  final void Function(String option) onOptionSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -1729,6 +1748,26 @@ class _MessageBubble extends StatelessWidget {
     // message keeps the simpler one-block layout with a single timestamp below.
     final List<MessageSegment> segments = message.segments;
     final bool segmented = !isUser && !system && segments.length > 1;
+    // Claude sometimes ends a finished answer with a "pick one" question + list;
+    // surface those choices as buttons that send the pick back as a new message.
+    final List<String>? optionPrompt = (!isUser && !system && !streaming)
+        ? parseOptionPrompt(
+            segments.isNotEmpty ? segments.last.text : message.content,
+          )
+        : null;
+    // agy opens with an "I will …" plan; fold it away on the finished bubble.
+    final ({String plan, String body})? planSplit = (!isUser &&
+            !system &&
+            !streaming &&
+            !segmented &&
+            message.content.isNotEmpty)
+        ? splitLeadingPlan(message.content)
+        : null;
+    // Execution steps captured during the turn, surfaced collapsed once it ends
+    // (live progress still streams via `progressLines` below while running).
+    final List<String> finishedSteps = (!isUser && !system && !streaming)
+        ? _persistedSteps(message)
+        : const <String>[];
     final DateTime stampTime =
         (!isUser && segments.isNotEmpty && segments.first.createdAt != null)
         ? segments.first.createdAt!
@@ -1764,14 +1803,56 @@ class _MessageBubble extends StatelessWidget {
                     formatInlineEmphasis: !streaming,
                   )
                 else if (message.content.isNotEmpty)
-                  MessageText(
-                    text: message.content,
+                  if (planSplit != null)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        CollapsibleNote(
+                          title: context.l10n.agentThinking,
+                          color: textColor,
+                          child: MessageText(
+                            text: planSplit.plan,
+                            color: textColor,
+                            formatInlineEmphasis: true,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        MessageText(
+                          text: planSplit.body,
+                          color: textColor,
+                          formatInlineEmphasis: true,
+                        ),
+                      ],
+                    )
+                  else
+                    MessageText(
+                      text: message.content,
+                      color: textColor,
+                      formatInlineEmphasis: !isUser && !streaming,
+                    ),
+                if (optionPrompt != null)
+                  OptionButtons(
+                    options: optionPrompt,
                     color: textColor,
-                    formatInlineEmphasis: !isUser && !streaming,
+                    onSelected: onOptionSelected,
                   ),
                 if (progressLines.isNotEmpty) ...<Widget>[
                   if (message.content.isNotEmpty) const SizedBox(height: 8),
-                  ProgressLines(lines: progressLines, color: textColor),
+                  ProgressLines(
+                    lines: progressLines,
+                    color: textColor,
+                  ),
+                ] else if (finishedSteps.isNotEmpty) ...<Widget>[
+                  if (message.content.isNotEmpty) const SizedBox(height: 6),
+                  CollapsibleNote(
+                    title: context.l10n.agentSteps(finishedSteps.length),
+                    color: textColor,
+                    child: ProgressLines(
+                      lines: finishedSteps,
+                      color: textColor,
+                    ),
+                  ),
                 ],
                 if (cancelled) ...<Widget>[
                   if (message.content.isNotEmpty || progressLines.isNotEmpty)

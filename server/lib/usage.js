@@ -18,6 +18,8 @@ const CLAUDE_OAUTH_BETA = 'oauth-2025-04-20';
 const CODEX_AUTH = path.join(os.homedir(), '.codex', 'auth.json');
 const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
 const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
+const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
+const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const AGY_LOG_DIR = path.join(AGY_DIR, 'log');
 const AGY_QUOTA_RPC_PATH =
   '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary';
@@ -60,10 +62,30 @@ let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let agyCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let persistedUsageCache = null;
 const usageBackoff = {
-  claude: { until: 0, delayMs: 0, refreshPromise: null },
-  codex: { until: 0, delayMs: 0, refreshPromise: null },
-  agy: { until: 0, delayMs: 0, refreshPromise: null },
+  claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
+  codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
+  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
 };
+
+// Claude/Codex quota credentials are shared with the live CLIs, which rotate
+// their OAuth tokens in place. A failed query is almost always a transient auth
+// race the CLI fixes by rewriting its credential file, so we remember the file's
+// mtime at failure time: once it changes, the backoff is dropped and the next
+// query retries immediately with the fresh token instead of serving stale.
+const USAGE_CRED_FILES = {
+  claude: CLAUDE_CREDS_PATH,
+  codex: CODEX_AUTH,
+};
+
+function credentialMtimeMs(key) {
+  const file = USAGE_CRED_FILES[key];
+  if (!file) return 0;
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch (_err) {
+    return 0;
+  }
+}
 
 class UsageQueryError extends Error {
   constructor(message, status) {
@@ -141,6 +163,7 @@ function rememberBackoff(key, err) {
   );
   state.delayMs = delayMs;
   state.until = Date.now() + delayMs;
+  state.credMtime = credentialMtimeMs(key);
   const status = err && err.status ? ` HTTP ${err.status}` : '';
   console.warn(
     `[usage:${key}] query failed${status}; backing off for ` +
@@ -202,7 +225,14 @@ async function cachedUsage({
 
   const state = usageBackoff[key];
   if (state.until > now && fallback) {
-    return withUsageMetadata(fallback, true);
+    // Still within the backoff window: only retry early if the CLI has rewritten
+    // its credentials (token refreshed / re-login) since the failure. Otherwise
+    // keep serving stale instead of hammering a still-failing API.
+    if (credentialMtimeMs(key) <= state.credMtime) {
+      return withUsageMetadata(fallback, true);
+    }
+    state.until = 0;
+    state.delayMs = 0;
   }
 
   try {
@@ -366,9 +396,51 @@ function readCodexModel() {
   return 'gpt-5.5';
 }
 
+// Codex shares ~/.codex/auth.json with the CLI. The access_token is short-lived,
+// so when our quota probe sees a 401 we refresh it in place with the long-lived
+// refresh_token (same OAuth flow the CLI uses) instead of forcing the user to go
+// run a Codex message in a terminal. Mirrors refreshClaudeToken.
+async function refreshCodexToken(auth) {
+  const refreshToken = auth.tokens && auth.tokens.refresh_token;
+  if (!refreshToken) {
+    throw new Error('Codex credentials are missing refresh_token. Run codex login again.');
+  }
+  const { status, body } = await httpJson('POST', CODEX_TOKEN_URL, {}, {
+    client_id: CODEX_CLIENT_ID,
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    scope: 'openid profile email',
+  });
+  if (status !== 200 || !body || !body.access_token) {
+    throw new UsageQueryError(`Failed to refresh Codex token (HTTP ${status}).`, status);
+  }
+  auth.tokens = {
+    ...auth.tokens,
+    access_token: body.access_token,
+    id_token: body.id_token || auth.tokens.id_token,
+    refresh_token: body.refresh_token || refreshToken,
+  };
+  auth.last_refresh = new Date().toISOString();
+  const tmp = `${CODEX_AUTH}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(auth, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, CODEX_AUTH);
+  return auth.tokens.access_token;
+}
+
+function callCodexUsage(token, accountId, body) {
+  return httpHeadersOnly(CODEX_URL, {
+    Authorization: `Bearer ${token}`,
+    'chatgpt-account-id': accountId,
+    'OpenAI-Beta': 'responses=experimental',
+    originator: 'codex_cli_rs',
+    'User-Agent': 'codex_cli_rs/0.132.0',
+    Accept: 'text/event-stream',
+  }, body);
+}
+
 async function fetchCodexUsage() {
   const auth = JSON.parse(fs.readFileSync(CODEX_AUTH, 'utf-8'));
-  const token = auth.tokens && auth.tokens.access_token;
+  let token = auth.tokens && auth.tokens.access_token;
   const accountId = (auth.tokens && auth.tokens.account_id) || '';
   if (!token) {
     throw new Error('Codex credentials were not found. Run codex login.');
@@ -393,17 +465,10 @@ async function fetchCodexUsage() {
     reasoning: { effort: 'low' },
   });
 
-  const { status, headers } = await httpHeadersOnly(CODEX_URL, {
-    Authorization: `Bearer ${token}`,
-    'chatgpt-account-id': accountId,
-    'OpenAI-Beta': 'responses=experimental',
-    originator: 'codex_cli_rs',
-    'User-Agent': 'codex_cli_rs/0.132.0',
-    Accept: 'text/event-stream',
-  }, body);
-
+  let { status, headers } = await callCodexUsage(token, accountId, body);
   if (status === 401) {
-    throw new Error('Codex token expired. Send one Codex CLI message in the terminal, then retry.');
+    token = await refreshCodexToken(auth);
+    ({ status, headers } = await callCodexUsage(token, accountId, body));
   }
   const hasQuotaHeaders = Boolean(
     firstHeader(headers, 'x-codex-primary-used-percent') ||
