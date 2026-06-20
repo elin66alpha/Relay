@@ -748,6 +748,7 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
     final bool submitting = _flow.phase == AgentLoginPhase.submitting;
     final bool done = _flow.phase == AgentLoginPhase.done;
     final bool hasCode = _code.text.trim().isNotEmpty;
+    final bool requiresCode = _flow.requiresCode;
     return AlertDialog(
       title: Text(strings.agentLoginTitle(widget.agent.label)),
       content: SizedBox(
@@ -766,7 +767,11 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
               Text(_statusText(strings)),
               if (_flow.url != null && _flow.url!.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
-                Text(strings.agentLoginOpenUrl),
+                Text(
+                  requiresCode
+                      ? strings.agentLoginOpenUrl
+                      : strings.agentLoginBrowserOpenUrl,
+                ),
                 const SizedBox(height: 8),
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -796,16 +801,18 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
                   ),
                 ),
               ],
-              const SizedBox(height: 12),
-              TextField(
-                controller: _code,
-                enabled: !done && _flow.phase != AgentLoginPhase.error,
-                decoration: InputDecoration(
-                  labelText: strings.agentLoginCode,
-                  hintText: strings.agentLoginCodeHint,
+              if (requiresCode) ...<Widget>[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _code,
+                  enabled: !done && _flow.phase != AgentLoginPhase.error,
+                  decoration: InputDecoration(
+                    labelText: strings.agentLoginCode,
+                    hintText: strings.agentLoginCodeHint,
+                  ),
+                  onSubmitted: (_) => unawaited(_submit()),
                 ),
-                onSubmitted: (_) => unawaited(_submit()),
-              ),
+              ],
               if (_flow.output.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
                 Text(
@@ -843,7 +850,7 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
           onPressed: _close,
           child: Text(done ? strings.close : strings.cancel),
         ),
-        if (!done)
+        if (!done && requiresCode)
           FilledButton(
             onPressed: _flow.canSubmitCode && hasCode && !submitting
                 ? () => unawaited(_submit())
@@ -864,7 +871,9 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
       AgentLoginPhase.starting =>
         strings.agentLoginStarting,
       AgentLoginPhase.waitingForUrl => strings.agentLoginWaitingForUrl,
-      AgentLoginPhase.readyForCode => strings.agentLoginOpenUrl,
+      AgentLoginPhase.readyForCode => _flow.requiresCode
+          ? strings.agentLoginOpenUrl
+          : strings.agentLoginBrowserOpenUrl,
       AgentLoginPhase.submitting => strings.agentLoginSubmitting,
       AgentLoginPhase.done => strings.agentLoginDone,
       AgentLoginPhase.error => strings.agentLoginFailed(

@@ -298,6 +298,9 @@ class AppStrings {
   String get agentLoginOpenUrl => isZh
       ? '在浏览器中打开此链接，完成授权后把代码粘贴回来。'
       : 'Open this link in a browser, authorize, then paste the code here.';
+  String get agentLoginBrowserOpenUrl => isZh
+      ? '在浏览器中打开此链接。完成授权后，状态会自动更新。'
+      : 'Open this link in a browser. Status will update after authorization finishes.';
   String get agentLoginCode => isZh ? '授权代码' : 'Authorization code';
   String get agentLoginCodeHint =>
       isZh ? '粘贴 CLI 要求的代码' : 'Paste the code requested by the CLI';
