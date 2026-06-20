@@ -109,10 +109,9 @@ class AppStrings {
   String diagnosticsWorkdirLine({
     required bool exists,
     required bool writable,
-  }) =>
-      isZh
-          ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
-          : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
+  }) => isZh
+      ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
+      : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
   String diagnosticsDefaultWorkdirLine(String value) =>
       isZh ? '默认工作目录：$value' : 'Default workdir: $value';
   String diagnosticsTransferLimitLine(String upload, String download) => isZh
@@ -122,19 +121,17 @@ class AppStrings {
     required bool configured,
     required int active,
     required int total,
-  }) =>
-      isZh
-          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
-          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
+  }) => isZh
+      ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
+      : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
   String diagnosticsRequestLine({
     required int active,
     required int running,
     required int queued,
     required int sse,
-  }) =>
-      isZh
-          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
-          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
+  }) => isZh
+      ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
+      : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
   String diagnosticsWebBuildLine(bool exists) => isZh
       ? 'Web 构建：${exists ? '存在' : '缺失'}'
       : 'Web build: ${exists ? 'present' : 'missing'}';
@@ -148,10 +145,11 @@ class AppStrings {
     final String login = loggedIn == null
         ? (isZh ? '登录未知' : 'login unknown')
         : (loggedIn
-            ? (isZh ? '已登录' : 'logged in')
-            : (isZh ? '未登录' : 'not logged in'));
-    final String cli =
-        available ? (isZh ? '可执行' : 'available') : (isZh ? '未找到' : 'not found');
+              ? (isZh ? '已登录' : 'logged in')
+              : (isZh ? '未登录' : 'not logged in'));
+    final String cli = available
+        ? (isZh ? '可执行' : 'available')
+        : (isZh ? '未找到' : 'not found');
     final String suffix = path.isEmpty ? '' : ' ($path)';
     return '- $label: $cli, $login$suffix';
   }
@@ -162,10 +160,9 @@ class AppStrings {
     required bool exists,
     required bool writable,
     required String size,
-  }) =>
-      isZh
-          ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
-          : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
+  }) => isZh
+      ? '- $name：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}，$size'
+      : '- $name: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}, $size';
   String get deviceTokens => isZh ? '设备 Token' : 'Device tokens';
   String get noDeviceTokens => isZh ? '没有设备 Token。' : 'No device tokens.';
   String get currentDeviceToken => isZh ? '当前设备' : 'Current device';
@@ -252,6 +249,30 @@ class AppStrings {
   String agentNotLoggedInBanner(String agent) => isZh
       ? '$agent 未登录：请在后端主机上登录该 CLI。'
       : '$agent is not logged in. Log in to this CLI on the backend host.';
+  String agentCliNotInstalled(String agent) => isZh
+      ? '$agent 未安装在后端主机上。'
+      : '$agent is not installed on the backend host.';
+  String agentNeedsLogin(String agent) =>
+      isZh ? '$agent 需要先在后端主机上登录。' : '$agent needs login on the backend host.';
+  String agentNeedsApiKey(String agent) => isZh
+      ? '$agent 需要先配置供应商和 API key。'
+      : '$agent needs a provider and API key first.';
+  String agentUnavailable(String agent) =>
+      isZh ? '$agent 当前不可用。' : '$agent is not available.';
+  String agentInstalledStatus(bool installed) => isZh
+      ? '安装：${installed ? '已安装' : '未安装'}'
+      : 'Installed: ${installed ? 'yes' : 'no'}';
+  String agentAuthStatus(bool authed, String authKind) {
+    final String label = switch (authKind) {
+      'apiKey' => isZh ? 'API key' : 'API key',
+      'apiKeyOptional' => isZh ? '可用' : 'Usable',
+      _ => isZh ? '登录' : 'Login',
+    };
+    return isZh
+        ? '$label：${authed ? '已就绪' : '未就绪'}'
+        : '$label: ${authed ? 'ready' : 'not ready'}';
+  }
+
   String get recheck => isZh ? '重新检查' : 'Recheck';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
   String get scanQr => isZh ? '扫描二维码' : 'Scan QR code';

@@ -1361,9 +1361,7 @@ class BackendClient {
     return result;
   }
 
-  /// The agents the backend host currently offers. Experimental agents
-  /// (opencode, hermes) appear only once their CLI is detected, so the app's
-  /// agent list tracks what is actually installed.
+  /// The agents the backend host knows about, including install/auth status.
   Future<List<CliAgent>> fetchAgents() async {
     final Object? decoded = await _requestJson('GET', '/api/agents');
     if (decoded is! Map) {

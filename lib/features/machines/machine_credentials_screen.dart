@@ -11,17 +11,22 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/backend/backend_client.dart';
 import '../../core/credentials/qr_image_decoder.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
+import '../cli_agents/agent_status_lights.dart';
+import '../cli_agents/cli_agents_controller.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
   const MachineCredentialsScreen({
     required this.machinesController,
+    this.agentsController,
     this.requireCredential = false,
     super.key,
   });
 
   final MachineCredentialsController machinesController;
+  final CliAgentsController? agentsController;
   final bool requireCredential;
 
   @override
@@ -45,7 +50,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
         // Camera QR scanning only exists on mobile. Desktop (and web) have no
         // mobile_scanner implementation, so they import via image upload or
         // paste instead.
-        final bool showCameraScan = !kIsWeb &&
+        final bool showCameraScan =
+            !kIsWeb &&
             (defaultTargetPlatform == TargetPlatform.android ||
                 defaultTargetPlatform == TargetPlatform.iOS);
         return Scaffold(
@@ -76,8 +82,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 child: Text(
                                   context.l10n.currentMachine,
                                   style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.outline,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outline,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -88,10 +95,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 _MachineTile(
                                   credential: credential,
                                   active: credential.id == active?.id,
-                                  onSelect: () =>
-                                      widget.machinesController.setActive(
-                                    credential.id,
-                                  ),
+                                  onSelect: () => widget.machinesController
+                                      .setActive(credential.id),
                                   onDelete: () => _confirmDelete(credential),
                                 ),
                               const SizedBox(height: 16),
@@ -105,6 +110,12 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 onUpload: _uploadCredentialQr,
                                 onTest: _testActive,
                               ),
+                              if (widget.agentsController != null) ...<Widget>[
+                                const SizedBox(height: 18),
+                                _AgentCredentialStatusSection(
+                                  agentsController: widget.agentsController!,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -160,15 +171,16 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       if (bytes == null || bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
-      final String raw = await compute<Uint8List, String>(
-        decodeCredentialQrImage,
-        bytes,
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw MachineCredentialException(
-          context.l10n.credentialQrDecodeTimedOut,
-        ),
-      );
+      final String raw =
+          await compute<Uint8List, String>(
+            decodeCredentialQrImage,
+            bytes,
+          ).timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw MachineCredentialException(
+              context.l10n.credentialQrDecodeTimedOut,
+            ),
+          );
       if (raw.trim().isEmpty) {
         throw MachineCredentialException(context.l10n.invalidQr);
       }
@@ -192,10 +204,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     late final MachineCredential credential;
     try {
       credential = await widget.machinesController
-          .decryptEncryptedBytes(
-            bytes,
-            passphrase: passphrase,
-          )
+          .decryptEncryptedBytes(bytes, passphrase: passphrase)
           .timeout(const Duration(seconds: 15));
     } on TimeoutException {
       throw MachineCredentialException(context.l10n.credentialDecryptTimedOut);
@@ -238,18 +247,14 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     return Uri.tryParse(credential.baseUrl)?.scheme.toLowerCase() == 'http';
   }
 
-  Future<bool> _confirmPlainHttpCredential(
-    MachineCredential credential,
-  ) async {
+  Future<bool> _confirmPlainHttpCredential(MachineCredential credential) async {
     if (!mounted) return false;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(context.l10n.plaintextCredentialTitle),
         content: Text(
-          context.l10n.plaintextCredentialBody(
-            credential.hostLabel,
-          ),
+          context.l10n.plaintextCredentialBody(credential.hostLabel),
         ),
         actions: <Widget>[
           TextButton(
@@ -276,8 +281,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     }
     return switch (err.code) {
       'NETWORK_HOST_LOOKUP' => context.l10n.credentialHostLookupFailed(host),
-      'NETWORK_CONNECTION_REFUSED' =>
-        context.l10n.credentialConnectionRefused(host),
+      'NETWORK_CONNECTION_REFUSED' => context.l10n.credentialConnectionRefused(
+        host,
+      ),
       'NETWORK_UNREACHABLE' => context.l10n.credentialNetworkUnreachable(host),
       'NETWORK_TIMEOUT' => context.l10n.credentialConnectionTimedOut(host),
       _ => context.l10n.credentialConnectionFailed(host, err.message),
@@ -419,8 +425,8 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     final String message = err is MachineCredentialException
         ? err.message
         : err is BackendException
-            ? err.message
-            : err.toString();
+        ? err.message
+        : err.toString();
     await showDialog<void>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -433,6 +439,92 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _AgentCredentialStatusSection extends StatelessWidget {
+  const _AgentCredentialStatusSection({required this.agentsController});
+
+  final CliAgentsController agentsController;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return AnimatedBuilder(
+      animation: agentsController,
+      builder: (BuildContext context, Widget? _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: Text(
+                context.l10n.cliAgents,
+                style: TextStyle(
+                  color: theme.colorScheme.outline,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceContainerLow,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                children: <Widget>[
+                  for (
+                    int index = 0;
+                    index < agentsController.agents.length;
+                    index += 1
+                  )
+                    _AgentCredentialStatusTile(
+                      agent: agentsController.agents[index],
+                      showDivider: index > 0,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AgentCredentialStatusTile extends StatelessWidget {
+  const _AgentCredentialStatusTile({
+    required this.agent,
+    required this.showDivider,
+  });
+
+  final CliAgent agent;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool usable = isCliAgentSelectable(agent);
+    final Color? textColor = usable ? null : theme.colorScheme.onSurfaceVariant;
+    return Column(
+      children: <Widget>[
+        if (showDivider) const Divider(height: 1),
+        ListTile(
+          dense: true,
+          title: Text(agent.label, style: TextStyle(color: textColor)),
+          subtitle: usable
+              ? null
+              : Text(
+                  agentUnavailableMessage(context.l10n, agent),
+                  style: TextStyle(color: theme.colorScheme.outline),
+                ),
+          trailing: AgentStatusLights(agent: agent),
+        ),
+      ],
     );
   }
 }
@@ -635,10 +727,9 @@ class _CredentialQrScannerScreenState
               padding: const EdgeInsets.all(16),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .surface
-                      .withValues(alpha: 0.92),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.surface.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Padding(

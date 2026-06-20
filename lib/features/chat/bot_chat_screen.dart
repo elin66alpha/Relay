@@ -17,6 +17,7 @@ import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
+import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -102,8 +103,8 @@ class _BotChatScreenState extends State<BotChatScreen>
     if (_agentsRefreshing) return;
     _agentsRefreshing = true;
     try {
-      final List<CliAgent> agents =
-          await widget.chatController.backend.fetchAgents();
+      final List<CliAgent> agents = await widget.chatController.backend
+          .fetchAgents();
       if (!mounted) return;
       widget.agentsController.syncAgents(agents);
       _agentsSynced = true;
@@ -133,9 +134,15 @@ class _BotChatScreenState extends State<BotChatScreen>
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) return;
-    // Pull the host's live agent list so experimental agents (opencode, hermes)
-    // appear automatically once their CLI is installed. Retries until it lands.
+    // Pull the host's live agent list and install/auth status. Retries until it
+    // lands.
     if (!_agentsSynced) unawaited(_refreshAgents());
+    if (!isCliAgentSelectable(active)) {
+      if (widget.chatController.machine != null) {
+        widget.chatController.goHome();
+      }
+      return;
+    }
     if (widget.chatController.machine == null) return;
     final bool hadMachine = widget.chatController.machine != null;
     final bool machineChanged = widget.chatController.machine?.id != machine.id;
@@ -241,10 +248,10 @@ class _BotChatScreenState extends State<BotChatScreen>
   Future<void> _showHistorySearch() async {
     final ChatHistorySearchResult? result =
         await showDialog<ChatHistorySearchResult>(
-      context: context,
-      builder: (BuildContext dialogContext) =>
-          _HistorySearchDialog(chatController: widget.chatController),
-    );
+          context: context,
+          builder: (BuildContext dialogContext) =>
+              _HistorySearchDialog(chatController: widget.chatController),
+        );
     if (result == null) return;
     try {
       await widget.chatController.selectSession(
@@ -286,8 +293,8 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   Future<void> _exportMarkdown() async {
     try {
-      final ConversationExport export =
-          await widget.chatController.exportCurrentSessionMarkdown();
+      final ConversationExport export = await widget.chatController
+          .exportCurrentSessionMarkdown();
       final List<int> bytes = utf8.encode(export.markdown);
       final DownloadSaveResult saved = await saveDownloadStream(
         fileName: export.fileName,
@@ -299,9 +306,9 @@ class _BotChatScreenState extends State<BotChatScreen>
       final String message = saved.isBrowserDownload
           ? context.l10n.savedToBrowserDownloads
           : context.l10n.savedTo(saved.path ?? export.fileName);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -327,9 +334,7 @@ class _BotChatScreenState extends State<BotChatScreen>
       drawerScrimColor: Colors.black54,
       drawer: usePermanentSidebar
           ? null
-          : Drawer(
-              child: SafeArea(child: sidebar),
-            ),
+          : Drawer(child: SafeArea(child: sidebar)),
       appBar: usePermanentSidebar
           ? null
           : AppBar(
@@ -457,26 +462,25 @@ class _BotChatScreenState extends State<BotChatScreen>
                               key: ValueKey<String>(message.id),
                               child: _MessageBubble(
                                 message: message,
-                                retryable:
-                                    widget.chatController.isRetryable(message),
-                                streaming:
-                                    widget.chatController.isStreaming(message),
-                                awaitingFirstToken: widget.chatController
-                                    .isAwaitingFirstToken(message),
-                                errorDetail:
-                                    widget.chatController.errorDetailFor(
+                                retryable: widget.chatController.isRetryable(
                                   message,
                                 ),
+                                streaming: widget.chatController.isStreaming(
+                                  message,
+                                ),
+                                awaitingFirstToken: widget.chatController
+                                    .isAwaitingFirstToken(message),
+                                errorDetail: widget.chatController
+                                    .errorDetailFor(message),
                                 system: widget.chatController.isSystemMessage(
                                   message,
                                 ),
-                                cancelled:
-                                    widget.chatController.isCancelled(message),
-                                queued: widget.chatController.isQueued(message),
-                                progressLines:
-                                    widget.chatController.progressLinesFor(
+                                cancelled: widget.chatController.isCancelled(
                                   message,
                                 ),
+                                queued: widget.chatController.isQueued(message),
+                                progressLines: widget.chatController
+                                    .progressLinesFor(message),
                                 onRetry: () =>
                                     widget.chatController.retry(message),
                                 onCancelQueued: () =>
@@ -611,10 +615,7 @@ class _ChatTitle extends StatelessWidget {
                   : context.l10n.home,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             if (subtitle.isNotEmpty)
               Text(
@@ -650,8 +651,10 @@ class _BtwButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation:
-          Listenable.merge(<Listenable>[agentsController, chatController]),
+      animation: Listenable.merge(<Listenable>[
+        agentsController,
+        chatController,
+      ]),
       builder: (BuildContext context, Widget? _) {
         if (chatController.machine == null) {
           return const SizedBox.shrink();
@@ -683,10 +686,7 @@ class _BtwButton extends StatelessWidget {
 }
 
 class _SearchButton extends StatelessWidget {
-  const _SearchButton({
-    required this.chatController,
-    required this.onPressed,
-  });
+  const _SearchButton({required this.chatController, required this.onPressed});
 
   final BotChatController chatController;
   final VoidCallback onPressed;
@@ -710,10 +710,7 @@ class _SearchButton extends StatelessWidget {
 }
 
 class _NotLoggedInBanner extends StatelessWidget {
-  const _NotLoggedInBanner({
-    required this.agentLabel,
-    required this.onRecheck,
-  });
+  const _NotLoggedInBanner({required this.agentLabel, required this.onRecheck});
 
   final String agentLabel;
   final Future<void> Function() onRecheck;
@@ -736,10 +733,7 @@ class _NotLoggedInBanner extends StatelessWidget {
             Expanded(
               child: Text(
                 context.l10n.agentNotLoggedInBanner(agentLabel),
-                style: TextStyle(
-                  color: colors.onErrorContainer,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: colors.onErrorContainer, fontSize: 13),
               ),
             ),
             TextButton(
@@ -794,7 +788,7 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
   List<ChatGroup> _swarms = const <ChatGroup>[];
   List<_RecentAgentSession> _agentSessions = const <_RecentAgentSession>[];
   String? _lastMachineId;
-  String _lastAgentKeys = '';
+  String _lastAgentState = '';
 
   @override
   void initState() {
@@ -815,9 +809,10 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
 
   void _onSourceChanged() {
     final String? machineId = widget.machinesController.activeMachine?.id;
-    final String agentKeys =
-        widget.agentsController.agents.map((CliAgent a) => a.key).join('|');
-    if (machineId == _lastMachineId && agentKeys == _lastAgentKeys) {
+    final String agentState = _agentStateSignature(
+      widget.agentsController.agents,
+    );
+    if (machineId == _lastMachineId && agentState == _lastAgentState) {
       setState(() {});
       return;
     }
@@ -828,7 +823,7 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
     final MachineCredential? machine = widget.machinesController.activeMachine;
     final List<CliAgent> agents = widget.agentsController.agents;
     _lastMachineId = machine?.id;
-    _lastAgentKeys = agents.map((CliAgent a) => a.key).join('|');
+    _lastAgentState = _agentStateSignature(agents);
     if (machine == null) {
       if (!mounted) return;
       setState(() {
@@ -851,8 +846,8 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
     await Future.wait<void>(
       agents.map((CliAgent agent) async {
         try {
-          final AgentSessionList list =
-              await widget.chatController.backend.fetchSessions(agent.key);
+          final AgentSessionList list = await widget.chatController.backend
+              .fetchSessions(agent.key);
           for (final AgentSession session in list.sessions) {
             sessions.add(_RecentAgentSession(agent: agent, session: session));
           }
@@ -888,6 +883,14 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
 
   Future<void> _openAgentSession(_RecentAgentSession entry) async {
     final MachineCredential? machine = widget.machinesController.activeMachine;
+    if (!isCliAgentSelectable(entry.agent)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(agentUnavailableMessage(context.l10n, entry.agent)),
+        ),
+      );
+      return;
+    }
     if (machine == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.l10n.importOrChooseMachine)),
@@ -895,9 +898,9 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
       return;
     }
     if (widget.chatController.isThinking) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.agentBusyRetryLater)));
       return;
     }
     await widget.agentsController.setActive(entry.agent.key);
@@ -931,8 +934,9 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
                 children: <Widget>[
                   Text(
                     strings.home,
-                    style: theme.textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w700),
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -1004,24 +1008,54 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
                     emptyText: strings.noRecentAgentSessions,
                     children: <Widget>[
                       for (final _RecentAgentSession entry in _agentSessions)
-                        ListTile(
-                          leading: const Icon(Icons.smart_toy_outlined),
-                          title: Text(
-                            strings.agentSessionLabel(
-                              entry.agent.label,
-                              entry.session.name,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            formatShortTime(
-                              context,
-                              entry.session.updatedAt.toIso8601String(),
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openAgentSession(entry),
+                        Builder(
+                          builder: (BuildContext context) {
+                            final bool usable = isCliAgentSelectable(
+                              entry.agent,
+                            );
+                            final Color? textColor = usable
+                                ? null
+                                : theme.colorScheme.onSurfaceVariant;
+                            return ListTile(
+                              leading: Icon(
+                                Icons.smart_toy_outlined,
+                                color: textColor,
+                              ),
+                              title: Text(
+                                strings.agentSessionLabel(
+                                  entry.agent.label,
+                                  entry.session.name,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: textColor),
+                              ),
+                              subtitle: Text(
+                                usable
+                                    ? formatShortTime(
+                                        context,
+                                        entry.session.updatedAt
+                                            .toIso8601String(),
+                                      )
+                                    : agentUnavailableMessage(
+                                        strings,
+                                        entry.agent,
+                                      ),
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  AgentStatusLights(
+                                    agent: entry.agent,
+                                    compact: true,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
+                              onTap: () => _openAgentSession(entry),
+                            );
+                          },
                         ),
                     ],
                   ),
@@ -1113,11 +1147,22 @@ class _HomeSectionCard extends StatelessWidget {
   }
 }
 
+String _agentStateSignature(List<CliAgent> agents) {
+  return agents
+      .map(
+        (CliAgent agent) => <Object?>[
+          agent.key,
+          agent.installed,
+          agent.authed,
+          agent.usable,
+          agent.authKind,
+        ].join(':'),
+      )
+      .join('|');
+}
+
 class _RecentAgentSession {
-  const _RecentAgentSession({
-    required this.agent,
-    required this.session,
-  });
+  const _RecentAgentSession({required this.agent, required this.session});
 
   final CliAgent agent;
   final AgentSession session;
@@ -1199,10 +1244,7 @@ class _HistorySearchDialogState extends State<_HistorySearchDialog> {
         ),
       ),
       actions: <Widget>[
-        TextButton(
-          onPressed: _search,
-          child: Text(context.l10n.searchChats),
-        ),
+        TextButton(onPressed: _search, child: Text(context.l10n.searchChats)),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(context.l10n.close),
@@ -1213,10 +1255,7 @@ class _HistorySearchDialogState extends State<_HistorySearchDialog> {
 }
 
 class _HistorySearchResults extends StatelessWidget {
-  const _HistorySearchResults({
-    required this.future,
-    required this.onSelected,
-  });
+  const _HistorySearchResults({required this.future, required this.onSelected});
 
   final Future<List<ChatHistorySearchResult>>? future;
   final ValueChanged<ChatHistorySearchResult> onSelected;
@@ -1228,52 +1267,53 @@ class _HistorySearchResults extends StatelessWidget {
     }
     return FutureBuilder<List<ChatHistorySearchResult>>(
       future: future,
-      builder: (
-        BuildContext context,
-        AsyncSnapshot<List<ChatHistorySearchResult>> snapshot,
-      ) {
-        final ColorScheme colors = Theme.of(context).colorScheme;
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Text(
-            context.l10n.searchFailed(snapshot.error!),
-            style: TextStyle(color: colors.error),
-          );
-        }
-        final List<ChatHistorySearchResult> results =
-            snapshot.data ?? const <ChatHistorySearchResult>[];
-        if (results.isEmpty) {
-          return Align(
-            alignment: Alignment.topLeft,
-            child: Text(
-              context.l10n.noSearchResults,
-              style: TextStyle(color: colors.outline),
-            ),
-          );
-        }
-        return ListView.separated(
-          shrinkWrap: true,
-          itemCount: results.length,
-          separatorBuilder: (BuildContext context, int index) =>
-              const Divider(height: 1),
-          itemBuilder: (BuildContext context, int index) {
-            final ChatHistorySearchResult result = results[index];
-            final CliAgent agent = cliAgentByKey(result.agentKey);
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('${agent.label} - ${result.sessionName}'),
-              subtitle: Text(
-                result.snippet,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () => onSelected(result),
+      builder:
+          (
+            BuildContext context,
+            AsyncSnapshot<List<ChatHistorySearchResult>> snapshot,
+          ) {
+            final ColorScheme colors = Theme.of(context).colorScheme;
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Text(
+                context.l10n.searchFailed(snapshot.error!),
+                style: TextStyle(color: colors.error),
+              );
+            }
+            final List<ChatHistorySearchResult> results =
+                snapshot.data ?? const <ChatHistorySearchResult>[];
+            if (results.isEmpty) {
+              return Align(
+                alignment: Alignment.topLeft,
+                child: Text(
+                  context.l10n.noSearchResults,
+                  style: TextStyle(color: colors.outline),
+                ),
+              );
+            }
+            return ListView.separated(
+              shrinkWrap: true,
+              itemCount: results.length,
+              separatorBuilder: (BuildContext context, int index) =>
+                  const Divider(height: 1),
+              itemBuilder: (BuildContext context, int index) {
+                final ChatHistorySearchResult result = results[index];
+                final CliAgent agent = cliAgentByKey(result.agentKey);
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${agent.label} - ${result.sessionName}'),
+                  subtitle: Text(
+                    result.snippet,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => onSelected(result),
+                );
+              },
             );
           },
-        );
-      },
     );
   }
 }
@@ -1440,22 +1480,22 @@ class _InputBarState extends State<_InputBar> {
                         onPressed: _hasText
                             ? _sendText
                             : widget.isThinking
-                                ? canCancel
-                                    ? widget.onCancel
-                                    : null
-                                : _toggleActions,
+                            ? canCancel
+                                  ? widget.onCancel
+                                  : null
+                            : _toggleActions,
                         icon: Icon(
                           _hasText
                               ? Icons.arrow_upward_rounded
                               : widget.isThinking
-                                  ? Icons.stop_rounded
-                                  : Icons.add_rounded,
+                              ? Icons.stop_rounded
+                              : Icons.add_rounded,
                         ),
                         tooltip: _hasText
                             ? context.l10n.send
                             : widget.isThinking
-                                ? context.l10n.stop
-                                : context.l10n.moreChatActions,
+                            ? context.l10n.stop
+                            : context.l10n.moreChatActions,
                       ),
                     ),
                   ],
@@ -1608,10 +1648,7 @@ class _ChatNotice extends StatelessWidget {
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 12,
-            color: colors.onSurfaceVariant,
-          ),
+          style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
         ),
       ),
     );
@@ -1649,20 +1686,20 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isUser = message.isUser;
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final double maxBubbleWidth =
-        isDesktopTarget ? 760 : MediaQuery.sizeOf(context).width * 0.80;
+    final double maxBubbleWidth = isDesktopTarget
+        ? 760
+        : MediaQuery.sizeOf(context).width * 0.80;
     final Color bubbleColor = system
         ? colors.tertiaryContainer
         : isUser
-            ? colors.primary
-            : colors.surfaceContainerHighest;
-    final Color textColor =
-        isUser && !system ? colors.onPrimary : colors.onSurface;
+        ? colors.primary
+        : colors.surfaceContainerHighest;
+    final Color textColor = isUser && !system
+        ? colors.onPrimary
+        : colors.onSurface;
     final Border? border = isUser && !system
         ? null
-        : Border.all(
-            color: colors.outlineVariant,
-          );
+        : Border.all(color: colors.outlineVariant);
 
     // A turn can leave several assistant messages (mid-task follow-ups + a final
     // answer); render them as separate, individually timestamped blocks. A single
@@ -1671,19 +1708,18 @@ class _MessageBubble extends StatelessWidget {
     final bool segmented = !isUser && !system && segments.length > 1;
     final DateTime stampTime =
         (!isUser && segments.isNotEmpty && segments.first.createdAt != null)
-            ? segments.first.createdAt!
-            : message.createdAt;
+        ? segments.first.createdAt!
+        : message.createdAt;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
-        crossAxisAlignment:
-            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: <Widget>[
           Container(
-            constraints: BoxConstraints(
-              maxWidth: maxBubbleWidth,
-            ),
+            constraints: BoxConstraints(maxWidth: maxBubbleWidth),
             margin: const EdgeInsets.symmetric(vertical: 5),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
             decoration: BoxDecoration(
@@ -1712,10 +1748,7 @@ class _MessageBubble extends StatelessWidget {
                   ),
                 if (progressLines.isNotEmpty) ...<Widget>[
                   if (message.content.isNotEmpty) const SizedBox(height: 8),
-                  ProgressLines(
-                    lines: progressLines,
-                    color: textColor,
-                  ),
+                  ProgressLines(lines: progressLines, color: textColor),
                 ],
                 if (cancelled) ...<Widget>[
                   if (message.content.isNotEmpty || progressLines.isNotEmpty)
@@ -1763,10 +1796,7 @@ class _MessageBubble extends StatelessWidget {
               padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
               child: Text(
                 formatShortTime(context, stampTime.toIso8601String()),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: colors.outline,
-                ),
+                style: TextStyle(fontSize: 11, color: colors.outline),
               ),
             ),
           if (retryable) ...<Widget>[

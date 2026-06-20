@@ -3,6 +3,10 @@
 const { execFile } = require('child_process');
 const express = require('express');
 
+const {
+  getAgentStatuses: defaultGetAgentStatuses,
+} = require('../lib/agent-status');
+
 module.exports = function createMetaRouter(ctx) {
   const {
     CLI,
@@ -26,6 +30,7 @@ module.exports = function createMetaRouter(ctx) {
     eventWorkdir,
     formatUptime,
     getAgent,
+    getAgentStatuses = defaultGetAgentStatuses,
     getDefaultWorkdir,
     getSettings,
     listAgents,
@@ -46,7 +51,22 @@ module.exports = function createMetaRouter(ctx) {
   });
 
   router.get('/api/agents', (_req, res) => {
-    res.json({ defaultAgent: DEFAULT_AGENT, agents: listAgents() });
+    const statuses = getAgentStatuses();
+    res.json({
+      defaultAgent: DEFAULT_AGENT,
+      agents: listAgents().map((agent) => {
+        const status = statuses[agent.key] || {};
+        const installed = status.installed === true;
+        const authed = status.authed === true;
+        return {
+          ...agent,
+          installed,
+          authed,
+          authKind: status.authKind || 'unknown',
+          usable: installed && (authed || agent.key === 'opencode'),
+        };
+      }),
+    });
   });
 
   // Run a CLI binary with fixed argv (no user-controlled tokens) and resolve with
