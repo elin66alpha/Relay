@@ -305,6 +305,181 @@ String _normalizeMarkdownLine(String line) {
   return value;
 }
 
+/// Detects a trailing "pick one of these" prompt at the end of an assistant
+/// message: a question line (ending in `?` / `？`) immediately followed by an
+/// ordered list (`1.` / `2)` / `a.` …). Returns the cleaned option texts, or
+/// null when the text doesn't match. Kept deliberately strict — only a question
+/// directly above a closing ordered list qualifies — so ordinary numbered lists
+/// in an answer never turn into buttons.
+List<String>? parseOptionPrompt(String text) {
+  final List<String> lines = text.replaceAll('\r\n', '\n').split('\n');
+  int end = lines.length;
+  while (end > 0 && lines[end - 1].trim().isEmpty) {
+    end--;
+  }
+  if (end == 0) return null;
+
+  final RegExp item = RegExp(r'^\s*(?:\d{1,2}|[A-Za-z])[.)、]\s+(\S.*)$');
+  final List<String> options = <String>[];
+  int i = end - 1;
+  for (; i >= 0; i--) {
+    final RegExpMatch? match = item.firstMatch(lines[i]);
+    if (match == null) break;
+    options.insert(0, _stripInlineMarkdown(match.group(1)!));
+  }
+  if (options.length < 2 || options.length > 8) return null;
+
+  // The line directly above the list (skipping blanks) must be the question.
+  int q = i;
+  while (q >= 0 && lines[q].trim().isEmpty) {
+    q--;
+  }
+  if (q < 0) return null;
+  final String question = lines[q];
+  if (!question.contains('?') && !question.contains('？')) return null;
+
+  return options;
+}
+
+String _stripInlineMarkdown(String value) {
+  return value
+      .replaceAll(RegExp(r'\*\*|__|[`*]'), '')
+      .trim();
+}
+
+/// Splits a leading "here's my plan" preamble off an assistant answer so it can
+/// be folded away. agy (Antigravity) habitually opens with one or more "I will …"
+/// / "我将 …" planning paragraphs before the real answer. Returns (plan, body) when
+/// such a preamble sits above a non-empty body, else null (so a message that is
+/// nothing but plan is never hidden).
+({String plan, String body})? splitLeadingPlan(String text) {
+  final List<String> paras = text.trim().split(RegExp(r'\n\s*\n'));
+  if (paras.length < 2) return null;
+  final RegExp planStart = RegExp(
+    r"^(?:I will\b|I['’]ll\b|I am going to\b|I['’]m going to\b|Let me\b|"
+    r'First[,，]|我将|我会|我先|我打算|我准备|让我|接下来我)',
+    caseSensitive: false,
+  );
+  int i = 0;
+  while (i < paras.length && planStart.hasMatch(paras[i].trimLeft())) {
+    i++;
+  }
+  if (i == 0 || i >= paras.length) return null;
+  return (
+    plan: paras.sublist(0, i).join('\n\n'),
+    body: paras.sublist(i).join('\n\n'),
+  );
+}
+
+/// A default-collapsed disclosure used to tuck an agent's "thinking" (a plan
+/// preamble or its execution steps) under a one-line toggle, matching the
+/// styling of [SegmentedContent]'s progress-updates toggle.
+class CollapsibleNote extends StatefulWidget {
+  const CollapsibleNote({
+    required this.title,
+    required this.color,
+    required this.child,
+    super.key,
+  });
+
+  final String title;
+  final Color color;
+  final Widget child;
+
+  @override
+  State<CollapsibleNote> createState() => _CollapsibleNoteState();
+}
+
+class _CollapsibleNoteState extends State<CollapsibleNote> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color toggle = widget.color.withValues(alpha: 0.7);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  _expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 16,
+                  color: toggle,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  widget.title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: toggle,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: widget.child,
+          ),
+      ],
+    );
+  }
+}
+
+/// Renders the choices from [parseOptionPrompt] as tappable buttons. Tapping one
+/// sends its text as the next user message (wired by the host screen).
+class OptionButtons extends StatelessWidget {
+  const OptionButtons({
+    required this.options,
+    required this.color,
+    required this.onSelected,
+    super.key,
+  });
+
+  final List<String> options;
+  final Color color;
+  final void Function(String option) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          for (final String option in options)
+            OutlinedButton(
+              onPressed: () => onSelected(option),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: color,
+                side: BorderSide(color: color.withValues(alpha: 0.4)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(option),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class ProgressLines extends StatelessWidget {
   const ProgressLines({
     required this.lines,

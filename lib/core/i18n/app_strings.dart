@@ -335,6 +335,10 @@ class AppStrings {
   String agentProgressUpdates(int count) => isZh
       ? '思索过程 · $count 条'
       : 'Thinking · $count ${count == 1 ? 'update' : 'updates'}';
+  String get agentThinking => isZh ? '思考过程' : 'Thinking';
+  String agentSteps(int count) => isZh
+      ? '执行步骤 · $count 条'
+      : '$count ${count == 1 ? 'step' : 'steps'}';
   String get btwTitle => isZh ? 'BTW 副手' : 'BTW sidekick';
   String get btwSubtitle => isZh
       ? '基于当前对话记忆的只读旁支问答，不影响主任务'

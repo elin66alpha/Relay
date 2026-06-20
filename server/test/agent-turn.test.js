@@ -354,6 +354,11 @@ test('no-op responder broadcasts scheduled progress and does not require task no
     ['agent_start', 'agent_progress', 'agent_delta', 'agent_done'],
   );
   const messages = harness.histories.get('scope');
-  assert.deepEqual(messages[1].metadata.progressLines, []);
+  // Progress/step lines are kept after the turn finishes so the app can fold
+  // them into a collapsed "thinking" area instead of dropping them on done.
+  assert.deepEqual(messages[1].metadata.progressLines, [
+    'Scheduled after quota reset.',
+    'quota resumed',
+  ]);
   assert.equal(messages[1].content, 'scheduled done');
 });
