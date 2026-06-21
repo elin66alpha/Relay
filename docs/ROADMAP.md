@@ -71,7 +71,7 @@
   each member's own group session still queues against itself. Each swarm pins
   its own work tree and per-member model/effort/permission, is listed per
   workspace (several per workspace, each on its chosen work tree), and appears as
-  always-visible sub-entries in the left drawer. See `docs/group-chat.md`.
+  always-visible sub-entries in the left drawer. See `docs/handbook.md`.
 - Antigravity model selection: `agy` exposes its model catalog via `--model`, so
   swarms and solo chats can pin a specific Gemini / Claude / GPT-OSS model.
 - Multi-segment messages: each assistant follow-up gets its own timestamp and

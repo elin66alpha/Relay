@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,9 +10,11 @@ import '../../core/models/agent_options.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/group.dart';
+import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
+import '../../core/widgets/agent_icon.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import 'chat_content.dart';
@@ -146,7 +151,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         return Scaffold(
           appBar: AppBar(
             title: InkWell(
-              onTap: _controller.groups.isEmpty ? null : _showGroupSwitcher,
+              onTap: _showGroupSwitcher,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -228,8 +233,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       controller: _scroll,
       padding: const EdgeInsets.symmetric(vertical: 12),
       itemCount: messages.length,
-      itemBuilder: (BuildContext context, int index) =>
-          _MessageBubble(message: messages[index]),
+      itemBuilder: (BuildContext context, int index) => _MessageBubble(
+        message: messages[index],
+        group: group,
+        onEditMember: _editMember,
+      ),
     );
   }
 
@@ -323,6 +331,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   void _showGroupSwitcher() {
+    final AppStrings strings = context.l10n;
+    final ChatGroup? selected = _controller.selected;
     showModalBottomSheet<void>(
       context: context,
       builder: (BuildContext context) {
@@ -341,6 +351,24 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     _controller.selectGroup(group);
                   },
                 ),
+              if (_controller.groups.isNotEmpty) const Divider(height: 1),
+              if (selected != null)
+                ListTile(
+                  leading: const Icon(Icons.download_outlined),
+                  title: Text(strings.saveSwarmTemplate),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _saveTemplate(selected);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.upload_file_outlined),
+                title: Text(strings.importSwarmTemplate),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _importTemplate();
+                },
+              ),
             ],
           ),
         );
@@ -375,6 +403,102 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       result.members,
       configs: result.configs,
     );
+  }
+
+  // Tapping a member's avatar in the transcript opens its swarm-scoped nickname
+  // and prompt for editing. Saving persists only that member's config (members
+  // stay the same), so a renamed/instructed member takes effect from the next
+  // round on. Only members still in the swarm are editable.
+  Future<void> _editMember(ChatGroup group, String agentKey) async {
+    if (!group.members.contains(agentKey)) return;
+    final Map<String, String> current =
+        group.memberConfigs[agentKey] ?? const <String, String>{};
+    final _MemberPersona? result = await showDialog<_MemberPersona>(
+      context: context,
+      builder: (BuildContext context) => _MemberPersonaDialog(
+        agentKey: agentKey,
+        initialNickname: current['nickname'] ?? '',
+        initialPrompt: current['prompt'] ?? '',
+      ),
+    );
+    if (result == null) return;
+    final Map<String, Map<String, String>> configs =
+        <String, Map<String, String>>{
+      for (final MapEntry<String, Map<String, String>> e
+          in group.memberConfigs.entries)
+        e.key: <String, String>{...e.value},
+    };
+    final Map<String, String> config =
+        configs.putIfAbsent(agentKey, () => <String, String>{});
+    if (result.nickname.trim().isEmpty) {
+      config.remove('nickname');
+    } else {
+      config['nickname'] = result.nickname.trim();
+    }
+    if (result.prompt.trim().isEmpty) {
+      config.remove('prompt');
+    } else {
+      config['prompt'] = result.prompt.trim();
+    }
+    await _controller.updateMembers(group, group.members, configs: configs);
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // Save the swarm as a reusable template by downloading it as a JSON file (same
+  // path the file browser uses), so it can be shared or re-imported later. Drops
+  // the id/workdir/transcript — only name, members and per-member configs travel.
+  Future<void> _saveTemplate(ChatGroup group) async {
+    final AppStrings strings = context.l10n;
+    try {
+      final String json = const JsonEncoder.withIndent('  ')
+          .convert(_swarmTemplateToJson(group));
+      final List<int> data = utf8.encode(json);
+      await saveDownloadStream(
+        fileName: _swarmTemplateFileName(group.name),
+        total: data.length,
+        bytes: Stream<List<int>>.value(data),
+        onProgress: (_, __) {},
+      );
+      _showSnack(strings.swarmTemplateSaved);
+    } catch (err) {
+      _showSnack(strings.swarmTemplateFailed(err));
+    }
+  }
+
+  // Import a template file and create a swarm from it in the current workspace.
+  // Unknown agents are dropped backend-side; the new swarm uses the default work
+  // tree, since a template carries no machine-specific path.
+  Future<void> _importTemplate() async {
+    final AppStrings strings = context.l10n;
+    try {
+      final FilePickerResult? result = await FilePicker.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final Uint8List? bytes = result.files.single.bytes;
+      if (bytes == null) {
+        _showSnack(strings.swarmTemplateInvalid);
+        return;
+      }
+      final _SwarmTemplate template = _parseSwarmTemplate(utf8.decode(bytes));
+      final ChatGroup? created = await _controller.createGroup(
+        template.name,
+        template.members,
+        configs: template.configs,
+      );
+      if (created != null) _showSnack(strings.swarmTemplateImported(created.name));
+    } on FormatException {
+      _showSnack(strings.swarmTemplateInvalid);
+    } catch (err) {
+      _showSnack(strings.swarmTemplateFailed(err));
+    }
   }
 
   Future<_SwarmForm?> _showSwarmForm(
@@ -473,6 +597,167 @@ class _SwarmForm {
   final Map<String, Map<String, String>> configs;
 }
 
+class _MemberPersona {
+  const _MemberPersona({required this.nickname, required this.prompt});
+
+  final String nickname;
+  final String prompt;
+}
+
+/// A swarm reduced to its reusable parts: name, roster, and per-member config
+/// (incl. nickname/prompt). No id/workdir/transcript, so it travels between
+/// workspaces and people.
+class _SwarmTemplate {
+  const _SwarmTemplate({
+    required this.name,
+    required this.members,
+    required this.configs,
+  });
+
+  final String name;
+  final List<String> members;
+  final Map<String, Map<String, String>> configs;
+}
+
+const String _swarmTemplateMarker = 'relaySwarmTemplate';
+
+Map<String, Object?> _swarmTemplateToJson(ChatGroup group) {
+  return <String, Object?>{
+    _swarmTemplateMarker: 1,
+    'name': group.name,
+    'members': group.members,
+    'memberConfigs': group.memberConfigs,
+  };
+}
+
+/// Parse a downloaded template back into its parts. Throws [FormatException] on
+/// malformed JSON or a roster with no members. Reuses [ChatGroup.fromJson] for
+/// the per-member config sanitization so both directions share one parser.
+_SwarmTemplate _parseSwarmTemplate(String raw) {
+  final Object? decoded = jsonDecode(raw);
+  if (decoded is! Map) throw const FormatException('not a template object');
+  final List<String> members = (decoded['members'] as List?)
+          ?.map((Object? m) => m?.toString() ?? '')
+          .where((String m) => m.isNotEmpty)
+          .toList(growable: false) ??
+      const <String>[];
+  if (members.isEmpty) throw const FormatException('template has no members');
+  final ChatGroup parsed = ChatGroup.fromJson(<String, Object?>{
+    'members': members,
+    'memberConfigs': decoded['memberConfigs'],
+  });
+  final String? name = decoded['name'] as String?;
+  return _SwarmTemplate(
+    name: (name != null && name.trim().isNotEmpty) ? name.trim() : 'Swarm',
+    members: members,
+    configs: parsed.memberConfigs,
+  );
+}
+
+String _swarmTemplateFileName(String name) {
+  final String slug = name
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  return 'swarm-${slug.isEmpty ? 'template' : slug}.json';
+}
+
+/// Edit one member's swarm-scoped nickname and work/prompt, reached by tapping its
+/// avatar in the transcript. Returns the new values; the caller persists them.
+class _MemberPersonaDialog extends StatefulWidget {
+  const _MemberPersonaDialog({
+    required this.agentKey,
+    required this.initialNickname,
+    required this.initialPrompt,
+  });
+
+  final String agentKey;
+  final String initialNickname;
+  final String initialPrompt;
+
+  @override
+  State<_MemberPersonaDialog> createState() => _MemberPersonaDialogState();
+}
+
+class _MemberPersonaDialogState extends State<_MemberPersonaDialog> {
+  late final TextEditingController _nickname =
+      TextEditingController(text: widget.initialNickname);
+  late final TextEditingController _prompt =
+      TextEditingController(text: widget.initialPrompt);
+
+  @override
+  void dispose() {
+    _nickname.dispose();
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    return AlertDialog(
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          AgentIcon(agentKey: widget.agentKey, size: 24),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              strings.editMemberTitle(cliAgentByKey(widget.agentKey).label),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TextField(
+              controller: _nickname,
+              decoration: InputDecoration(
+                labelText: strings.memberNickname,
+                hintText: strings.memberNicknameHint,
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _prompt,
+              minLines: 3,
+              maxLines: 8,
+              decoration: InputDecoration(
+                labelText: strings.memberPrompt,
+                hintText: strings.memberPromptHint,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(
+            _MemberPersona(
+              nickname: _nickname.text,
+              prompt: _prompt.text,
+            ),
+          ),
+          child: Text(strings.ok),
+        ),
+      ],
+    );
+  }
+}
+
 /// Create / edit a swarm: name, work tree, members, and — per selected member —
 /// model / effort / permission. Option catalogs are fetched lazily the first
 /// time an agent is selected, so opening the dialog costs no network round-trips.
@@ -525,11 +810,45 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   final Map<String, AgentOptionsCatalog> _catalogs =
       <String, AgentOptionsCatalog>{};
   final Set<String> _loading = <String>{};
+  // Per-member swarm-scoped nickname / prompt fields, lazily created and seeded
+  // from the swarm being edited. Kept as controllers (not inline initialValue) so
+  // their text survives the setState rebuilds that toggling other members causes.
+  final Map<String, TextEditingController> _nicknameControllers =
+      <String, TextEditingController>{};
+  final Map<String, TextEditingController> _promptControllers =
+      <String, TextEditingController>{};
   String? _validationError;
+
+  TextEditingController _personaController(
+    Map<String, TextEditingController> map,
+    String agentKey,
+    String field,
+  ) {
+    return map.putIfAbsent(
+      agentKey,
+      () => TextEditingController(text: _configs[agentKey]?[field] ?? ''),
+    );
+  }
+
+  void _onPersonaChanged(String agentKey, String field, String value) {
+    final Map<String, String> config =
+        _configs.putIfAbsent(agentKey, () => <String, String>{});
+    if (value.trim().isEmpty) {
+      config.remove(field);
+    } else {
+      config[field] = value;
+    }
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
+    for (final TextEditingController c in _nicknameControllers.values) {
+      c.dispose();
+    }
+    for (final TextEditingController c in _promptControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -727,8 +1046,11 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
         if (on)
           Padding(
             padding: const EdgeInsets.only(left: 16, bottom: 8),
-            child: _loading.contains(agent.key)
-                ? const Padding(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (_loading.contains(agent.key))
+                  const Padding(
                     padding: EdgeInsets.symmetric(vertical: 8),
                     child: SizedBox(
                       height: 16,
@@ -736,9 +1058,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : catalog == null
-                ? const SizedBox.shrink()
-                : Wrap(
+                else if (catalog != null)
+                  Wrap(
                     spacing: 12,
                     runSpacing: 4,
                     children: <Widget>[
@@ -752,8 +1073,50 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
                           ),
                     ],
                   ),
+                _buildPersonaFields(strings, agent.key),
+              ],
+            ),
           ),
       ],
+    );
+  }
+
+  // The swarm-scoped nickname + work/prompt for one member. Independent of the
+  // option catalog, so they show even while it loads or fails.
+  Widget _buildPersonaFields(AppStrings strings, String agentKey) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          TextField(
+            controller:
+                _personaController(_nicknameControllers, agentKey, 'nickname'),
+            onChanged: (String value) =>
+                _onPersonaChanged(agentKey, 'nickname', value),
+            decoration: InputDecoration(
+              labelText: strings.memberNickname,
+              hintText: strings.memberNicknameHint,
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller:
+                _personaController(_promptControllers, agentKey, 'prompt'),
+            onChanged: (String value) =>
+                _onPersonaChanged(agentKey, 'prompt', value),
+            minLines: 2,
+            maxLines: 5,
+            decoration: InputDecoration(
+              labelText: strings.memberPrompt,
+              hintText: strings.memberPromptHint,
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -925,20 +1288,46 @@ class _WorkTreePickerDialogState extends State<_WorkTreePickerDialog> {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({
+    required this.message,
+    this.group,
+    this.onEditMember,
+  });
 
   final ChatMessage message;
+
+  /// The swarm this transcript belongs to, used to resolve a member's current
+  /// nickname (so renames apply to past messages too) and to gate avatar editing.
+  final ChatGroup? group;
+
+  /// Opens the member editor when its avatar is tapped. Null disables editing.
+  final void Function(ChatGroup group, String agentKey)? onEditMember;
+
+  // A member's display name: its current swarm nickname wins (so a rename
+  // re-labels earlier messages too), then the label recorded with the message,
+  // then the agent's default label.
+  String _memberLabel(String? author) {
+    final Map<String, String>? config =
+        author == null ? null : group?.memberConfigs[author];
+    final String? nickname = config == null ? null : config['nickname'];
+    if (nickname != null && nickname.trim().isNotEmpty) return nickname.trim();
+    final Object? recorded = message.metadata['agentLabel'];
+    if (recorded is String && recorded.trim().isNotEmpty) return recorded;
+    return groupAuthorLabel(author);
+  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final bool isHuman = message.role == ChatRole.user;
     final String? author = message.metadata['author'] as String?;
-    final String label = isHuman
-        ? groupAuthorLabel('human')
-        : (message.metadata['agentLabel'] as String?)?.trim().isNotEmpty == true
-        ? message.metadata['agentLabel'] as String
-        : groupAuthorLabel(author);
+    final String label =
+        isHuman ? groupAuthorLabel('human') : _memberLabel(author);
+    final bool canEdit = !isHuman &&
+        author != null &&
+        group != null &&
+        onEditMember != null &&
+        group!.members.contains(author);
     final bool streaming = message.metadata['streaming'] == true;
     final bool awaitingFirstToken =
         message.metadata['awaitingFirstToken'] == true;
@@ -970,12 +1359,27 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            child: Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.outline,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (!isHuman && author != null) ...<Widget>[
+                  InkWell(
+                    onTap: canEdit
+                        ? () => onEditMember!(group!, author)
+                        : null,
+                    borderRadius: BorderRadius.circular(12),
+                    child: AgentIcon(agentKey: author, size: 20),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
           Container(

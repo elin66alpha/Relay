@@ -8,6 +8,7 @@ import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
+import '../../core/widgets/agent_icon.dart';
 import '../chat/bot_chat_controller.dart';
 import '../chat/group_chat_screen.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -206,7 +207,7 @@ class CliAgentsDrawer extends StatelessWidget {
       ListTile(
         leading: Opacity(
           opacity: usable ? 1 : 0.45,
-          child: _agentIconFor(context, agent.key),
+          child: AgentIcon(agentKey: agent.key),
         ),
         title: Text(agent.label),
         textColor: usable ? null : disabledColor,
@@ -390,44 +391,6 @@ class CliAgentsDrawer extends StatelessWidget {
 // Mirrors the backend cap (server/lib/chat-sessions.js MAX_SESSIONS) so the
 // "new session" button disables before the create call would be rejected.
 const int _maxSessionsPerAgent = 8;
-
-Widget _agentIconFor(BuildContext context, String key) {
-  final String? assetPath = _agentIconAssetPath(
-    key,
-    Theme.of(context).brightness,
-  );
-  if (assetPath == null) return const Icon(Icons.code_rounded);
-  return SizedBox.square(
-    dimension: 28,
-    child: Image.asset(
-      assetPath,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
-      excludeFromSemantics: true,
-    ),
-  );
-}
-
-String? _agentIconAssetPath(String key, Brightness brightness) {
-  final bool useInverse = brightness == Brightness.dark;
-  return switch (key) {
-    'claude' => 'assets/agent_icons/claude.png',
-    'codex' =>
-      useInverse
-          ? 'assets/agent_icons/codex_inverse.png'
-          : 'assets/agent_icons/codex.png',
-    'agy' => 'assets/agent_icons/agy.png',
-    'opencode' =>
-      useInverse
-          ? 'assets/agent_icons/opencode_inverse.png'
-          : 'assets/agent_icons/opencode.png',
-    'hermes' =>
-      useInverse
-          ? 'assets/agent_icons/hermes_inverse.png'
-          : 'assets/agent_icons/hermes.png',
-    _ => null,
-  };
-}
 
 /// The Swarm drawer entry plus an always-visible list of the workspace's swarms
 /// as sub-entries. Tapping the header opens the swarm screen on its most-recent

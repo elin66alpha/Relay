@@ -58,11 +58,16 @@ function normalizeMembers(members) {
   return out;
 }
 
-// Per-member model/effort/permission, structurally sanitized only: the route
-// normalizes ids against agent-options before they reach here, so we just keep
-// the known groups with plausible string ids for current members and drop the
-// rest. Stays agent-agnostic so this module never imports the option catalog.
+// Per-member config, structurally sanitized only: the route normalizes option
+// ids against agent-options before they reach here, so we just keep the known
+// groups with plausible string ids for current members and drop the rest. Stays
+// agent-agnostic so this module never imports the option catalog.
+//   * model/effort/permission are short option ids (<= 64 chars).
+//   * nickname is a swarm-scoped display name for the member (<= 80 chars).
+//   * prompt is the member's per-swarm work instructions / persona (<= 4000).
 const CONFIG_GROUPS = ['model', 'effort', 'permission'];
+const MAX_MEMBER_NICKNAME = 80;
+const MAX_MEMBER_PROMPT = 4000;
 
 function normalizeMemberConfigs(raw, members) {
   const out = {};
@@ -76,6 +81,14 @@ function normalizeMemberConfigs(raw, members) {
     for (const group of CONFIG_GROUPS) {
       const id = value[group];
       if (typeof id === 'string' && id && id.length <= 64) config[group] = id;
+    }
+    if (typeof value.nickname === 'string') {
+      const nickname = value.nickname.replace(/\s+/g, ' ').trim();
+      if (nickname) config.nickname = nickname.slice(0, MAX_MEMBER_NICKNAME);
+    }
+    if (typeof value.prompt === 'string') {
+      const prompt = value.prompt.trim();
+      if (prompt) config.prompt = prompt.slice(0, MAX_MEMBER_PROMPT);
     }
     if (Object.keys(config).length > 0) out[key] = config;
   }

@@ -839,7 +839,27 @@ function quotaItem(key, label, block) {
     usedPercent,
     remainingPercent: usedPercent == null ? null : Math.max(0, 100 - usedPercent),
     resetsAt: (block && block.resets_at) || null,
+    expired: false,
   };
+}
+
+// A stale cached quota whose reset time has already passed no longer reflects
+// reality: the rolling window refreshed while the source was unreachable (most
+// often a stopped `agy`, whose quota is only readable from a running instance),
+// so the cached utilization is meaningless — the real remaining is back near
+// full. Flag those buckets `expired` so the client shows "window reset, awaiting
+// refresh" instead of a misleading old percentage. Fresh (non-stale) data is
+// never touched, even if its reset moment just passed, because it was just read.
+function markExpiredQuotas(quotas, stale, nowMs = Date.now()) {
+  if (!stale) return quotas;
+  return quotas.map((quota) => {
+    if (!quota || !quota.resetsAt) return quota;
+    const resetMs = Date.parse(quota.resetsAt);
+    if (Number.isFinite(resetMs) && resetMs <= nowMs) {
+      return { ...quota, expired: true };
+    }
+    return quota;
+  });
 }
 
 // Agents whose quota we can report. `normalize` maps each fetcher's own result
@@ -897,10 +917,13 @@ async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
       detail,
       asOf,
       stale,
-      quotas: [
-        quotaItem('five_hour', '5 hour quota', fiveHour),
-        quotaItem('seven_day', 'Weekly quota', sevenDay),
-      ],
+      quotas: markExpiredQuotas(
+        [
+          quotaItem('five_hour', '5 hour quota', fiveHour),
+          quotaItem('seven_day', 'Weekly quota', sevenDay),
+        ],
+        stale,
+      ),
     };
   } catch (err) {
     return { key, label, available: true, error: err.message, quotas: [] };
@@ -925,5 +948,6 @@ module.exports = {
   getCodexUsage,
   getAgyUsage,
   normalizeAgyQuotaSummary,
+  markExpiredQuotas,
   buildUsageReport,
 };

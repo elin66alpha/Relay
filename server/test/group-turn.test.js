@@ -93,6 +93,20 @@ test('buildGroupPrompt handles an empty delta', () => {
   assert.match(prompt, /\(no new messages\)/);
 });
 
+test('buildGroupPrompt injects the member persona when given', () => {
+  const delta = [human('start')];
+  const prompt = buildGroupPrompt({
+    selfLabel: 'Codex',
+    persona: 'Own the database schema',
+    delta,
+    labelFor,
+  });
+  assert.match(prompt, /Your role in this swarm: Own the database schema/);
+  // No persona -> no role line.
+  const plain = buildGroupPrompt({ selfLabel: 'Codex', delta, labelFor });
+  assert.doesNotMatch(plain, /Your role in this swarm/);
+});
+
 test('buildGroupPrompt bounds the prompt and notes omitted history', () => {
   const big = 'x'.repeat(2000);
   const delta = [];

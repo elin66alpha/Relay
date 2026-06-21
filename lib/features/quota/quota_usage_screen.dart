@@ -235,7 +235,10 @@ class _UsageQuotaRow extends StatelessWidget {
       'seven_day' => context.l10n.weeklyQuota,
       _ => quota.label,
     };
-    final double? percent = quota.remainingPercent;
+    // An expired bucket's cached percentage is meaningless (its window already
+    // reset while the source was unreachable), so drop the number and let the
+    // bar fall to its indeterminate "awaiting fresh data" state.
+    final double? percent = quota.expired ? null : quota.remainingPercent;
     final String percentText = _formatPercent(context, percent);
     final double? value =
         percent == null ? null : (percent / 100).clamp(0.0, 1.0).toDouble();
@@ -258,7 +261,14 @@ class _UsageQuotaRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text('$percentText ${context.l10n.remaining}'),
+                    Text(
+                      quota.expired
+                          ? context.l10n.quotaWindowReset
+                          : '$percentText ${context.l10n.remaining}',
+                      style: quota.expired
+                          ? TextStyle(color: colors.tertiary)
+                          : null,
+                    ),
                     const SizedBox(height: 3),
                     Text(
                       '${context.l10n.refreshAt}: ${formatShortTime(context, quota.resetsAt)}',
