@@ -302,9 +302,9 @@ class AppStrings {
   String get recheck => isZh ? '重新检查' : 'Recheck';
   String get login => isZh ? '登录' : 'Log in';
   String get loginAgain => isZh ? '重新登录' : 'Log in again';
-  String get configureApiKey => isZh ? '配置 API key' : 'Configure API key';
-  String get updateApiKey => isZh ? '更新 API key' : 'Update API key';
   String get optionalApiKey => isZh ? 'API key 可选' : 'API key optional';
+  String get keyManagedOnHost =>
+      isZh ? '在主机上配置' : 'Configured on host';
   String get agentReady => isZh ? '已就绪' : 'Ready';
   String get copy => isZh ? '复制' : 'Copy';
   String get copied => isZh ? '已复制。' : 'Copied.';
@@ -331,15 +331,6 @@ class AppStrings {
   String get agentLoginOutput => isZh ? 'CLI 输出' : 'CLI output';
   String agentLoginFailed(Object err) =>
       isZh ? '登录失败：$err' : 'Login failed: $err';
-  String get apiProvider => isZh ? '供应商' : 'Provider';
-  String get apiKey => isZh ? 'API key' : 'API key';
-  String apiKeyTitle(String agent) =>
-      isZh ? '配置 $agent API key' : 'Configure $agent API key';
-  String get apiKeyHint =>
-      isZh ? '此值只会写入后端主机。' : 'This value is written only on the backend host.';
-  String get saveApiKey => isZh ? '保存 API key' : 'Save API key';
-  String apiKeySaved(String agent) =>
-      isZh ? '已保存 $agent API key。' : 'Saved $agent API key.';
   String agentStatusRefreshFailed(Object err) =>
       isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';

@@ -7,7 +7,8 @@ class CliAgent {
     this.authed = true,
     bool? usable,
     String? authKind,
-  }) : usable = usable ?? (installed && (authed || key == 'opencode')),
+  }) : usable = usable ??
+            (installed && (authed || key == 'opencode' || key == 'hermes')),
        authKind = authKind ?? 'unknown';
 
   factory CliAgent.fromJson(Map<String, Object?> json) {
@@ -22,7 +23,7 @@ class CliAgent {
       authed: authed,
       usable:
           json['usable'] as bool? ??
-          (installed && (authed || key == 'opencode')),
+          (installed && (authed || key == 'opencode' || key == 'hermes')),
       authKind: json['authKind'] as String? ?? defaultAuthKindForAgent(key),
     );
   }

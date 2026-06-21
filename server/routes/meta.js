@@ -63,7 +63,12 @@ module.exports = function createMetaRouter(ctx) {
           installed,
           authed,
           authKind: status.authKind || 'unknown',
-          usable: installed && (authed || agent.key === 'opencode'),
+          // claude/codex/agy (oauth) gate on login; hermes/opencode are managed
+          // out-of-band (the user sets up their key on the host), so they are
+          // usable whenever installed and never gate on a key Relay can't see.
+          usable:
+            installed &&
+            (authed || agent.key === 'opencode' || agent.key === 'hermes'),
         };
       }),
     });

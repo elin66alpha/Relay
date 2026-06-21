@@ -135,7 +135,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 _AgentCredentialStatusSection(
                                   agentsController: widget.agentsController!,
                                   onLogin: _startAgentLogin,
-                                  onApiKey: _configureAgentApiKey,
                                   onRefresh: _refreshAgents,
                                 ),
                               ],
@@ -431,27 +430,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     }
   }
 
-  Future<void> _configureAgentApiKey(CliAgent agent) async {
-    if (agent.key != 'hermes') return;
-    final bool? changed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => _ApiKeyDialog(
-        agent: agent,
-        onSave: (String provider, String apiKey) {
-          return _backendClient.saveAgentApiKey(
-            agent: agent.key,
-            provider: provider,
-            apiKey: apiKey,
-          );
-        },
-      ),
-    );
-    if (changed == true) {
-      _showMessage(context.l10n.apiKeySaved(agent.label));
-      await _refreshAgents();
-    }
-  }
-
   Future<void> _confirmDelete(MachineCredential credential) async {
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -515,13 +493,11 @@ class _AgentCredentialStatusSection extends StatelessWidget {
   const _AgentCredentialStatusSection({
     required this.agentsController,
     required this.onLogin,
-    required this.onApiKey,
     required this.onRefresh,
   });
 
   final CliAgentsController agentsController;
   final ValueChanged<CliAgent> onLogin;
-  final ValueChanged<CliAgent> onApiKey;
   final Future<void> Function() onRefresh;
 
   @override
@@ -571,7 +547,6 @@ class _AgentCredentialStatusSection extends StatelessWidget {
                       agent: agentsController.agents[index],
                       showDivider: index > 0,
                       onLogin: onLogin,
-                      onApiKey: onApiKey,
                     ),
                 ],
               ),
@@ -588,13 +563,11 @@ class _AgentCredentialStatusTile extends StatelessWidget {
     required this.agent,
     required this.showDivider,
     required this.onLogin,
-    required this.onApiKey,
   });
 
   final CliAgent agent;
   final bool showDivider;
   final ValueChanged<CliAgent> onLogin;
-  final ValueChanged<CliAgent> onApiKey;
 
   @override
   Widget build(BuildContext context) {
@@ -625,7 +598,6 @@ class _AgentCredentialStatusTile extends StatelessWidget {
               _AgentCredentialAction(
                 agent: agent,
                 onLogin: onLogin,
-                onApiKey: onApiKey,
               ),
             ],
           ),
@@ -646,12 +618,10 @@ class _AgentCredentialAction extends StatelessWidget {
   const _AgentCredentialAction({
     required this.agent,
     required this.onLogin,
-    required this.onApiKey,
   });
 
   final CliAgent agent;
   final ValueChanged<CliAgent> onLogin;
-  final ValueChanged<CliAgent> onApiKey;
 
   @override
   Widget build(BuildContext context) {
@@ -668,17 +638,12 @@ class _AgentCredentialAction extends StatelessWidget {
         child: Text(agent.authed ? strings.loginAgain : strings.login),
       );
     }
-    if (agent.key == 'hermes') {
-      return FilledButton(
-        onPressed: () => onApiKey(agent),
-        child:
-            Text(agent.authed ? strings.updateApiKey : strings.configureApiKey),
-      );
-    }
-    if (agent.key == 'opencode') {
+    // hermes/opencode get their key set up on the host out of Relay's view, so
+    // there's no in-app key action — just a hint that they're managed there.
+    if (agent.key == 'opencode' || agent.key == 'hermes') {
       return OutlinedButton(
         onPressed: null,
-        child: Text(strings.optionalApiKey),
+        child: Text(strings.keyManagedOnHost),
       );
     }
     return const SizedBox.shrink();
@@ -880,133 +845,6 @@ class _AgentLoginDialogState extends State<_AgentLoginDialog> {
           _flow.error ?? strings.unknown,
         ),
     };
-  }
-}
-
-class _ApiKeyDialog extends StatefulWidget {
-  const _ApiKeyDialog({
-    required this.agent,
-    required this.onSave,
-  });
-
-  final CliAgent agent;
-  final Future<void> Function(String provider, String apiKey) onSave;
-
-  @override
-  State<_ApiKeyDialog> createState() => _ApiKeyDialogState();
-}
-
-class _ApiKeyDialogState extends State<_ApiKeyDialog> {
-  static const List<String> _providers = <String>[
-    'openrouter',
-    'anthropic',
-    'openai',
-    'google',
-    'xai',
-    'deepseek',
-    'kimi',
-    'zai',
-    'minimax',
-    'qwen',
-  ];
-
-  final TextEditingController _apiKey = TextEditingController();
-  String _provider = _providers.first;
-  bool _saving = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _apiKey.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final String key = _apiKey.text.trim();
-    if (key.isEmpty) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await widget.onSave(_provider, key);
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (err) {
-      if (!mounted) return;
-      setState(() {
-        _error = err is BackendException ? err.message : err.toString();
-        _saving = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final AppStrings strings = context.l10n;
-    final ThemeData theme = Theme.of(context);
-    final bool canSave = _apiKey.text.trim().isNotEmpty && !_saving;
-    return AlertDialog(
-      title: Text(strings.apiKeyTitle(widget.agent.label)),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            DropdownButtonFormField<String>(
-              initialValue: _provider,
-              decoration: InputDecoration(labelText: strings.apiProvider),
-              items: <DropdownMenuItem<String>>[
-                for (final String provider in _providers)
-                  DropdownMenuItem<String>(
-                    value: provider,
-                    child: Text(provider),
-                  ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (String? value) {
-                      if (value == null) return;
-                      setState(() => _provider = value);
-                    },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _apiKey,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              enabled: !_saving,
-              decoration: InputDecoration(
-                labelText: strings.apiKey,
-                helperText: strings.apiKeyHint,
-              ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) => unawaited(_save()),
-            ),
-            if (_saving) ...<Widget>[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(minHeight: 2),
-            ],
-            if (_error != null) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
-            ],
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-          child: Text(strings.cancel),
-        ),
-        FilledButton(
-          onPressed: canSave ? () => unawaited(_save()) : null,
-          child: Text(strings.saveApiKey),
-        ),
-      ],
-    );
   }
 }
 

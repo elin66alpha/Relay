@@ -34,6 +34,10 @@ class AgentStatusLights extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
+    // Only OAuth agents (claude/codex/agy) show the second "logged in" light.
+    // hermes/opencode manage their key on the host out of Relay's view, so they
+    // get just the install light and count as usable once installed.
+    final bool showAuthLight = agent.authKind == 'oauth';
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
@@ -41,11 +45,13 @@ class AgentStatusLights extends StatelessWidget {
           ok: agent.installed,
           tooltip: strings.agentInstalledStatus(agent.installed),
         ),
-        SizedBox(width: compact ? 5 : 7),
-        _StatusDot(
-          ok: agent.authed,
-          tooltip: strings.agentAuthStatus(agent.authed, agent.authKind),
-        ),
+        if (showAuthLight) ...<Widget>[
+          SizedBox(width: compact ? 5 : 7),
+          _StatusDot(
+            ok: agent.authed,
+            tooltip: strings.agentAuthStatus(agent.authed, agent.authKind),
+          ),
+        ],
       ],
     );
   }

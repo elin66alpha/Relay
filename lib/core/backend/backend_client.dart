@@ -1412,23 +1412,6 @@ class BackendClient {
     );
   }
 
-  Future<void> saveAgentApiKey({
-    required String agent,
-    required String provider,
-    required String apiKey,
-  }) async {
-    await _requestJson(
-      'POST',
-      '/api/agent-auth/api-key',
-      body: <String, Object?>{
-        'agent': agent,
-        'provider': provider,
-        'apiKey': apiKey,
-      },
-      timeout: const Duration(seconds: 20),
-    );
-  }
-
   /// Catalog of selectable model/effort/permission options for an agent.
   Future<AgentOptionsCatalog> fetchAgentOptions(String agentKey) async {
     final Object? decoded = await _requestJson(

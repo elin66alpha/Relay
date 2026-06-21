@@ -83,5 +83,7 @@ test('/api/agents returns every agent with install/auth usability fields', async
   assert.equal(byKey.agy.usable, false);
   assert.equal(byKey.opencode.usable, true);
   assert.equal(byKey.hermes.authKind, 'apiKey');
-  assert.equal(byKey.hermes.usable, false);
+  // hermes is managed out-of-band, so it is usable once installed even with no
+  // key Relay can see.
+  assert.equal(byKey.hermes.usable, true);
 });

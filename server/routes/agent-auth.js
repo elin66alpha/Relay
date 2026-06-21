@@ -7,7 +7,6 @@ const {
   getAgentStatuses,
 } = require('../lib/agent-status');
 const { createAgentLoginManager } = require('../lib/agent-login');
-const { writeHermesApiKey } = require('../lib/hermes-credentials');
 
 function writeStreamEvent(res, type, payload) {
   if (res.destroyed || res.writableEnded) return;
@@ -81,32 +80,6 @@ module.exports = function createAgentAuthRouter(ctx = {}) {
     }
     const agentStatus = getAgentStatuses()[session.agent] || null;
     return res.json({ ok: true, session, agentStatus });
-  });
-
-  router.post('/api/agent-auth/api-key', (req, res) => {
-    const body = req.body || {};
-    const agent = String(body.agent || '').trim();
-    if (agent !== 'hermes') {
-      return res.status(400).json({
-        error: 'API-key entry is only supported for hermes',
-        code: 'AGENT_UNSUPPORTED',
-      });
-    }
-    try {
-      const result = writeHermesApiKey({
-        provider: body.provider,
-        apiKey: body.apiKey,
-        label: body.label,
-      });
-      return res.json({
-        ok: true,
-        agent,
-        provider: result.provider,
-        agentStatus: getAgentStatuses()[agent] || null,
-      });
-    } catch (err) {
-      return sendError(res, err.code === 'INVALID_PROVIDER' ? 400 : 422, err);
-    }
   });
 
   return router;
