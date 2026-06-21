@@ -182,9 +182,7 @@ function replaceExactTextInTree(rootDir, from, to) {
   }
 }
 
-// Experimental agents (opencode, hermes) are only offered once their CLI is
-// actually present on the host, so the app hides them until installed. Some
-// installers (opencode) put the binary in a per-user dir that isn't on the
+// Some installers (opencode) put the binary in a per-user dir that isn't on the
 // server's PATH, so detection scans PATH first, then known fallback locations.
 // Results are cached briefly so /api/agents stays fast.
 const LOCATE_BIN_TTL_MS = 60 * 1000;
@@ -299,6 +297,12 @@ function spawnStream({ cmd, args, cwd, label, onLine, finalize, signal }) {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // Decode as UTF-8 at the stream layer so Node's StringDecoder buffers any
+    // multi-byte character (e.g. a 3-byte Chinese glyph) that straddles a chunk
+    // boundary. Calling chunk.toString() per-chunk would split it and emit U+FFFD
+    // replacement characters (the "���" tofu) into the output.
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
 
     let stdout = '';
     let stderr = '';
@@ -1295,7 +1299,7 @@ const AGENTS = {
     description: 'Antigravity CLI',
     run: runAgy,
   },
-  // Experimental: hidden from the app until their CLI is detected on the host.
+  // Experimental: listed in the app with explicit install/auth status.
   opencode: {
     key: 'opencode',
     label: 'OpenCode',
@@ -1316,21 +1320,12 @@ const AGENTS = {
 
 const DEFAULT_AGENT = 'claude';
 
-// Experimental agents only appear once their binary is on PATH; the stable
-// agents are always listed.
-function isAgentAvailable(agent) {
-  if (!agent.experimental) return true;
-  return commandExists(agent.bin || agent.key);
-}
-
 function listAgents() {
-  return Object.values(AGENTS)
-    .filter(isAgentAvailable)
-    .map(({ key, label, description }) => ({
-      key,
-      label,
-      description,
-    }));
+  return Object.values(AGENTS).map(({ key, label, description }) => ({
+    key,
+    label,
+    description,
+  }));
 }
 
 function getAgent(key) {
@@ -1361,6 +1356,7 @@ module.exports = {
   TIMEOUT_MS,
   listAgents,
   getAgent,
+  commandExists,
   runAgent,
   runBtw,
   runBtwAgent,

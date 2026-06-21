@@ -94,8 +94,9 @@ class _BotAppState extends State<BotApp> {
       child: AnimatedBuilder(
         animation: widget.settingsController,
         builder: (BuildContext context, Widget? _) {
-          final AppStrings strings =
-              AppStrings(widget.settingsController.language);
+          final AppStrings strings = AppStrings(
+            widget.settingsController.language,
+          );
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             title: strings.appName,
@@ -122,6 +123,7 @@ class _BotAppState extends State<BotApp> {
                       if (widget.machinesController.activeMachine == null) {
                         return MachineCredentialsScreen(
                           machinesController: widget.machinesController,
+                          agentsController: widget.agentsController,
                           requireCredential: true,
                         );
                       }
@@ -145,8 +147,6 @@ class _Splash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: SizedBox.shrink(),
-    );
+    return const Scaffold(body: SizedBox.shrink());
   }
 }

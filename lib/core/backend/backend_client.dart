@@ -1363,9 +1363,7 @@ class BackendClient {
     return result;
   }
 
-  /// The agents the backend host currently offers. Experimental agents
-  /// (opencode, hermes) appear only once their CLI is detected, so the app's
-  /// agent list tracks what is actually installed.
+  /// The agents the backend host knows about, including install/auth status.
   Future<List<CliAgent>> fetchAgents() async {
     final Object? decoded = await _requestJson('GET', '/api/agents');
     if (decoded is! Map) {
@@ -1378,6 +1376,40 @@ class BackendClient {
         .whereType<Map>()
         .map((Map item) => CliAgent.fromJson(item.cast<String, Object?>()))
         .toList(growable: false);
+  }
+
+  Stream<BackendEvent> streamAgentLogin(String agentKey) async* {
+    final MachineCredential credential = await _requireCredential();
+    final http.Request request = http.Request(
+      'GET',
+      _uri(
+        credential,
+        '/api/agent-auth/login/start?agent=${Uri.encodeQueryComponent(agentKey)}',
+      ),
+    );
+    request.headers.addAll(
+      await _headers(credential, accept: 'text/event-stream'),
+    );
+
+    final http.StreamedResponse response = await _httpClient.send(request);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final String text = await response.stream.bytesToString();
+      throw _exceptionFor(response.statusCode, text);
+    }
+
+    yield* decodeSse(response.stream);
+  }
+
+  Future<void> submitAgentLoginCode({
+    required String sessionId,
+    required String code,
+  }) async {
+    await _requestJson(
+      'POST',
+      '/api/agent-auth/login/code',
+      body: <String, Object?>{'sessionId': sessionId, 'code': code},
+      timeout: const Duration(seconds: 20),
+    );
   }
 
   /// Catalog of selectable model/effort/permission options for an agent.

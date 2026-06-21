@@ -17,6 +17,7 @@ import '../settings/app_settings_screen.dart';
 import '../filesystem/file_system_screen.dart';
 import '../quota/quota_scheduler_screen.dart';
 import '../quota/quota_usage_screen.dart';
+import 'agent_status_lights.dart';
 import 'cli_agents_controller.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
@@ -78,6 +79,7 @@ class CliAgentsDrawer extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => MachineCredentialsScreen(
                             machinesController: machinesController,
+                            agentsController: agentsController,
                           ),
                         ),
                       );
@@ -90,9 +92,8 @@ class CliAgentsDrawer extends StatelessWidget {
                       if (closeOnAction) Navigator.of(context).pop();
                       Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
-                          builder: (_) => QuotaUsageScreen(
-                            chatController: chatController,
-                          ),
+                          builder: (_) =>
+                              QuotaUsageScreen(chatController: chatController),
                         ),
                       );
                     },
@@ -131,12 +132,7 @@ class CliAgentsDrawer extends StatelessWidget {
                     ),
                   ),
                   for (final CliAgent agent in agentsController.agents)
-                    ..._agentTiles(
-                      context,
-                      agent,
-                      activeKey,
-                      activeMachine,
-                    ),
+                    ..._agentTiles(context, agent, activeKey, activeMachine),
                 ],
               ),
             ),
@@ -163,9 +159,8 @@ class CliAgentsDrawer extends StatelessWidget {
                 if (closeOnAction) Navigator.of(context).pop();
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(
-                    builder: (_) => FileSystemScreen(
-                      chatController: chatController,
-                    ),
+                    builder: (_) =>
+                        FileSystemScreen(chatController: chatController),
                   ),
                 );
               },
@@ -203,22 +198,45 @@ class CliAgentsDrawer extends StatelessWidget {
     final String? activeSessionId = selectedAgent
         ? chatController.activeSessionId
         : sessions.isNotEmpty
-            ? sessions.first.id
-            : null;
+        ? sessions.first.id
+        : null;
+    final bool usable = isCliAgentSelectable(agent);
+    final Color disabledColor = Theme.of(context).colorScheme.outline;
+    void showUnavailable() => showAgentUnavailableSnack(context, agent);
     return <Widget>[
       ListTile(
-        leading: AgentIcon(agentKey: agent.key),
+        leading: Opacity(
+          opacity: usable ? 1 : 0.45,
+          child: AgentIcon(agentKey: agent.key),
+        ),
         title: Text(agent.label),
+        textColor: usable ? null : disabledColor,
+        iconColor: usable ? null : disabledColor,
         selected: selectedAgent,
-        trailing: IconButton(
-          icon: const Icon(Icons.add_rounded),
-          tooltip: context.l10n.newSession,
-          onPressed: chatController.isThinking ||
-                  sessions.length >= _maxSessionsPerAgent
-              ? null
-              : () => _createSession(context, agent, activeMachine),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            AgentStatusLights(agent: agent),
+            const SizedBox(width: 6),
+            IconButton(
+              icon: const Icon(Icons.add_rounded),
+              tooltip: usable
+                  ? context.l10n.newSession
+                  : agentUnavailableMessage(context.l10n, agent),
+              onPressed:
+                  usable &&
+                      !chatController.isThinking &&
+                      sessions.length < _maxSessionsPerAgent
+                  ? () => _createSession(context, agent, activeMachine)
+                  : null,
+            ),
+          ],
         ),
         onTap: () async {
+          if (!usable) {
+            showUnavailable();
+            return;
+          }
           await agentsController.setActive(agent.key);
           if (activeMachine != null) {
             await chatController.loadFor(agent, activeMachine);
@@ -227,6 +245,7 @@ class CliAgentsDrawer extends StatelessWidget {
             Navigator.of(context).pop();
           }
         },
+        onLongPress: usable ? null : showUnavailable,
       ),
       if (selectedAgent && chatController.sessionsLoadingFor(agent.key))
         const Padding(
@@ -427,8 +446,8 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
 
   Future<void> _load() async {
     try {
-      final List<ChatGroup> swarms =
-          await widget.chatController.backend.fetchGroups();
+      final List<ChatGroup> swarms = await widget.chatController.backend
+          .fetchGroups();
       if (mounted) setState(() => _swarms = swarms);
     } on BackendException {
       // Best-effort: a failed fetch just leaves the last-known list in place.
@@ -594,8 +613,8 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                     color: _isLoading
                         ? Colors.grey
                         : (_isOnline
-                            ? const Color(0xFF10B981)
-                            : const Color(0xFFEF4444)),
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444)),
                     size: 14,
                   ),
                   const SizedBox(width: 8),
@@ -632,9 +651,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
                       const SizedBox(height: 16),
                       const Divider(height: 1),
                       const SizedBox(height: 12),
-                      _DeviceTokensPanel(
-                        chatController: widget.chatController,
-                      ),
+                      _DeviceTokensPanel(chatController: widget.chatController),
                     ],
                   ),
                 ),
@@ -710,8 +727,8 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
             color: _isLoading
                 ? Theme.of(context).colorScheme.outline
                 : (_isOnline
-                    ? const Color(0xFF10B981)
-                    : const Color(0xFFEF4444)),
+                      ? const Color(0xFF10B981)
+                      : const Color(0xFFEF4444)),
             fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
@@ -799,9 +816,9 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
         _tokensFuture = Future<List<DeviceToken>>.value(next);
       });
       final String label = token.label.isEmpty ? token.id : token.label;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.tokenRevoked(label))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.tokenRevoked(label))));
       if (!token.current) _refresh();
     } catch (err) {
       if (!mounted) return;
@@ -836,9 +853,9 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
         _tokensFuture = Future<List<DeviceToken>>.value(next);
       });
       final String label = token.label.isEmpty ? token.id : token.label;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.tokenDeleted(label))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.tokenDeleted(label))));
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -890,10 +907,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (snap.hasError && tokens.isEmpty)
-              Text(
-                snap.error.toString(),
-                style: TextStyle(color: colors.error),
-              )
+              Text(snap.error.toString(), style: TextStyle(color: colors.error))
             else if (tokens.isEmpty)
               Text(
                 context.l10n.noDeviceTokens,
@@ -903,7 +917,8 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
               for (final DeviceToken token in tokens)
                 _DeviceTokenRow(
                   token: token,
-                  busy: _revoking.contains(token.id) ||
+                  busy:
+                      _revoking.contains(token.id) ||
                       _deleting.contains(token.id),
                   onRevoke: () => _revoke(token),
                   onDelete: () => _delete(token),
@@ -1033,8 +1048,9 @@ class _DeviceTokenRow extends StatelessWidget {
 
 String _tokenDeviceInfo(DeviceToken token) {
   final String deviceId = token.lastDeviceId;
-  final String shortId =
-      deviceId.length <= 8 ? deviceId : '${deviceId.substring(0, 8)}...';
+  final String shortId = deviceId.length <= 8
+      ? deviceId
+      : '${deviceId.substring(0, 8)}...';
   if (token.lastDeviceName.isNotEmpty && shortId.isNotEmpty) {
     return '${token.lastDeviceName} ($shortId)';
   }

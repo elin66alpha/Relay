@@ -35,6 +35,9 @@ class AppStrings {
   String get gettingStarted => isZh ? '开始使用' : 'Getting started';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
+  String get manageCredentialsHomeHint => isZh
+      ? '登录 CLI 智能体或配置 Hermes API key'
+      : 'Log in CLI agents or configure a Hermes API key';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
   String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
@@ -272,7 +275,64 @@ class AppStrings {
   String agentNotLoggedInBanner(String agent) => isZh
       ? '$agent 未登录：请在后端主机上登录该 CLI。'
       : '$agent is not logged in. Log in to this CLI on the backend host.';
+  String agentCliNotInstalled(String agent) => isZh
+      ? '$agent 未安装在后端主机上。'
+      : '$agent is not installed on the backend host.';
+  String agentNeedsLogin(String agent) =>
+      isZh ? '$agent 需要先在后端主机上登录。' : '$agent needs login on the backend host.';
+  String agentNeedsApiKey(String agent) => isZh
+      ? '$agent 需要先配置供应商和 API key。'
+      : '$agent needs a provider and API key first.';
+  String agentUnavailable(String agent) =>
+      isZh ? '$agent 当前不可用。' : '$agent is not available.';
+  String agentInstalledStatus(bool installed) => isZh
+      ? '安装：${installed ? '已安装' : '未安装'}'
+      : 'Installed: ${installed ? 'yes' : 'no'}';
+  String agentAuthStatus(bool authed, String authKind) {
+    final String label = switch (authKind) {
+      'apiKey' => isZh ? 'API key' : 'API key',
+      'apiKeyOptional' => isZh ? '可用' : 'Usable',
+      _ => isZh ? '登录' : 'Login',
+    };
+    return isZh
+        ? '$label：${authed ? '已就绪' : '未就绪'}'
+        : '$label: ${authed ? 'ready' : 'not ready'}';
+  }
+
   String get recheck => isZh ? '重新检查' : 'Recheck';
+  String get login => isZh ? '登录' : 'Log in';
+  String get loginAgain => isZh ? '重新登录' : 'Log in again';
+  String get optionalApiKey => isZh ? 'API key 可选' : 'API key optional';
+  String get keyManagedOnHost =>
+      isZh ? '在主机上配置' : 'Configured on host';
+  String get agentReady => isZh ? '已就绪' : 'Ready';
+  String get copy => isZh ? '复制' : 'Copy';
+  String get copied => isZh ? '已复制。' : 'Copied.';
+  String agentLoginTitle(String agent) =>
+      isZh ? '登录 $agent' : 'Log in to $agent';
+  String get agentLoginStarting =>
+      isZh ? '正在启动 CLI 登录...' : 'Starting CLI login...';
+  String get agentLoginWaitingForUrl => isZh
+      ? '等待 CLI 输出授权链接。'
+      : 'Waiting for the CLI to print an authorization URL.';
+  String get agentLoginOpenUrl => isZh
+      ? '在浏览器中打开此链接，完成授权后把代码粘贴回来。'
+      : 'Open this link in a browser, authorize, then paste the code here.';
+  String get agentLoginBrowserOpenUrl => isZh
+      ? '在浏览器中打开此链接。完成授权后，状态会自动更新。'
+      : 'Open this link in a browser. Status will update after authorization finishes.';
+  String get agentLoginCode => isZh ? '授权代码' : 'Authorization code';
+  String get agentLoginCodeHint =>
+      isZh ? '粘贴 CLI 要求的代码' : 'Paste the code requested by the CLI';
+  String get agentLoginSubmit => isZh ? '提交代码' : 'Submit code';
+  String get agentLoginSubmitting => isZh ? '正在提交代码...' : 'Submitting code...';
+  String get agentLoginDone =>
+      isZh ? '登录完成。状态会在刷新后更新。' : 'Login complete. Status will refresh.';
+  String get agentLoginOutput => isZh ? 'CLI 输出' : 'CLI output';
+  String agentLoginFailed(Object err) =>
+      isZh ? '登录失败：$err' : 'Login failed: $err';
+  String agentStatusRefreshFailed(Object err) =>
+      isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
   String get scanQr => isZh ? '扫描二维码' : 'Scan QR code';
   String get pasteCredential => isZh ? '粘贴凭证' : 'Paste credential';
@@ -355,6 +415,10 @@ class AppStrings {
   String agentProgressUpdates(int count) => isZh
       ? '思索过程 · $count 条'
       : 'Thinking · $count ${count == 1 ? 'update' : 'updates'}';
+  String get agentThinking => isZh ? '思考过程' : 'Thinking';
+  String agentSteps(int count) => isZh
+      ? '执行步骤 · $count 条'
+      : '$count ${count == 1 ? 'step' : 'steps'}';
   String get btwTitle => isZh ? 'BTW 副手' : 'BTW sidekick';
   String get btwSubtitle => isZh
       ? '基于当前对话记忆的只读旁支问答，不影响主任务'

@@ -15,6 +15,7 @@ import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
 import '../../core/widgets/agent_icon.dart';
+import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import 'chat_content.dart';
 import 'group_chat_controller.dart';
@@ -81,6 +82,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   List<CliAgent> get _agents => widget.agentsController.agents;
+
+  CliAgent _agentForKey(String key) {
+    return _agents.firstWhere(
+      (CliAgent agent) => agent.key == key,
+      orElse: () => cliAgentByKey(key),
+    );
+  }
 
   Future<void> _send() async {
     if (_controller.sending) return;
@@ -169,19 +177,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   onSelected: (String action) => _onMenu(action, group),
                   itemBuilder: (BuildContext context) =>
                       <PopupMenuEntry<String>>[
-                    PopupMenuItem<String>(
-                      value: 'members',
-                      child: Text(strings.manageMembers),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'clear',
-                      child: Text(strings.clearTranscript),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'delete',
-                      child: Text(strings.deleteGroup),
-                    ),
-                  ],
+                        PopupMenuItem<String>(
+                          value: 'members',
+                          child: Text(strings.manageMembers),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'clear',
+                          child: Text(strings.clearTranscript),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Text(strings.deleteGroup),
+                        ),
+                      ],
                 ),
             ],
           ),
@@ -250,9 +258,17 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   for (final String member in group.members)
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
-                      child: ActionChip(
-                        label: Text('@${cliAgentByKey(member).label}'),
-                        onPressed: () => _insertMention(member),
+                      child: Builder(
+                        builder: (BuildContext context) {
+                          final CliAgent agent = _agentForKey(member);
+                          return ActionChip(
+                            label: Text('@${agent.label}'),
+                            onPressed: isCliAgentSelectable(agent)
+                                ? () => _insertMention(member)
+                                : () =>
+                                      showAgentUnavailableSnack(context, agent),
+                          );
+                        },
                       ),
                     ),
                 ],
@@ -555,8 +571,9 @@ class _GroupComposerField extends StatelessWidget {
       onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
       minLines: 1,
       maxLines: 5,
-      textInputAction:
-          onSubmitted == null ? TextInputAction.newline : TextInputAction.send,
+      textInputAction: onSubmitted == null
+          ? TextInputAction.newline
+          : TextInputAction.send,
       decoration: InputDecoration(
         hintText: hintText,
         border: const OutlineInputBorder(),
@@ -778,17 +795,18 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     'permission',
   ];
 
-  late final TextEditingController _nameController =
-      TextEditingController(text: widget.initialName);
+  late final TextEditingController _nameController = TextEditingController(
+    text: widget.initialName,
+  );
   late final Set<String> _selected = <String>{...widget.initialMembers};
   late String _workdir = widget.initialWorkdir;
   // Selected option ids per agent, seeded from the swarm being edited.
   late final Map<String, Map<String, String>> _configs =
       <String, Map<String, String>>{
-    for (final MapEntry<String, Map<String, String>> e
-        in widget.initialConfigs.entries)
-      e.key: <String, String>{...e.value},
-  };
+        for (final MapEntry<String, Map<String, String>> e
+            in widget.initialConfigs.entries)
+          e.key: <String, String>{...e.value},
+      };
   final Map<String, AgentOptionsCatalog> _catalogs =
       <String, AgentOptionsCatalog>{};
   final Set<String> _loading = <String>{};
@@ -835,6 +853,16 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   }
 
   Future<void> _toggleMember(String agentKey, bool on) async {
+    final CliAgent agent = widget.agents.firstWhere(
+      (CliAgent item) => item.key == agentKey,
+      orElse: () => cliAgentByKey(agentKey),
+    );
+    if (on && !isCliAgentSelectable(agent)) {
+      setState(() {
+        _validationError = agentUnavailableMessage(context.l10n, agent);
+      });
+      return;
+    }
     setState(() {
       if (on) {
         _selected.add(agentKey);
@@ -851,16 +879,19 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     if (_catalogs.containsKey(agentKey) || _loading.contains(agentKey)) return;
     setState(() => _loading.add(agentKey));
     try {
-      final AgentOptionsCatalog catalog =
-          await widget.backend.fetchAgentOptions(agentKey);
+      final AgentOptionsCatalog catalog = await widget.backend
+          .fetchAgentOptions(agentKey);
       if (!mounted) return;
       setState(() {
         _catalogs[agentKey] = catalog;
-        final Map<String, String> config =
-            _configs.putIfAbsent(agentKey, () => <String, String>{});
+        final Map<String, String> config = _configs.putIfAbsent(
+          agentKey,
+          () => <String, String>{},
+        );
         for (final String group in _groupOrder) {
           if (!catalog.supportsGroup(group)) continue;
-          config[group] ??= catalog.defaults[group] ??
+          config[group] ??=
+              catalog.defaults[group] ??
               (catalog.optionsFor(group).isNotEmpty
                   ? catalog.optionsFor(group).first.id
                   : '');
@@ -897,10 +928,10 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
         .toList(growable: false);
     final Map<String, Map<String, String>> configs =
         <String, Map<String, String>>{
-      for (final String key in members)
-        if (_configs[key] != null && _configs[key]!.isNotEmpty)
-          key: _configs[key]!,
-    };
+          for (final String key in members)
+            if (_configs[key] != null && _configs[key]!.isNotEmpty)
+              key: _configs[key]!,
+        };
     Navigator.of(context).pop(
       _SwarmForm(
         name: _nameController.text.trim(),
@@ -958,8 +989,9 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
               Text(strings.groupMembers, style: theme.textTheme.labelLarge),
               Text(
                 strings.swarmConfigureMembersHint,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.outline),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
               ),
               for (final CliAgent agent in widget.agents)
                 _buildMemberTile(strings, theme, agent),
@@ -991,6 +1023,7 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   Widget _buildMemberTile(AppStrings strings, ThemeData theme, CliAgent agent) {
     final bool on = _selected.contains(agent.key);
     final AgentOptionsCatalog? catalog = _catalogs[agent.key];
+    final bool usable = isCliAgentSelectable(agent);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -998,7 +1031,16 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
           dense: true,
           contentPadding: EdgeInsets.zero,
           value: on,
-          title: Text(agent.label),
+          title: Text(
+            agent.label,
+            style: usable
+                ? null
+                : TextStyle(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          subtitle: usable
+              ? null
+              : Text(agentUnavailableMessage(strings, agent)),
+          secondary: AgentStatusLights(agent: agent, compact: true),
           onChanged: (bool? value) => _toggleMember(agent.key, value == true),
         ),
         if (on)
@@ -1085,7 +1127,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     AgentOptionsCatalog catalog,
   ) {
     final List<AgentOption> options = catalog.optionsFor(group);
-    final String? value = _configs[agentKey]?[group] ??
+    final String? value =
+        _configs[agentKey]?[group] ??
         catalog.defaults[group] ??
         (options.isNotEmpty ? options.first.id : null);
     // Bound the width and let the button ellipsize: some catalogs (agy, opencode)
@@ -1212,18 +1255,18 @@ class _WorkTreePickerDialogState extends State<_WorkTreePickerDialog> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                      ? Center(child: Text(_error!))
-                      : ListView(
-                          children: <Widget>[
-                            for (final FsEntry dir in dirs)
-                              ListTile(
-                                dense: true,
-                                leading: const Icon(Icons.folder_outlined),
-                                title: Text(dir.name),
-                                onTap: () => _load(dir.absolutePath),
-                              ),
-                          ],
-                        ),
+                  ? Center(child: Text(_error!))
+                  : ListView(
+                      children: <Widget>[
+                        for (final FsEntry dir in dirs)
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.folder_outlined),
+                            title: Text(dir.name),
+                            onTap: () => _load(dir.absolutePath),
+                          ),
+                      ],
+                    ),
             ),
           ],
         ),
@@ -1304,14 +1347,15 @@ class _MessageBubble extends StatelessWidget {
     final bool awaiting = awaitingFirstToken && message.content.isEmpty;
     final DateTime stampTime =
         (!isHuman && segments.isNotEmpty && segments.first.createdAt != null)
-            ? segments.first.createdAt!
-            : message.createdAt;
+        ? segments.first.createdAt!
+        : message.createdAt;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Column(
-        crossAxisAlignment:
-            isHuman ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isHuman
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1356,8 +1400,9 @@ class _MessageBubble extends StatelessWidget {
                 else if (isHuman)
                   SelectableText(
                     message.content,
-                    style:
-                        theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: textColor,
+                    ),
                   )
                 else if (segmented)
                   SegmentedContent(
@@ -1438,8 +1483,9 @@ class _EmptyState extends StatelessWidget {
               Text(
                 subtitle!,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.outline),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
               ),
             ],
             if (action != null) ...<Widget>[
