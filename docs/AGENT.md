@@ -21,7 +21,11 @@ git; finished work should be summarized here briefly, not narrated.
   the user-chosen password.
 - All protected APIs require a revocable bearer token from `server/tokens.json`;
   token summaries track the last device id/name and last-used time, and revoked
-  tokens can be deleted from the app.
+  tokens can be deleted from the app. Brute-forcing the token is rate-limited
+  (15 failed attempts/min/IP → `429`); the rest of `/api` is capped at 600/min/IP
+  with the SSE stream and file transfers exempt. The server also prints a startup
+  warning when `PUBLIC_BASE_URL` is `http://` to a routable host, since the token
+  then travels in cleartext.
 - Sessions are keyed by `workdir + agent + session`; devices in the same scope
   share chat history, the resumable CLI session, and in-flight progress.
 - The authenticated default screen is Home: it shows the active machine, recent

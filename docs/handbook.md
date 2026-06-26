@@ -18,9 +18,17 @@ Cloudflare Tunnel or directly on a public host.
 ### Recommended shape
 
 - **HTTPS only.** Terminate TLS at Cloudflare (named Tunnel) or at a reverse
-  proxy such as Nginx or Caddy (direct mode).
+  proxy such as Nginx or Caddy (direct mode). If `PUBLIC_BASE_URL` is `http://`
+  to a routable host, the server prints a loud startup warning: the device token
+  then travels in cleartext and anyone on the path can steal it (it is warn-only
+  — `localhost` and `https://` are exempt, and it never blocks startup).
 - **Stay on localhost.** Prefer `HOST=127.0.0.1` with the proxy/tunnel in front
   over `HOST=0.0.0.0`, unless the proxy runs on another host.
+- **Rate limiting is built in.** `/api` is capped per client IP (600/min; the
+  SSE stream and file transfers are exempt) and wrong-token attempts are
+  throttled to 15/min, answering `429`. The limiter reads the real client IP
+  from `X-Forwarded-For` via `trust proxy` set to `loopback`, so keep the
+  tunnel/proxy on localhost and let it forward that header.
 - **Pin the URL.** Set `PUBLIC_BASE_URL` to the exact address users import (e.g.
   `https://agent.example.com`) and regenerate credentials after changing it.
 - **One credential per device.** Revoke and then delete old device tokens
@@ -33,6 +41,8 @@ Cloudflare Tunnel or directly on a public host.
 
 - Forward `GET`/`POST` and the long-lived `GET /api/events`; **disable
   buffering** for `/api/events` and streaming `/api/chat` responses.
+- Pass `X-Forwarded-For` (Cloudflare and most proxies do by default) so the
+  rate limiter keys on the real client IP, not the proxy's loopback address.
 - Keep proxy timeouts longer than the agent timeout (default 60 minutes).
 - Upload/download caps default to 100 MB / 300 MB (`UPLOAD_MAX_BYTES` /
   `DOWNLOAD_MAX_BYTES`); tune only if the proxy and network can handle them.
