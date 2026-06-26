@@ -360,6 +360,9 @@ class AppStrings {
   String get newSession => isZh ? '新建会话' : 'New session';
   String get sessionName => isZh ? '会话名称' : 'Session name';
   String defaultSessionName(int index) => isZh ? '会话 $index' : 'Session $index';
+  String get sessionRunning => isZh ? '正在运行' : 'Running';
+  String backgroundSessionFinished(String agent, String session) =>
+      isZh ? '$agent · $session 已完成。' : '$agent · $session finished.';
   String get deleteSession => isZh ? '删除会话' : 'Delete session';
   String deleteSessionTitle(String name) =>
       isZh ? '删除 $name？' : 'Delete $name?';

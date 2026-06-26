@@ -223,10 +223,7 @@ class CliAgentsDrawer extends StatelessWidget {
               tooltip: usable
                   ? context.l10n.newSession
                   : agentUnavailableMessage(context.l10n, agent),
-              onPressed:
-                  usable &&
-                      !chatController.isThinking &&
-                      sessions.length < _maxSessionsPerAgent
+              onPressed: usable && sessions.length < _maxSessionsPerAgent
                   ? () => _createSession(context, agent, activeMachine)
                   : null,
             ),
@@ -254,42 +251,61 @@ class CliAgentsDrawer extends StatelessWidget {
         ),
       if (selectedAgent)
         for (final AgentSession session in sessions)
-          Padding(
-            padding: const EdgeInsets.only(left: 28),
-            child: ListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              leading: Icon(
-                session.id == activeSessionId
-                    ? Icons.chat_bubble
-                    : Icons.chat_bubble_outline,
-                size: 18,
-              ),
-              title: Text(
-                session.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              selected: session.id == activeSessionId,
-              // The default "Main" session can't be deleted — it holds the
-              // original, pre-multi-session conversation for this path.
-              trailing: session.isDefault
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 20),
-                      tooltip: context.l10n.deleteSession,
-                      onPressed: chatController.isThinking
-                          ? null
-                          : () => _deleteSession(context, agent, session),
-                    ),
-              onTap: () async {
-                await agentsController.setActive(agent.key);
-                await chatController.selectSession(agent, session.id);
-                if (context.mounted && closeOnAction) {
-                  Navigator.of(context).pop();
-                }
-              },
-            ),
+          Builder(
+            builder: (BuildContext context) {
+              final bool running = chatController.sessionRunning(
+                agent.key,
+                session.id,
+              );
+              return Padding(
+                padding: const EdgeInsets.only(left: 28),
+                child: ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
+                    session.id == activeSessionId
+                        ? Icons.chat_bubble
+                        : Icons.chat_bubble_outline,
+                    size: 18,
+                  ),
+                  title: Text(
+                    session.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  selected: session.id == activeSessionId,
+                  // The default "Main" session can't be deleted — it holds the
+                  // original, pre-multi-session conversation for this path.
+                  trailing: running || !session.isDefault
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            if (running) const _RunningSessionIndicator(),
+                            if (running && !session.isDefault)
+                              const SizedBox(width: 4),
+                            if (!session.isDefault)
+                              IconButton(
+                                icon:
+                                    const Icon(Icons.delete_outline, size: 20),
+                                tooltip: context.l10n.deleteSession,
+                                onPressed: running
+                                    ? null
+                                    : () =>
+                                        _deleteSession(context, agent, session),
+                              ),
+                          ],
+                        )
+                      : null,
+                  onTap: () async {
+                    await agentsController.setActive(agent.key);
+                    await chatController.selectSession(agent, session.id);
+                    if (context.mounted && closeOnAction) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                ),
+              );
+            },
           ),
     ];
   }
@@ -385,6 +401,25 @@ class CliAgentsDrawer extends StatelessWidget {
         SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
       );
     }
+  }
+}
+
+class _RunningSessionIndicator extends StatelessWidget {
+  const _RunningSessionIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: context.l10n.sessionRunning,
+      child: SizedBox(
+        width: 14,
+        height: 14,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
   }
 }
 
