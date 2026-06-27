@@ -124,6 +124,7 @@ class _BotAppState extends State<BotApp> {
                         return MachineCredentialsScreen(
                           machinesController: widget.machinesController,
                           agentsController: widget.agentsController,
+                          settingsController: widget.settingsController,
                           requireCredential: true,
                         );
                       }
