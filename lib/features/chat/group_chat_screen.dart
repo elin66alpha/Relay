@@ -229,14 +229,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         subtitle: strings.groupEmptyHint,
       );
     }
-    return ListView.builder(
-      controller: _scroll,
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      itemCount: messages.length,
-      itemBuilder: (BuildContext context, int index) => _MessageBubble(
-        message: messages[index],
-        group: group,
-        onEditMember: _editMember,
+    // SelectionArea keeps bubble text selectable without each bubble building
+    // its own overlay-based SelectableText (see MessageText), which crashed on
+    // conversation teardown (InheritedElement '_dependents.isEmpty').
+    return SelectionArea(
+      child: ListView.builder(
+        controller: _scroll,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        itemCount: messages.length,
+        itemBuilder: (BuildContext context, int index) => _MessageBubble(
+          message: messages[index],
+          group: group,
+          onEditMember: _editMember,
+        ),
       ),
     );
   }
@@ -1398,7 +1403,7 @@ class _MessageBubble extends StatelessWidget {
                 if (awaiting)
                   TypingDots(color: textColor)
                 else if (isHuman)
-                  SelectableText(
+                  Text(
                     message.content,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: textColor,

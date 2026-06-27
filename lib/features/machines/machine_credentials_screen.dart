@@ -17,6 +17,7 @@ import '../../core/models/machine_credential.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import 'agent_login_flow_controller.dart';
+import 'deploy_backend_screen.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
@@ -912,6 +913,18 @@ class _EmptyCredentialState extends StatelessWidget {
                         onPaste: onPaste,
                         onUpload: onUpload,
                         onTest: null,
+                      ),
+                      const SizedBox(height: 18),
+                      const Divider(height: 1),
+                      const SizedBox(height: 10),
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const DeployBackendScreen(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.menu_book_outlined, size: 18),
+                        label: Text(context.l10n.deployBackendGuide),
                       ),
                     ],
                   ),

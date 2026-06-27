@@ -179,11 +179,16 @@ class _MessageTextState extends State<MessageText> {
       fontSize: 15,
     );
     if (!widget.formatInlineEmphasis) {
-      return SelectableText(widget.text, style: style);
+      // Not SelectableText: a wrapping SelectionArea (see the message lists)
+      // handles selection. SelectableText / MarkdownBody(selectable: true)
+      // build overlay-based selection that registers a dependency on the
+      // enclosing Scrollable and throws InheritedElement '_dependents.isEmpty'
+      // when the conversation is torn down (e.g. creating/switching a session).
+      return Text(widget.text, style: style);
     }
     return MarkdownBody(
       data: _normalizeAgentMarkdown(widget.text),
-      selectable: true,
+      selectable: false,
       softLineBreak: true,
       styleSheet: _markdownStyleSheet(context, widget.color, style),
     );

@@ -109,7 +109,11 @@ class _BtwDialogState extends State<BtwDialog> {
                   ? const Center(child: CircularProgressIndicator())
                   : messages.isEmpty
                       ? _empty(context, colors)
-                      : ListView.builder(
+                      // SelectionArea keeps bubble text selectable without
+                      // per-bubble overlay-based SelectableText, which crashed
+                      // on teardown (InheritedElement '_dependents.isEmpty').
+                      : SelectionArea(
+                          child: ListView.builder(
                           controller: _scroll,
                           reverse: true,
                           padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
@@ -123,6 +127,7 @@ class _BtwDialogState extends State<BtwDialog> {
                               errorDetail: _controller.errorDetailFor(message),
                             );
                           },
+                        ),
                         ),
             ),
             const Divider(height: 1),
@@ -290,10 +295,10 @@ class _BtwBubble extends StatelessWidget {
                     ),
                   )
                 : isUser
-                    ? SelectableText(message.content, style: textStyle)
+                    ? Text(message.content, style: textStyle)
                     : MarkdownBody(
                         data: message.content,
-                        selectable: true,
+                        selectable: false,
                         styleSheet: MarkdownStyleSheet(p: textStyle),
                       ),
           ),
