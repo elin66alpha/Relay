@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
 const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 
 const {
   DEFAULT_AGENT,
@@ -136,6 +137,54 @@ const MAX_PROMPT_BYTES = parseInt(
 const CORS_ALLOW_ORIGIN = String(process.env.CORS_ALLOW_ORIGIN || '*').trim() || '*';
 
 const app = express();
+// cloudflared connects from localhost and forwards the real client IP in
+// X-Forwarded-For. Trusting only loopback makes req.ip the real client behind a
+// tunnel, while a direct-mode (0.0.0.0) attacker — whose socket is NOT loopback —
+// cannot spoof the header, so rate limiting keys on a genuine per-client address.
+app.set('trust proxy', 'loopback');
+
+// Long-lived (SSE) and large-transfer endpoints: a single chat turn streams for
+// up to AGENT_TIMEOUT_MS and uploads/downloads move hundreds of MB, so counting
+// them as ordinary requests would throttle normal use. They still require auth.
+function isStreamingApiPath(req) {
+  // Path is relative to the '/api' mount point.
+  switch (req.path) {
+    case '/events':
+    case '/chat':
+    case '/group/chat':
+    case '/btw':
+    case '/fs/download':
+    case '/fs/upload':
+    case '/agent-auth/login/start':
+      return true;
+    default:
+      return false;
+  }
+}
+
+// DoS guard for the authenticated API surface. Generous (the app polls status and
+// can chat briskly); the real access gate is the bearer token. Keyed per client IP.
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: isStreamingApiPath,
+  message: { error: 'too many requests, slow down', code: 'RATE_LIMITED' },
+});
+
+// Brute-force guard for the bearer token. Invoked only on an auth failure (see
+// requireAuth), so it counts wrong-token attempts per IP and never throttles
+// successful, possibly long-lived, traffic. A wrong token is rejected before it
+// reaches any handler, so these requests are always short.
+const authFailureLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 15,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'too many failed attempts, slow down', code: 'AUTH_RATE_LIMITED' },
+});
+
 const eventClients = new Set();
 // Live SSE connection count per workdir, so presence checks on the broadcast
 // path are O(1) instead of scanning every connected client.
@@ -233,7 +282,11 @@ function requireAuth(req, res, next) {
   const header = String(req.get('authorization') || '');
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!isTokenAllowed(token)) {
-    return res.status(401).json({ error: 'unauthorized' });
+    // Count the failure per IP; once over the limit the limiter answers 429
+    // itself, otherwise we fall through to the normal 401.
+    return authFailureLimiter(req, res, () => {
+      res.status(401).json({ error: 'unauthorized' });
+    });
   }
   markTokenUsed(token, {
     deviceId: normalizeDeviceId(req.get('x-device-id')),
@@ -242,6 +295,7 @@ function requireAuth(req, res, next) {
   return next();
 }
 
+app.use('/api', apiLimiter);
 app.use('/api', requireAuth);
 
 function bearerToken(req) {
@@ -255,6 +309,47 @@ function formatUptime(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   return `${d}d ${h}h ${m}m ${s}s`;
+}
+
+// Warn loudly when the device token will travel in cleartext: PUBLIC_BASE_URL is
+// http:// (no TLS) to a routable host. An https:// URL (reverse proxy or a
+// Cloudflare Tunnel) terminates TLS and is fine; localhost is irrelevant. A
+// private/LAN address still leaks the token, but only to the local network; a
+// public address exposes it to anyone on the internet path.
+function warnIfPlaintextTokenExposure() {
+  if (!PUBLIC_BASE_URL) return;
+  let url;
+  try {
+    url = new URL(PUBLIC_BASE_URL);
+  } catch (_err) {
+    return;
+  }
+  if (url.protocol !== 'http:') return;
+  const host = url.hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
+  const isPrivate =
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    host.endsWith('.local');
+  console.warn('');
+  console.warn('  ============================================================');
+  console.warn('  ⚠  SECURITY WARNING: PUBLIC_BASE_URL uses http:// (no TLS).');
+  if (isPrivate) {
+    console.warn(`     Your device token is sent UNENCRYPTED to ${host}.`);
+    console.warn('     This is a private/LAN address, so exposure is limited to your');
+    console.warn('     local network — but anyone who can sniff that network can steal');
+    console.warn('     the token and take FULL CONTROL of this machine.');
+  } else {
+    console.warn(`     Your device token rides NAKED over the public internet to ${host}.`);
+    console.warn('     ANYONE on the network path can read it and take FULL CONTROL of');
+    console.warn('     this machine (run agents, read/write any file).');
+  }
+  console.warn('     Fix: put TLS in front (nginx/Caddy) and use an https:// URL,');
+  console.warn('     or switch to a Cloudflare Tunnel (re-run setup, pick mode 2/3).');
+  console.warn('  ============================================================');
+  console.warn('');
 }
 
 function sendWorkdirError(res, err) {
@@ -866,6 +961,7 @@ app.listen(PORT, HOST, () => {
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);
   }
+  warnIfPlaintextTokenExposure();
   console.log(`default workdir: ${getDefaultWorkdir()}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {

@@ -14,15 +14,18 @@ import '../../core/credentials/qr_image_decoder.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
+import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import 'agent_login_flow_controller.dart';
+import 'deploy_backend_screen.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
   const MachineCredentialsScreen({
     required this.machinesController,
     this.agentsController,
+    this.settingsController,
     this.backendClient,
     this.requireCredential = false,
     super.key,
@@ -30,6 +33,7 @@ class MachineCredentialsScreen extends StatefulWidget {
 
   final MachineCredentialsController machinesController;
   final CliAgentsController? agentsController;
+  final AppSettingsController? settingsController;
   final BackendClient? backendClient;
   final bool requireCredential;
 
@@ -86,6 +90,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                     onScan: _scanCredential,
                     onPaste: _pasteCredential,
                     onUpload: _uploadCredentialQr,
+                    settingsController: widget.requireCredential
+                        ? widget.settingsController
+                        : null,
                   )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -855,6 +862,7 @@ class _EmptyCredentialState extends StatelessWidget {
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
+    required this.settingsController,
   });
 
   final bool isImporting;
@@ -862,6 +870,7 @@ class _EmptyCredentialState extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
+  final AppSettingsController? settingsController;
 
   @override
   Widget build(BuildContext context) {
@@ -880,6 +889,15 @@ class _EmptyCredentialState extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
+                      if (settingsController != null) ...<Widget>[
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: _InitialLanguageToggle(
+                            settingsController: settingsController!,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       Icon(
                         Icons.vpn_key_outlined,
                         size: 48,
@@ -913,12 +931,48 @@ class _EmptyCredentialState extends StatelessWidget {
                         onUpload: onUpload,
                         onTest: null,
                       ),
+                      const SizedBox(height: 18),
+                      const Divider(height: 1),
+                      const SizedBox(height: 10),
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const DeployBackendScreen(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.menu_book_outlined, size: 18),
+                        label: Text(context.l10n.deployBackendGuide),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+class _InitialLanguageToggle extends StatelessWidget {
+  const _InitialLanguageToggle({required this.settingsController});
+
+  final AppSettingsController settingsController;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: settingsController,
+      builder: (BuildContext context, Widget? _) {
+        final AppLanguage current = settingsController.language;
+        final AppLanguage next =
+            current == AppLanguage.zh ? AppLanguage.en : AppLanguage.zh;
+        return TextButton(
+          onPressed: () {
+            settingsController.setLanguage(next);
+          },
+          child: const Text('中/En'),
         );
       },
     );

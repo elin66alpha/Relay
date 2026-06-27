@@ -645,6 +645,21 @@ class GroupHistory {
   final List<ChatMessage> messages;
 }
 
+class ChatStreamHandle {
+  ChatStreamHandle({http.Client? client}) : _client = client ?? http.Client();
+
+  final http.Client _client;
+  bool _closed = false;
+
+  bool get closed => _closed;
+
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _client.close();
+  }
+}
+
 class BackendClient {
   BackendClient({
     MachineCredentialsStore? credentialsStore,
@@ -828,6 +843,8 @@ class BackendClient {
     required String prompt,
     required String requestId,
     void Function(BackendEvent event)? onEvent,
+    ChatStreamHandle? streamHandle,
+    void Function()? onStreamStarted,
   }) async {
     if (onEvent != null) {
       return _sendMessageStreamed(
@@ -836,6 +853,8 @@ class BackendClient {
         prompt: prompt,
         requestId: requestId,
         onEvent: onEvent,
+        streamHandle: streamHandle,
+        onStreamStarted: onStreamStarted,
       );
     }
     final Object? decoded = await _requestJson(
@@ -912,8 +931,11 @@ class BackendClient {
     required String prompt,
     required String requestId,
     required void Function(BackendEvent event) onEvent,
+    ChatStreamHandle? streamHandle,
+    void Function()? onStreamStarted,
     String path = '/api/chat',
   }) async {
+    final ChatStreamHandle handle = streamHandle ?? ChatStreamHandle();
     final MachineCredential credential = await _requireCredential();
     final http.Request request = http.Request(
       'POST',
@@ -929,62 +951,68 @@ class BackendClient {
       'requestId': requestId,
     });
 
-    final http.StreamedResponse response =
-        await _httpClient.send(request).timeout(const Duration(minutes: 65));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final String text = await response.stream.bytesToString();
-      throw _exceptionFor(response.statusCode, text);
-    }
-
-    ChatReply? reply;
-    BackendException? streamError;
     try {
-      await for (final BackendEvent event in decodeSse(
-        response.stream,
-      ).timeout(const Duration(minutes: 65))) {
-        if (event.type == 'ready' || event.type == 'heartbeat') continue;
-        onEvent(event);
-        if (event.type == 'agent_done') {
-          reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
-        } else if (event.type == 'agent_cancelled') {
-          streamError = BackendException(
-            'request cancelled',
-            status: 499,
-            code: 'AGENT_CANCELLED',
-          );
-        } else if (event.type == 'agent_error') {
-          final String? code = event.data['code'] as String?;
-          streamError = BackendException(
-            event.data['error'] as String? ?? 'Agent stream failed.',
-            status: code == 'NOT_LOGGED_IN' ? 424 : 500,
-            code: code,
-          );
-        }
+      final http.StreamedResponse response = await handle._client
+          .send(request)
+          .timeout(const Duration(minutes: 65));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final String text = await response.stream.bytesToString();
+        throw _exceptionFor(response.statusCode, text);
       }
-    } on http.ClientException {
-      // The app was backgrounded/closed and the OS tore down the socket while
-      // the backend keeps running the turn. A distinct code lets the caller
-      // reattach to the still-running turn instead of marking it failed.
-      throw BackendException(
-        'Lost the connection to the agent stream.',
-        code: 'STREAM_DISCONNECTED',
-      );
-    } on TimeoutException {
-      throw BackendException(
-        'The agent stream stalled.',
-        code: 'STREAM_DISCONNECTED',
-      );
+      onStreamStarted?.call();
+
+      ChatReply? reply;
+      BackendException? streamError;
+      try {
+        await for (final BackendEvent event in decodeSse(
+          response.stream,
+        ).timeout(const Duration(minutes: 65))) {
+          if (event.type == 'ready' || event.type == 'heartbeat') continue;
+          onEvent(event);
+          if (event.type == 'agent_done') {
+            reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
+          } else if (event.type == 'agent_cancelled') {
+            streamError = BackendException(
+              'request cancelled',
+              status: 499,
+              code: 'AGENT_CANCELLED',
+            );
+          } else if (event.type == 'agent_error') {
+            final String? code = event.data['code'] as String?;
+            streamError = BackendException(
+              event.data['error'] as String? ?? 'Agent stream failed.',
+              status: code == 'NOT_LOGGED_IN' ? 424 : 500,
+              code: code,
+            );
+          }
+        }
+      } on http.ClientException {
+        // The app was backgrounded/closed and the OS tore down the socket while
+        // the backend keeps running the turn. A distinct code lets the caller
+        // reattach to the still-running turn instead of marking it failed.
+        throw BackendException(
+          'Lost the connection to the agent stream.',
+          code: 'STREAM_DISCONNECTED',
+        );
+      } on TimeoutException {
+        throw BackendException(
+          'The agent stream stalled.',
+          code: 'STREAM_DISCONNECTED',
+        );
+      }
+      if (streamError != null) throw streamError;
+      if (reply == null) {
+        // The stream ended without a terminal agent_done — the turn may still be
+        // running on the backend. A distinct code lets the caller reattach.
+        throw BackendException(
+          'Agent stream ended without a final response.',
+          code: 'STREAM_INCOMPLETE',
+        );
+      }
+      return reply;
+    } finally {
+      handle.close();
     }
-    if (streamError != null) throw streamError;
-    if (reply == null) {
-      // The stream ended without a terminal agent_done — the turn may still be
-      // running on the backend. A distinct code lets the caller reattach.
-      throw BackendException(
-        'Agent stream ended without a final response.',
-        code: 'STREAM_INCOMPLETE',
-      );
-    }
-    return reply;
   }
 
   Future<void> cancelMessage(String requestId) async {
@@ -1737,5 +1765,4 @@ class BackendClient {
 
   BackendException _networkExceptionFor(Object err, Uri uri) =>
       _transport.networkExceptionFor(err, uri);
-
 }

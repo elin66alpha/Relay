@@ -444,7 +444,12 @@ class _BotChatScreenState extends State<BotChatScreen>
                         if (messages.isEmpty) {
                           return _EmptyChatPlaceholder(agentName: agent.label);
                         }
-                        return ListView.builder(
+                        // SelectionArea keeps bubble text selectable/copyable
+                        // without each bubble building its own overlay-based
+                        // SelectableText (see MessageText), which crashed on
+                        // conversation teardown.
+                        return SelectionArea(
+                            child: ListView.builder(
                           controller: _scroll,
                           // Reversed: offset 0 is the bottom, so opening or
                           // switching a conversation lands on the newest message
@@ -495,6 +500,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                               ),
                             );
                           },
+                        ),
                         );
                       },
                     ),
