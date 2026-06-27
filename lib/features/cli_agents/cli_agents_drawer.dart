@@ -315,45 +315,51 @@ class CliAgentsDrawer extends StatelessWidget {
     CliAgent agent,
     MachineCredential? activeMachine,
   ) async {
+    final AppStrings strings = context.l10n;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
+    final ScaffoldState? scaffold = Scaffold.maybeOf(context);
     if (activeMachine == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.importOrChooseMachine)),
+      messenger.showSnackBar(
+        SnackBar(content: Text(strings.importOrChooseMachine)),
       );
       return;
     }
     final int next = chatController.sessionsFor(agent.key).length + 1;
-    final TextEditingController controller = TextEditingController(
-      text: context.l10n.defaultSessionName(next),
-    );
+    final String defaultName = strings.defaultSessionName(next);
+    if (closeOnAction && scaffold?.isDrawerOpen == true) {
+      scaffold!.closeDrawer();
+    }
+    String draftName = defaultName;
     final String? name = await showDialog<String>(
-      context: context,
+      context: navigator.context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          title: Text(context.l10n.newSession),
-          content: TextField(
-            controller: controller,
+          title: Text(strings.newSession),
+          content: TextFormField(
+            initialValue: defaultName,
             autofocus: true,
-            decoration: InputDecoration(labelText: context.l10n.sessionName),
+            decoration: InputDecoration(labelText: strings.sessionName),
             textInputAction: TextInputAction.done,
-            onSubmitted: (String value) =>
+            onChanged: (String value) => draftName = value,
+            onFieldSubmitted: (String value) =>
                 Navigator.of(dialogContext).pop(value.trim()),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(context.l10n.cancel),
+              child: Text(strings.cancel),
             ),
             FilledButton(
               onPressed: () =>
-                  Navigator.of(dialogContext).pop(controller.text.trim()),
-              child: Text(context.l10n.create),
+                  Navigator.of(dialogContext).pop(draftName.trim()),
+              child: Text(strings.create),
             ),
           ],
         );
       },
     );
-    controller.dispose();
-    if (name == null || !context.mounted) return;
+    if (name == null) return;
     try {
       await agentsController.setActive(agent.key);
       if (chatController.machine == null) {
@@ -361,9 +367,8 @@ class CliAgentsDrawer extends StatelessWidget {
       }
       await chatController.createSessionFor(agent, name: name);
     } catch (err) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.sessionActionFailed(err))),
+      messenger.showSnackBar(
+        SnackBar(content: Text(strings.sessionActionFailed(err))),
       );
     }
   }
