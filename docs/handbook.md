@@ -3,6 +3,7 @@
 Everything beyond the README: deploying to production, building the native
 desktop apps, and how the Swarm (multi-agent group chat) works under the hood.
 
+[Security model](../SECURITY.md) ·
 [Production deployment](#production-deployment) ·
 [Desktop builds](#desktop-builds) ·
 [How Swarm works](#how-swarm-works)
@@ -14,6 +15,12 @@ desktop apps, and how the Swarm (multi-agent group chat) works under the hood.
 Quick Tunnel is great for trials, but a real deployment wants a stable URL, a
 small attack surface, and a clear recovery path. Relay runs behind a named
 Cloudflare Tunnel or directly on a public host.
+
+If you are setting up Relay for the first time, the app's empty credential
+screen includes a **Deploy backend** guide with the same five-step setup flow as
+the README: prepare a backend machine, run the OS setup script, choose the
+network mode, generate an encrypted credential, then import it by scan, image
+upload, or paste. This handbook is the follow-up for stable public deployment.
 
 ### Recommended shape
 

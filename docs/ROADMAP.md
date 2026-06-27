@@ -16,7 +16,7 @@
 - Theme, language, and app-wide font-size switching.
 - English-first active app flow with Chinese toggle.
 - Drawer cleanup, Home navigation page, machine status, Getting started tutorial,
-  and About dialog (version 0.11).
+  About dialog, and first-run Deploy backend guide.
 - Read-only quota dialog showing remaining Claude Code, Codex, and Antigravity
   5-hour and weekly quotas.
 - Native OS notifications for quota-reset alerts, delivered to the system tray instead of the chat message list on Android, iOS, macOS, and Windows.
@@ -36,6 +36,8 @@
   macOS LaunchAgent setup, and Windows PowerShell/Scheduled Task setup.
 - Cross-device event mirroring by workdir and selected session scope.
 - Left-drawer session creation, switching, and deletion for each CLI agent.
+- Background turn tracking for single-agent sessions, with running-session
+  indicators while long turns continue outside the foreground chat.
 - Native Flutter desktop frontend for Windows, with a verified release build,
   sharing client code with mobile and Web.
 - Offline remote push (Web Push for Web, Firebase Cloud Messaging for Android)

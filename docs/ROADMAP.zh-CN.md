@@ -12,7 +12,7 @@
 - 同一 `workdir + agent + session` 会话内的并发消息自动排队。
 - 主题、语言和全局字体大小切换。
 - 当前主流程默认英文，可切换中文。
-- 抽屉清理、首页导航页、机器状态、“开始使用”教程和关于弹窗（版本 0.11）。
+- 抽屉清理、首页导航页、机器状态、“开始使用”教程、关于弹窗和首次连接时的后端部署指南。
 - 只读额度弹窗显示 Claude Code、Codex 和 Antigravity 的 5 小时、本周剩余额度。
 - 额度刷新提醒改为系统原生通知（Android / iOS / macOS / Windows），发送到通知栏而非聊天消息框。
 - 额度刷新定时消息独立成左栏**“定时消息”**页:可按工作区为下一次 Claude Code 或 Codex 5 小时额度刷新预设一条消息,后端检测到刷新后自动发送;同一工作区多设备同步,并提供“清除已排程”取消。
@@ -24,6 +24,7 @@
 - `backends/` 下区分平台后端安装入口：Linux 使用 PM2，macOS 使用 LaunchAgent，Windows 使用 PowerShell/计划任务。
 - 跨设备事件按 workdir 和当前 session scope 镜像。
 - 左侧抽屉支持为每个 CLI agent 新建、切换、删除会话。
+- 单 agent 会话支持后台任务跟踪；长任务离开当前聊天后仍可继续，并在抽屉中显示运行状态。
 - Windows 原生 Flutter 桌面前端，已验证 release 构建，与移动端、Web 端共享客户端代码。
 - 离线远程推送（Web 端用 Web Push，Android 用 Firebase Cloud Messaging）：额度刷新
   提醒和定时消息发送结果，按设备可开关订阅，即使 app 进程被系统完全杀掉、SSE 断开也能收到。
