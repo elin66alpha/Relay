@@ -1,5 +1,5 @@
 name: relay
-description: "A dedicated Flutter chat client for local Claude Code, Codex, and Antigravity CLI agents."
+description: "A private Flutter control surface for local CLI coding agents."
 publish_to: "none"
 
 version: 0.1.3+13

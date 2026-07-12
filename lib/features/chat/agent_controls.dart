@@ -4,7 +4,7 @@ import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/agent_options.dart';
 
-/// Per-agent Model / Effort / Permission controls shown in the chat composer's
+/// Per-agent Model / Effort / Permission / Fast controls shown in the composer's
 /// "+" drawer. Capability-aware: only groups the agent supports are rendered
 /// for the current workdir+agent scope, so every device in that scope shares
 /// them.
@@ -65,6 +65,8 @@ String _optionLabel(AppStrings l10n, String group, AgentOption option) {
       return l10n.agentEffortExtraHigh;
     case 'max':
       return l10n.agentEffortMax;
+    case 'ultra':
+      return l10n.agentEffortUltra;
     default:
       return option.label;
   }
@@ -107,16 +109,17 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   }
 
   Future<void> _load() async {
+    final String agentKey = widget.agentKey;
     setState(() {
       _loading = true;
       _failed = false;
     });
     try {
       final List<Object> results = await Future.wait(<Future<Object>>[
-        widget.backend.fetchAgentOptions(widget.agentKey),
-        widget.backend.fetchAgentSettings(widget.agentKey),
+        widget.backend.fetchAgentOptions(agentKey),
+        widget.backend.fetchAgentSettings(agentKey),
       ]);
-      if (!mounted) return;
+      if (!mounted || agentKey != widget.agentKey) return;
       setState(() {
         _catalog = results[0] as AgentOptionsCatalog;
         _settings = results[1] as AgentSettings;
@@ -134,6 +137,16 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   Future<void> _openGroup(String group) async {
     final AgentOptionsCatalog? catalog = _catalog;
     if (catalog == null) return;
+    final String? modelId = catalog.resolveSelection(
+      'model',
+      _settings['model'],
+    );
+    final String current = catalog.resolveSelection(
+          group,
+          _settings[group],
+          modelId: modelId,
+        ) ??
+        '';
     final NavigatorState navigator = Navigator.of(context);
     widget.onOpenPage?.call();
     final AgentSettings? result = await navigator.push<AgentSettings>(
@@ -143,13 +156,17 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
           agentKey: widget.agentKey,
           group: group,
           catalog: catalog,
-          current: _settings[group] ?? catalog.defaults[group] ?? '',
+          current: current,
+          modelId: modelId,
+          fastEnabled: _settings['fast'] == 'on',
         ),
       ),
     );
-    if (result != null && mounted) {
+    if (!mounted) return;
+    if (result != null) {
       setState(() => _settings = result);
     }
+    await _load();
   }
 
   @override
@@ -176,8 +193,16 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
     }
     final AgentOptionsCatalog? catalog = _catalog;
     if (catalog == null) return const SizedBox.shrink();
+    final String? modelId = catalog.resolveSelection(
+      'model',
+      _settings['model'],
+    );
     final List<String> groups = _groupOrder
-        .where((String group) => catalog.supportsGroup(group))
+        .where(
+          (String group) =>
+              catalog.supportsGroup(group) &&
+              catalog.optionsFor(group, modelId: modelId).isNotEmpty,
+        )
         .toList(growable: false);
     if (groups.isEmpty) return const SizedBox.shrink();
 
@@ -251,10 +276,9 @@ class ComposerActionButton extends StatelessWidget {
   }
 }
 
-/// Page listing the choices for one control group. For the `model` group it also
-/// shows the installed CLI version and an "Update CLI" button so a user who
-/// doesn't see the newest model can pull it in. Saves on selection and pops with
-/// the new AgentSettings.
+/// Page listing the choices for one control group. Model and effort pages also
+/// expose the installed CLI version and updater because both catalogs can change
+/// with a CLI release. Saves on selection and pops with the new AgentSettings.
 class _AgentOptionPage extends StatefulWidget {
   const _AgentOptionPage({
     required this.backend,
@@ -262,6 +286,8 @@ class _AgentOptionPage extends StatefulWidget {
     required this.group,
     required this.catalog,
     required this.current,
+    required this.modelId,
+    required this.fastEnabled,
   });
 
   final BackendClient backend;
@@ -269,6 +295,8 @@ class _AgentOptionPage extends StatefulWidget {
   final String group;
   final AgentOptionsCatalog catalog;
   final String current;
+  final String? modelId;
+  final bool fastEnabled;
 
   @override
   State<_AgentOptionPage> createState() => _AgentOptionPageState();
@@ -277,18 +305,29 @@ class _AgentOptionPage extends StatefulWidget {
 class _AgentOptionPageState extends State<_AgentOptionPage> {
   late AgentOptionsCatalog _catalog;
   late String _current;
+  String? _modelId;
   bool _saving = false;
+  bool _savingFast = false;
+  late bool _fastEnabled;
   bool _updating = false;
   String _version = '';
 
   bool get _isModel => widget.group == 'model';
+  bool get _canUpdateCli => _isModel || widget.group == 'effort';
 
   @override
   void initState() {
     super.initState();
     _catalog = widget.catalog;
-    _current = widget.current;
-    if (_isModel) _loadVersion();
+    _fastEnabled = widget.fastEnabled;
+    _modelId = _catalog.resolveSelection('model', widget.modelId);
+    _current = _catalog.resolveSelection(
+          widget.group,
+          widget.current,
+          modelId: _modelId,
+        ) ??
+        '';
+    if (_canUpdateCli) _loadVersion();
   }
 
   Future<void> _loadVersion() async {
@@ -322,6 +361,27 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
     }
   }
 
+  Future<void> _toggleFast(bool enabled) async {
+    if (_savingFast || _saving || _updating) return;
+    setState(() => _savingFast = true);
+    try {
+      await widget.backend.updateAgentSetting(
+        widget.agentKey,
+        'fast',
+        enabled ? 'on' : 'off',
+      );
+      if (!mounted) return;
+      setState(() => _fastEnabled = enabled);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.agentSettingSaveFailed(err))),
+      );
+    } finally {
+      if (mounted) setState(() => _savingFast = false);
+    }
+  }
+
   Future<void> _update() async {
     final AppStrings l10n = context.l10n;
     final bool? confirmed = await showDialog<bool>(
@@ -346,11 +406,42 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
     try {
       final AgentUpdateResult result =
           await widget.backend.updateAgentCli(widget.agentKey);
-      final AgentOptionsCatalog options =
-          await widget.backend.fetchAgentOptions(widget.agentKey);
+      if (!result.ok) {
+        if (!mounted) return;
+        setState(() => _updating = false);
+        final String detail = result.timedOut
+            ? l10n.agentUpdateTimedOut
+            : result.output.isNotEmpty
+                ? result.output
+                : l10n.agentUpdateCommandFailed;
+        final String visibleDetail =
+            detail.length > 400 ? '${detail.substring(0, 400)}...' : detail;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.agentUpdateFailed(visibleDetail))),
+        );
+        return;
+      }
+      final List<Object> refreshed = await Future.wait(<Future<Object>>[
+        widget.backend.fetchAgentOptions(widget.agentKey),
+        widget.backend.fetchAgentSettings(widget.agentKey),
+      ]);
       if (!mounted) return;
+      final AgentOptionsCatalog options = refreshed[0] as AgentOptionsCatalog;
+      final AgentSettings settings = refreshed[1] as AgentSettings;
+      final String? modelId = options.resolveSelection(
+        'model',
+        settings['model'],
+      );
+      final String current = options.resolveSelection(
+            widget.group,
+            settings[widget.group],
+            modelId: modelId,
+          ) ??
+          '';
       setState(() {
         _catalog = options;
+        _modelId = modelId;
+        _current = current;
         _version = result.after.isNotEmpty ? result.after : _version;
         _updating = false;
       });
@@ -372,7 +463,10 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
   Widget build(BuildContext context) {
     final AppStrings l10n = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final List<AgentOption> options = _catalog.optionsFor(widget.group);
+    final List<AgentOption> options = _catalog.optionsFor(
+      widget.group,
+      modelId: _modelId,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -383,11 +477,31 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
           children: <Widget>[
             Expanded(
               child: ListView.separated(
-                itemCount: options.length,
+                itemCount: options.length +
+                    (_isModel && _catalog.supportsGroup('fast') ? 1 : 0),
                 separatorBuilder: (BuildContext context, int index) =>
                     Divider(height: 1, color: colors.outlineVariant),
                 itemBuilder: (BuildContext ctx, int index) {
-                  final AgentOption option = options[index];
+                  if (_isModel &&
+                      _catalog.supportsGroup('fast') &&
+                      index == 0) {
+                    return SwitchListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 4,
+                      ),
+                      secondary: const Icon(Icons.bolt_rounded),
+                      title: Text(l10n.agentFastMode),
+                      subtitle: Text(l10n.agentFastModeHint),
+                      value: _fastEnabled,
+                      onChanged: _savingFast || _saving || _updating
+                          ? null
+                          : _toggleFast,
+                    );
+                  }
+                  final int optionIndex = index -
+                      (_isModel && _catalog.supportsGroup('fast') ? 1 : 0);
+                  final AgentOption option = options[optionIndex];
                   final bool selected = option.id == _current;
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(
@@ -411,7 +525,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
                 },
               ),
             ),
-            if (_isModel) _buildUpdateFooter(l10n, colors),
+            if (_canUpdateCli) _buildUpdateFooter(l10n, colors),
           ],
         ),
       ),
@@ -429,11 +543,13 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            l10n.agentUpdateMissingModel,
-            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
-          ),
-          const SizedBox(height: 8),
+          if (_isModel) ...<Widget>[
+            Text(
+              l10n.agentUpdateMissingModel,
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: <Widget>[
               FilledButton.tonalIcon(

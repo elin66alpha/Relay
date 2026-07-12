@@ -4,7 +4,7 @@
 // that share one canonical transcript. It sits above the per-agent scopes (see
 // docs/group-chat.md). Each member keeps its own resumable CLI session; the
 // swarm additionally pins its own work tree (`workdir`) and per-member
-// model/effort/permission (`memberConfigs`) so it is configured independently of
+// model/effort/permission/fast (`memberConfigs`) so it is configured independently of
 // each member's solo chat.
 //
 // Persisted with the shared json-store (in-memory cache + atomic 0o600 writes),
@@ -62,10 +62,10 @@ function normalizeMembers(members) {
 // ids against agent-options before they reach here, so we just keep the known
 // groups with plausible string ids for current members and drop the rest. Stays
 // agent-agnostic so this module never imports the option catalog.
-//   * model/effort/permission are short option ids (<= 64 chars).
+//   * model/effort/permission/fast are short option ids (<= 64 chars).
 //   * nickname is a swarm-scoped display name for the member (<= 80 chars).
 //   * prompt is the member's per-swarm work instructions / persona (<= 4000).
-const CONFIG_GROUPS = ['model', 'effort', 'permission'];
+const CONFIG_GROUPS = ['model', 'effort', 'permission', 'fast'];
 const MAX_MEMBER_NICKNAME = 80;
 const MAX_MEMBER_PROMPT = 4000;
 

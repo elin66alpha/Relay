@@ -1,247 +1,245 @@
-# Relay Handbook
+# Relay handbook
 
-Everything beyond the README: deploying to production, building the native
-desktop apps, and how the Swarm (multi-agent group chat) works under the hood.
-
-[Security model](../SECURITY.md) ·
-[Production deployment](#production-deployment) ·
-[Desktop builds](#desktop-builds) ·
-[How Swarm works](#how-swarm-works)
-
----
+This is the durable operating and architecture reference for Relay. Start with
+the [README](../README.md), use the [backend setup guide](../backends/README.md)
+for installation, and read [SECURITY.md](../SECURITY.md) before exposing a
+backend outside a trusted network.
 
 ## Production deployment
 
-Quick Tunnel is great for trials, but a real deployment wants a stable URL, a
-small attack surface, and a clear recovery path. Relay runs behind a named
-Cloudflare Tunnel or directly on a public host.
+Relay carries a bearer token on every API request and can start coding agents as
+the backend OS user. A stable deployment should have all of the following:
 
-If you are setting up Relay for the first time, the app's empty credential
-screen includes a **Deploy backend** guide with the same five-step setup flow as
-the README: prepare a backend machine, run the OS setup script, choose the
-network mode, generate an encrypted credential, then import it by scan, image
-upload, or paste. This handbook is the follow-up for stable public deployment.
+- Terminate TLS at a named Cloudflare Tunnel or a reverse proxy such as Caddy or
+  Nginx. A routable `http://` `PUBLIC_BASE_URL` triggers a warning but is not
+  blocked.
+- Keep `HOST=127.0.0.1` when the tunnel or reverse proxy is on the same host.
+  Direct mode uses `0.0.0.0`; expose it only behind HTTPS and a firewall.
+- Set `PUBLIC_BASE_URL` to the exact URL imported by clients. Regenerate and
+  re-import credentials after it changes.
+- Run Relay as a non-root user and restrict that user's filesystem access.
+- Set `RELAY_FS_ROOTS` to the absolute directories the file API should reach.
+  Without it, the API is filesystem-wide except for its built-in denylist.
+- Generate one credential per device. Revoke and delete old device tokens rather
+  than sharing one token.
+- Keep `.env`, tokens, credential exports, CLI login state, push keys, history,
+  sessions, settings, groups, and quota state out of git and release archives.
 
-### Recommended shape
+### Reverse proxy requirements
 
-- **HTTPS only.** Terminate TLS at Cloudflare (named Tunnel) or at a reverse
-  proxy such as Nginx or Caddy (direct mode). If `PUBLIC_BASE_URL` is `http://`
-  to a routable host, the server prints a loud startup warning: the device token
-  then travels in cleartext and anyone on the path can steal it (it is warn-only
-  — `localhost` and `https://` are exempt, and it never blocks startup).
-- **Stay on localhost.** Prefer `HOST=127.0.0.1` with the proxy/tunnel in front
-  over `HOST=0.0.0.0`, unless the proxy runs on another host.
-- **Rate limiting is built in.** `/api` is capped per client IP (600/min; the
-  SSE stream and file transfers are exempt) and wrong-token attempts are
-  throttled to 15/min, answering `429`. The limiter reads the real client IP
-  from `X-Forwarded-For` via `trust proxy` set to `loopback`, so keep the
-  tunnel/proxy on localhost and let it forward that header.
-- **Pin the URL.** Set `PUBLIC_BASE_URL` to the exact address users import (e.g.
-  `https://agent.example.com`) and regenerate credentials after changing it.
-- **One credential per device.** Revoke and then delete old device tokens
-  instead of sharing one long-lived token.
-- **Keep secrets out of git:** `server/.env`, `server/tokens.json`, and
-  `server/credentials/` hold deployment identity, access tokens, and encrypted
-  credential exports.
+- Forward normal HTTP requests and long-lived SSE responses. Disable buffering
+  for `/api/events`, `/api/chat`, `/api/group/chat`, `/api/btw`, and
+  `/api/agent-auth/login/start`.
+- Keep proxy timeouts above `AGENT_TIMEOUT_MS` (60 minutes by default).
+- Pass the real client address in `X-Forwarded-For`. Relay trusts forwarded
+  addresses only from loopback proxies.
+- Match proxy body/response limits to Relay's defaults: 100 MB per upload and
+  300 MB per download. Override with `UPLOAD_MAX_BYTES` and
+  `DOWNLOAD_MAX_BYTES` only when the full path can handle larger transfers.
+- Narrow browser access with `CORS_ALLOW_ORIGIN` when the Web app has a stable
+  origin.
 
-### Reverse proxy checklist
+Relay applies a general limit of 600 ordinary API requests per minute per IP.
+Long-lived chat/SSE and file-transfer endpoints are excluded from that counter
+but still require authentication. Failed bearer-token attempts have a separate
+15-per-minute per-IP limit.
 
-- Forward `GET`/`POST` and the long-lived `GET /api/events`; **disable
-  buffering** for `/api/events` and streaming `/api/chat` responses.
-- Pass `X-Forwarded-For` (Cloudflare and most proxies do by default) so the
-  rate limiter keys on the real client IP, not the proxy's loopback address.
-- Keep proxy timeouts longer than the agent timeout (default 60 minutes).
-- Upload/download caps default to 100 MB / 300 MB (`UPLOAD_MAX_BYTES` /
-  `DOWNLOAD_MAX_BYTES`); tune only if the proxy and network can handle them.
-- Narrow CORS with `CORS_ALLOW_ORIGIN`. The device token is the real API gate,
-  but a tight origin reduces accidental exposure.
-- Optionally confine the file API to an allowlist with `RELAY_FS_ROOTS`. Even
-  without it, Relay refuses to serve `tokens.json`, `.env`, `credentials/`,
-  `~/.ssh`, and the CLI auth files, so a leaked token cannot mint new
-  credentials or steal host keys through the file API.
+### File API boundary
 
-### Direct public host
+The built-in denylist currently covers Relay's token file, `.env`, generated
+credential directory, Web Push/FCM token stores, `~/.ssh`, Claude Code OAuth
+credentials, and Codex auth. It is not a general secret scanner and does not
+cover every third-party CLI configuration. Use `RELAY_FS_ROOTS` and a restricted
+backend user for the actual production boundary.
 
-- Run the Node process behind a service manager (PM2, systemd, LaunchAgent, or a
-  Windows Scheduled Task) as a **non-root** user that owns only the intended
-  work directories.
-- Restrict the inbound firewall to the proxy port (normally 443) and keep the
-  backend port private.
-- After deploys, verify with `GET /api/diagnostics` from an authenticated app
-  session: public URL, token state, CLI availability, active requests, storage
-  files, and workdir access.
+Directory downloads are zipped and rejected if the tree would contain a denied
+path. Native uploads/downloads stream; Web downloads use a browser Blob and may
+hold the file in memory up to the configured cap.
 
-### After any change
+## Credentials and agent login
 
-- Changed `PUBLIC_BASE_URL`? Re-run the credential script and re-import in the
-  app.
-- Rotated/revoked/deleted tokens? Confirm old devices fail and current ones
-  still pass `GET /api/health`.
-- The local backend should always still answer on `http://127.0.0.1:<PORT>` from
-  the backend host — that is your rollback path for any tunnel/proxy change.
+`npm run credential` creates an encrypted `relay.credentials.v1` QR/JSON
+envelope containing the backend URL, machine identity, and one revocable device
+token. It uses PBKDF2-HMAC-SHA256 (600,000 iterations) and AES-256-GCM. The
+passphrase is not saved.
 
----
+Useful commands from `server/`:
 
-## Desktop builds
+```bash
+npm run credential
+npm run credential -- --url https://relay.example.com
+npm run credential -- --list-tokens
+npm run credential -- --revoke <token-id>
+```
 
-Relay's client is a **native Flutter app** — there is no Electron or web wrapper.
-The same `lib/` code runs on mobile, Web, and all three desktops; `windows/`,
-`macos/`, and `linux/` are the standard Flutter desktop runner projects.
+The app can scan a QR on supported mobile platforms or import it by image/file
+and pasted JSON. Native clients use platform secure storage. The Web client is
+subject to browser-origin storage security, so use a private profile on a
+trusted device.
 
-**Each OS builds its own target — desktop binaries cannot be cross-compiled.**
+Relay reports separate installed, authenticated, and usable state for all five
+known agents. Claude Code, Codex, and Agy are OAuth-gated. Their in-app login
+bridge starts the CLI in a PTY, streams the authorization URL, and accepts a
+device code where required. The bridge currently depends on GNU-compatible
+`script -qfec` (normally Linux); on unsupported hosts, log in directly in a
+terminal. OpenCode and Hermes credentials remain host-managed; once installed,
+Relay allows their runner to start and lets the CLI report provider errors.
 
-| Target  | Build host required                       | From a Linux box? |
-|---------|-------------------------------------------|-------------------|
-| Windows | Windows + Visual Studio (VS 2022 or 2026) | No                |
-| macOS   | macOS + Xcode + CocoaPods                 | No                |
-| Linux   | Linux (clang / cmake / ninja / GTK)       | Yes               |
+## Runtime model
 
-### Prerequisites
+### Workdirs, conversations, and settings
 
-- **Windows:** VS 2022/2026 with the *"Desktop development with C++"* workload
-  (MSVC, Windows 10/11 SDK, CMake); Flutter on PATH.
-- **macOS:** Xcode + command line tools, CocoaPods
-  (`sudo gem install cocoapods`); `flutter config --enable-macos-desktop`.
-- **Linux:** `sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev
-  liblzma-dev`, plus `libsecret-1-0` and a keyring (e.g. `gnome-keyring`) for
-  `flutter_secure_storage`.
+Each device stores its current workdir and sends it in `X-Workdir`. Backend state
+then uses two related scopes:
 
-### Build
+| State | Scope |
+|---|---|
+| Named conversation, history, running turn, native CLI resume id | `workdir + agent + sessionId` |
+| Model, effort, permission, fast mode | `workdir + agent` |
+| Swarm list | workspace in `X-Workdir` |
+| Swarm transcript and member sessions | Swarm id plus its chosen work tree |
+
+An agent context supports up to eight named conversations. `Main` preserves the
+legacy scope key and cannot be deleted. Turns in one exact conversation scope
+queue; other sessions can continue independently. Devices on the same scope
+share backend history and live events.
+
+Agent controls are capability-aware:
+
+| Agent | Model | Effort | Permission | Fast | Authentication |
+|---|---:|---:|---:|---:|---|
+| Claude Code | yes | yes | yes | yes | OAuth |
+| Codex | yes | model-specific | yes | yes | OAuth |
+| Antigravity | yes | no | yes | no | OAuth |
+| OpenCode | yes | yes | yes | no | host-managed, optional key |
+| Hermes | host config/pins | no | yes | no | host-managed key |
+
+Fast mode defaults off, may use more quota or cost more, and is visible only in
+the solo-chat composer. Relay sends an explicit Claude `fastMode` setting or
+Codex `service_tier` override on every invocation. Availability still depends on
+the selected model, CLI version, account, and provider. Swarm storage can retain
+the field, but the current Swarm form exposes only model, effort, and permission.
+
+Codex model and reasoning choices come from the installed CLI's structured
+catalog and keep each model's advertised order/default. Updating Codex clears
+the discovery cache. Other agents use their supported live or fallback catalogs;
+local pins may be added in the gitignored `server/models-extra.json`.
+
+### Swarms
+
+A Swarm is one canonical transcript above several independent CLI sessions.
+When a human message mentions multiple members, Relay snapshots the transcript
+once, builds a speaker-labelled delta for each member, and runs those members in
+parallel. Each member still serializes against its own private Swarm session.
+
+At creation, a Swarm selects its work tree and per-member model, effort,
+permission, nickname, and prompt/persona. The work tree cannot be changed later.
+Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
+Templates contain the name, member list, and member configuration; they omit the
+machine-specific workdir, id, and transcript.
+
+BTW side conversations are read-only and do not modify the main session. Claude
+forks through its native CLI; Codex and Agy clone their native persisted
+conversation before resuming an isolated side scope.
+
+### Quota and notifications
+
+The usage screen reports Claude Code, Codex, and Antigravity. Reset detection and
+scheduled messages support Claude Code and Codex only. A schedule stores one
+prompt per source and workspace for the next detected five-hour reset.
+
+Notification delivery has three layers:
+
+- Android, iOS, macOS, and Windows can show local notifications while Relay is
+  receiving live events; Web can use browser notifications.
+- Optional Web Push reaches a subscribed browser after the tab closes.
+- Optional FCM reaches configured Android builds after the app is killed.
+
+Linux desktop currently falls back to an in-app message. Fully killed iOS apps
+do not have a configured offline push channel in this repository.
+
+## API map
+
+All `/api/*` endpoints require the imported bearer token.
+
+- Metadata/auth: health, agents, agent options/settings/version/update,
+  auth status, diagnostics, device tokens, and shared events.
+- Agent OAuth: `GET /api/agent-auth/login/start`,
+  `POST /api/agent-auth/login/code`, and
+  `GET /api/agent-auth/login/status`.
+- Chat: chat, cancellation, history, history search/export, and clear session.
+- Named sessions: list/create, set active, and delete.
+- Files/workdir: current workdir, absolute directory browse, upload, and
+  download.
+- BTW: chat, history, and clear. Cancellation uses the normal chat cancellation
+  endpoint and side-scope metadata.
+- Swarms: list/create, update members, delete, history, clear, chat, and cancel.
+- Quota: usage, schedules, schedule replacement, and cancellation.
+- Push: browser subscription/config and FCM device registration.
+
+The route implementations in `server/routes/` are the source of truth when an
+endpoint changes.
+
+## Development and builds
+
+### Backend and Web
+
+```bash
+cd server
+npm install
+cp .env.example .env
+npm start
+```
+
+To let the backend serve the Flutter Web client:
 
 ```bash
 flutter pub get
-flutter run -d windows            # or: -d macos / -d linux
-flutter build windows --release   # or: macos / linux
+flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+npm --prefix server start
 ```
 
-Artifacts: Windows `build/windows/x64/runner/Release/` (a portable folder — zip
-to share); macOS `build/macos/Build/Products/Release/Relay.app`; Linux
-`build/linux/x64/release/bundle/`.
+The server serves `build/web` when present. CanvasKit is bundled locally and the
+service worker is disabled to keep the self-hosted client current.
 
-### Windows build gotchas
+### Desktop clients
 
-Two toolchain quirks (not Relay bugs) can block a Windows build:
+Desktop runner projects exist for Windows, macOS, and Linux, but each target
+must be built on its own operating system. Windows release builds have been
+exercised in this repository; macOS and Linux runners still need broader
+release/secure-storage validation before being advertised as packaged releases.
 
-1. **A non-ASCII (CJK) repo path** breaks the toolchain — `flutter analyze`
-   crashes in its LSP channel and `flutter build windows` fails to read
-   `app.dill` (the path shows mojibake). Fix: build from an **ASCII-only path**
-   (e.g. `D:\code\Relay`). For analysis alone, `dart analyze` avoids the failing
-   LSP channel.
-2. **VS 2026 MSVC (14.51)** turns the deprecated `<experimental/coroutine>`
-   header into a hard error, which `flutter_local_notifications_windows` still
-   includes. Silence it for the whole build:
+```bash
+flutter run -d windows       # or macos / linux
+flutter build windows --release
+```
 
-   ```powershell
-   $env:CL = "/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
-   flutter build windows --release
-   ```
+Build prerequisites:
 
-   VS 2022 does not need this. If you moved the repo to dodge issue 1, run
-   `flutter clean` first so stale plugin symlinks don't trip
-   `PathExistsException`.
+- Windows: Visual Studio with Desktop development with C++, Windows SDK, CMake,
+  and Flutter. Use an ASCII-only repository path. The repository already adds
+  the MSVC coroutine compatibility define needed by the notifications plugin.
+- macOS: Xcode, command-line tools, CocoaPods, and Flutter desktop enabled.
+- Linux: clang, CMake, Ninja, pkg-config, GTK development packages,
+  `libsecret-1-dev`, and a keyring such as GNOME Keyring.
 
-### Connecting on desktop
+Typical artifacts are `build/windows/x64/runner/Release/`,
+`build/macos/Build/Products/Release/Relay.app`, and
+`build/linux/x64/release/bundle/`. Packaging, store signing, macOS notarization,
+and production Android signing are not configured. Android release builds in
+this repository still reuse debug signing.
 
-- **No camera scanner on desktop** (`mobile_scanner` is mobile/macOS only): the
-  credential screen offers **Upload QR image** and **Paste credential** instead.
-  Generate the credential on the backend, then upload the PNG or paste the
-  payload and enter the passphrase.
-- Quick Tunnel backends use the same `https://*.trycloudflare.com` URL as
-  mobile/Web; regenerate the QR after it rotates.
-- Plain `http://<ip>:port` works; macOS allows the cleartext request via
-  `NSAllowsLocalNetworking`.
+## Configuration
 
-### Platform notes
+`server/.env.example` documents supported deployment settings. The most useful
+groups are:
 
-- **Notifications:** native on Android/iOS/macOS/Windows while the app is alive
-  on SSE; Linux falls back to an in-app system message.
-- **Secure storage:** Windows Credential Manager / macOS Keychain / Linux
-  libsecret (needs a keyring daemon).
-- **macOS sandbox:** both entitlement files include
-  `com.apple.security.network.client`, required to reach the backend.
+- identity/network: `PORT`, `HOST`, `PUBLIC_BASE_URL`, tunnel variables;
+- execution: `RELAY_DEFAULT_DIR`, `AGENT_TIMEOUT_MS`, `PROMPT_MAX_BYTES`,
+  `RELAY_MODEL_DISCOVERY`, `CODEX_HOME`;
+- security/files: `CORS_ALLOW_ORIGIN`, `RELAY_FS_ROOTS`, upload/download caps;
+- usage: quota watch, poll interval, HTTP/probe timeouts and backoff;
+- offline push: VAPID keys and `FCM_SERVICE_ACCOUNT_FILE`.
 
-### Signing & packaging
-
-- **macOS:** an unsigned `.app` runs but Gatekeeper warns on first launch —
-  right-click → **Open**, or `xattr -dr com.apple.quarantine Relay.app`.
-  Distribution needs an Apple **Developer ID** signature + **notarization**.
-  Bundle id: `dev.relay.app`.
-- **Windows:** the `Release/` folder is portable (the target needs the usually
-  present VC++ runtime). MSIX / Inno Setup / NSIS installers are possible but
-  not set up in-repo.
-
----
-
-## How Swarm works
-
-A **Swarm** (蜂群) is one chat box, one human, and several AI agents sharing a
-single transcript. You summon members with `@mentions`; mention several in one
-message and they answer **in parallel**, each from the same conversation
-snapshot. (In the code, routes, and storage the feature is called `group`.)
-
-### The core idea: orchestration, not shared memory
-
-Each CLI agent keeps its **own private memory** (`claude --resume`, Codex/Agy
-resume, etc.) and these cannot see each other. So a Swarm is an orchestration
-layer on top of independent per-agent sessions, not a shared brain:
-
-- The backend stores **one canonical group transcript**.
-- On an agent's turn, the orchestrator feeds it only the **delta** since it last
-  spoke — each line labeled with its speaker — the agent replies, and the reply
-  is appended to the transcript with attribution. The agent's own resumable
-  session already holds everything else.
-
-"Who summoned whom" is metadata the orchestrator records, not a native
-capability of the agents, so the existing single-agent runners are reused
-unchanged.
-
-### A round, end to end
-
-1. **Human posts a message.** `@mentions` select who runs this round; a message
-   with no mention is just recorded.
-2. **Snapshot.** The transcript is snapshotted once; every summoned member builds
-   its prompt from that same snapshot.
-3. **Delta prompt.** Each member receives only what is new since it last spoke,
-   speaker-labeled, plus a marker that it is now its turn (byte-bounded so it
-   never exceeds the argv cap).
-4. **Run in parallel.** Members run concurrently and stream over SSE. The group
-   is busy for the round, but each member also serializes against its own private
-   session so its CLI memory stays coherent.
-5. **Append + attribute.** Each reply lands on the transcript with `author` and
-   `summonedBy`; placeholders keep ordering stable even when replies finish out
-   of order.
-6. **Idle.** When all members settle, the Swarm waits for the next human message.
-
-### What you can configure
-
-Each Swarm pins its own **work tree** (a directory chosen at creation — e.g. a
-git worktree), and each member gets its own **model / effort / permission** plus
-an optional **nickname and per-member prompt** (persona). That is enough to build
-heterogeneous roles — a read-only "reviewer" alongside a write-enabled "doer" on
-different models — with no extra machinery.
-
-### Where it lives
-
-- **Backend:** `server/lib/groups.js` (config), `server/lib/group-turn.js` (pure
-  `parseMentions` / `deltaSince` / `buildGroupPrompt`, unit-tested), and
-  `server/routes/group.js` (endpoints + the round orchestrator).
-- **Client:** `lib/core/models/group.dart` and
-  `lib/features/chat/group_chat_{controller,screen}.dart`; the left drawer lists
-  every Swarm in the workspace as always-visible sub-entries.
-- **Endpoints** (auth + `X-Workdir`): `GET`/`POST /api/groups`,
-  `POST /api/groups/members`, `POST /api/groups/delete`,
-  `GET /api/group/history`, `POST /api/group/clear`, and `POST /api/group/chat`
-  (+ `/cancel`).
-
-### Limits and trade-offs
-
-- **Prompt size.** Prompts ride to the CLI as a single argv token (capped by
-  `PROMPT_MAX_BYTES`, default 100 KB). Delta injection keeps each turn small; a
-  very large delta must still be bounded before it hits the cap.
-- **Cost.** One message can fan out into several concurrent agent turns,
-  multiplying token spend across accounts. The quota watch tracks usage.
-- **Divergent memory.** Members only know what their injected deltas told them,
-  so their private memories diverge by design — which is why consistent,
-  speaker-labeled deltas matter.
-- **Out of scope (v1):** agent-initiated summon chains (`@agent` emitted by an
-  agent) and facilitator / round-robin auto turn-taking.
+The default workdir for a new device remains `~/agent_deck` for compatibility;
+after first use, each device persists its own selection.

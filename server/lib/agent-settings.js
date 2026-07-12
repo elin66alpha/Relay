@@ -2,8 +2,8 @@
 
 // Per-scope Model / Effort / Permission selections, persisted to disk so every
 // device sharing a `workdir + agent` scope sees the same choice (matching the
-// shared-session design). The store maps a scope key string -> { model, effort,
-// permission }. Selections are normalized against agent-options on read and
+// shared-session design). The store maps a scope key string to its supported
+// selections (model / effort / permission / fast). Values are normalized on read and
 // write, so an unknown id silently falls back to the agent's default and a
 // never-configured scope starts from that agent's default selection.
 

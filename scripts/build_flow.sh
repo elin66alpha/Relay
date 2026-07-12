@@ -61,4 +61,8 @@ restart_pm2_app
 wait_for_web
 
 run flutter build apk --debug --no-pub
-run adb install -r "$APK_PATH"
+if [[ "${INSTALL_APK:-0}" == "1" ]]; then
+  run adb install -r "$APK_PATH"
+else
+  printf '\n==> APK built at %s (ADB install skipped; set INSTALL_APK=1 to install)\n' "$APK_PATH"
+fi

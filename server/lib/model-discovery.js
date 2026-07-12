@@ -5,15 +5,16 @@
 // When a CLI updates (e.g. `claude update` adds Fable 5), the new models appear
 // here automatically — no code change.
 //
-// Each strategy returns an array of { id, label, args } (newest first) or null
-// when discovery is unavailable; agent-options falls back to its static catalog
-// in that case. Results are cached per agent and keyed by the resolved binary's
-// path + size + mtime, so an update busts the cache while steady-state calls
-// (every chat turn resolves defaults through here) stay a cheap map lookup.
+// Each strategy returns model options (newest first, optionally with per-model
+// effort metadata) or null when discovery is unavailable; agent-options falls
+// back to its static catalog in that case. Results are cached per agent and
+// keyed by the resolved binary plus relevant CLI cache files, so an update busts
+// the cache while steady-state calls stay a cheap map lookup.
 //
 // Set RELAY_MODEL_DISCOVERY=0 to disable and always use the static catalog.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -122,49 +123,151 @@ function parseClaudeModels(raw) {
 
 // ---- codex -------------------------------------------------------------------
 
-// Codex's launcher is a thin JS shim; the model strings live in the vendored
-// Rust binary. Match the dotted gpt-N.M family plus size variants; the
-// specialized -codex* ids are skipped (unverified for non-interactive exec).
-const CODEX_ID_RE = /gpt-\d+\.\d+(?:-(?:mini|nano|pro))?/g;
-// Floor out older versions. A plain id like "gpt-5.3" is often just the prefix
-// of a -codex-only release, so it isn't a real standalone exec model; the
-// current exec line is gpt-5.4+. Future majors/minors pass automatically.
-const CODEX_MIN_MAJOR = 5;
-const CODEX_MIN_MINOR = 4;
+const SAFE_MODEL_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
+const SAFE_EFFORT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
-function parseCodexModels(raw) {
-  const byId = new Map();
-  for (const token of raw) {
-    const m = /^gpt-(\d+)\.(\d+)(?:-(mini|nano|pro))?$/.exec(token);
-    if (!m) continue;
-    const [, major, minor, suffix] = m;
-    const maj = Number(major);
-    const min = Number(minor);
-    if (maj < CODEX_MIN_MAJOR || (maj === CODEX_MIN_MAJOR && min < CODEX_MIN_MINOR)) {
+function optionLabel(id) {
+  if (id === 'xhigh') return 'Extra high';
+  return id
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+// `codex debug models` and app-server's `model/list` expose the same catalog in
+// snake_case and camelCase respectively. Accept both shapes so discovery stays
+// coupled to Codex's structured metadata rather than guessing ids from strings
+// embedded in the binary. Each model keeps its own ordered reasoning choices.
+function parseCodexCatalog(raw) {
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_err) {
+      return [];
+    }
+  }
+  const entries = Array.isArray(parsed && parsed.models)
+    ? parsed.models
+    : Array.isArray(parsed && parsed.data)
+      ? parsed.data
+      : [];
+  const models = [];
+  const seen = new Set();
+  for (let index = 0; index < entries.length; index += 1) {
+    const item = entries[index];
+    if (!item || typeof item !== 'object') continue;
+    if (item.visibility && item.visibility !== 'list') continue;
+    if (item.hidden === true) continue;
+    const id = String(item.slug || item.id || item.model || '').trim();
+    const cliModel = String(item.slug || item.model || item.id || '').trim();
+    if (
+      !SAFE_MODEL_ID_RE.test(id) ||
+      !SAFE_MODEL_ID_RE.test(cliModel) ||
+      seen.has(id)
+    ) {
       continue;
     }
-    if (byId.has(token)) continue;
-    const suffixLabel = suffix
-      ? ` ${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}`
-      : '';
-    byId.set(token, {
-      id: token,
-      label: `GPT-${major}.${minor}${suffixLabel}`,
-      args: ['-m', token],
-      _sort: [0, Number(major), Number(minor)],
-      _variant: suffix ? 1 : 0,
+
+    const rawEfforts = Array.isArray(item.supported_reasoning_levels)
+      ? item.supported_reasoning_levels
+      : Array.isArray(item.supportedReasoningEfforts)
+        ? item.supportedReasoningEfforts
+        : [];
+    const efforts = [];
+    const seenEfforts = new Set();
+    for (const rawEffort of rawEfforts) {
+      const effort = String(
+        rawEffort && (rawEffort.effort || rawEffort.reasoningEffort) || '',
+      ).trim();
+      if (!SAFE_EFFORT_ID_RE.test(effort) || seenEfforts.has(effort)) continue;
+      seenEfforts.add(effort);
+      efforts.push({
+        id: effort,
+        label: optionLabel(effort),
+        description:
+          typeof rawEffort.description === 'string'
+            ? rawEffort.description.trim() || undefined
+            : undefined,
+        args: ['-c', `model_reasoning_effort=${effort}`],
+      });
+    }
+    const requestedDefault = String(
+      item.default_reasoning_level || item.defaultReasoningEffort || '',
+    ).trim();
+    const defaultEffort = efforts.some((effort) => effort.id === requestedDefault)
+      ? requestedDefault
+      : efforts[0] && efforts[0].id;
+
+    seen.add(id);
+    models.push({
+      id,
+      label: String(item.display_name || item.displayName || id).trim() || id,
+      description:
+        typeof item.description === 'string'
+          ? item.description.trim() || undefined
+          : undefined,
+      args: ['-m', cliModel],
+      efforts,
+      defaultEffort,
+      _priority:
+        Number.isFinite(Number(item.priority)) ? Number(item.priority) : index,
+      _isDefault: item.isDefault === true,
+      _index: index,
     });
   }
-  // Plain (non-variant) ids rank above their -mini/-nano/-pro siblings of the
-  // same version so the strongest model of the newest version is the default.
-  const list = [...byId.values()];
-  list.sort(
+  models.sort(
     (a, b) =>
-      b._sort[1] - a._sort[1] ||
-      b._sort[2] - a._sort[2] ||
-      a._variant - b._variant,
+      Number(b._isDefault) - Number(a._isDefault) ||
+      a._priority - b._priority ||
+      a._index - b._index,
   );
-  return list.map(({ _sort, _variant, ...rest }) => rest);
+  return models.map(({ _priority, _isDefault, _index, ...model }) => model);
+}
+
+function codexHome() {
+  const configured = String(process.env.CODEX_HOME || '').trim();
+  return configured || path.join(os.homedir(), '.codex');
+}
+
+function readCodexCache({ maxAgeMs } = {}) {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(codexHome(), 'models_cache.json'), 'utf8'),
+    );
+    const cacheVersion = String(parsed.client_version || '').trim();
+    if (!cacheVersion) return [];
+    const versionResult = spawnSync('codex', ['--version'], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+    const match = String(versionResult.stdout || '').match(
+      /\d+\.\d+\.\d+(?:[-+][^\s]+)?/,
+    );
+    if (versionResult.status !== 0 || !match || match[0] !== cacheVersion) {
+      return [];
+    }
+    if (Number.isFinite(maxAgeMs)) {
+      const fetchedAt = Date.parse(String(parsed.fetched_at || ''));
+      if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt > maxAgeMs) {
+        return [];
+      }
+    }
+    return parseCodexCatalog(parsed);
+  } catch (_err) {
+    return [];
+  }
+}
+
+function runCodexCatalog(args, timeout = 5000) {
+  const result = spawnSync('codex', args, {
+    encoding: 'utf8',
+    timeout,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) return [];
+  return parseCodexCatalog(String(result.stdout || ''));
 }
 
 // ---- agy ---------------------------------------------------------------------
@@ -206,9 +309,9 @@ function sortByFamilyThenVersionDesc(list) {
   return list.map(({ _sort, ...rest }) => rest);
 }
 
-// `codex` on PATH is a thin JS launcher; the real model strings live in a
-// per-platform vendored Rust binary inside the package. Walk from the launcher
-// to <pkg>/node_modules/@openai/codex-<platform>/vendor/<target>/bin/codex.
+// `codex` on PATH is normally a thin JS launcher. Stamp the per-platform Rust
+// binary inside the package so an npm update invalidates discovery even when the
+// launcher's path remains unchanged.
 function locateCodexBinary() {
   const launcher = resolveBinary('codex');
   if (!launcher) return null;
@@ -249,9 +352,18 @@ const STRATEGIES = {
   },
   codex: {
     locate: () => locateCodexBinary(),
-    discover: (bin) => {
-      const list = parseCodexModels(scanFile(bin, CODEX_ID_RE));
-      return list.length ? list : null;
+    discover: () => {
+      const freshCache = readCodexCache({ maxAgeMs: 5 * 60 * 1000 });
+      if (freshCache.length) return freshCache;
+      const live = runCodexCatalog(['debug', 'models'], 5000);
+      if (live.length) return live;
+      const bundled = runCodexCatalog(
+        ['debug', 'models', '--bundled'],
+        3000,
+      );
+      if (bundled.length) return bundled;
+      const cached = readCodexCache();
+      return cached.length ? cached : null;
     },
   },
   agy: {
@@ -263,7 +375,7 @@ const STRATEGIES = {
 };
 
 // Discovered model options for an agent, or null to fall back to the static
-// catalog. Cached and keyed by the binary stamp so a CLI update refreshes it.
+// catalog. Cached by binary/cache stamps so CLI and catalog updates refresh it.
 function discoverModels(agentKey) {
   if (DISABLED) return null;
   const strategy = STRATEGIES[agentKey];
@@ -271,7 +383,11 @@ function discoverModels(agentKey) {
   try {
     const bin = strategy.locate();
     if (!bin) return null;
-    const stamp = fileStamp(bin);
+    const extraStamp =
+      agentKey === 'codex'
+        ? fileStamp(path.join(codexHome(), 'models_cache.json')) || ''
+        : '';
+    const stamp = `${fileStamp(bin) || ''}|${extraStamp}`;
     const cached = cache.get(agentKey);
     if (cached && cached.stamp === stamp) return cached.models;
     let models = null;
@@ -281,11 +397,25 @@ function discoverModels(agentKey) {
       models = null;
     }
     const normalized = Array.isArray(models) && models.length ? models : null;
-    cache.set(agentKey, { stamp, models: normalized });
+    const finalExtraStamp =
+      agentKey === 'codex'
+        ? fileStamp(path.join(codexHome(), 'models_cache.json')) || ''
+        : '';
+    const finalStamp = `${fileStamp(bin) || ''}|${finalExtraStamp}`;
+    cache.set(agentKey, { stamp: finalStamp, models: normalized });
     return normalized;
   } catch (_err) {
     return null;
   }
 }
 
-module.exports = { discoverModels };
+function clearModelDiscoveryCache(agentKey) {
+  if (agentKey) cache.delete(agentKey);
+  else cache.clear();
+}
+
+module.exports = {
+  clearModelDiscoveryCache,
+  discoverModels,
+  parseCodexCatalog,
+};

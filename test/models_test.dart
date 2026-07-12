@@ -171,6 +171,101 @@ void main() {
       expect(catalog.optionsFor('nonsense'), isEmpty);
     });
 
+    test('uses model-specific effort choices and defaults when present', () {
+      final AgentOptionsCatalog modelAware =
+          AgentOptionsCatalog.fromJson(<String, Object?>{
+        'agent': 'codex',
+        'supports': <String, Object?>{'model': true, 'effort': true},
+        'model': <Object?>[
+          <String, Object?>{'id': 'gpt-new', 'label': 'GPT New'},
+          <String, Object?>{'id': 'gpt-lite', 'label': 'GPT Lite'},
+          <String, Object?>{'id': 'gpt-none', 'label': 'GPT None'},
+        ],
+        'effort': <Object?>[
+          <String, Object?>{'id': 'medium', 'label': 'Medium'},
+        ],
+        'effortByModel': <String, Object?>{
+          'gpt-new': <Object?>[
+            <String, Object?>{'id': 'high', 'label': 'High'},
+            <String, Object?>{'id': 'xhigh', 'label': 'Extra high'},
+          ],
+          'gpt-none': <Object?>[],
+          'bad-entry': 'not-a-list',
+        },
+        'defaults': <String, Object?>{
+          'model': 'gpt-new',
+          'effort': 'medium',
+        },
+        'defaultEffortByModel': <String, Object?>{
+          'gpt-new': 'xhigh',
+          'gpt-none': 'medium',
+          'bad-entry': 42,
+        },
+      });
+
+      expect(
+        modelAware
+            .optionsFor('effort', modelId: 'gpt-new')
+            .map((AgentOption option) => option.id),
+        <String>['high', 'xhigh'],
+      );
+      expect(
+        modelAware.optionsFor('effort', modelId: 'gpt-lite').single.id,
+        'medium',
+      );
+      expect(
+        modelAware.optionsFor('effort', modelId: 'gpt-none'),
+        isEmpty,
+      );
+      expect(
+        modelAware.defaultFor('effort', modelId: 'gpt-new'),
+        'xhigh',
+      );
+      expect(
+        modelAware.defaultFor('effort', modelId: 'gpt-lite'),
+        'medium',
+      );
+      expect(modelAware.effortByModel.containsKey('bad-entry'), isFalse);
+      expect(modelAware.defaultEffortByModel.containsKey('bad-entry'), isFalse);
+    });
+
+    test('resolveSelection replaces stale values with a valid fallback', () {
+      final AgentOptionsCatalog modelAware =
+          AgentOptionsCatalog.fromJson(<String, Object?>{
+        'supports': <String, Object?>{'model': true, 'effort': true},
+        'model': <Object?>[
+          <String, Object?>{'id': 'gpt-new', 'label': 'GPT New'},
+        ],
+        'effortByModel': <String, Object?>{
+          'gpt-new': <Object?>[
+            <String, Object?>{'id': 'high', 'label': 'High'},
+            <String, Object?>{'id': 'xhigh', 'label': 'Extra high'},
+          ],
+        },
+        'defaults': <String, Object?>{'model': 'missing'},
+        'defaultEffortByModel': <String, Object?>{'gpt-new': 'xhigh'},
+      });
+
+      expect(modelAware.resolveSelection('model', 'stale'), 'gpt-new');
+      expect(
+        modelAware.resolveSelection(
+          'effort',
+          'stale',
+          modelId: 'gpt-new',
+        ),
+        'xhigh',
+      );
+      expect(
+        modelAware.resolveSelection(
+          'effort',
+          'high',
+          modelId: 'gpt-new',
+        ),
+        'high',
+      );
+      expect(modelAware.resolveSelection('permission', 'stale'), isNull);
+    });
+
     test('AgentOption description becomes null when blank', () {
       final AgentOption opt = AgentOption.fromJson(<String, Object?>{
         'id': 'x',

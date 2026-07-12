@@ -1,110 +1,121 @@
 # Security
 
-Relay is a self-hosted control surface for local CLI coding agents. This page
-explains what the project protects, what it does not protect, and how to deploy
-it responsibly.
+Relay is a self-hosted control surface for CLI coding agents. It protects the
+connection to its own API and limits what its file endpoints expose, but it is
+not a sandbox for the agents it launches.
 
-## Trust Boundary
+## Trust boundary
 
-Relay has two main parts:
+Relay has two parts:
 
-- **Client app:** Flutter app for mobile, Web, and desktop.
-- **Backend:** Node service running on a machine you control. It starts local
-  CLI agents and can read/write files that the backend OS user can access.
+- a Flutter client for mobile, Web, and desktop;
+- a Node.js backend on a machine you control, running with that machine user's
+  filesystem and process permissions.
 
-There is no Relay-hosted cloud control plane. The app connects only to the
-backend URL inside the credential you import.
+There is no Relay-hosted account or control plane. The client connects only to
+the backend URL in an imported credential. Prompts, files, agent output, and CLI
+credentials stay between your devices, backend host, and the CLI providers you
+already use.
 
-## Credential and Token Model
+## Credentials and device tokens
 
-Credential setup creates an encrypted QR/JSON envelope containing:
+The credential generator creates a `relay.credentials.v1` QR/JSON envelope with
+the machine id/name, backend URL, and one bearer token. The envelope uses
+PBKDF2-HMAC-SHA256 with 600,000 iterations plus AES-256-GCM with a random salt
+and nonce. Its passphrase is entered interactively and is not written to disk.
 
-- machine id and display name
-- backend base URL
-- one bearer token for that device
-
-The envelope uses:
-
-- PBKDF2-HMAC-SHA256, currently 600,000 iterations
-- AES-256-GCM
-- random salt and nonce
-
-The credential password is entered interactively and is not written to disk. The
-backend stores bearer tokens in `server/tokens.json`; the client stores imported
-machine credentials in platform secure storage through `flutter_secure_storage`.
+The backend stores bearer-token records and metadata in `server/tokens.json`.
+That file is a secret and is written owner-only. Native
+clients store imported credentials through platform secure storage. Web storage
+inherits the security of the browser profile and origin; use a trusted device
+and private profile for sensitive backends.
 
 Recommended practice:
 
-- Generate one credential per device.
-- Revoke and delete old tokens instead of sharing a long-lived token.
-- Treat QR images and credential JSON files like passwords.
-- Regenerate credentials after changing `PUBLIC_BASE_URL`.
+- generate a separate credential for every device;
+- treat generated QR/JSON files as secrets even though they are encrypted;
+- revoke and delete a token when a device is lost or retired;
+- regenerate credentials after changing `PUBLIC_BASE_URL`;
+- never commit `.env`, tokens, credential exports, push keys, history, sessions,
+  agent settings, groups, or CLI login state.
 
-## Backend API Protections
+## API protections
 
-Protected `/api/*` routes require `Authorization: Bearer <token>`.
+Every `/api/*` endpoint requires `Authorization: Bearer <token>`. Until at least
+one token exists, protected routes fail with `TOKEN_NOT_CONFIGURED` rather than
+running unauthenticated.
 
-Implemented backend protections include:
+Implemented controls include:
 
-- no-token-configured mode that rejects protected APIs before a credential is
-  generated
-- constant-time token digest comparison for active tokens
-- per-IP API rate limiting
-- stricter rate limiting for failed auth attempts
-- token last-use metadata for device id/name tracking
-- token revocation and deletion
-- startup warning for routable plaintext `http://` public URLs
+- timing-safe comparison of hashed candidate and stored active-token values;
+- device id/name and last-use metadata without exposing token values;
+- token revocation and deletion;
+- a 600-request/minute/IP limit for ordinary API requests;
+- a separate 15-failed-auth-attempt/minute/IP limit;
+- streaming chat/SSE/login and file-transfer routes excluded from the general
+  request counter while still requiring authentication;
+- `trust proxy` restricted to loopback so a direct client cannot spoof
+  `X-Forwarded-For`;
+- a startup warning when a routable public URL uses plaintext HTTP.
 
-## File API Protections
+The in-app Claude/Codex/Agy login bridge starts the real CLI in a backend PTY.
+It returns authorization URLs and status only, redacts URLs from diagnostic
+output, and never returns stored OAuth tokens. The bridge currently depends on
+GNU-compatible `script -qfec`; log in directly on hosts without it. OpenCode and
+Hermes keys are managed outside Relay on the backend host.
 
-The file browser intentionally works against the backend filesystem so users can
-work with real project files. To prevent a leaked token from escalating into
-credential theft, Relay always denies access to sensitive paths, including:
+## File API protections
 
-- `server/tokens.json`
-- `server/.env`
-- `server/credentials/`
-- push subscription and FCM token stores
-- `~/.ssh`
-- known Claude Code and Codex auth files
+By default, the file browser accepts absolute paths anywhere the backend user
+can access. It always rejects these current sensitive locations:
 
-Directory downloads also refuse trees that contain those sensitive paths.
+- `server/tokens.json`, `server/.env`, and `server/credentials/`;
+- `server/push-subscriptions.json` and `server/fcm-tokens.json`;
+- `~/.ssh`;
+- Claude Code's `.credentials.json` and Codex's `auth.json`.
 
-For stricter deployments, set `RELAY_FS_ROOTS` to a comma-separated list of
-absolute directories that the file API may access. This limits browse, upload,
-and download operations; it does not limit what the CLI agents themselves can do
-as the backend OS user.
+The same policy applies to listing, upload, download, and atomic temp-file
+variants. A directory download is also rejected when its tree would contain a
+denied path.
 
-## Deployment Requirements
+This list is intentionally precise, not a promise to detect every secret. It
+does not automatically cover arbitrary Agy, OpenCode, Hermes, provider, or
+service-account files. Set `RELAY_FS_ROOTS` to a comma-separated allowlist of
+absolute directories and run Relay as a restricted OS user. The allowlist
+limits the file API only; it does not change what a launched CLI can access.
 
-For any backend reachable outside the local machine:
+Uploads stream to a temporary file and default to 100 MB. Downloads default to
+300 MB. Configure smaller proxy and Relay limits when the deployment does not
+need those sizes.
 
-- Put TLS in front of the backend. Prefer a named Cloudflare Tunnel or a reverse
-  proxy such as Caddy or Nginx.
-- Keep the Node backend bound to `HOST=127.0.0.1` when a tunnel or local reverse
-  proxy is in front.
-- Set `PUBLIC_BASE_URL` to the exact HTTPS URL users will import.
-- Run the backend as a non-root user.
-- Give that OS user access only to the workdirs Relay should control.
-- Keep `server/.env`, `server/tokens.json`, `server/credentials/`, and push
-  service credentials out of git and out of release archives.
+## Production requirements
 
-See the production checklist in
-[docs/handbook.md](docs/handbook.md#production-deployment).
+For a backend reachable beyond localhost:
 
-## What Relay Does Not Do
+- terminate TLS with a named Cloudflare Tunnel or a reverse proxy;
+- bind Relay to `127.0.0.1` when the proxy/tunnel runs on the same host;
+- set `PUBLIC_BASE_URL` to the exact HTTPS URL imported by clients;
+- run the backend as a non-root user with access only to intended workdirs;
+- configure `RELAY_FS_ROOTS`;
+- keep the backend port private and forward only the TLS endpoint;
+- disable proxy buffering for SSE/chat routes and set timeouts above the maximum
+  agent turn duration;
+- protect backend backups, because history and session files contain raw
+  unredacted conversation content.
 
-Relay is not a sandbox:
+See the [production checklist](docs/handbook.md#production-deployment).
 
-- CLI agents run as real processes under the backend OS user.
-- Agent permission modes are delegated to the underlying CLI tools.
-- A token with access to the backend can operate the Relay API until revoked.
-- Relay cannot protect a machine that is already compromised.
-- Relay cannot make plaintext public HTTP safe; use HTTPS for public access.
+## What Relay does not do
 
-## Reporting Security Issues
+- It does not sandbox Claude Code, Codex, Agy, OpenCode, or Hermes.
+- It cannot stop an enabled fast mode or high-permission agent from consuming
+  provider quota or changing files within its effective access.
+- It cannot protect an already compromised backend host or browser profile.
+- It cannot make a public plaintext HTTP connection safe.
+- A valid device token remains powerful until it is revoked.
 
-Please do not open a public issue for a suspected vulnerability that exposes
-tokens, credentials, private files, or remote execution paths. Contact the
-maintainer privately first, then open a public advisory or issue after a fix is
-available.
+## Reporting issues
+
+Do not publish a vulnerability that exposes tokens, credentials, private files,
+or remote-execution paths before a fix is available. Contact the maintainer
+privately, then coordinate a public advisory or issue after remediation.

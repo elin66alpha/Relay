@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -764,8 +765,8 @@ class _MemberPersonaDialogState extends State<_MemberPersonaDialog> {
 }
 
 /// Create / edit a swarm: name, work tree, members, and — per selected member —
-/// model / effort / permission. Option catalogs are fetched lazily the first
-/// time an agent is selected, so opening the dialog costs no network round-trips.
+/// model / effort / permission. Existing members load their catalogs when the
+/// dialog opens; other catalogs are fetched lazily when an agent is selected.
 class _SwarmFormDialog extends StatefulWidget {
   const _SwarmFormDialog({
     required this.title,
@@ -824,6 +825,14 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
       <String, TextEditingController>{};
   String? _validationError;
 
+  @override
+  void initState() {
+    super.initState();
+    for (final String agentKey in widget.initialMembers) {
+      unawaited(_ensureCatalog(agentKey));
+    }
+  }
+
   TextEditingController _personaController(
     Map<String, TextEditingController> map,
     String agentKey,
@@ -878,8 +887,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     if (on) await _ensureCatalog(agentKey);
   }
 
-  // Fetch (once) the agent's option catalog and seed any unset selection from
-  // its defaults, so a freshly checked member already has valid settings.
+  // Fetch (once) the agent's option catalog and reconcile every selection. The
+  // effort list can depend on the selected model, so model is resolved first.
   Future<void> _ensureCatalog(String agentKey) async {
     if (_catalogs.containsKey(agentKey) || _loading.contains(agentKey)) return;
     setState(() => _loading.add(agentKey));
@@ -893,14 +902,7 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
           agentKey,
           () => <String, String>{},
         );
-        for (final String group in _groupOrder) {
-          if (!catalog.supportsGroup(group)) continue;
-          config[group] ??=
-              catalog.defaults[group] ??
-              (catalog.optionsFor(group).isNotEmpty
-                  ? catalog.optionsFor(group).first.id
-                  : '');
-        }
+        _normalizeConfig(catalog, config);
       });
     } on BackendException {
       // A catalog that fails to load just leaves the agent on backend defaults;
@@ -908,6 +910,65 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     } finally {
       if (mounted) setState(() => _loading.remove(agentKey));
     }
+  }
+
+  void _normalizeConfig(
+    AgentOptionsCatalog catalog,
+    Map<String, String> config,
+  ) {
+    final String? modelId = catalog.supportsGroup('model')
+        ? catalog.resolveSelection('model', config['model'])
+        : null;
+    if (modelId == null) {
+      config.remove('model');
+    } else {
+      config['model'] = modelId;
+    }
+
+    for (final String group in <String>['effort', 'permission']) {
+      if (!catalog.supportsGroup(group)) {
+        config.remove(group);
+        continue;
+      }
+      final String? resolved = catalog.resolveSelection(
+        group,
+        config[group],
+        modelId: modelId,
+      );
+      if (resolved == null) {
+        config.remove(group);
+      } else {
+        config[group] = resolved;
+      }
+    }
+  }
+
+  List<AgentOption> _optionsForGroup(
+    AgentOptionsCatalog catalog,
+    Map<String, String> config,
+    String group,
+  ) {
+    final String? modelId = catalog.resolveSelection(
+      'model',
+      config['model'],
+    );
+    return catalog.optionsFor(group, modelId: modelId);
+  }
+
+  void _onOptionChanged(
+    String agentKey,
+    String group,
+    String id,
+    AgentOptionsCatalog catalog,
+  ) {
+    setState(() {
+      final Map<String, String> config = _configs.putIfAbsent(
+        agentKey,
+        () => <String, String>{},
+      );
+      config[group] = id;
+      _normalizeConfig(catalog, config);
+    });
   }
 
   Future<void> _pickWorkTree() async {
@@ -931,11 +992,18 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
         .map((CliAgent a) => a.key)
         .where(_selected.contains)
         .toList(growable: false);
+    for (final String key in members) {
+      final AgentOptionsCatalog? catalog = _catalogs[key];
+      final Map<String, String>? config = _configs[key];
+      if (catalog != null && config != null) {
+        _normalizeConfig(catalog, config);
+      }
+    }
     final Map<String, Map<String, String>> configs =
         <String, Map<String, String>>{
           for (final String key in members)
             if (_configs[key] != null && _configs[key]!.isNotEmpty)
-              key: _configs[key]!,
+              key: <String, String>{..._configs[key]!},
         };
     Navigator.of(context).pop(
       _SwarmForm(
@@ -1028,6 +1096,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   Widget _buildMemberTile(AppStrings strings, ThemeData theme, CliAgent agent) {
     final bool on = _selected.contains(agent.key);
     final AgentOptionsCatalog? catalog = _catalogs[agent.key];
+    final Map<String, String> config =
+        _configs[agent.key] ?? const <String, String>{};
     final bool usable = isCliAgentSelectable(agent);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1069,7 +1139,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
                     runSpacing: 4,
                     children: <Widget>[
                       for (final String group in _groupOrder)
-                        if (catalog.supportsGroup(group))
+                        if (catalog.supportsGroup(group) &&
+                            _optionsForGroup(catalog, config, group).isNotEmpty)
                           _buildOptionDropdown(
                             strings,
                             agent.key,
@@ -1131,11 +1202,21 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     String group,
     AgentOptionsCatalog catalog,
   ) {
-    final List<AgentOption> options = catalog.optionsFor(group);
-    final String? value =
-        _configs[agentKey]?[group] ??
-        catalog.defaults[group] ??
-        (options.isNotEmpty ? options.first.id : null);
+    final Map<String, String> config =
+        _configs[agentKey] ?? const <String, String>{};
+    final String? modelId = catalog.resolveSelection(
+      'model',
+      config['model'],
+    );
+    final List<AgentOption> options = catalog.optionsFor(
+      group,
+      modelId: modelId,
+    );
+    final String? value = catalog.resolveSelection(
+      group,
+      config[group],
+      modelId: modelId,
+    );
     // Bound the width and let the button ellipsize: some catalogs (agy, opencode)
     // have long labels that would otherwise overflow the row.
     return SizedBox(
@@ -1147,10 +1228,7 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
         isExpanded: true,
         onChanged: (String? id) {
           if (id == null) return;
-          setState(() {
-            _configs.putIfAbsent(agentKey, () => <String, String>{})[group] =
-                id;
-          });
+          _onOptionChanged(agentKey, group, id, catalog);
         },
         items: <DropdownMenuItem<String>>[
           for (final AgentOption option in options)

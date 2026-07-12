@@ -133,7 +133,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   ),
   _GettingStartedStep(
     title: '选择一个 CLI 智能体',
-    body: '打开左侧栏，选择 Claude Code、Codex、Antigravity 等智能体。选中后就会进入对应聊天会话。',
+    body: '打开左侧栏选择 agent。红绿状态灯表示安装和认证状态；可在“管理凭证”中登录兼容的 OAuth agent。',
   ),
   _GettingStartedStep(
     title: '像发消息一样描述任务',
@@ -149,7 +149,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   ),
   _GettingStartedStep(
     title: '文件系统用于查看和上传文件',
-    body: '左侧栏的文件系统可以浏览当前工作目录，下载结果文件，或把需要处理的文件上传到后端机器。',
+    body: '左侧栏的文件系统可以浏览后端允许的目录、设置工作目录、下载结果，或上传待处理文件。',
   ),
 ];
 
@@ -162,7 +162,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose a CLI agent',
     body:
-        'Open the left drawer and choose Claude Code, Codex, Antigravity, or another available agent. Relay then opens that chat session.',
+        'Open the left drawer and choose an agent. Red/green lights show installation and authentication; compatible OAuth agents can log in from Manage credentials.',
   ),
   _GettingStartedStep(
     title: 'Describe the task like a message',
@@ -182,6 +182,6 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Use File system for files',
     body:
-        'The File system entry lets you browse the current work directory, download results, or upload files to the backend machine.',
+        'File system lets you browse backend directories allowed by the deployment, set the workdir, download results, or upload files.',
   ),
 ];

@@ -1440,7 +1440,7 @@ class BackendClient {
     );
   }
 
-  /// Catalog of selectable model/effort/permission options for an agent.
+  /// Catalog of selectable model/effort/permission/fast options for an agent.
   Future<AgentOptionsCatalog> fetchAgentOptions(String agentKey) async {
     final Object? decoded = await _requestJson(
       'GET',
@@ -1452,7 +1452,7 @@ class BackendClient {
     return AgentOptionsCatalog.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// Current model/effort/permission selection for the request's workdir+agent
+  /// Current model/effort/permission/fast selection for the workdir+agent
   /// scope.
   Future<AgentSettings> fetchAgentSettings(String agentKey) async {
     final Object? decoded = await _requestJson(
@@ -1467,7 +1467,7 @@ class BackendClient {
     );
   }
 
-  /// Persist one group's selection (model/effort/permission) for the scope.
+  /// Persist one supported selection group for the scope.
   Future<AgentSettings> updateAgentSetting(
     String agentKey,
     String group,

@@ -3,6 +3,7 @@
 const { execFile } = require('child_process');
 const express = require('express');
 
+const { clearModelDiscoveryCache } = require('../lib/model-discovery');
 const {
   getAgentStatuses: defaultGetAgentStatuses,
 } = require('../lib/agent-status');
@@ -106,8 +107,9 @@ module.exports = function createMetaRouter(ctx) {
     return result.ok ? result.text.split('\n')[0].trim() : '';
   }
 
-  // Catalog of selectable model/effort/permission options for one agent
-  // (capability-aware). Static, so no workdir needed.
+  // Catalog of selectable model/effort/permission/fast options for one agent. Model
+  // and effort choices can be discovered from the installed CLI, so no workdir
+  // is needed but the result may change after a CLI update.
   router.get('/api/agent-options', (req, res) => {
     const agent = getAgent(String(req.query.agent || '').trim());
     if (!agent) {
@@ -116,7 +118,7 @@ module.exports = function createMetaRouter(ctx) {
     return res.json({ ok: true, ...describeAgent(agent.key) });
   });
 
-  // Current model/effort/permission selection for the request's workdir+agent
+  // Current model/effort/permission/fast selection for the request's workdir+agent
   // scope (shared by every device in that scope).
   router.get('/api/agent-settings', (req, res) => {
     const scope = resolveAgentScope(req, res, {
@@ -134,7 +136,7 @@ module.exports = function createMetaRouter(ctx) {
     });
   });
 
-  // Update the selection for a scope. Body: { agent, model?, effort?, permission? }.
+  // Update the selection for a scope. Body includes any supported string group.
   // Only provided groups change; invalid ids fall back to the agent default.
   router.post('/api/agent-settings', (req, res) => {
     const body = req.body || {};
@@ -146,7 +148,7 @@ module.exports = function createMetaRouter(ctx) {
     if (!scope) return;
     const { agent, workdir, contextKey } = scope;
     const partial = {};
-    for (const group of ['model', 'effort', 'permission']) {
+    for (const group of ['model', 'effort', 'permission', 'fast']) {
       if (typeof body[group] === 'string') partial[group] = body[group];
     }
     const settings = setSettings(agent.key, contextKey, partial);
@@ -177,6 +179,7 @@ module.exports = function createMetaRouter(ctx) {
     }
     const before = await cliVersion(agent.key);
     const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
+    clearModelDiscoveryCache(agent.key);
     const after = await cliVersion(agent.key);
     return res.json({
       ok: result.ok,

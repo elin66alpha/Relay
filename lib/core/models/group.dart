@@ -2,7 +2,7 @@ import 'cli_agent.dart';
 
 /// A swarm (group chat): an ordered set of agent members sharing one transcript.
 /// It pins its own [workdir] (work tree) and per-member [memberConfigs]
-/// (model/effort/permission ids). Mirrors the backend `server/lib/groups.js`.
+/// (model/effort/permission/fast ids). Mirrors `server/lib/groups.js`.
 class ChatGroup {
   const ChatGroup({
     required this.id,

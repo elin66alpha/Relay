@@ -6,7 +6,7 @@
 # generates the credential QR that the Relay app scans. Run from the repo
 # root:
 #
-#   ./setup.sh
+#   ./backends/linux/setup.sh
 #
 # Network modes:
 #   1. No tunnel: for a VPS / box with a reachable public IP or domain.
@@ -15,7 +15,7 @@
 #
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_DIR="$ROOT_DIR/server"
 ENV_FILE="$SERVER_DIR/.env"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"

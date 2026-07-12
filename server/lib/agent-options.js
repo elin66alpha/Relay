@@ -153,6 +153,20 @@ const EFFORTS = {
   hermes: [],
 };
 
+// Fast mode is deliberately limited to the two CLIs with a real speed tier.
+// Both values are explicit so Relay overrides (rather than mutates or inherits)
+// the host user's global CLI preference on every invocation.
+const FAST_MODES = {
+  claude: [
+    { id: 'off', label: 'Off', args: ['--settings', '{"fastMode":false}'] },
+    { id: 'on', label: 'On', args: ['--settings', '{"fastMode":true}'] },
+  ],
+  codex: [
+    { id: 'off', label: 'Off', args: ['-c', 'service_tier="default"'] },
+    { id: 'on', label: 'On', args: ['-c', 'service_tier="fast"'] },
+  ],
+};
+
 // Permission tiers. The bypass tier is listed first but is no longer the
 // default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. For
 // Codex, non-bypass tiers must pin approval_policy=never — `codex exec` is
@@ -275,8 +289,8 @@ const CLI = {
 // edits, codex writes within the workspace (approvals disabled so exec never
 // hangs), and agy runs sandboxed.
 const AGENT_DEFAULTS = {
-  claude: { effort: 'high', permission: 'acceptEdits' },
-  codex: { effort: 'medium', permission: 'workspace-write' },
+  claude: { effort: 'high', permission: 'acceptEdits', fast: 'off' },
+  codex: { effort: 'medium', permission: 'workspace-write', fast: 'off' },
   agy: { permission: 'sandbox' },
   // Non-interactive defaults that can actually do work; effort stays unset
   // (model-specific) and opencode's model default comes from the catalog.
@@ -304,17 +318,7 @@ function configuredAgyModelId(models) {
 }
 
 function defaultsFor(agentKey) {
-  const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
-  if (MODEL_DEFAULT_AGENTS.has(agentKey)) {
-    const models = modelsFor(agentKey);
-    if (models.length) {
-      defaults.model =
-        agentKey === 'agy'
-          ? configuredAgyModelId(models) || models[0].id
-          : models[0].id;
-    }
-  }
-  return defaults;
+  return defaultsForModels(agentKey, modelsFor(agentKey));
 }
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
@@ -346,9 +350,59 @@ function mergeExtraModels(agentKey, base) {
       } else args = [];
     }
     seen.add(item.id);
-    merged.push({ id: item.id, label: item.label || item.id, args });
+    const model = {
+      id: item.id,
+      label: item.label || item.id,
+      description:
+        typeof item.description === 'string' ? item.description : undefined,
+      args,
+    };
+    if (agentKey === 'codex' && Array.isArray(item.efforts)) {
+      const effortIds = new Set();
+      model.efforts = item.efforts
+        .map((raw) => {
+          const rawId = typeof raw === 'string' ? raw : raw && raw.id;
+          const id = String(rawId || '').trim();
+          if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id) || effortIds.has(id)) {
+            return null;
+          }
+          effortIds.add(id);
+          return {
+            id,
+            label:
+              raw && typeof raw.label === 'string'
+                ? raw.label
+                : id === 'xhigh'
+                  ? 'Extra high'
+                  : id.charAt(0).toUpperCase() + id.slice(1),
+            description:
+              raw && typeof raw.description === 'string'
+                ? raw.description
+                : undefined,
+            args: ['-c', `model_reasoning_effort=${id}`],
+          };
+        })
+        .filter(Boolean);
+      const requestedDefault = String(item.defaultEffort || '').trim();
+      model.defaultEffort = effortIds.has(requestedDefault)
+        ? requestedDefault
+        : model.efforts[0] && model.efforts[0].id;
+    }
+    merged.push(model);
   }
   return merged;
+}
+
+function fallbackModelsFor(agentKey) {
+  const models = BASE_MODELS[agentKey] || [];
+  if (agentKey !== 'codex') return models;
+  const supported = new Set(['low', 'medium', 'high', 'xhigh']);
+  const efforts = EFFORTS.codex.filter((effort) => supported.has(effort.id));
+  return models.map((model) => ({
+    ...model,
+    efforts,
+    defaultEffort: 'medium',
+  }));
 }
 
 function modelsFor(agentKey) {
@@ -357,15 +411,55 @@ function modelsFor(agentKey) {
   // discovery is unavailable. User pins from models-extra.json apply either way.
   const discovered = discoverModels(agentKey);
   const base =
-    discovered && discovered.length ? discovered : BASE_MODELS[agentKey] || [];
+    discovered && discovered.length ? discovered : fallbackModelsFor(agentKey);
   return mergeExtraModels(agentKey, base);
 }
 
-function groupsFor(agentKey) {
+function effortOptionsFor(agentKey, model) {
+  if (model && Array.isArray(model.efforts)) {
+    return model.efforts;
+  }
+  return EFFORTS[agentKey] || [];
+}
+
+function effortDefaultFor(agentKey, model, efforts) {
+  if (!efforts.length) return null;
+  const requested =
+    model && typeof model.defaultEffort === 'string'
+      ? model.defaultEffort
+      : (AGENT_DEFAULTS[agentKey] || {}).effort;
+  return efforts.find((option) => option.id === requested) || null;
+}
+
+function defaultsForModels(agentKey, models) {
+  const defaults = { ...(AGENT_DEFAULTS[agentKey] || {}) };
+  let defaultModel = null;
+  if (MODEL_DEFAULT_AGENTS.has(agentKey) && models.length) {
+    const modelId =
+      agentKey === 'agy'
+        ? configuredAgyModelId(models) || models[0].id
+        : models[0].id;
+    defaultModel = models.find((model) => model.id === modelId) || models[0];
+    defaults.model = defaultModel.id;
+  }
+  const efforts = effortOptionsFor(agentKey, defaultModel);
+  const effort = effortDefaultFor(agentKey, defaultModel, efforts);
+  if (effort) defaults.effort = effort.id;
+  else delete defaults.effort;
+  return defaults;
+}
+
+function groupsFor(agentKey, settings) {
+  const models = modelsFor(agentKey);
+  const defaults = defaultsForModels(agentKey, models);
+  const selectedModel = pick(models, settings && settings.model, defaults.model);
   return {
-    model: modelsFor(agentKey),
-    effort: EFFORTS[agentKey] || [],
+    model: models,
+    effort: effortOptionsFor(agentKey, selectedModel),
     permission: PERMISSIONS[agentKey] || [],
+    fast: FAST_MODES[agentKey] || [],
+    defaults,
+    selectedModel,
   };
 }
 
@@ -375,17 +469,35 @@ function describeAgent(agentKey) {
   const groups = groupsFor(agentKey);
   const strip = (list) =>
     list.map(({ id, label, description }) => ({ id, label, description }));
+  const effortByModel = {};
+  const defaultEffortByModel = {};
+  for (const model of groups.model) {
+    const efforts = effortOptionsFor(agentKey, model);
+    if (Array.isArray(model.efforts) || efforts.length) {
+      effortByModel[model.id] = strip(efforts);
+    }
+    const effort = effortDefaultFor(agentKey, model, efforts);
+    if (effort) defaultEffortByModel[model.id] = effort.id;
+  }
   return {
     agent: agentKey,
-    defaults: defaultsFor(agentKey),
+    defaults: groups.defaults,
     supports: {
       model: groups.model.length > 0,
-      effort: groups.effort.length > 0,
+      effort:
+        groups.effort.length > 0 ||
+        groups.model.some(
+          (model) => effortOptionsFor(agentKey, model).length > 0,
+        ),
       permission: groups.permission.length > 0,
+      fast: groups.fast.length > 0,
     },
     model: strip(groups.model),
     effort: strip(groups.effort),
+    effortByModel,
+    defaultEffortByModel,
     permission: strip(groups.permission),
+    fast: strip(groups.fast),
   };
 }
 
@@ -400,30 +512,43 @@ function pick(list, id, fallbackId) {
 // Normalize an arbitrary settings object to valid ids for the agent, dropping
 // selections the agent doesn't support.
 function normalizeSettings(agentKey, settings) {
-  const groups = groupsFor(agentKey);
-  const defaults = defaultsFor(agentKey);
   const s = settings || {};
+  const groups = groupsFor(agentKey, s);
   const out = {};
-  for (const group of ['model', 'effort', 'permission']) {
-    const list = groups[group];
-    if (!list.length) continue;
-    const chosen = pick(list, s[group], defaults[group]);
-    out[group] = chosen ? chosen.id : defaults[group];
-  }
+  const model = pick(groups.model, s.model, groups.defaults.model);
+  if (model) out.model = model.id;
+  const efforts = effortOptionsFor(agentKey, model);
+  const defaultEffort = effortDefaultFor(agentKey, model, efforts);
+  const effort = pick(efforts, s.effort, defaultEffort && defaultEffort.id);
+  if (effort) out.effort = effort.id;
+  const permission = pick(
+    groups.permission,
+    s.permission,
+    groups.defaults.permission,
+  );
+  if (permission) out.permission = permission.id;
+  const fast = pick(groups.fast, s.fast, groups.defaults.fast);
+  if (fast) out.fast = fast.id;
   return out;
 }
 
 // Build the extra argv tokens implied by a settings object, in a stable order
 // (model, effort, permission). Returns [] for unknown agents.
 function buildArgs(agentKey, settings) {
-  const groups = groupsFor(agentKey);
-  const defaults = defaultsFor(agentKey);
   const s = settings || {};
+  const groups = groupsFor(agentKey, s);
+  const model = pick(groups.model, s.model, groups.defaults.model);
+  const efforts = effortOptionsFor(agentKey, model);
+  const defaultEffort = effortDefaultFor(agentKey, model, efforts);
+  const effort = pick(efforts, s.effort, defaultEffort && defaultEffort.id);
+  const permission = pick(
+    groups.permission,
+    s.permission,
+    groups.defaults.permission,
+  );
+  const fast = pick(groups.fast, s.fast, groups.defaults.fast);
   const args = [];
-  for (const group of ['model', 'effort', 'permission']) {
-    const list = groups[group];
-    if (!list.length) continue;
-    const chosen = pick(list, s[group], defaults[group]);
+  for (const chosen of [model, effort, permission, fast]) {
     if (chosen && Array.isArray(chosen.args)) args.push(...chosen.args);
   }
   return args;

@@ -28,7 +28,9 @@ class DeployBackendScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      zh ? '在自己的机器上部署后端' : 'Deploy the backend on your own machine',
+                      zh
+                          ? '在自己的机器上部署后端'
+                          : 'Deploy the backend on your own machine',
                       style: Theme.of(context)
                           .textTheme
                           .headlineSmall
@@ -248,14 +250,18 @@ class _DeployStep {
 const List<_Command> _setupCommands = <_Command>[
   _Command(label: 'Linux', code: './backends/linux/setup.sh'),
   _Command(label: 'macOS', code: './backends/macos/setup.sh'),
-  _Command(label: 'Windows (PowerShell)', code: r'.\backends\windows\setup.ps1'),
+  _Command(
+    label: 'Windows (PowerShell)',
+    code: r'.\backends\windows\setup.ps1',
+  ),
 ];
 
 const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '准备一台后端机器',
     body: '一台你自己的电脑或服务器都行：家里的 PC、Mac，或一台云服务器。'
-        '先装好 Node.js 18+，并在上面登录至少一个 CLI 智能体（Claude Code、Codex、Antigravity 等）。',
+        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、Antigravity 等）。'
+        '可在主机上登录，兼容的 OAuth agent 也可稍后在 Relay 中登录。',
   ),
   _DeployStep(
     title: '下载 Relay，运行安装脚本',
@@ -285,8 +291,9 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
   _DeployStep(
     title: 'Prepare a backend machine',
     body: 'Any computer you own works: a home PC, a Mac, or a cloud server. '
-        'Install Node.js 18+ on it and log in to at least one CLI agent '
-        '(Claude Code, Codex, Antigravity, …).',
+        'Install Node.js 18+ and at least one CLI agent (Claude Code, Codex, '
+        'Antigravity, …). Log in on the host, or use Relay later for a '
+        'compatible OAuth agent.',
   ),
   _DeployStep(
     title: 'Download Relay and run the setup script',

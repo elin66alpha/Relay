@@ -154,7 +154,7 @@ module.exports = function createGroupRouter(ctx) {
     }
   }
 
-  // Per-member config: model/effort/permission normalized to valid ids for that
+  // Per-member config: model/effort/permission/fast normalized for that
   // agent (unknown ids fall back to defaults), plus the free-text swarm-scoped
   // `nickname` and `prompt` passed through (groups.js bounds their length). Only
   // current members are kept, so a config can never reference a dropped member.
@@ -450,7 +450,7 @@ module.exports = function createGroupRouter(ctx) {
         // this group react to it.
         broadcastScope: (type, payload) =>
           base.broadcastScope(type, { ...payload, groupId: group.id }),
-        // The swarm pins each member's model/effort/permission itself, so use
+        // The swarm pins each member's model/effort/permission/fast itself, so use
         // its config instead of the member's solo-chat agent-settings store.
         getSettings: (agentKey) =>
           normalizeSettings(agentKey, group.memberConfigs[agentKey] || {}),
