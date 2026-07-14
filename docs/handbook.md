@@ -30,6 +30,8 @@ the backend OS user. A stable deployment should have all of the following:
 - Forward normal HTTP requests and long-lived SSE responses. Disable buffering
   for `/api/events`, `/api/chat`, `/api/group/chat`, `/api/btw`, and
   `/api/agent-auth/login/start`.
+- Forward `Upgrade`/`Connection` headers for the WebSocket endpoint
+  `/api/terminal/connect`. Do not log its one-time `ticket` query value.
 - Keep proxy timeouts above `AGENT_TIMEOUT_MS` (60 minutes by default).
 - Pass the real client address in `X-Forwarded-For`. Relay trusts forwarded
   addresses only from loopback proxies.
@@ -84,6 +86,35 @@ device code where required. The bridge currently depends on GNU-compatible
 `script -qfec` (normally Linux); on unsupported hosts, log in directly in a
 terminal. OpenCode and Hermes credentials remain host-managed; once installed,
 Relay allows their runner to start and lets the CLI report provider errors.
+
+## SSH terminal
+
+**Manage credentials → Enter SSH** opens an interactive PTY on the backend. It
+uses the backend service account's login shell, starts in that account's home
+directory, and is presented by the same Flutter terminal emulator on mobile,
+Web, and desktop. The colors follow Relay's current Light/Dark theme. Terminal
+text uses the bundled `RelayTerminalMono` family, backed by Cascadia Mono, with
+system monospace fallbacks for missing glyphs. Keep the bundled family as the
+primary font: xterm measures its character grid before painting, and Chromium
+can otherwise measure a proportional fallback and produce excessively wide
+horizontal cells.
+
+An authenticated `POST /api/terminal/ticket` returns a random, single-use ticket
+valid for 30 seconds. The client redeems it at `/api/terminal/connect`; the
+long-lived bearer credential is not sent in the WebSocket URL. One token record
+maps to one PTY. Returning to Manage credentials leaves that PTY alive, and the
+next Enter SSH reconnects to it; opening it elsewhere replaces the old socket
+instead of creating another shell.
+Revoking the device token closes the socket and PTY. Revocations made by the
+credential CLI are picked up by the terminal heartbeat without a server restart.
+
+Detached PTYs expire after 12 hours and retain up to 2 MB of output in process
+memory for replay; terminal transcripts are not written to disk.
+Operators can tune these bounds with `TERMINAL_IDLE_TIMEOUT_MS` (60 seconds to 7
+days) and `TERMINAL_BUFFER_MAX_BYTES` (64 KB to 16 MB), or select a shell with
+`RELAY_TERMINAL_SHELL`. These settings do not make the terminal a sandbox: it
+has the full permissions of the backend OS user and bypasses the file API's
+denylist and `RELAY_FS_ROOTS`.
 
 ## Runtime model
 
@@ -160,7 +191,8 @@ do not have a configured offline push channel in this repository.
 
 ## API map
 
-All `/api/*` endpoints require the imported bearer token.
+All HTTP `/api/*` endpoints require the imported bearer token. The terminal
+WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
 
 - Metadata/auth: health, agents, agent options/settings/version/update,
   auth status, diagnostics, device tokens, and shared events.
@@ -176,6 +208,7 @@ All `/api/*` endpoints require the imported bearer token.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.
 - Quota: usage, schedules, schedule replacement, and cancellation.
 - Push: browser subscription/config and FCM device registration.
+- SSH terminal: authenticated ticket creation plus the WebSocket PTY transport.
 
 The route implementations in `server/routes/` are the source of truth when an
 endpoint changes.
@@ -190,6 +223,11 @@ npm install
 cp .env.example .env
 npm start
 ```
+
+On Linux, `node-pty` compiles a native addon during `npm install`; install
+Python 3, `make`, and a C++ compiler first (for example `build-essential` on
+Debian/Ubuntu). macOS and Windows use the package's supported prebuilt binaries
+when available.
 
 To let the backend serve the Flutter Web client:
 
@@ -236,7 +274,8 @@ groups are:
 
 - identity/network: `PORT`, `HOST`, `PUBLIC_BASE_URL`, tunnel variables;
 - execution: `RELAY_DEFAULT_DIR`, `AGENT_TIMEOUT_MS`, `PROMPT_MAX_BYTES`,
-  `RELAY_MODEL_DISCOVERY`, `CODEX_HOME`;
+  `RELAY_MODEL_DISCOVERY`, `CODEX_HOME`, `RELAY_TERMINAL_SHELL`, and terminal
+  idle/buffer limits;
 - security/files: `CORS_ALLOW_ORIGIN`, `RELAY_FS_ROOTS`, upload/download caps;
 - usage: quota watch, poll interval, HTTP/probe timeouts and backoff;
 - offline push: VAPID keys and `FCM_SERVICE_ACCOUNT_FILE`.

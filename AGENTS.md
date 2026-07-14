@@ -44,7 +44,7 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - `server/server.js`: server configuration, middleware, shared runtime state,
   scheduling, route context, and optional Web static hosting.
 - `server/routes/`: API routers for metadata, push, files, chat, BTW, Swarms,
-  agent login, sessions, and quota.
+  agent login, sessions, quota, and the SSH terminal ticket.
 - `server/lib/`: agent runners, settings/model discovery, persistence, auth,
   filesystem policy, history, quota, push, and orchestration helpers.
 - `backends/`: Linux, macOS, and Windows install/service adapters.
@@ -120,6 +120,12 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - BTW is read-only and isolated from the main session. Claude forks natively;
   Codex and Agy clone their native persisted conversations before resuming the
   side scope.
+- The SSH terminal exchanges the bearer credential for a short-lived,
+  single-use WebSocket ticket. Never put the bearer token in a socket URL. A
+  token record owns one resumable PTY, which runs with the full permissions of
+  the backend OS user and is not constrained by the file API denylist. Keep its
+  bundled `RelayTerminalMono` family as xterm's primary font: using generic
+  `monospace` can produce overly wide character cells in Chromium.
 
 ## Local state and secrets
 

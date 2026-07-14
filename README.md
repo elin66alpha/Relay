@@ -46,6 +46,10 @@ flowchart LR
   without changing the main task's native session.
 - **Remote files.** Browse absolute paths allowed by the backend, change the
   workdir, upload files, and download files or zipped folders.
+- **SSH terminal.** Open **Manage credentials → Enter SSH** for one resumable
+  terminal on the current backend machine. It runs as the backend OS user and
+  follows the app's Light/Dark appearance. Web bundles a terminal monospace
+  font so Chromium keeps normal horizontal character spacing.
 - **Quota workflows.** View Claude, Codex, and Agy usage. Claude and Codex can
   queue one prompt for the next detected five-hour reset.
 - **Notifications.** Live local/browser alerts plus optional Web Push and Android
@@ -100,7 +104,9 @@ Swarm. The active workdir is stored per client and sent with every API request.
 
 ## Security summary
 
-- All API routes require a revocable bearer token.
+- All HTTP API routes require a revocable bearer token.
+- The SSH terminal uses a short-lived, single-use WebSocket ticket derived from
+  that token; the long-lived bearer token is never placed in the socket URL.
 - Credential exports are encrypted with PBKDF2-HMAC-SHA256 and AES-256-GCM.
 - The file API denies a specific set of Relay, SSH, Claude, and Codex secrets and
   can be restricted further with `RELAY_FS_ROOTS`.
@@ -108,8 +114,8 @@ Swarm. The active workdir is stored per client and sent with every API request.
 - Public deployments should terminate TLS and run Relay as a restricted non-root
   user.
 
-Relay is not an agent sandbox: every CLI process has the permissions of the
-backend OS user. Read [SECURITY.md](SECURITY.md) and the
+Relay is not a sandbox: every CLI and SSH terminal process has the permissions
+of the backend OS user. Read [SECURITY.md](SECURITY.md) and the
 [production checklist](docs/handbook.md#production-deployment) before exposing
 a backend outside a trusted network.
 

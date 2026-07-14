@@ -182,7 +182,9 @@ require_node() {
 
 install_server_deps() {
   cd "$SERVER_DIR"
-  if [ ! -d node_modules ]; then
+  if [ ! -d node_modules ] ||
+     [ ! -d node_modules/node-pty ] ||
+     [ ! -d node_modules/ws ]; then
     c_info "Installing backend dependencies..."
     npm install
   fi

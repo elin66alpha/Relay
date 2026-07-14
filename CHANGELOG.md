@@ -1,15 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 - 2026-07-13
 
 ### Added
 
+- A resumable SSH terminal for mobile, Web, and desktop under **Manage
+  credentials**, with one PTY per device credential, Light/Dark colors, and
+  short-lived single-use WebSocket tickets.
 - A Fast mode switch in the solo-chat composer for Claude Code and Codex. The
   setting defaults off and is shared by every named session in the same
   workdir/agent context.
 
 ### Changed
 
+- Bundled a terminal monospace font for the Web SSH terminal so Chromium does
+  not render excessive horizontal spacing between characters.
 - Codex model and reasoning-effort choices now come from the installed CLI's
   structured catalog, including model-specific supported effort levels and
   defaults. Updating the CLI refreshes both choices without a Relay release.

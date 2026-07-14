@@ -706,6 +706,31 @@ class BackendClient {
     return decoded is Map && decoded['ok'] == true;
   }
 
+  Future<Uri> terminalWebSocketUri({
+    required int cols,
+    required int rows,
+  }) async {
+    final MachineCredential credential = await _requireCredential();
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/terminal/ticket',
+      body: <String, Object?>{'cols': cols, 'rows': rows},
+      timeout: const Duration(seconds: 15),
+    );
+    if (decoded is! Map || decoded['ticket'] is! String) {
+      throw BackendException('Invalid SSH terminal ticket response.');
+    }
+    final String ticket = (decoded['ticket'] as String).trim();
+    if (ticket.isEmpty) {
+      throw BackendException('The SSH terminal ticket is empty.');
+    }
+    final Uri endpoint = _uri(credential, '/api/terminal/connect');
+    return endpoint.replace(
+      scheme: endpoint.scheme == 'https' ? 'wss' : 'ws',
+      queryParameters: <String, String>{'ticket': ticket},
+    );
+  }
+
   Future<BackendStatus> status({
     Duration timeout = const Duration(seconds: 8),
   }) async {

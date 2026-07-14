@@ -2,7 +2,7 @@ name: relay
 description: "A private Flutter control surface for local CLI coding agents."
 publish_to: "none"
 
-version: 0.1.3+13
+version: 0.1.4+14
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -25,6 +25,8 @@ dependencies:
   flutter_markdown_plus: ^1.0.7
   firebase_core: ^4.10.0
   firebase_messaging: ^16.3.0
+  xterm: ^4.0.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:
@@ -35,3 +37,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/agent_icons/
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: RelayTerminalMono
+      fonts:
+        - asset: assets/fonts/CascadiaMonoPL.ttf

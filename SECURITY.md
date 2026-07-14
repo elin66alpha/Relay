@@ -41,9 +41,11 @@ Recommended practice:
 
 ## API protections
 
-Every `/api/*` endpoint requires `Authorization: Bearer <token>`. Until at least
-one token exists, protected routes fail with `TOKEN_NOT_CONFIGURED` rather than
-running unauthenticated.
+Every HTTP `/api/*` endpoint requires `Authorization: Bearer <token>`. Until at
+least one token exists, protected routes fail with `TOKEN_NOT_CONFIGURED` rather
+than running unauthenticated. The terminal WebSocket upgrade redeems the
+single-use ticket described below instead of accepting a bearer token in its
+URL.
 
 Implemented controls include:
 
@@ -63,6 +65,32 @@ It returns authorization URLs and status only, redacts URLs from diagnostic
 output, and never returns stored OAuth tokens. The bridge currently depends on
 GNU-compatible `script -qfec`; log in directly on hosts without it. OpenCode and
 Hermes keys are managed outside Relay on the backend host.
+
+## SSH terminal
+
+The **Enter SSH** surface is a remote interactive login shell backed by a PTY;
+it does not connect to or expose the host's SSH daemon. The shell runs as the
+same OS user as the Relay backend and starts in that user's home directory.
+
+Creating a terminal connection first requires the normal bearer token over an
+authenticated HTTP request. The backend returns a random ticket that expires
+after 30 seconds and can be redeemed only once through the WebSocket endpoint.
+The bearer token is never placed in the WebSocket URL. Each device-token record
+owns at most one terminal: a newer attachment replaces an older window, while a
+detached shell is retained for 12 hours by default so the client can resume it.
+Revoking the owning device token closes its attached socket and PTY; token-file
+changes made by the credential CLI are detected by the terminal heartbeat.
+Terminal replay output is bounded and held in process memory only; Relay does
+not write terminal transcripts to disk. Client-only rendering choices such as
+Light/Dark colors and terminal font spacing do not change this authorization or
+process boundary.
+
+This shell is intentionally more powerful than the file API. It is **not**
+restricted by `RELAY_FS_ROOTS` or the sensitive-path denylist and can read,
+write, and execute anything available to the backend OS user. Possession of a
+valid device token therefore permits arbitrary command execution as that user.
+Use a dedicated non-root account, revoke lost-device tokens immediately, and do
+not expose Relay without TLS.
 
 ## File API protections
 
@@ -100,6 +128,8 @@ For a backend reachable beyond localhost:
 - keep the backend port private and forward only the TLS endpoint;
 - disable proxy buffering for SSE/chat routes and set timeouts above the maximum
   agent turn duration;
+- forward WebSocket upgrades for `/api/terminal/connect` and use an idle timeout
+  suitable for interactive shells;
 - protect backend backups, because history and session files contain raw
   unredacted conversation content.
 
@@ -112,7 +142,8 @@ See the [production checklist](docs/handbook.md#production-deployment).
   provider quota or changing files within its effective access.
 - It cannot protect an already compromised backend host or browser profile.
 - It cannot make a public plaintext HTTP connection safe.
-- A valid device token remains powerful until it is revoked.
+- A valid device token permits an interactive shell and remains powerful until
+  it is revoked.
 
 ## Reporting issues
 

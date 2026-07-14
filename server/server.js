@@ -40,11 +40,14 @@ const {
 const {
   deleteRevokedTokenById,
   hasConfiguredToken,
+  isTokenIdAllowed,
   isTokenAllowed,
   listTokenSummaries,
   markTokenUsed,
   revokeTokenById,
+  tokenRecordForToken,
 } = require('./lib/tokens');
+const { createTerminalManager } = require('./lib/terminal-manager');
 const { buildUsageReport } = require('./lib/usage');
 const { describeAgent, CLI } = require('./lib/agent-options');
 const { getSettings, setSettings } = require('./lib/agent-settings');
@@ -103,6 +106,7 @@ const createMetaRouter = require('./routes/meta');
 const createBtwRouter = require('./routes/btw');
 const createGroupRouter = require('./routes/group');
 const createAgentAuthRouter = require('./routes/agent-auth');
+const createTerminalRouter = require('./routes/terminal');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -137,6 +141,9 @@ const MAX_PROMPT_BYTES = parseInt(
 const CORS_ALLOW_ORIGIN = String(process.env.CORS_ALLOW_ORIGIN || '*').trim() || '*';
 
 const app = express();
+const terminalManager = createTerminalManager({
+  isTokenActive: isTokenIdAllowed,
+});
 // cloudflared connects from localhost and forwards the real client IP in
 // X-Forwarded-For. Trusting only loopback makes req.ip the real client behind a
 // tunnel, while a direct-mode (0.0.0.0) attacker — whose socket is NOT loopback —
@@ -877,7 +884,9 @@ const routeContext = {
   setActiveChatSession,
   setSettings,
   streamUploadToFile,
+  terminalManager,
   touchChatSession,
+  tokenRecordForToken,
   uploadedEntry,
   upsertHistoryMessage,
   validateWorkdir,
@@ -894,6 +903,7 @@ app.use(createGroupRouter(routeContext));
 app.use(createAgentAuthRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
+app.use(createTerminalRouter(routeContext));
 
 if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
   app.use(express.static(WEB_BUILD_DIR, {
@@ -939,12 +949,13 @@ function exitCodeForSignal(signal) {
 process.on('exit', flushHistoryForShutdown);
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
+    terminalManager.closeAll();
     flushHistoryForShutdown();
     process.exit(exitCodeForSignal(signal));
   });
 }
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`Relay server listening on http://${HOST}:${PORT}`);
   // Warm the model-discovery cache off the request path. The first scan/spawn
   // per agent is synchronous (agy even shells out to `agy models`), so priming
@@ -1005,3 +1016,4 @@ app.listen(PORT, HOST, () => {
     });
   }
 });
+terminalManager.attachServer(server);

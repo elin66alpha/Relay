@@ -53,7 +53,9 @@ pm2 logs relay-tunnel
 ```
 
 Linux setup requires PM2 (`npm install -g pm2`). It creates `relay-server` and,
-for tunnel modes, `relay-tunnel`.
+for tunnel modes, `relay-tunnel`. The interactive terminal's PTY dependency is
+compiled on Linux, so first-time setup also needs Python 3, `make`, and a C++
+compiler (for example the Debian/Ubuntu `build-essential` package).
 
 ### macOS
 

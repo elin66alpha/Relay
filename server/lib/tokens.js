@@ -58,6 +58,12 @@ function isTokenAllowed(token) {
   return allowed;
 }
 
+function isTokenIdAllowed(id) {
+  const clean = String(id || '').trim();
+  if (!clean) return false;
+  return activeTokenRecords().some((record) => String(record.id || '') === clean);
+}
+
 function tokenRecordForToken(token) {
   const clean = String(token || '').trim();
   if (!clean) return null;
@@ -194,6 +200,7 @@ module.exports = {
   createToken,
   deleteRevokedTokenById,
   hasConfiguredToken,
+  isTokenIdAllowed,
   isTokenAllowed,
   listTokenSummaries,
   markTokenUsed,

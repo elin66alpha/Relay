@@ -463,6 +463,16 @@ class AppStrings {
       : 'Use this when you are new or want a quick reminder.';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
+  String get enterSsh => isZh ? '进入SSH' : 'Enter SSH';
+  String get sshTerminal => isZh ? 'SSH 终端' : 'SSH terminal';
+  String get backToCredentials =>
+      isZh ? '返回管理凭证' : 'Back to machine credentials';
+  String get sshTerminalExited =>
+      isZh ? '终端会话已退出。' : 'The terminal session has exited.';
+  String get sshTerminalReplaced =>
+      isZh ? '这个终端已在另一个窗口中打开。' : 'This terminal was opened in another window.';
+  String get sshTerminalConnectionFailed =>
+      isZh ? '无法连接 SSH 终端。' : 'Could not connect to the SSH terminal.';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
   String get importOrChooseMachine =>
       isZh ? '请导入或选择一台机器' : 'Import or choose a machine';

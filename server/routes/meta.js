@@ -43,6 +43,7 @@ module.exports = function createMetaRouter(ctx) {
     runningScopes,
     scopeChains,
     setSettings,
+    terminalManager,
     workdirPresence,
   } = ctx;
   const router = express.Router();
@@ -217,6 +218,7 @@ module.exports = function createMetaRouter(ctx) {
     if (!revoked) {
       return res.status(404).json({ error: 'token not found' });
     }
+    terminalManager?.closeSession(revoked.id);
     res.json({
       token: {
         id: revoked.id || '',

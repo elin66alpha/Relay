@@ -153,7 +153,23 @@ if [ ! -f "$ENV_FILE" ]; then
   cp "$ENV_EXAMPLE" "$ENV_FILE"
   c_info "Created server/.env from .env.example"
 fi
-if [ ! -d node_modules ]; then
+if [ ! -d node_modules ] ||
+   [ ! -d node_modules/node-pty ] ||
+   [ ! -d node_modules/ws ]; then
+  if [ ! -d node_modules/node-pty ]; then
+    need python3 || {
+      c_err "python3 is required to build the Linux PTY dependency."
+      exit 1
+    }
+    need make || {
+      c_err "make is required to build the Linux PTY dependency."
+      exit 1
+    }
+    if ! need c++ && ! need g++; then
+      c_err "A C++ compiler is required to build the Linux PTY dependency."
+      exit 1
+    fi
+  fi
   c_info "Installing server dependencies..."
   npm install
 fi

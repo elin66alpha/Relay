@@ -17,6 +17,8 @@ import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import '../ssh/ssh_terminal_controller.dart';
+import '../ssh/ssh_terminal_screen.dart';
 import 'agent_login_flow_controller.dart';
 import 'deploy_backend_screen.dart';
 import 'machine_credentials_controller.dart';
@@ -47,16 +49,19 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   bool _isTesting = false;
   late final BackendClient _backendClient;
   late final bool _ownsBackendClient;
+  late final SshTerminalController _sshController;
 
   @override
   void initState() {
     super.initState();
     _ownsBackendClient = widget.backendClient == null;
     _backendClient = widget.backendClient ?? BackendClient();
+    _sshController = SshTerminalController(backend: _backendClient);
   }
 
   @override
   void dispose() {
+    _sshController.dispose();
     if (_ownsBackendClient) {
       unawaited(_backendClient.close());
     }
@@ -135,6 +140,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                                 onScan: _scanCredential,
                                 onPaste: _pasteCredential,
                                 onUpload: _uploadCredentialQr,
+                                onSsh: _enterSsh,
                                 onTest: _testActive,
                               ),
                               if (widget.agentsController != null) ...<Widget>[
@@ -410,6 +416,19 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       await client.close();
       if (mounted) setState(() => _isTesting = false);
     }
+  }
+
+  void _enterSsh() {
+    final MachineCredential? active = widget.machinesController.activeMachine;
+    if (active == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SshTerminalScreen(
+          controller: _sshController,
+          machineId: active.id,
+        ),
+      ),
+    );
   }
 
   Future<void> _refreshAgents() async {
@@ -929,6 +948,7 @@ class _EmptyCredentialState extends StatelessWidget {
                         onScan: onScan,
                         onPaste: onPaste,
                         onUpload: onUpload,
+                        onSsh: null,
                         onTest: null,
                       ),
                       const SizedBox(height: 18),
@@ -988,6 +1008,7 @@ class _CredentialActionButtons extends StatelessWidget {
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
+    required this.onSsh,
     required this.onTest,
   });
 
@@ -998,6 +1019,7 @@ class _CredentialActionButtons extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
+  final VoidCallback? onSsh;
   final VoidCallback? onTest;
 
   @override
@@ -1028,6 +1050,12 @@ class _CredentialActionButtons extends StatelessWidget {
           icon: const Icon(Icons.image_search_rounded),
           label: Text(context.l10n.uploadQrImage),
         ),
+        if (onSsh != null)
+          FilledButton.icon(
+            onPressed: active == null ? null : onSsh,
+            icon: const Icon(Icons.terminal_rounded),
+            label: Text(context.l10n.enterSsh),
+          ),
         if (onTest != null)
           OutlinedButton.icon(
             onPressed: active == null || isTesting ? null : onTest,

@@ -40,6 +40,9 @@ flowchart LR
   蜂群还可保存和导入 JSON 模板。
 - **只读 BTW 旁路对话。** 向 Claude、Codex 或 Agy 提问而不改变主任务的原生会话。
 - **远程文件。** 浏览后端允许的绝对路径、切换工作目录、上传文件、下载文件或压缩文件夹。
+- **SSH 终端。** 从“管理凭证 → 进入SSH”打开当前后端机器上唯一且可恢复的终端；终端
+  使用后端系统用户运行，并跟随 app 的“白天/黑夜”外观。Web 端内置等宽终端字体，
+  避免 Chromium 中的字符横向间距过大。
 - **额度工作流。** 查看 Claude、Codex 和 Agy 额度；只有 Claude 与 Codex 可以预约在
   下一个检测到的 5 小时额度重置后自动发送一条消息。
 - **通知。** 在线时使用本地/浏览器通知；配置后还可使用 Web Push 和 Android FCM。
@@ -90,14 +93,16 @@ app 的首次连接页也内置了“部署后端”向导。
 
 ## 安全摘要
 
-- 所有 API 都需要可撤销的 bearer token。
+- 所有 HTTP API 都需要可撤销的 bearer token。
+- SSH 终端用该 token 换取短时、一次性的 WebSocket 票据，长期 bearer token 不会进入
+  WebSocket 地址。
 - 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM 加密。
 - 文件 API 会拒绝一组明确的 Relay、SSH、Claude 与 Codex 敏感路径，并可用
   `RELAY_FS_ROOTS` 进一步限制。
 - 错误 token 尝试会被限速。
 - 公网部署应终止 TLS，并使用权限受限的非 root 系统用户运行 Relay。
 
-Relay 不是 agent 沙箱：CLI 进程拥有后端系统用户的权限。对外暴露前请阅读
+Relay 不是沙箱：CLI 与 SSH 终端进程都拥有后端系统用户的权限。对外暴露前请阅读
 [SECURITY.md](SECURITY.md) 与[生产部署清单](docs/handbook.md#production-deployment)。
 
 ## 开发

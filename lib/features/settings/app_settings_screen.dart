@@ -4,7 +4,7 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import 'getting_started_screen.dart';
 
-const String _applicationVersion = '0.1.3';
+const String _applicationVersion = '0.1.4';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {

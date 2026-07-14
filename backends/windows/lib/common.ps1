@@ -234,7 +234,10 @@ function Require-Node {
 function Install-ServerDeps {
   Push-Location $Script:ServerDir
   try {
-    if (-not (Test-Path -LiteralPath (Join-Path $Script:ServerDir 'node_modules'))) {
+    $nodeModules = Join-Path $Script:ServerDir 'node_modules'
+    if ((-not (Test-Path -LiteralPath $nodeModules)) -or
+        (-not (Test-Path -LiteralPath (Join-Path $nodeModules 'node-pty'))) -or
+        (-not (Test-Path -LiteralPath (Join-Path $nodeModules 'ws')))) {
       Write-Info 'Installing backend dependencies...'
       & npm install
     }

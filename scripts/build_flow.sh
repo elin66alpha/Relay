@@ -43,6 +43,7 @@ restart_pm2_app() {
 run flutter pub get
 run flutter analyze --no-pub
 run flutter test --no-pub
+run npm --prefix server install
 
 # Syntax-check every backend JS file (not a hand-maintained subset that silently
 # skips new files), then run the server test suite. Both gate the build so a

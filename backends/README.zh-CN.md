@@ -48,7 +48,8 @@ pm2 logs relay-tunnel
 ```
 
 Linux 安装需要 PM2（`npm install -g pm2`）。进程名为 `relay-server`；隧道模式还会创建
-`relay-tunnel`。
+`relay-tunnel`。交互终端的 PTY 依赖会在 Linux 上本地编译，因此首次安装还需要 Python 3、
+`make` 和 C++ 编译器（Debian/Ubuntu 可安装 `build-essential`）。
 
 ### macOS
 
