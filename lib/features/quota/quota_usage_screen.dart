@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/util/time_format.dart';
+import '../../core/widgets/agent_icon.dart';
 import '../chat/bot_chat_controller.dart';
 
 class QuotaUsageScreen extends StatefulWidget {
@@ -33,12 +35,23 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   UsageReport? _report;
   final Map<String, String> _errors = <String, String>{};
   bool _loading = false;
+  // Keeps the "resets in" countdowns current.
+  Timer? _tick;
 
   @override
   void initState() {
     super.initState();
     _report = widget.chatController.lastUsageReport;
     unawaited(_refresh());
+    _tick = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -114,6 +127,7 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
               child: _UsageAgentPanel(
+                source: source,
                 label: _usageSources[source]!,
                 agent: _agent(source),
                 error: _errors[source],
@@ -126,9 +140,23 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   }
 }
 
-class _UsageAgentPanel extends StatelessWidget {
-  const _UsageAgentPanel({required this.label, this.agent, this.error});
+/// The colour of a quota with [remainingPercent] left: the accent while there
+/// is room, amber when it runs low, red when nearly gone.
+Color quotaTone(ColorScheme colors, double remainingPercent) {
+  if (remainingPercent < 10) return colors.error;
+  if (remainingPercent < 25) return AppTheme.statusWarn;
+  return colors.primary;
+}
 
+class _UsageAgentPanel extends StatelessWidget {
+  const _UsageAgentPanel({
+    required this.source,
+    required this.label,
+    this.agent,
+    this.error,
+  });
+
+  final String source;
   final String label;
   // Null until the source's first report arrives.
   final UsageAgent? agent;
@@ -140,61 +168,51 @@ class _UsageAgentPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final UsageAgent? agent = this.agent;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                flex: 2,
-                child: Text(
-                  agent?.label ?? label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  softWrap: false,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-              if (agent != null && agent.detail.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 8),
+    final TextStyle muted = TextStyle(color: colors.outline, fontSize: 12);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                AgentIcon(agentKey: source, size: 22),
+                const SizedBox(width: 10),
                 Flexible(
                   child: Text(
-                    agent.detail,
+                    agent?.label ?? label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     softWrap: false,
-                    textAlign: TextAlign.end,
-                    style: TextStyle(color: colors.outline, fontSize: 12),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-              ],
-            ],
-          ),
-          if (agent != null && (agent.asOf != null || agent.stale)) ...<Widget>[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                if (agent.asOf != null)
-                  Text(
-                    context.l10n.usageAsOf(
-                      formatShortTime(context, agent.asOf),
+                // The plan, e.g. "pro" or "plus".
+                if (agent != null && agent.detail.isNotEmpty) ...<Widget>[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: colors.outlineVariant),
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                    style: TextStyle(color: colors.outline, fontSize: 12),
+                    child: Text(
+                      agent.detail,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.mono(colors.onSurfaceVariant)
+                          .copyWith(fontSize: 11, height: 1.4),
+                    ),
                   ),
-                if (agent.stale)
+                ],
+                const Spacer(),
+                if (agent != null && agent.stale)
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -213,34 +231,53 @@ class _UsageAgentPanel extends StatelessWidget {
                   ),
               ],
             ),
-          ],
-          const SizedBox(height: 12),
-          if (agent == null)
-            Text(
-              error ?? context.l10n.loadingUsage,
-              style: TextStyle(
-                color: error == null ? colors.outline : colors.error,
+            if (agent?.asOf != null) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                context.l10n.usageAsOf(formatShortTime(context, agent!.asOf)),
+                style: muted,
               ),
-            )
-          else if (!agent.available)
-            Text(
-              context.l10n.unavailable,
-              style: TextStyle(color: colors.outline),
-            )
-          else if (agent.error != null)
-            Text(
-              agent.error!,
-              style: TextStyle(color: colors.error),
-            )
-          else if (agent.quotas.isEmpty)
-            Text(
-              context.l10n.unknown,
-              style: TextStyle(color: colors.outline),
-            )
-          else
-            for (final UsageQuota quota in agent.quotas)
-              _UsageQuotaRow(quota: quota),
-        ],
+            ],
+            const SizedBox(height: 14),
+            if (agent == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  error ?? context.l10n.loadingUsage,
+                  style: TextStyle(
+                    color: error == null ? colors.outline : colors.error,
+                  ),
+                ),
+              )
+            else if (!agent.available)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  context.l10n.unavailable,
+                  style: TextStyle(color: colors.outline),
+                ),
+              )
+            else if (agent.error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  agent.error!,
+                  style: TextStyle(color: colors.error),
+                ),
+              )
+            else if (agent.quotas.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  context.l10n.unknown,
+                  style: TextStyle(color: colors.outline),
+                ),
+              )
+            else
+              for (final UsageQuota quota in agent.quotas)
+                _UsageQuotaRow(quota: quota),
+          ],
+        ),
       ),
     );
   }
@@ -251,72 +288,99 @@ class _UsageQuotaRow extends StatelessWidget {
 
   final UsageQuota quota;
 
-  String _formatPercent(BuildContext context, double? percent) {
-    if (percent == null) return context.l10n.unknown;
-    final double clamped = percent.clamp(0, 100).toDouble();
-    if ((clamped - clamped.round()).abs() < 0.05) {
-      return '${clamped.round()}%';
-    }
-    return '${clamped.toStringAsFixed(1)}%';
+  String _formatPercent(double percent) {
+    if ((percent - percent.round()).abs() < 0.05) return '${percent.round()}%';
+    return '${percent.toStringAsFixed(1)}%';
   }
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final AppStrings strings = context.l10n;
     final String label = switch (quota.key) {
-      'five_hour' => context.l10n.fiveHourQuota,
-      'seven_day' => context.l10n.weeklyQuota,
+      'five_hour' => strings.fiveHourQuota,
+      'seven_day' => strings.weeklyQuota,
       _ => quota.label,
     };
     // An expired bucket's cached percentage is meaningless (its window already
     // reset while the source was unreachable), so drop the number and let the
     // bar fall to its indeterminate "awaiting fresh data" state.
-    final double? percent = quota.expired ? null : quota.remainingPercent;
-    final String percentText = _formatPercent(context, percent);
-    final double? value =
-        percent == null ? null : (percent / 100).clamp(0.0, 1.0).toDouble();
+    final double? percent = quota.expired
+        ? null
+        : quota.remainingPercent?.clamp(0, 100).toDouble();
+    final Color tone =
+        percent == null ? colors.outline : quotaTone(colors, percent);
+    final DateTime? reset = DateTime.tryParse(quota.resetsAt ?? '');
+    final Duration? left = reset?.difference(DateTime.now());
+    final TextStyle muted = TextStyle(color: colors.outline, fontSize: 12);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: <Widget>[
-              SizedBox(
-                width: 84,
+              Expanded(
                 child: Text(
                   label,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      quota.expired
-                          ? context.l10n.quotaWindowReset
-                          : '$percentText ${context.l10n.remaining}',
-                      style: quota.expired
-                          ? TextStyle(color: colors.tertiary)
-                          : null,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${context.l10n.refreshAt}: ${formatShortTime(context, quota.resetsAt)}',
-                      style: TextStyle(color: colors.outline, fontSize: 12),
-                    ),
-                  ],
+              if (quota.expired)
+                Text(
+                  strings.quotaWindowReset,
+                  style: TextStyle(color: colors.tertiary, fontSize: 13),
+                )
+              else
+                Text.rich(
+                  TextSpan(
+                    children: <InlineSpan>[
+                      TextSpan(
+                        text: percent == null
+                            ? strings.unknown
+                            : _formatPercent(percent),
+                        style: AppTheme.mono(tone).copyWith(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2,
+                        ),
+                      ),
+                      TextSpan(text: ' ${strings.remaining}', style: muted),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: value,
+            value: percent == null ? null : percent / 100,
             minHeight: 6,
+            color: tone,
+            backgroundColor: tone.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(999),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              if (left != null && !left.isNegative)
+                Text(
+                  strings.resetsIn(left),
+                  style: muted.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontFeatures: const <FontFeature>[
+                      FontFeature.tabularFigures(),
+                    ],
+                  ),
+                ),
+              const Spacer(),
+              Text(
+                '${strings.refreshAt}: '
+                '${formatShortTime(context, quota.resetsAt)}',
+                style: muted,
+              ),
+            ],
           ),
         ],
       ),

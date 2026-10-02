@@ -36,6 +36,8 @@ class AppStrings {
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
+  String get resyncSessions =>
+      isZh ? '刷新会话（同步到当前工作区）' : 'Refresh sessions for the current workspace';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
   String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
   String get newGroup => isZh ? '新建蜂群' : 'New swarm';
@@ -91,6 +93,30 @@ class AppStrings {
   String get usageStale => isZh ? '上次成功结果' : 'Stale';
   String get quotaWindowReset =>
       isZh ? '配额窗口已重置，等待最新数据' : 'Window reset — awaiting fresh data';
+  String get fiveHourQuotaShort => isZh ? '5小时' : '5h';
+  String get weeklyQuotaShort => isZh ? '本周' : 'Week';
+  String get quotaResetShort => isZh ? '已重置' : 'Reset';
+  String resetsIn(Duration left) => isZh
+      ? '${resetsInShort(left)}后重置'
+      : 'Resets in ${resetsInShort(left)}';
+
+  /// Time until a quota window resets, compact enough for the composer strip.
+  String resetsInShort(Duration left) {
+    final int minutes = left.inMinutes < 1 ? 1 : left.inMinutes;
+    final int days = minutes ~/ (24 * 60);
+    final int hours = minutes ~/ 60 % 24;
+    final int mins = minutes % 60;
+    // The smaller unit is dropped when it is zero: "5天", not "5天0小时".
+    if (days > 0) {
+      if (hours == 0) return isZh ? '$days天' : '${days}d';
+      return isZh ? '$days天$hours小时' : '${days}d ${hours}h';
+    }
+    if (hours > 0) {
+      if (mins == 0) return isZh ? '$hours小时' : '${hours}h';
+      return isZh ? '$hours小时$mins分' : '${hours}h ${mins}m';
+    }
+    return isZh ? '$mins分' : '${mins}m';
+  }
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
@@ -413,8 +439,6 @@ class AppStrings {
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
-  String get homeSubtitle =>
-      isZh ? '从这里查看机器状态与工作区。' : 'Check the machine status and workspaces.';
   String get currentWorkspace => isZh ? '当前工作区' : 'Current workspace';
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>

@@ -4,7 +4,10 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/util/time_format.dart';
+import '../../core/widgets/agent_icon.dart';
+import 'code_block.dart';
 
 // Presentational chat-content widgets shared by the single-agent chat
 // (bot_chat_screen) and the multi-agent swarm chat (group_chat_screen), so both
@@ -218,11 +221,10 @@ class _MessageTextState extends State<MessageText> {
       inlineSyntaxes: needle.isEmpty
           ? null
           : <md.InlineSyntax>[_SearchHitSyntax(needle)],
-      builders: needle.isEmpty
-          ? const <String, MarkdownElementBuilder>{}
-          : <String, MarkdownElementBuilder>{
-              _searchHitTag: _SearchHitBuilder(style),
-            },
+      builders: <String, MarkdownElementBuilder>{
+        'pre': CodeBlockBuilder(widget.color),
+        if (needle.isNotEmpty) _searchHitTag: _SearchHitBuilder(style),
+      },
     );
   }
 }
@@ -309,9 +311,10 @@ MarkdownStyleSheet _markdownStyleSheet(
   Color color,
   TextStyle base,
 ) {
-  final ColorScheme colors = Theme.of(context).colorScheme;
-  final Color codeBackground = colors.surface.withValues(alpha: 0.55);
-  final Color borderColor = color.withValues(alpha: 0.20);
+  // Tints of the text colour rather than scheme surfaces, so code reads the
+  // same on an agent panel and on a tinted system reply in either theme.
+  final Color codeBackground = color.withValues(alpha: 0.05);
+  final Color borderColor = color.withValues(alpha: 0.14);
   return MarkdownStyleSheet(
     p: base,
     pPadding: EdgeInsets.zero,
@@ -344,11 +347,16 @@ MarkdownStyleSheet _markdownStyleSheet(
     blockSpacing: 8,
     listIndent: 22,
     listBullet: base,
-    code: base.copyWith(fontStyle: FontStyle.italic),
-    codeblockPadding: const EdgeInsets.all(9),
+    code: AppTheme.mono(color).copyWith(
+      fontSize: 13.5,
+      height: base.height,
+      backgroundColor: color.withValues(alpha: 0.08),
+    ),
+    // CodeBlock pads its own header and body.
+    codeblockPadding: EdgeInsets.zero,
     codeblockDecoration: BoxDecoration(
       color: codeBackground,
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(8),
       border: Border.all(color: borderColor),
     ),
     blockquote: base.copyWith(color: color.withValues(alpha: 0.78)),
@@ -594,55 +602,147 @@ class OptionButtons extends StatelessWidget {
   }
 }
 
+/// An agent's execution steps on a thin rail, in monospace because they are
+/// mostly tool calls, paths and commands. While [active], the newest step is the
+/// one running and carries a spinner.
 class ProgressLines extends StatelessWidget {
   const ProgressLines({
     required this.lines,
     required this.color,
+    this.active = false,
     super.key,
   });
 
   final List<String> lines;
   final Color color;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        for (final String line in lines)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.55),
-                      shape: BoxShape.circle,
+    return Container(
+      padding: const EdgeInsets.only(left: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(color: color.withValues(alpha: 0.18), width: 2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (int i = 0; i < lines.length; i++)
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (active && i == lines.length - 1)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, right: 7),
+                      child: SizedBox.square(
+                        dimension: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: color.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  Flexible(
+                    child: Text(
+                      lines[i],
+                      style: AppTheme.mono(
+                        color.withValues(
+                          alpha: active && i == lines.length - 1 ? 0.9 : 0.62,
+                        ),
+                      ).copyWith(fontSize: 12, height: 1.4),
                     ),
                   ),
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    line,
-                    style: TextStyle(
-                      color: color.withValues(alpha: 0.72),
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The full-width surface an agent reply sits on. Uses the theme's card so a
+/// reply matches every other panel; [color] tints special replies.
+class ReplyPanel extends StatelessWidget {
+  const ReplyPanel({required this.child, this.color, super.key});
+
+  final Widget child;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Card(
+        margin: EdgeInsets.zero,
+        color: color,
+        clipBehavior: Clip.none,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// The first line of an agent reply: who answered and when.
+class ReplyHeader extends StatelessWidget {
+  const ReplyHeader({
+    required this.label,
+    this.agentKey,
+    this.time,
+    this.onIconTap,
+    super.key,
+  });
+
+  final String label;
+  final String? agentKey;
+  final String? time;
+  final VoidCallback? onIconTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: <Widget>[
+          if (agentKey != null) ...<Widget>[
+            InkWell(
+              onTap: onIconTap,
+              borderRadius: BorderRadius.circular(6),
+              child: AgentIcon(agentKey: agentKey!, size: 18),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: colors.onSurface,
+              ),
             ),
           ),
-      ],
+          if (time != null) ...<Widget>[
+            const SizedBox(width: 8),
+            Text(
+              time!,
+              style: AppTheme.mono(colors.outline).copyWith(fontSize: 11),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -30,6 +30,7 @@ dependencies:
   firebase_messaging: ^16.3.0
   xterm: ^4.0.0
   web_socket_channel: ^3.0.3
+  re_highlight: ^0.0.3
 
 dev_dependencies:
   flutter_test:

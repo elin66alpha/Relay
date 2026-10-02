@@ -673,16 +673,39 @@ class BotChatController extends ChangeNotifier {
       create: create,
     );
     _activeWorkdir = info.dir;
-    // Switching paths switches conversations: the session is keyed by
-    // workdir + agent + chat session. Reconnect the event stream with the new
-    // workdir and reload the shared history for this path so it shows immediately.
+    await _enterWorkdirContext();
+    return info;
+  }
+
+  bool _resyncingWorkdir = false;
+  bool get isResyncingWorkdir => _resyncingWorkdir;
+
+  /// Re-reads this device's work directory and reloads the session lists and
+  /// conversation for it: the manual way back in sync when the chat still
+  /// shows the previous workspace's sessions. Not while a turn is running.
+  Future<void> resyncWorkdir() async {
+    if (_resyncingWorkdir || isThinking || _remoteActive) return;
+    _resyncingWorkdir = true;
+    notifyListeners();
+    try {
+      await refreshWorkdir();
+      await _enterWorkdirContext();
+    } finally {
+      _resyncingWorkdir = false;
+      notifyListeners();
+    }
+  }
+
+  // Switching paths switches conversations: the session is keyed by
+  // workdir + agent + chat session. Reconnect the event stream with the new
+  // workdir and reload the shared history for this path so it shows immediately.
+  Future<void> _enterWorkdirContext() async {
     _detachVisibleTurnForContextSwitch();
     _clearBackgroundTurns();
     _pendingDrafts.clear();
     _clearSessionLists();
     await reconnectEvents();
     await _reloadConversation();
-    return info;
   }
 
   /// Clears the view and pulls the shared conversation for the current

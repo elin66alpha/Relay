@@ -200,12 +200,7 @@ class _AgentCredentialStatusSection extends StatelessWidget {
               ),
             ),
             Card(
-              elevation: 0,
-              color: theme.colorScheme.surfaceContainerLow,
               margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
               child: Column(
                 children: <Widget>[
                   for (int index = 0;
