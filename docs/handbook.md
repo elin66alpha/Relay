@@ -273,7 +273,11 @@ machine-specific workdir, id, and transcript.
 
 The usage screen reports Claude Code and Codex. It queries each source on its
 own (`GET /api/usage?source=claude|codex`; an unknown source is a 400), so one
-card fills in as soon as its source answers. Reset detection and
+card fills in as soon as its source answers. The solo-chat composer also pins
+the active agent's remaining quota above the input for Claude Code and Codex; it
+reads the same per-source endpoint when the agent changes and after each turn,
+at most once a minute per agent, matching the backend's one-minute usage cache.
+Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
