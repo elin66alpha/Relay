@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -108,6 +109,27 @@ void main() {
       ).toList();
       expect(events.single.type, 'delta');
       expect(events.single.data, <String, Object?>{'text': 'hello'});
+    });
+
+    test('cancelling a quiet stream releases the connection at once', () async {
+      // The event stream sits idle between heartbeats. A cancel must reach the
+      // HTTP body right away, not wait for the next line to arrive; a workdir
+      // switch awaits it before reloading the conversation.
+      bool sourceCancelled = false;
+      final StreamController<List<int>> body = StreamController<List<int>>(
+        onCancel: () => sourceCancelled = true,
+      );
+      final Completer<void> ready = Completer<void>();
+      final StreamSubscription<BackendEvent> sub = decodeSse(body.stream)
+          .listen((BackendEvent event) => ready.complete());
+      body.add(utf8.encode('event: ready\ndata: {"ok":true}\n\n'));
+      await ready.future;
+      // Let the decoder go idle waiting for the next line, as between
+      // heartbeats.
+      await pumpEventQueue();
+
+      await sub.cancel().timeout(const Duration(seconds: 1));
+      expect(sourceCancelled, isTrue);
     });
   });
 }
