@@ -190,14 +190,17 @@ then uses two related scopes:
 | State | Scope |
 |---|---|
 | Named conversation, history, running turn, native CLI resume id | `workdir + agent + sessionId` |
-| Model, effort, permission, fast mode | `workdir + agent` |
+| Model, effort, permission, fast mode | `workdir + agent + sessionId` |
 | Swarm list | workspace in `X-Workdir` |
 | Swarm transcript and member sessions | Swarm id plus its chosen work tree |
 
 An agent context supports up to eight named conversations. `Main` preserves the
 legacy scope key and cannot be deleted. Turns in one exact conversation scope
 queue; other sessions can continue independently. Devices on the same scope
-share backend history and live events.
+share backend history and live events. A new session starts from a copy of the
+settings of the session it was created from; a session with no settings of its
+own (one created before settings were per session) follows Main's until its
+first change.
 
 Agent controls are capability-aware:
 

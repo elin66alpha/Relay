@@ -97,8 +97,8 @@ function makeHarness(runAgentImpl, options = {}) {
         calls.push({ type: 'enqueue', scopeKey });
         return taskFn();
       },
-      getSettings(agentKey, contextKey) {
-        calls.push({ type: 'settings', agentKey, contextKey });
+      getSettings(agentKey, scopeKey, fallbackKey) {
+        calls.push({ type: 'settings', agentKey, scopeKey, fallbackKey });
         return settings;
       },
       runningScopes,
@@ -174,6 +174,13 @@ test('SSE responder preserves direct event order while scope events keep start/q
     ['agent_start', 'agent_queued', 'agent_done'],
   );
   assert.equal(harness.runningScopes.size, 0);
+  // Settings are the session's own, falling back to Main's (the context key).
+  assert.deepEqual(
+    harness.calls
+      .filter((call) => call.type === 'settings')
+      .map(({ scopeKey, fallbackKey }) => ({ scopeKey, fallbackKey })),
+    [{ scopeKey: 'scope', fallbackKey: 'context' }],
+  );
 });
 
 test('JSON responder returns the final reply and broadcasts progress and delta', async () => {

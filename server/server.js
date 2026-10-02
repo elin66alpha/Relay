@@ -50,7 +50,7 @@ const {
 const { createTerminalManager } = require('./lib/terminal-manager');
 const { buildUsageReport } = require('./lib/usage');
 const { describeAgent, CLI } = require('./lib/agent-options');
-const { getSettings, setSettings } = require('./lib/agent-settings');
+const { getSettings, setSettings, deleteSettings } = require('./lib/agent-settings');
 const push = require('./lib/push');
 const fcm = require('./lib/fcm');
 const { notifyAll } = require('./lib/notify');
@@ -830,6 +830,7 @@ const routeContext = {
   createQuotaSchedule,
   deleteChatSession,
   deleteRevokedTokenById,
+  deleteSettings,
   describeAgent,
   eventClients,
   eventWorkdir,

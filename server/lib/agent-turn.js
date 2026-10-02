@@ -470,7 +470,7 @@ async function runAgentTurn(options) {
           sessionKey: scopeKey,
           ...(signal ? { signal } : {}),
           workdir,
-          settings: getSettings(agentKey, contextKey),
+          settings: getSettings(agentKey, scopeKey, contextKey),
         });
       } finally {
         runningScopes.delete(concurrencyKey);

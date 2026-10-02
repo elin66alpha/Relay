@@ -228,9 +228,11 @@ class BotChatController extends ChangeNotifier {
   Future<void> createSessionFor(CliAgent agent, {String name = ''}) async {
     final MachineCredential? machine = _machine;
     if (machine == null) return;
+    // The new session starts from the settings of the one the user is on.
     final AgentSessionList result = await _backendClient.createSession(
       agent.key,
       name,
+      copySettingsFrom: activeSessionIdFor(agent.key),
     );
     if (_machine?.id != machine.id) return;
     _detachVisibleTurnForContextSwitch();

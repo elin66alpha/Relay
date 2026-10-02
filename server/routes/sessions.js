@@ -12,12 +12,15 @@ module.exports = function createSessionsRouter(ctx) {
     purgeSession,
     createChatSession,
     deleteChatSession,
+    deleteSettings,
+    getSettings,
     listChatSessions,
     resolveAgentScope,
     runningScopes,
     scopeChains,
     scopeKeyFor,
     setActiveChatSession,
+    setSettings,
   } = ctx;
   const router = express.Router();
 
@@ -54,6 +57,17 @@ module.exports = function createSessionsRouter(ctx) {
         code: 'SESSION_LIMIT_REACHED',
       });
     }
+    // A new session starts from a copy of the settings of the session it was
+    // created from (Main when none is named) and is independent after that.
+    setSettings(
+      agent.key,
+      scopeKeyFor(agent.key, workdir, created.activeSessionId),
+      getSettings(
+        agent.key,
+        scopeKeyFor(agent.key, workdir, req.body.copySettingsFrom),
+        contextKey,
+      ),
+    );
     return res.json({
       ok: true,
       agent: agentPayload(agent),
@@ -129,6 +143,7 @@ module.exports = function createSessionsRouter(ctx) {
     const result = deleteChatSession(contextKey, sessionId);
     await purgeSession(scopeKey, { agentKey: agent.key, workdir });
     clearHistory(scopeKey);
+    deleteSettings(scopeKey);
     return res.json({
       ok: true,
       agent: agentPayload(agent),

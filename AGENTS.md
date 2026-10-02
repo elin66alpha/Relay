@@ -64,9 +64,11 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   cannot be deleted.
 - Turns in the same exact conversation scope serialize through `scopeChains`.
   Different sessions and different Swarm members may run concurrently.
-- Agent controls are broader than a conversation: model, effort, permission,
-  and fast mode persist per `workdir + agent`, so all named sessions and devices
-  in that context share them.
+- Agent controls belong to a conversation: model, effort, permission, and fast
+  mode persist per `workdir + agent + sessionId`, shared by every device on that
+  session. A new session copies the settings of the session it was created from;
+  a session with no entry of its own falls back to Main's (the context key).
+  Requests without a `sessionId` address Main, so older clients keep working.
 
 ### Agents and controls
 

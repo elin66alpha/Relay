@@ -93,6 +93,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(backendClient.createdSessions, 1);
+    // The new session starts from the settings of the session it came from.
+    expect(backendClient.copiedSettingsFrom, AgentSession.defaultId);
     expect(chatController.sessionsFor('claude'), hasLength(2));
     expect(chatController.activeSession?.name, 'Session 2');
     expect(find.text('CLI agents'), findsNothing);
@@ -136,6 +138,7 @@ class _MemoryMachineCredentialsStore extends MachineCredentialsStore {
 
 class _SessionBackendClient extends BackendClient {
   int createdSessions = 0;
+  String? copiedSettingsFrom;
   final Map<String, List<AgentSession>> _sessions =
       <String, List<AgentSession>>{};
   final Map<String, String> _activeSessionIds = <String, String>{};
@@ -146,8 +149,13 @@ class _SessionBackendClient extends BackendClient {
   }
 
   @override
-  Future<AgentSessionList> createSession(String agentKey, String name) async {
+  Future<AgentSessionList> createSession(
+    String agentKey,
+    String name, {
+    String? copySettingsFrom,
+  }) async {
     createdSessions += 1;
+    copiedSettingsFrom = copySettingsFrom;
     final DateTime now = DateTime.utc(2026, 1, 1, 0, 0, createdSessions);
     final AgentSession session = AgentSession(
       id: 'session-$createdSessions',

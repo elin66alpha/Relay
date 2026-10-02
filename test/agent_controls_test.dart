@@ -14,6 +14,7 @@ void main() {
   Future<void> pumpControls(
     WidgetTester tester,
     _OptionsBackendClient backend, {
+    String? sessionId,
     bool settle = true,
   }) async {
     final AppSettingsController settings = AppSettingsController();
@@ -27,6 +28,7 @@ void main() {
             body: AgentControlsButtons(
               backend: backend,
               agentKey: 'codex',
+              sessionId: sessionId,
             ),
           ),
         ),
@@ -132,6 +134,25 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('switching session reloads and saves that session\'s settings', (
+    WidgetTester tester,
+  ) async {
+    final _OptionsBackendClient backend = _OptionsBackendClient();
+    await pumpControls(tester, backend, sessionId: 'a');
+    await pumpControls(tester, backend, sessionId: 'b');
+
+    expect(backend.settingsFetches, 2);
+    expect(backend.lastSessionId, 'b');
+
+    await tester.tap(find.text('Model'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('GPT Lite'));
+    await tester.pumpAndSettle();
+
+    expect(backend.lastUpdatedGroup, 'model');
+    expect(backend.lastSessionId, 'b');
+  });
+
   testWidgets('fast switch updates the Codex fast setting', (
     WidgetTester tester,
   ) async {
@@ -162,6 +183,7 @@ class _OptionsBackendClient extends BackendClient {
   int settingUpdates = 0;
   String? lastUpdatedGroup;
   String? lastUpdatedOption;
+  String? lastSessionId;
   bool fast = false;
 
   AgentOptionsCatalog get _catalog =>
@@ -214,8 +236,12 @@ class _OptionsBackendClient extends BackendClient {
   }
 
   @override
-  Future<AgentSettings> fetchAgentSettings(String agentKey) async {
+  Future<AgentSettings> fetchAgentSettings(
+    String agentKey, {
+    String? sessionId,
+  }) async {
     settingsFetches += 1;
+    lastSessionId = sessionId;
     return _settings;
   }
 
@@ -228,9 +254,11 @@ class _OptionsBackendClient extends BackendClient {
   Future<AgentSettings> updateAgentSetting(
     String agentKey,
     String group,
-    String optionId,
-  ) async {
+    String optionId, {
+    String? sessionId,
+  }) async {
     settingUpdates += 1;
+    lastSessionId = sessionId;
     lastUpdatedGroup = group;
     lastUpdatedOption = optionId;
     if (group == 'fast') fast = optionId == 'on';

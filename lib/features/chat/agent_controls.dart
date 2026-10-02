@@ -88,12 +88,15 @@ class AgentControlsButtons extends StatefulWidget {
   const AgentControlsButtons({
     required this.backend,
     required this.agentKey,
+    this.sessionId,
     this.onOpenPage,
     super.key,
   });
 
   final BackendClient backend;
   final String agentKey;
+  // The chat session the settings belong to; null addresses Main.
+  final String? sessionId;
   final VoidCallback? onOpenPage;
 
   @override
@@ -103,8 +106,7 @@ class AgentControlsButtons extends StatefulWidget {
 class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   AgentOptionsCatalog? _catalog;
   AgentSettings _settings = AgentSettings.empty;
-  // Settings are per workdir+agent, so unlike the catalog they are always
-  // fetched. Held as a future too: the buttons now render from the cached
+  // Settings are per session, so unlike the catalog they are always fetched. Held as a future too: the buttons now render from the cached
   // catalog before this lands, so a quick tap must wait for the real selection
   // instead of opening a page on the defaults.
   Future<AgentSettings> _settingsReady =
@@ -121,7 +123,8 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
   @override
   void didUpdateWidget(AgentControlsButtons oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.agentKey != widget.agentKey) {
+    if (oldWidget.agentKey != widget.agentKey ||
+        oldWidget.sessionId != widget.sessionId) {
       _load();
     }
   }
@@ -133,9 +136,10 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
 
   Future<void> _load() async {
     final String agentKey = widget.agentKey;
+    final String? sessionId = widget.sessionId;
     final AgentOptionsCatalog? cached = _catalogCache[agentKey];
     final Future<AgentSettings> pending =
-        widget.backend.fetchAgentSettings(agentKey);
+        widget.backend.fetchAgentSettings(agentKey, sessionId: sessionId);
     setState(() {
       _catalog = cached;
       _settingsReady = pending;
@@ -149,7 +153,11 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
         widget.backend.fetchAgentOptions(agentKey),
         pending,
       ]);
-      if (!mounted || agentKey != widget.agentKey) return;
+      if (!mounted ||
+          agentKey != widget.agentKey ||
+          sessionId != widget.sessionId) {
+        return;
+      }
       final AgentOptionsCatalog catalog = results[0] as AgentOptionsCatalog;
       _catalogCache[agentKey] = catalog;
       setState(() {
@@ -158,7 +166,11 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
         _loading = false;
       });
     } catch (_) {
-      if (!mounted || agentKey != widget.agentKey) return;
+      if (!mounted ||
+          agentKey != widget.agentKey ||
+          sessionId != widget.sessionId) {
+        return;
+      }
       setState(() {
         _loading = false;
         // A cached catalog is still worth showing; only a cold failure is fatal.
@@ -195,6 +207,7 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
         builder: (BuildContext ctx) => _AgentOptionPage(
           backend: widget.backend,
           agentKey: widget.agentKey,
+          sessionId: widget.sessionId,
           group: group,
           catalog: catalog,
           current: current,
@@ -326,6 +339,7 @@ class _AgentOptionPage extends StatefulWidget {
   const _AgentOptionPage({
     required this.backend,
     required this.agentKey,
+    required this.sessionId,
     required this.group,
     required this.catalog,
     required this.current,
@@ -335,6 +349,7 @@ class _AgentOptionPage extends StatefulWidget {
 
   final BackendClient backend;
   final String agentKey;
+  final String? sessionId;
   final String group;
   final AgentOptionsCatalog catalog;
   final String current;
@@ -391,8 +406,12 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
       _current = id;
     });
     try {
-      final AgentSettings settings = await widget.backend
-          .updateAgentSetting(widget.agentKey, widget.group, id);
+      final AgentSettings settings = await widget.backend.updateAgentSetting(
+        widget.agentKey,
+        widget.group,
+        id,
+        sessionId: widget.sessionId,
+      );
       if (!mounted) return;
       Navigator.of(context).pop(settings);
     } catch (err) {
@@ -412,6 +431,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
         widget.agentKey,
         'fast',
         enabled ? 'on' : 'off',
+        sessionId: widget.sessionId,
       );
       if (!mounted) return;
       setState(() => _fastEnabled = enabled);
@@ -466,7 +486,10 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
       }
       final List<Object> refreshed = await Future.wait(<Future<Object>>[
         widget.backend.fetchAgentOptions(widget.agentKey),
-        widget.backend.fetchAgentSettings(widget.agentKey),
+        widget.backend.fetchAgentSettings(
+          widget.agentKey,
+          sessionId: widget.sessionId,
+        ),
       ]);
       if (!mounted) return;
       final AgentOptionsCatalog options = refreshed[0] as AgentOptionsCatalog;

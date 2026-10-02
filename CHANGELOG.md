@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Model, effort, permission, and Fast mode are now chosen per named session
+  instead of per workdir/agent context. A new session starts from a copy of the
+  current session's settings and is independent after that; existing sessions
+  follow Main until their first change. Older clients that send no session id
+  read and write Main's settings.
+
 ## 0.1.6 - 2026-09-10
 
 ### Added

@@ -585,6 +585,9 @@ class _BotChatScreenState extends State<BotChatScreen>
                         controller: _input,
                         backend: widget.chatController.backend,
                         agentKey: widget.agentsController.activeAgent.key,
+                        sessionId: widget.chatController.activeSessionIdFor(
+                          widget.agentsController.activeAgent.key,
+                        ),
                         isThinking: widget.chatController.isThinking,
                         isCancelling: widget.chatController.isCancelling,
                         onSend: _send,
@@ -1216,6 +1219,7 @@ class _InputBar extends StatefulWidget {
     required this.controller,
     required this.backend,
     required this.agentKey,
+    required this.sessionId,
     required this.isThinking,
     required this.isCancelling,
     required this.onSend,
@@ -1228,6 +1232,7 @@ class _InputBar extends StatefulWidget {
   final TextEditingController controller;
   final BackendClient backend;
   final String agentKey;
+  final String? sessionId;
   final bool isThinking;
   final bool isCancelling;
   final VoidCallback onSend;
@@ -1400,6 +1405,7 @@ class _InputBarState extends State<_InputBar> {
                       ? _ComposerActionPanel(
                           backend: widget.backend,
                           agentKey: widget.agentKey,
+                          sessionId: widget.sessionId,
                           onOpenSettingsPage: _closeActions,
                           onClear: () => _runAction(widget.onClear),
                           onCompress: () => _runAction(widget.onCompress),
@@ -1472,6 +1478,7 @@ class _ComposerActionPanel extends StatelessWidget {
   const _ComposerActionPanel({
     required this.backend,
     required this.agentKey,
+    required this.sessionId,
     required this.onOpenSettingsPage,
     required this.onClear,
     required this.onCompress,
@@ -1480,6 +1487,7 @@ class _ComposerActionPanel extends StatelessWidget {
 
   final BackendClient backend;
   final String agentKey;
+  final String? sessionId;
   final VoidCallback onOpenSettingsPage;
   final VoidCallback onClear;
   final VoidCallback onCompress;
@@ -1495,6 +1503,7 @@ class _ComposerActionPanel extends StatelessWidget {
           AgentControlsButtons(
             backend: backend,
             agentKey: agentKey,
+            sessionId: sessionId,
             onOpenPage: onOpenSettingsPage,
           ),
           const SizedBox(height: 14),
