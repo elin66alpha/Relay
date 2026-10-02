@@ -18,6 +18,8 @@
 // behaves exactly like the old per-turn model. That keeps the failure mode of
 // "no warm process" identical to Relay's previous behaviour rather than a new
 // one.
+const crypto = require('crypto');
+
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_LIVE = 3;
 // After an interrupt, how long to wait for the CLI to wind the turn down
@@ -47,6 +49,40 @@ function sessionLostError(cause) {
   return err;
 }
 
+// Claude also runs turns nobody sent: when a background task (a background
+// subagent, Monitor, or shell) finishes, and on resume after one was cut off.
+// Those end in a result too, so a result answers the turn only when it names
+// that turn's message. The CLI stamps it even when the message was folded into
+// a turn of its own; older CLIs stamp nothing, and then a turn they started
+// themselves is told apart by its origin.
+function answersTurn(turn, result) {
+  if (result.user_message_uuid) return result.user_message_uuid === turn.uuid;
+  return !result.origin || result.origin.kind === 'human';
+}
+
+const TASK_ENDED = new Set(['completed', 'failed', 'killed']);
+
+// Background tasks the CLI is still running for this session. While any is,
+// the session is not idle: closing it would kill that work.
+function trackTask(entry, message) {
+  if (!message || message.type !== 'system' || !message.task_id) return false;
+  const ended =
+    message.subtype === 'task_notification' ||
+    (message.subtype === 'task_updated' &&
+      TASK_ENDED.has(message.patch && message.patch.status));
+  if (message.subtype === 'task_started') entry.tasks.add(message.task_id);
+  else if (ended) return entry.tasks.delete(message.task_id);
+  return false;
+}
+
+// Eviction order: sessions without background work first, then the least
+// recently used.
+function evictsBefore(a, b) {
+  const aBusy = a.tasks.size > 0;
+  if (aBusy !== (b.tasks.size > 0)) return !aBusy;
+  return a.lastActivity < b.lastActivity;
+}
+
 // stdin for one live session: an async iterable the SDK drains, that we push
 // user messages into as turns arrive. Staying un-ended is what keeps the CLI
 // process alive between turns.
@@ -55,15 +91,19 @@ function createInputQueue() {
   const waiters = [];
   let ended = false;
   return {
+    // Returns the message's uuid, which the CLI echoes on the result that
+    // answers it.
     push(text) {
       const message = {
         type: 'user',
+        uuid: crypto.randomUUID(),
         message: { role: 'user', content: String(text) },
         parent_tool_use_id: null,
       };
       const waiter = waiters.shift();
       if (waiter) waiter({ value: message, done: false });
       else pending.push(message);
+      return message.uuid;
     },
     end() {
       if (ended) return;
@@ -140,6 +180,8 @@ function createClaudeSessionPool(options = {}) {
     if (entry.closed) return;
     entry.idleTimer = setTimeout(() => {
       if (entry.turn) return;
+      // Background work keeps the session alive; check again later.
+      if (entry.tasks.size) return scheduleIdleClose(entry);
       closeEntry(entry).catch(() => {});
     }, idleMs);
     if (typeof entry.idleTimer.unref === 'function') entry.idleTimer.unref();
@@ -180,12 +222,14 @@ function createClaudeSessionPool(options = {}) {
     releaseSlot();
   }
 
-  // Evict the least recently used session that is not mid-turn.
+  // Evict the least recently used session that is not mid-turn, preferring
+  // one with no background work: that is only cut off when nothing else can
+  // make room.
   function lruIdleEntry() {
     let victim = null;
     for (const entry of live.values()) {
       if (entry.turn || entry.closed) continue;
-      if (!victim || entry.lastActivity < victim.lastActivity) victim = entry;
+      if (!victim || evictsBefore(entry, victim)) victim = entry;
     }
     return victim;
   }
@@ -206,9 +250,14 @@ function createClaudeSessionPool(options = {}) {
 
   function routeMessage(entry, message) {
     if (message && message.session_id) entry.sessionId = message.session_id;
+    entry.lastActivity = now();
+    // The last background task ending starts a full idle window, so the turn
+    // the CLI runs on its result is not cut short.
+    if (trackTask(entry, message) && !entry.turn) scheduleIdleClose(entry);
     const turn = entry.turn;
     if (!turn) return;
     if (message && message.type === 'result') {
+      if (!answersTurn(turn, message)) return;
       settleTurn(entry, (settled) => {
         if (settled.cancelled) settled.reject(cancelledError());
         else settled.resolve(message);
@@ -236,6 +285,7 @@ function createClaudeSessionPool(options = {}) {
       cwd: request.cwd,
       optionsKey: request.optionsKey,
       sessionId: request.resumeId || null,
+      tasks: new Set(),
       input,
       query: null,
       turn: null,
@@ -283,6 +333,7 @@ function createClaudeSessionPool(options = {}) {
   function runTurn(entry, request) {
     return new Promise((resolve, reject) => {
       const turn = {
+        uuid: null,
         onMessage: request.onMessage || (() => {}),
         emitted: false,
         cancelled: false,
@@ -339,7 +390,7 @@ function createClaudeSessionPool(options = {}) {
       if (typeof turn.timer.unref === 'function') turn.timer.unref();
 
       try {
-        entry.input.push(request.prompt);
+        turn.uuid = entry.input.push(request.prompt);
       } catch (err) {
         settleTurn(entry, (settled) => settled.reject(err));
       }

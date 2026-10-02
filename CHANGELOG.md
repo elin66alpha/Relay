@@ -10,6 +10,15 @@
   follow Main until their first change. Older clients that send no session id
   read and write Main's settings.
 
+### Fixed
+
+- Claude Code no longer answers "(claude produced no output)" after background
+  subagents or monitors: a reply is matched to the message it answers, so the
+  turns Claude runs on its own when background work finishes (or after a
+  restart cut it off) can no longer end the user's turn early. A Claude process
+  with background work still running is no longer closed as idle after 15
+  minutes, which used to kill that work.
+
 ## 0.1.6 - 2026-09-10
 
 ### Added

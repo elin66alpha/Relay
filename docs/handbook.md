@@ -175,7 +175,9 @@ cap wait for a slot.
 Work an agent starts in the background now outlives the turn that started it,
 except on Codex: its sandbox kills each command's process group as the command
 returns, so background work there survives only if it detaches into its own
-session (`setsid`).
+session (`setsid`). A Claude process with background tasks still running
+(background subagents, Monitor, background shells) is not closed as idle, and
+is evicted for the cap only when no other idle process can make room.
 
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
