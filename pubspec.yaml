@@ -2,7 +2,7 @@ name: relay
 description: "A private Flutter control surface for local CLI coding agents."
 publish_to: "none"
 
-version: 0.1.6+16
+version: 0.1.7+17
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -30,6 +30,7 @@ dependencies:
   firebase_messaging: ^16.3.0
   xterm: ^4.0.0
   web_socket_channel: ^3.0.3
+  re_highlight: ^0.0.3
 
 dev_dependencies:
   flutter_test:

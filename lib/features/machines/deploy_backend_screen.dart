@@ -77,10 +77,7 @@ class _DeployStepTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerLow,
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(

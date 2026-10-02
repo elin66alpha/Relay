@@ -70,10 +70,7 @@ class _GettingStartedStepTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerLow,
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -150,7 +147,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '设置模型、思考强度和权限',
     body:
-        '在聊天输入区域选择该智能体支持的模型、思考强度和权限等级，再发送任务。模型和选项以主机上 CLI 的能力为准。\n这些设置按“工作区 + 智能体”保存，会影响该上下文的所有命名会话及设备。Claude Code 和 Codex 另有默认关闭的 Fast 模式，可用性取决于模型及账号。Relay 会按所选权限等级处理 CLI 的审批请求，请按任务需要选择。',
+        '在聊天输入区域选择该智能体支持的模型、思考强度和权限等级，再发送任务。模型和选项以主机上 CLI 的能力为准。\n这些设置按会话保存，同一会话的所有设备共享；新建会话会复制当前会话的设置，之后各自独立。Claude Code 和 Codex 另有默认关闭的 Fast 模式，可用性取决于模型及账号。Relay 会按所选权限等级处理 CLI 的审批请求，请按任务需要选择。',
   ),
   _GettingStartedStep(
     title: '描述任务，查看和找回结果',
@@ -203,7 +200,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Set the model, effort, and permissions',
     body:
-        'Use the chat composer controls to select the supported model, reasoning effort, and permission tier before sending a task. Available options depend on the CLI on the host.\nSettings are saved per workspace and agent, so all named sessions and devices in that context share them. Claude Code and Codex also offer Fast mode, off by default and subject to model and account availability. Relay handles CLI approval requests according to the chosen permission tier; select it to fit the task.',
+        'Use the chat composer controls to select the supported model, reasoning effort, and permission tier before sending a task. Available options depend on the CLI on the host.\nSettings are saved per session and shared by every device on it; a new session starts from a copy of the current session settings and is independent after that. Claude Code and Codex also offer Fast mode, off by default and subject to model and account availability. Relay handles CLI approval requests according to the chosen permission tier; select it to fit the task.',
   ),
   _GettingStartedStep(
     title: 'Describe tasks and find results',

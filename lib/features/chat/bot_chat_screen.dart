@@ -15,11 +15,14 @@ import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/util/time_format.dart';
+import '../../core/widgets/agent_icon.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../cli_agents/cli_agents_drawer.dart';
 import '../machines/machine_credentials_controller.dart';
+import '../quota/quota_strip.dart';
 import '../settings/getting_started_screen.dart';
 import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
@@ -498,7 +501,10 @@ class _BotChatScreenState extends State<BotChatScreen>
                           );
                         }
                         if (messages.isEmpty) {
-                          return _EmptyChatPlaceholder(agentName: agent.label);
+                          return _EmptyChatPlaceholder(
+                            agentKey: agent.key,
+                            agentName: agent.label,
+                          );
                         }
                         // SelectionArea keeps bubble text selectable/copyable
                         // without each bubble building its own overlay-based
@@ -511,7 +517,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                           // switching a conversation lands on the newest message
                           // instantly with no top-to-bottom jump.
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
                           itemCount: messages.length,
                           itemBuilder: (BuildContext context, int index) {
                             final ChatMessage message =
@@ -525,6 +531,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                                 message.id == _highlightMessageId;
                             final Widget bubble = _MessageBubble(
                               message: message,
+                              agentKey: agent.key,
+                              agentLabel: agent.label,
                               highlightQuery: highlighted
                                   ? _highlightQuery
                                   : null,
@@ -581,10 +589,22 @@ class _BotChatScreenState extends State<BotChatScreen>
                       if (widget.chatController.machine == null) {
                         return const SizedBox.shrink();
                       }
+                      final String agentKey =
+                          widget.agentsController.activeAgent.key;
                       return _InputBar(
                         controller: _input,
+                        header: quotaStripSupports(agentKey)
+                            ? QuotaStrip(
+                                chatController: widget.chatController,
+                                agentKey: agentKey,
+                                busy: widget.chatController.isThinking,
+                              )
+                            : null,
                         backend: widget.chatController.backend,
                         agentKey: widget.agentsController.activeAgent.key,
+                        sessionId: widget.chatController.activeSessionIdFor(
+                          widget.agentsController.activeAgent.key,
+                        ),
                         isThinking: widget.chatController.isThinking,
                         isCancelling: widget.chatController.isCancelling,
                         onSend: _send,
@@ -768,19 +788,30 @@ class _NotLoggedInBanner extends StatelessWidget {
 }
 
 class _EmptyChatPlaceholder extends StatelessWidget {
-  const _EmptyChatPlaceholder({required this.agentName});
+  const _EmptyChatPlaceholder({
+    required this.agentKey,
+    required this.agentName,
+  });
 
+  final String agentKey;
   final String agentName;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text(
-        context.l10n.startChat(agentName),
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.outline,
-          fontSize: 14,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          AgentIcon(agentKey: agentKey, size: 40),
+          const SizedBox(height: 14),
+          Text(
+            context.l10n.startChat(agentName),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.outline,
+              fontSize: 14,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -864,7 +895,6 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
-    final ThemeData theme = Theme.of(context);
     final MachineCredential? machine = widget.machinesController.activeMachine;
     final String? workdir = widget.chatController.activeWorkdir;
     return RefreshIndicator(
@@ -880,52 +910,38 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  Text(
-                    strings.home,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    strings.homeSubtitle,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (_loading) const LinearProgressIndicator(minHeight: 2),
-                  if (_loading) const SizedBox(height: 12),
-                  Text(
-                    strings.currentMachine,
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (machine == null)
-                    _HomeSectionCard(
-                      child: ListTile(
-                        leading: const Icon(Icons.link_off_rounded),
-                        title: Text(strings.notConnected),
-                        subtitle: Text(strings.importOrChooseMachine),
-                      ),
-                    )
-                  else
-                    ActiveMachineStatusTile(
-                      activeMachine: machine,
-                      chatController: widget.chatController,
-                      agentsController: widget.agentsController,
-                    ),
-                  if (workdir != null) ...<Widget>[
+                  if (_loading) ...<Widget>[
+                    const LinearProgressIndicator(minHeight: 2),
                     const SizedBox(height: 12),
+                  ],
+                  _HomeSection(
+                    title: strings.currentMachine,
+                    children: <Widget>[
+                      if (machine == null)
+                        ListTile(
+                          leading: const Icon(Icons.link_off_rounded),
+                          title: Text(strings.notConnected),
+                          subtitle: Text(strings.importOrChooseMachine),
+                        )
+                      else
+                        ActiveMachineStatusTile(
+                          activeMachine: machine,
+                          chatController: widget.chatController,
+                          agentsController: widget.agentsController,
+                          framed: false,
+                        ),
+                    ],
+                  ),
+                  if (workdir != null) ...<Widget>[
+                    const SizedBox(height: 20),
                     _HomeSection(
                       title: strings.currentWorkspace,
-                      children: <Widget>[_WorkdirTile(dir: workdir)],
+                      children: <Widget>[
+                        _WorkdirTile(dir: workdir, current: true),
+                      ],
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
                   _HomeSection(
                     title: strings.recentWorkspaces,
                     emptyText: strings.noRecentWorkspaces,
@@ -934,7 +950,7 @@ class _HomeNavigationPageState extends State<_HomeNavigationPage> {
                         _WorkdirTile(dir: dir),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
                   _HomeSection(
                     title: strings.tutorial,
                     children: <Widget>[
@@ -974,11 +990,15 @@ class _HomeSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Text(
-          title,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.primary,
-            fontWeight: FontWeight.w700,
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Text(
+            title,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -1018,30 +1038,38 @@ class _HomeSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: child,
     );
   }
 }
 
 class _WorkdirTile extends StatelessWidget {
-  const _WorkdirTile({required this.dir});
+  const _WorkdirTile({required this.dir, this.current = false});
 
   final String dir;
 
+  /// The device's active workdir, marked with an open, accented folder.
+  final bool current;
+
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return ListTile(
-      leading: const Icon(Icons.folder_outlined),
+      leading: current
+          ? Icon(Icons.folder_open_rounded, color: colors.primary)
+          : const Icon(Icons.folder_outlined),
       title: Text(
         _workdirName(dir),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(dir, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        dir,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: AppTheme.mono(colors.onSurfaceVariant).copyWith(fontSize: 12),
+      ),
     );
   }
 }
@@ -1216,6 +1244,7 @@ class _InputBar extends StatefulWidget {
     required this.controller,
     required this.backend,
     required this.agentKey,
+    required this.sessionId,
     required this.isThinking,
     required this.isCancelling,
     required this.onSend,
@@ -1223,11 +1252,16 @@ class _InputBar extends StatefulWidget {
     required this.onClear,
     required this.onCompress,
     required this.onExportMarkdown,
+    this.header,
   });
 
   final TextEditingController controller;
+
+  /// Pinned above the field: the active agent's quota.
+  final Widget? header;
   final BackendClient backend;
   final String agentKey;
+  final String? sessionId;
   final bool isThinking;
   final bool isCancelling;
   final VoidCallback onSend;
@@ -1261,9 +1295,6 @@ class _InputBarState extends State<_InputBar> {
       _hasText = widget.controller.text.trim().isNotEmpty;
       widget.controller.addListener(_onTextChanged);
     }
-    if (widget.isThinking && _actionsOpen) {
-      _actionsOpen = false;
-    }
     // Hardware-keyboard targets should stay ready for the next prompt after a
     // turn finishes. On mobile we leave focus alone so the soft keyboard does
     // not reopen after every reply.
@@ -1295,7 +1326,6 @@ class _InputBarState extends State<_InputBar> {
   }
 
   void _toggleActions() {
-    if (widget.isThinking || _hasText) return;
     _inputFocus.unfocus();
     setState(() => _actionsOpen = !_actionsOpen);
   }
@@ -1343,74 +1373,78 @@ class _InputBarState extends State<_InputBar> {
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1024),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (widget.header != null) widget.header!,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    Expanded(
-                      child: usesHardwareKeyboard
-                          ? CallbackShortcuts(
-                              bindings: <ShortcutActivator, VoidCallback>{
-                                const SingleActivator(LogicalKeyboardKey.enter):
-                                    _submitFromKeyboard,
-                              },
-                              child: input,
-                            )
-                          : input,
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox.square(
-                      dimension: 44,
-                      child: IconButton.filledTonal(
-                        // With text present, the button always sends (queuing a
-                        // follow-up while a turn runs). With no text mid-turn it
-                        // stops the turn; otherwise it opens the actions panel.
-                        onPressed: _hasText
-                            ? _sendText
-                            : widget.isThinking
-                            ? canCancel
-                                  ? widget.onCancel
-                                  : null
-                            : _toggleActions,
-                        icon: Icon(
-                          _hasText
-                              ? Icons.arrow_upward_rounded
-                              : widget.isThinking
-                              ? Icons.stop_rounded
-                              : Icons.add_rounded,
-                        ),
-                        tooltip: _hasText
-                            ? context.l10n.send
-                            : widget.isThinking
-                            ? context.l10n.stop
-                            : context.l10n.moreChatActions,
-                      ),
-                    ),
-                  ],
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  child: _actionsOpen
-                      ? _ComposerActionPanel(
-                          backend: widget.backend,
-                          agentKey: widget.agentKey,
-                          onOpenSettingsPage: _closeActions,
-                          onClear: () => _runAction(widget.onClear),
-                          onCompress: () => _runAction(widget.onCompress),
-                          onExportMarkdown: () =>
-                              _runAction(widget.onExportMarkdown),
+                Expanded(
+                  child: usesHardwareKeyboard
+                      ? CallbackShortcuts(
+                          bindings: <ShortcutActivator, VoidCallback>{
+                            const SingleActivator(LogicalKeyboardKey.enter):
+                                _submitFromKeyboard,
+                          },
+                          child: input,
                         )
-                      : const SizedBox.shrink(),
+                      : input,
+                ),
+                const SizedBox(width: 8),
+                // Always available, even mid-turn: model and other controls
+                // apply from the next turn.
+                SizedBox.square(
+                  dimension: 44,
+                  child: IconButton.filledTonal(
+                    isSelected: _actionsOpen,
+                    onPressed: _toggleActions,
+                    icon: const Icon(Icons.add_rounded),
+                    selectedIcon: const Icon(Icons.close_rounded),
+                    tooltip: context.l10n.moreChatActions,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // With text it sends (queuing a follow-up while a turn runs);
+                // with no text mid-turn it stops the turn.
+                SizedBox.square(
+                  dimension: 44,
+                  child: IconButton.filled(
+                    onPressed: _hasText
+                        ? _sendText
+                        : canCancel
+                            ? widget.onCancel
+                            : null,
+                    icon: Icon(
+                      !_hasText && widget.isThinking
+                          ? Icons.stop_rounded
+                          : Icons.arrow_upward_rounded,
+                    ),
+                    tooltip: !_hasText && widget.isThinking
+                        ? context.l10n.stop
+                        : context.l10n.send,
+                  ),
                 ),
               ],
             ),
-          ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: _actionsOpen
+                  ? _ComposerActionPanel(
+                      backend: widget.backend,
+                      agentKey: widget.agentKey,
+                      sessionId: widget.sessionId,
+                      busy: widget.isThinking,
+                      onOpenSettingsPage: _closeActions,
+                      onClear: () => _runAction(widget.onClear),
+                      onCompress: () => _runAction(widget.onCompress),
+                      onExportMarkdown: () =>
+                          _runAction(widget.onExportMarkdown),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
       ),
     );
@@ -1472,6 +1506,8 @@ class _ComposerActionPanel extends StatelessWidget {
   const _ComposerActionPanel({
     required this.backend,
     required this.agentKey,
+    required this.sessionId,
+    required this.busy,
     required this.onOpenSettingsPage,
     required this.onClear,
     required this.onCompress,
@@ -1480,6 +1516,10 @@ class _ComposerActionPanel extends StatelessWidget {
 
   final BackendClient backend;
   final String agentKey;
+  final String? sessionId;
+
+  /// A turn is running: clearing and compacting need an idle session.
+  final bool busy;
   final VoidCallback onOpenSettingsPage;
   final VoidCallback onClear;
   final VoidCallback onCompress;
@@ -1495,6 +1535,7 @@ class _ComposerActionPanel extends StatelessWidget {
           AgentControlsButtons(
             backend: backend,
             agentKey: agentKey,
+            sessionId: sessionId,
             onOpenPage: onOpenSettingsPage,
           ),
           const SizedBox(height: 14),
@@ -1505,12 +1546,12 @@ class _ComposerActionPanel extends StatelessWidget {
               ComposerActionButton(
                 icon: Icons.refresh_rounded,
                 label: context.l10n.clearChat,
-                onPressed: onClear,
+                onPressed: busy ? null : onClear,
               ),
               ComposerActionButton(
                 icon: Icons.compress,
                 label: context.l10n.compress,
-                onPressed: onCompress,
+                onPressed: busy ? null : onCompress,
               ),
               ComposerActionButton(
                 icon: Icons.download_outlined,
@@ -1626,10 +1667,16 @@ class _MessageBubble extends StatelessWidget {
     required this.onRetry,
     required this.onCancelQueued,
     required this.onOptionSelected,
+    required this.agentKey,
+    required this.agentLabel,
     this.highlightQuery,
   });
 
   final ChatMessage message;
+
+  /// The conversation's agent, named in each reply's header.
+  final String agentKey;
+  final String agentLabel;
 
   /// Set only while this bubble is the revealed "search chats" hit; marks the
   /// term inside the rendered text.
@@ -1654,17 +1701,9 @@ class _MessageBubble extends StatelessWidget {
     final double maxBubbleWidth = isDesktopTarget
         ? 760
         : MediaQuery.sizeOf(context).width * 0.80;
-    final Color bubbleColor = system
-        ? colors.tertiaryContainer
-        : isUser
-        ? colors.primary
-        : colors.surfaceContainerHighest;
     final Color textColor = isUser && !system
         ? colors.onPrimary
         : colors.onSurface;
-    final Border? border = isUser && !system
-        ? null
-        : Border.all(color: colors.outlineVariant);
 
     // A turn can leave several assistant messages (mid-task follow-ups + a final
     // answer); render them as separate, individually timestamped blocks. A single
@@ -1696,6 +1735,92 @@ class _MessageBubble extends StatelessWidget {
         (!isUser && segments.isNotEmpty && segments.first.createdAt != null)
         ? segments.first.createdAt!
         : message.createdAt;
+    final bool showStamp =
+        !segmented && !(awaitingFirstToken && message.content.isEmpty);
+    // An agent reply names its agent and time in a header line; the user's
+    // bubble and a system reply keep the time underneath.
+    final bool hasHeader = !isUser && !system;
+
+    final Widget content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (awaitingFirstToken && message.content.isEmpty)
+          TypingDots(color: textColor)
+        else if (segmented)
+          SegmentedContent(
+            segments: segments,
+            color: textColor,
+            formatInlineEmphasis: !streaming,
+            highlightQuery: highlightQuery,
+          )
+        else if (message.content.isNotEmpty)
+          if (planSplit != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                CollapsibleNote(
+                  title: context.l10n.agentThinking,
+                  color: textColor,
+                  child: MessageText(
+                    text: planSplit.plan,
+                    color: textColor,
+                    formatInlineEmphasis: true,
+                    highlightQuery: highlightQuery,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                MessageText(
+                  text: planSplit.body,
+                  color: textColor,
+                  formatInlineEmphasis: true,
+                  highlightQuery: highlightQuery,
+                ),
+              ],
+            )
+          else
+            MessageText(
+              text: message.content,
+              color: textColor,
+              formatInlineEmphasis: !isUser && !streaming,
+              highlightQuery: highlightQuery,
+            ),
+        if (optionPrompt != null)
+          OptionButtons(
+            options: optionPrompt,
+            color: textColor,
+            onSelected: onOptionSelected,
+          ),
+        if (progressLines.isNotEmpty) ...<Widget>[
+          if (message.content.isNotEmpty) const SizedBox(height: 8),
+          ProgressLines(
+            lines: progressLines,
+            color: textColor,
+            active: true,
+          ),
+        ] else if (finishedSteps.isNotEmpty) ...<Widget>[
+          if (message.content.isNotEmpty) const SizedBox(height: 6),
+          CollapsibleNote(
+            title: context.l10n.agentSteps(finishedSteps.length),
+            color: textColor,
+            child: ProgressLines(
+              lines: finishedSteps,
+              color: textColor,
+            ),
+          ),
+        ],
+        if (cancelled) ...<Widget>[
+          if (message.content.isNotEmpty || progressLines.isNotEmpty)
+            const SizedBox(height: 8),
+          MessageStatus(
+            icon: Icons.stop_circle_outlined,
+            text: context.l10n.cancelled,
+            color: textColor,
+          ),
+        ],
+      ],
+    );
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -1704,96 +1829,53 @@ class _MessageBubble extends StatelessWidget {
             ? CrossAxisAlignment.end
             : CrossAxisAlignment.start,
         children: <Widget>[
-          Container(
-            constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-            margin: const EdgeInsets.symmetric(vertical: 5),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-            decoration: BoxDecoration(
-              // A queued follow-up is dimmed until it is actually sent.
-              color: queued ? bubbleColor.withValues(alpha: 0.55) : bubbleColor,
-              borderRadius: BorderRadius.circular(12),
-              border: border,
+          if (isUser)
+            Container(
+              constraints: BoxConstraints(maxWidth: maxBubbleWidth),
+              margin: const EdgeInsets.symmetric(vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+              decoration: BoxDecoration(
+                // A queued follow-up is dimmed until it is actually sent.
+                color: queued
+                    ? colors.primary.withValues(alpha: 0.55)
+                    : colors.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              // The default selection colour is the primary colour, i.e. this
+              // bubble's fill, so a selection would be invisible. Tint it with
+              // the text colour instead.
+              child: DefaultSelectionStyle.merge(
+                selectionColor: textColor.withValues(alpha: 0.35),
+                child: content,
+              ),
+            )
+          else
+            // Replies span the full width: long answers and code read better
+            // without a ragged right gutter.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: ReplyPanel(
+                color: system ? colors.tertiaryContainer : null,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (hasHeader)
+                      ReplyHeader(
+                        agentKey: agentKey,
+                        label: agentLabel,
+                        time: showStamp
+                            ? formatShortTime(
+                                context,
+                                stampTime.toIso8601String(),
+                              )
+                            : null,
+                      ),
+                    content,
+                  ],
+                ),
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                if (awaitingFirstToken && message.content.isEmpty)
-                  TypingDots(color: textColor)
-                else if (segmented)
-                  SegmentedContent(
-                    segments: segments,
-                    color: textColor,
-                    formatInlineEmphasis: !streaming,
-                    highlightQuery: highlightQuery,
-                  )
-                else if (message.content.isNotEmpty)
-                  if (planSplit != null)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        CollapsibleNote(
-                          title: context.l10n.agentThinking,
-                          color: textColor,
-                          child: MessageText(
-                            text: planSplit.plan,
-                            color: textColor,
-                            formatInlineEmphasis: true,
-                            highlightQuery: highlightQuery,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        MessageText(
-                          text: planSplit.body,
-                          color: textColor,
-                          formatInlineEmphasis: true,
-                          highlightQuery: highlightQuery,
-                        ),
-                      ],
-                    )
-                  else
-                    MessageText(
-                      text: message.content,
-                      color: textColor,
-                      formatInlineEmphasis: !isUser && !streaming,
-                      highlightQuery: highlightQuery,
-                    ),
-                if (optionPrompt != null)
-                  OptionButtons(
-                    options: optionPrompt,
-                    color: textColor,
-                    onSelected: onOptionSelected,
-                  ),
-                if (progressLines.isNotEmpty) ...<Widget>[
-                  if (message.content.isNotEmpty) const SizedBox(height: 8),
-                  ProgressLines(
-                    lines: progressLines,
-                    color: textColor,
-                  ),
-                ] else if (finishedSteps.isNotEmpty) ...<Widget>[
-                  if (message.content.isNotEmpty) const SizedBox(height: 6),
-                  CollapsibleNote(
-                    title: context.l10n.agentSteps(finishedSteps.length),
-                    color: textColor,
-                    child: ProgressLines(
-                      lines: finishedSteps,
-                      color: textColor,
-                    ),
-                  ),
-                ],
-                if (cancelled) ...<Widget>[
-                  if (message.content.isNotEmpty || progressLines.isNotEmpty)
-                    const SizedBox(height: 8),
-                  MessageStatus(
-                    icon: Icons.stop_circle_outlined,
-                    text: context.l10n.cancelled,
-                    color: textColor,
-                  ),
-                ],
-              ],
-            ),
-          ),
           // A pending follow-up shows a "queued" affordance instead of a time:
           // it has not been sent yet and can still be cancelled.
           if (queued)
@@ -1822,8 +1904,7 @@ class _MessageBubble extends StatelessWidget {
           // Every message shows when it was sent/received. Segmented bubbles also
           // carry an inline time per follow-up, so the trailing stamp is hidden
           // for them to avoid duplicating the last segment's time.
-          else if (!segmented &&
-              !(awaitingFirstToken && message.content.isEmpty))
+          else if (showStamp && !hasHeader)
             Padding(
               padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
               child: Text(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
+import '../../core/theme/app_theme.dart';
 
 String agentUnavailableMessage(AppStrings strings, CliAgent agent) {
   if (!agent.installed) return strings.agentCliNotInstalled(agent.label);
@@ -92,11 +93,7 @@ class _StatusDot extends StatelessWidget {
         height: 9,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: ok ? Colors.green.shade600 : colors.error,
-          border: Border.all(
-            color: ok ? Colors.green.shade800 : colors.error,
-            width: 0.5,
-          ),
+          color: ok ? AppTheme.statusOk : colors.error,
         ),
       ),
     );

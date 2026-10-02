@@ -64,9 +64,11 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   cannot be deleted.
 - Turns in the same exact conversation scope serialize through `scopeChains`.
   Different sessions and different Swarm members may run concurrently.
-- Agent controls are broader than a conversation: model, effort, permission,
-  and fast mode persist per `workdir + agent`, so all named sessions and devices
-  in that context share them.
+- Agent controls belong to a conversation: model, effort, permission, and fast
+  mode persist per `workdir + agent + sessionId`, shared by every device on that
+  session. A new session copies the settings of the session it was created from;
+  a session with no entry of its own falls back to Main's (the context key).
+  Requests without a `sessionId` address Main, so older clients keep working.
 
 ### Agents and controls
 
@@ -83,6 +85,10 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   - `server/lib/claude-session-pool.js` — one Agent SDK process per scope.
     Settings resolve to SDK options (`claudeSdkOptions`) rather than argv, and
     are fixed for the life of a process, so a change restarts it with `resume`.
+    Claude also runs turns nobody sent (a background task finishing, or resume
+    after one was cut off), which end in a `result` too: a turn settles only on
+    the result whose `user_message_uuid` names the message it pushed. Running
+    background tasks keep a process from idle eviction.
   - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
     speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
     session cap, idle eviction and cancellation; a `driver` supplies the

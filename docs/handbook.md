@@ -175,7 +175,9 @@ cap wait for a slot.
 Work an agent starts in the background now outlives the turn that started it,
 except on Codex: its sandbox kills each command's process group as the command
 returns, so background work there survives only if it detaches into its own
-session (`setsid`).
+session (`setsid`). A Claude process with background tasks still running
+(background subagents, Monitor, background shells) is not closed as idle, and
+is evicted for the cap only when no other idle process can make room.
 
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
@@ -190,14 +192,17 @@ then uses two related scopes:
 | State | Scope |
 |---|---|
 | Named conversation, history, running turn, native CLI resume id | `workdir + agent + sessionId` |
-| Model, effort, permission, fast mode | `workdir + agent` |
+| Model, effort, permission, fast mode | `workdir + agent + sessionId` |
 | Swarm list | workspace in `X-Workdir` |
 | Swarm transcript and member sessions | Swarm id plus its chosen work tree |
 
 An agent context supports up to eight named conversations. `Main` preserves the
 legacy scope key and cannot be deleted. Turns in one exact conversation scope
 queue; other sessions can continue independently. Devices on the same scope
-share backend history and live events.
+share backend history and live events. A new session starts from a copy of the
+settings of the session it was created from; a session with no settings of its
+own (one created before settings were per session) follows Main's until its
+first change.
 
 Agent controls are capability-aware:
 
@@ -268,7 +273,11 @@ machine-specific workdir, id, and transcript.
 
 The usage screen reports Claude Code and Codex. It queries each source on its
 own (`GET /api/usage?source=claude|codex`; an unknown source is a 400), so one
-card fills in as soon as its source answers. Reset detection and
+card fills in as soon as its source answers. The solo-chat composer also pins
+the active agent's remaining quota above the input for Claude Code and Codex; it
+reads the same per-source endpoint when the agent changes and after each turn,
+at most once a minute per agent, matching the backend's one-minute usage cache.
+Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 

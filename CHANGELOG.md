@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.1.7 - 2026-10-02
+
+### Added
+
+- Fenced code blocks in chat get syntax highlighting, a language label, and a
+  copy button; inline code renders in the bundled monospace font instead of
+  italics.
+- The solo-chat composer pins the active agent's remaining Claude Code or Codex
+  quota above the input, with a countdown to each window's reset. It refreshes
+  when the agent changes and after each turn, at most once a minute per agent;
+  tapping it opens the usage screen.
+- A refresh button beside CLI agents in the drawer re-reads this device's
+  workspace and reloads its sessions and conversation.
+
+### Changed
+
+- Agent replies in solo chat and Swarms are full-width panels headed by the
+  agent's icon, name, and time, instead of 80%-wide bubbles. Execution steps
+  render as a monospace timeline with the running step marked.
+- The composer is full width on desktop and has separate + and send/stop
+  buttons. + stays available during a turn, so model, effort, permission, and
+  Fast mode can be changed at any time; clear and compact are disabled while a
+  turn runs.
+- The usage screen colours each quota by what remains (amber below 25%, red
+  below 10%) and shows a countdown to each reset next to its reset time.
+- The home page drops its repeated title, and the current machine card lines up
+  with the other sections.
+- One card style (lighter panel, hairline border, 12px corners) across the app,
+  and shared status colours.
+- Model, effort, permission, and Fast mode are now chosen per named session
+  instead of per workdir/agent context. A new session starts from a copy of the
+  current session's settings and is independent after that; existing sessions
+  follow Main until their first change. Older clients that send no session id
+  read and write Main's settings.
+
+### Fixed
+
+- Claude Code no longer answers "(claude produced no output)" after background
+  subagents or monitors: a reply is matched to the message it answers, so the
+  turns Claude runs on its own when background work finishes (or after a
+  restart cut it off) can no longer end the user's turn early. A Claude process
+  with background work still running is no longer closed as idle after 15
+  minutes, which used to kill that work.
+- Setting a new work path took effect only after the next event-stream
+  heartbeat (up to 30 seconds), so the chat and drawer kept showing the previous
+  workspace's conversation and sessions. Closing the event stream is now
+  immediate, and the switch reloads at once.
+- Selected text in your own chat bubble is now visible: the selection colour
+  was the bubble's own fill colour.
+
 ## 0.1.6 - 2026-09-10
 
 ### Added

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 /// One decoded Server-Sent Event: an event [type] and its JSON [data] payload.
@@ -16,29 +17,53 @@ class BackendEvent {
 /// space after `data:` is stripped per the SSE spec. The terminal frame is
 /// emitted even without a trailing blank line so a stream that ends right after
 /// its last `data:` line is not dropped.
-Stream<BackendEvent> decodeSse(Stream<List<int>> stream) async* {
+///
+/// Built from transformers rather than an `async*` loop on purpose: cancelling
+/// an `async*` generator parked in `await for` only takes effect once the next
+/// line arrives, which on a quiet event stream is the next 30-second heartbeat.
+/// Here a cancel reaches the HTTP body at once and closes the connection.
+Stream<BackendEvent> decodeSse(Stream<List<int>> stream) {
   String eventType = 'message';
   final StringBuffer data = StringBuffer();
-  await for (final String line
-      in stream.transform(utf8.decoder).transform(const LineSplitter())) {
-    if (line.isEmpty) {
-      if (data.isNotEmpty) {
-        yield BackendEvent(type: eventType, data: decodeSseData(data.toString()));
-      }
-      eventType = 'message';
-      data.clear();
-      continue;
-    }
-    if (line.startsWith('event:')) {
-      eventType = line.substring(6).trim();
-    } else if (line.startsWith('data:')) {
-      if (data.isNotEmpty) data.writeln();
-      data.write(line.substring(5).trimLeft());
-    }
-  }
-  if (data.isNotEmpty) {
-    yield BackendEvent(type: eventType, data: decodeSseData(data.toString()));
-  }
+  return stream
+      .transform(utf8.decoder)
+      .transform(const LineSplitter())
+      .transform(
+        StreamTransformer<String, BackendEvent>.fromHandlers(
+          handleData: (String line, EventSink<BackendEvent> sink) {
+            if (line.isEmpty) {
+              if (data.isNotEmpty) {
+                sink.add(
+                  BackendEvent(
+                    type: eventType,
+                    data: decodeSseData(data.toString()),
+                  ),
+                );
+              }
+              eventType = 'message';
+              data.clear();
+              return;
+            }
+            if (line.startsWith('event:')) {
+              eventType = line.substring(6).trim();
+            } else if (line.startsWith('data:')) {
+              if (data.isNotEmpty) data.writeln();
+              data.write(line.substring(5).trimLeft());
+            }
+          },
+          handleDone: (EventSink<BackendEvent> sink) {
+            if (data.isNotEmpty) {
+              sink.add(
+                BackendEvent(
+                  type: eventType,
+                  data: decodeSseData(data.toString()),
+                ),
+              );
+            }
+            sink.close();
+          },
+        ),
+      );
 }
 
 /// Decode a single SSE frame's `data` payload. Returns the parsed JSON object,

@@ -5,7 +5,7 @@ import '../../core/settings/app_settings_controller.dart';
 import 'getting_started_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.6';
+const String _applicationVersion = '0.1.7';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
@@ -42,13 +42,7 @@ class AppSettingsScreen extends StatelessWidget {
                       children: <Widget>[
                         _buildSectionTitle(context, context.l10n.appearance),
                         Card(
-                          elevation: 0,
-                          color:
-                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
                             child: Column(
@@ -104,13 +98,7 @@ class AppSettingsScreen extends StatelessWidget {
                         ),
                         _buildSectionTitle(context, context.l10n.language),
                         Card(
-                          elevation: 0,
-                          color:
-                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
                             child: Align(
@@ -144,13 +132,7 @@ class AppSettingsScreen extends StatelessWidget {
                           context.l10n.notifications,
                         ),
                         Card(
-                          elevation: 0,
-                          color:
-                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                           child: Column(
                             children: <Widget>[
                               SwitchListTile(
@@ -177,13 +159,7 @@ class AppSettingsScreen extends StatelessWidget {
                         ),
                         _buildSectionTitle(context, context.l10n.tutorial),
                         Card(
-                          elevation: 0,
-                          color:
-                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                           child: ListTile(
                             leading: const Icon(Icons.school_outlined),
                             title: Text(context.l10n.gettingStarted),
@@ -200,13 +176,7 @@ class AppSettingsScreen extends StatelessWidget {
                         ),
                         _buildSectionTitle(context, context.l10n.about),
                         Card(
-                          elevation: 0,
-                          color:
-                              Theme.of(context).colorScheme.surfaceContainerLow,
                           margin: const EdgeInsets.only(bottom: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
                           child: ListTile(
                             leading: const Icon(Icons.info_outline),
                             title: Text(context.l10n.aboutApp),

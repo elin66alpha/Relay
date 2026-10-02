@@ -1125,11 +1125,21 @@ class BackendClient {
     return AgentSessionList.fromJson(decoded.cast<String, Object?>());
   }
 
-  Future<AgentSessionList> createSession(String agentKey, String name) async {
+  /// Creates a session that starts from a copy of [copySettingsFrom]'s
+  /// model/effort/permission/fast settings (Main's when null).
+  Future<AgentSessionList> createSession(
+    String agentKey,
+    String name, {
+    String? copySettingsFrom,
+  }) async {
     final Object? decoded = await _requestJson(
       'POST',
       '/api/sessions',
-      body: <String, Object?>{'agent': agentKey, 'name': name},
+      body: <String, Object?>{
+        'agent': agentKey,
+        'name': name,
+        if (copySettingsFrom != null) 'copySettingsFrom': copySettingsFrom,
+      },
     );
     if (decoded is! Map) {
       throw BackendException('Invalid session creation response.');
@@ -1418,12 +1428,18 @@ class BackendClient {
     return AgentOptionsCatalog.fromJson(decoded.cast<String, Object?>());
   }
 
-  /// Current model/effort/permission/fast selection for the workdir+agent
-  /// scope.
-  Future<AgentSettings> fetchAgentSettings(String agentKey) async {
+  /// Current model/effort/permission/fast selection for one session (Main's
+  /// when [sessionId] is null).
+  Future<AgentSettings> fetchAgentSettings(
+    String agentKey, {
+    String? sessionId,
+  }) async {
+    final String session = sessionId == null
+        ? ''
+        : '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
     final Object? decoded = await _requestJson(
       'GET',
-      '/api/agent-settings?agent=${Uri.encodeQueryComponent(agentKey)}',
+      '/api/agent-settings?agent=${Uri.encodeQueryComponent(agentKey)}$session',
     );
     if (decoded is! Map || decoded['settings'] is! Map) {
       throw BackendException('Invalid agent settings response.');
@@ -1433,16 +1449,22 @@ class BackendClient {
     );
   }
 
-  /// Persist one supported selection group for the scope.
+  /// Persist one supported selection group for a session (Main's when
+  /// [sessionId] is null).
   Future<AgentSettings> updateAgentSetting(
     String agentKey,
     String group,
-    String optionId,
-  ) async {
+    String optionId, {
+    String? sessionId,
+  }) async {
     final Object? decoded = await _requestJson(
       'POST',
       '/api/agent-settings',
-      body: <String, Object?>{'agent': agentKey, group: optionId},
+      body: <String, Object?>{
+        'agent': agentKey,
+        group: optionId,
+        if (sessionId != null) 'sessionId': sessionId,
+      },
     );
     if (decoded is! Map || decoded['settings'] is! Map) {
       throw BackendException('Invalid agent settings response.');

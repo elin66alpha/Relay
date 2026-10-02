@@ -1415,9 +1415,6 @@ class _MessageBubble extends StatelessWidget {
     final bool awaitingFirstToken =
         message.metadata['awaitingFirstToken'] == true;
     final bool cancelled = message.metadata['cancelled'] == true;
-    final Color bubbleColor = isHuman
-        ? theme.colorScheme.primaryContainer
-        : theme.colorScheme.surfaceContainerHighest;
     final Color textColor = isHuman
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onSurface;
@@ -1433,36 +1430,88 @@ class _MessageBubble extends StatelessWidget {
         ? segments.first.createdAt!
         : message.createdAt;
 
+    final Widget content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (awaiting)
+          TypingDots(color: textColor)
+        else if (isHuman)
+          Text(
+            message.content,
+            style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+          )
+        else if (segmented)
+          SegmentedContent(
+            segments: segments,
+            color: textColor,
+            formatInlineEmphasis: !streaming,
+          )
+        else if (message.content.isNotEmpty)
+          MessageText(
+            text: message.content,
+            color: textColor,
+            formatInlineEmphasis: !streaming,
+          )
+        else if (cancelled)
+          MessageText(
+            text: '_cancelled_',
+            color: textColor,
+            formatInlineEmphasis: true,
+          ),
+        if (cancelled && message.content.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 8),
+          MessageStatus(
+            icon: Icons.stop_circle_outlined,
+            text: context.l10n.cancelled,
+            color: textColor,
+          ),
+        ],
+      ],
+    );
+    // Every message shows when it was sent/received. Segmented replies carry
+    // an inline time per follow-up, so theirs is omitted to avoid duplicating
+    // the last segment's time.
+    final String? time = segmented || awaiting
+        ? null
+        : formatShortTime(context, stampTime.toIso8601String());
+
+    // A member's reply spans the full width, headed by its avatar and name;
+    // only the human's message is a right-aligned bubble.
+    if (!isHuman) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: ReplyPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ReplyHeader(
+                agentKey: author,
+                label: label,
+                time: time,
+                onIconTap: canEdit ? () => onEditMember!(group!, author) : null,
+              ),
+              content,
+            ],
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Column(
-        crossAxisAlignment: isHuman
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                if (!isHuman && author != null) ...<Widget>[
-                  InkWell(
-                    onTap: canEdit
-                        ? () => onEditMember!(group!, author)
-                        : null,
-                    borderRadius: BorderRadius.circular(12),
-                    child: AgentIcon(agentKey: author, size: 20),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                Text(
-                  label,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+            child: Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.outline,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           Container(
@@ -1471,59 +1520,21 @@ class _MessageBubble extends StatelessWidget {
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: bubbleColor,
+              color: theme.colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                if (awaiting)
-                  TypingDots(color: textColor)
-                else if (isHuman)
-                  Text(
-                    message.content,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: textColor,
-                    ),
-                  )
-                else if (segmented)
-                  SegmentedContent(
-                    segments: segments,
-                    color: textColor,
-                    formatInlineEmphasis: !streaming,
-                  )
-                else if (message.content.isNotEmpty)
-                  MessageText(
-                    text: message.content,
-                    color: textColor,
-                    formatInlineEmphasis: !streaming,
-                  )
-                else if (cancelled)
-                  MessageText(
-                    text: '_cancelled_',
-                    color: textColor,
-                    formatInlineEmphasis: true,
-                  ),
-                if (cancelled && message.content.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 8),
-                  MessageStatus(
-                    icon: Icons.stop_circle_outlined,
-                    text: context.l10n.cancelled,
-                    color: textColor,
-                  ),
-                ],
-              ],
+            // The default selection colour shares this bubble's hue and barely
+            // shows on it; tint it with the text colour instead.
+            child: DefaultSelectionStyle.merge(
+              selectionColor: textColor.withValues(alpha: 0.35),
+              child: content,
             ),
           ),
-          // Every message shows when it was sent/received. Segmented bubbles
-          // carry an inline time per follow-up, so the trailing stamp is hidden
-          // for them to avoid duplicating the last segment's time.
-          if (!segmented && !awaiting)
+          if (time != null)
             Padding(
               padding: const EdgeInsets.only(left: 6, right: 6, top: 2),
               child: Text(
-                formatShortTime(context, stampTime.toIso8601String()),
+                time,
                 style: TextStyle(
                   fontSize: 11,
                   color: theme.colorScheme.outline,

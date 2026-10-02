@@ -7,6 +7,7 @@ import '../../core/models/group.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../chat/bot_chat_controller.dart';
 import '../chat/group_chat_screen.dart';
@@ -114,14 +115,40 @@ class CliAgentsDrawer extends StatelessWidget {
                   ),
                   const Divider(height: 16),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                    child: Text(
-                      context.l10n.cliAgents,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.outline,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    // The right inset centres the button over the agents'
+                    // new-session buttons.
+                    padding: const EdgeInsets.fromLTRB(20, 0, 28, 0),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            context.l10n.cliAgents,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        // For when the workspace changed but the session
+                        // lists below still show the previous one.
+                        IconButton(
+                          tooltip: context.l10n.resyncSessions,
+                          iconSize: 18,
+                          visualDensity: VisualDensity.compact,
+                          onPressed: chatController.isResyncingWorkdir
+                              ? null
+                              : () => _resyncSessions(context),
+                          icon: chatController.isResyncingWorkdir
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.refresh_rounded),
+                        ),
+                      ],
                     ),
                   ),
                   for (final CliAgent agent in agentsController.agents)
@@ -184,6 +211,16 @@ class CliAgentsDrawer extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _resyncSessions(BuildContext context) async {
+    if (chatController.isThinking) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
+      );
+      return;
+    }
+    await chatController.resyncWorkdir();
   }
 
   List<Widget> _agentTiles(
@@ -554,12 +591,17 @@ class ActiveMachineStatusTile extends StatefulWidget {
     required this.activeMachine,
     required this.chatController,
     required this.agentsController,
+    this.framed = true,
     super.key,
   });
 
   final MachineCredential? activeMachine;
   final BotChatController chatController;
   final CliAgentsController agentsController;
+
+  /// Draws its own inset panel, as in the drawer. Off when the host already
+  /// places it in a card, as the home page does.
+  final bool framed;
 
   @override
   State<ActiveMachineStatusTile> createState() =>
@@ -642,6 +684,47 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       );
     }
 
+    final Widget tile = ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 4,
+      ),
+      leading: _isLoading
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          // Same 24px slot as the spinner, so the title lines up with
+          // neighbouring icon tiles.
+          : SizedBox.square(
+              dimension: 24,
+              child: Icon(
+                Icons.lens,
+                color: _isOnline ? AppTheme.statusOk : AppTheme.statusDown,
+                size: 14,
+              ),
+            ),
+      title: Text(
+        machine.displayName,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+      ),
+      subtitle: Text(
+        _isLoading
+            ? context.l10n.loadingStatus
+            : (_isOnline ? context.l10n.online : context.l10n.offline),
+        style: TextStyle(
+          color: _isLoading
+              ? Theme.of(context).colorScheme.outline
+              : (_isOnline ? AppTheme.statusOk : AppTheme.statusDown),
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      trailing: const Icon(Icons.chevron_right, size: 20),
+      onTap: _openDetails,
+    );
+    if (!widget.framed) return tile;
     // The tile's background must come from a Material, not a plain decoration:
     // ListTile paints its ink splash on the nearest Material ancestor, so a
     // DecoratedBox in between would hide the tap feedback.
@@ -651,45 +734,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
         clipBehavior: Clip.antiAlias,
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 4,
-          ),
-          leading: _isLoading
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  Icons.lens,
-                  color: _isOnline
-                      ? const Color(0xFF10B981)
-                      : const Color(0xFFEF4444),
-                  size: 14,
-                ),
-          title: Text(
-            machine.displayName,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          subtitle: Text(
-            _isLoading
-                ? context.l10n.loadingStatus
-                : (_isOnline ? context.l10n.online : context.l10n.offline),
-            style: TextStyle(
-              color: _isLoading
-                  ? Theme.of(context).colorScheme.outline
-                  : (_isOnline
-                        ? const Color(0xFF10B981)
-                        : const Color(0xFFEF4444)),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: _openDetails,
-        ),
+        child: tile,
       ),
     );
   }

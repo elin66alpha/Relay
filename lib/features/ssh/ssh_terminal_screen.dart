@@ -4,6 +4,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/platform/platform_capabilities.dart';
+import '../../core/theme/app_theme.dart';
 import 'ssh_terminal_controller.dart';
 
 class SshTerminalScreen extends StatefulWidget {
@@ -73,23 +74,8 @@ class _SshTerminalScreenState extends State<SshTerminalScreen> {
                             theme: terminalTheme,
                             textStyle: const TerminalStyle(
                               fontSize: 14,
-                              fontFamily: 'RelayTerminalMono',
-                              fontFamilyFallback: <String>[
-                                'Cascadia Mono',
-                                'Consolas',
-                                'Menlo',
-                                'Monaco',
-                                'Liberation Mono',
-                                'DejaVu Sans Mono',
-                                'Noto Sans Mono',
-                                'Noto Sans Mono CJK SC',
-                                'Noto Sans Mono CJK TC',
-                                'Noto Sans Mono CJK KR',
-                                'Noto Sans Mono CJK JP',
-                                'Noto Color Emoji',
-                                'Noto Sans Symbols',
-                                'monospace',
-                              ],
+                              fontFamily: AppTheme.monoFamily,
+                              fontFamilyFallback: AppTheme.monoFallback,
                             ),
                             padding: const EdgeInsets.all(8),
                             autofocus: true,

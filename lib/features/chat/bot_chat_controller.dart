@@ -228,9 +228,11 @@ class BotChatController extends ChangeNotifier {
   Future<void> createSessionFor(CliAgent agent, {String name = ''}) async {
     final MachineCredential? machine = _machine;
     if (machine == null) return;
+    // The new session starts from the settings of the one the user is on.
     final AgentSessionList result = await _backendClient.createSession(
       agent.key,
       name,
+      copySettingsFrom: activeSessionIdFor(agent.key),
     );
     if (_machine?.id != machine.id) return;
     _detachVisibleTurnForContextSwitch();
@@ -671,16 +673,39 @@ class BotChatController extends ChangeNotifier {
       create: create,
     );
     _activeWorkdir = info.dir;
-    // Switching paths switches conversations: the session is keyed by
-    // workdir + agent + chat session. Reconnect the event stream with the new
-    // workdir and reload the shared history for this path so it shows immediately.
+    await _enterWorkdirContext();
+    return info;
+  }
+
+  bool _resyncingWorkdir = false;
+  bool get isResyncingWorkdir => _resyncingWorkdir;
+
+  /// Re-reads this device's work directory and reloads the session lists and
+  /// conversation for it: the manual way back in sync when the chat still
+  /// shows the previous workspace's sessions. Not while a turn is running.
+  Future<void> resyncWorkdir() async {
+    if (_resyncingWorkdir || isThinking || _remoteActive) return;
+    _resyncingWorkdir = true;
+    notifyListeners();
+    try {
+      await refreshWorkdir();
+      await _enterWorkdirContext();
+    } finally {
+      _resyncingWorkdir = false;
+      notifyListeners();
+    }
+  }
+
+  // Switching paths switches conversations: the session is keyed by
+  // workdir + agent + chat session. Reconnect the event stream with the new
+  // workdir and reload the shared history for this path so it shows immediately.
+  Future<void> _enterWorkdirContext() async {
     _detachVisibleTurnForContextSwitch();
     _clearBackgroundTurns();
     _pendingDrafts.clear();
     _clearSessionLists();
     await reconnectEvents();
     await _reloadConversation();
-    return info;
   }
 
   /// Clears the view and pulls the shared conversation for the current
@@ -1815,26 +1840,23 @@ class BotChatController extends ChangeNotifier {
     // the push service worker shows its copy whether or not the tab is focused,
     // so a browser this backend can actually push to must not also show the
     // event-stream copy — that is the duplicate.
-    if (_webPushDelivers(quota: true)) return;
+    if (!_quotaPushEnabled || _webPushDelivers) return;
     await _showNotificationOrSystemMessage(message, tag: 'quota');
   }
 
   Future<void> _showBackgroundTurnNotification(BackgroundTurn turn) async {
-    if (_webPushDelivers(quota: false)) return;
+    if (!_taskPushEnabled || _webPushDelivers) return;
     await _showNotificationOrSystemMessage(
       _strings.backgroundSessionFinished(turn.agentLabel, turn.sessionName),
       tag: 'task:${turn.agentKey}:${turn.sessionId}',
     );
   }
 
-  /// Whether this browser's push subscription will already deliver an alert of
-  /// this category, making an in-page notification a duplicate. False off the
-  /// web, and false until a subscription is actually registered — a backend
-  /// with no VAPID keys never pushes, so the in-page copy stays the only one.
-  bool _webPushDelivers({required bool quota}) {
-    if (!kIsWeb || !_webPushActive) return false;
-    return quota ? _quotaPushEnabled : _taskPushEnabled;
-  }
+  /// Whether this browser's push subscription will already deliver an enabled
+  /// alert, making an in-page notification a duplicate. False off the web, and
+  /// false until a subscription is actually registered — a backend with no
+  /// VAPID keys never pushes, so the in-page copy stays the only one.
+  bool get _webPushDelivers => kIsWeb && _webPushActive;
 
   Future<void> _showNotificationOrSystemMessage(
     String message, {

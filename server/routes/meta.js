@@ -184,40 +184,51 @@ module.exports = function createMetaRouter(ctx) {
     return res.json({ ok: true, ...describeAgent(agent.key) });
   });
 
-  // Current model/effort/permission/fast selection for the request's workdir+agent
-  // scope (shared by every device in that scope).
-  router.get('/api/agent-settings', (req, res) => {
-    const scope = resolveAgentScope(req, res, {
-      agentFrom: 'query',
-      requireSession: false,
+  // Settings belong to one chat session. A request without a sessionId (an
+  // older client) addresses Main, whose scope key is the context key.
+  function settingsScope(req, res, options) {
+    const sessionId = String(options.sessionId || '').trim();
+    return resolveAgentScope(req, res, {
+      ...options,
+      sessionId,
+      requireSession: !!sessionId,
       agentError: agentRequiredError,
     });
+  }
+
+  // Current model/effort/permission/fast selection for one session (shared by
+  // every device viewing it).
+  router.get('/api/agent-settings', (req, res) => {
+    const scope = settingsScope(req, res, {
+      agentFrom: 'query',
+      sessionId: req.query.sessionId,
+    });
     if (!scope) return;
-    const { agent, workdir, contextKey } = scope;
+    const { agent, workdir, contextKey, scopeKey } = scope;
     return res.json({
       ok: true,
       agent: agent.key,
       workdir,
-      settings: getSettings(agent.key, contextKey),
+      settings: getSettings(agent.key, scopeKey, contextKey),
     });
   });
 
-  // Update the selection for a scope. Body includes any supported string group.
-  // Only provided groups change; invalid ids fall back to the agent default.
+  // Update the selection for a session. Body includes any supported string
+  // group. Only provided groups change; invalid ids fall back to the agent
+  // default.
   router.post('/api/agent-settings', (req, res) => {
     const body = req.body || {};
-    const scope = resolveAgentScope(req, res, {
+    const scope = settingsScope(req, res, {
       agentKey: body.agent,
-      requireSession: false,
-      agentError: agentRequiredError,
+      sessionId: body.sessionId,
     });
     if (!scope) return;
-    const { agent, workdir, contextKey } = scope;
+    const { agent, workdir, contextKey, scopeKey } = scope;
     const partial = {};
     for (const group of ['model', 'effort', 'permission', 'fast']) {
       if (typeof body[group] === 'string') partial[group] = body[group];
     }
-    const settings = setSettings(agent.key, contextKey, partial);
+    const settings = setSettings(agent.key, scopeKey, partial, contextKey);
     return res.json({ ok: true, agent: agent.key, workdir, settings });
   });
 

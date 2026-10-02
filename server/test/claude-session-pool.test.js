@@ -12,6 +12,10 @@ function fakeSdk() {
   const deleted = [];
   let hangNext = false;
   let hangAll = false;
+  // Messages to emit before the reply to the next prompt: what the CLI sends
+  // for a turn it runs on its own. A function receives the pushed message.
+  const before = [];
+  const sdk = { stamp: true };
 
   function query({ prompt, options }) {
     const session = {
@@ -29,6 +33,12 @@ function fakeSdk() {
         const text = String(message.message.content);
         session.prompts.push(text);
         yield { type: 'system', subtype: 'init', session_id: session.sessionId };
+        for (const item of before.shift() || []) {
+          yield {
+            session_id: session.sessionId,
+            ...(typeof item === 'function' ? item(message) : item),
+          };
+        }
         if (session.hang) {
           // A long turn that only finishes when interrupted, like the CLI
           // winding down on ESC.
@@ -47,6 +57,8 @@ function fakeSdk() {
           subtype: 'success',
           session_id: session.sessionId,
           result: `echo:${text}`,
+          // Like the CLI, name the message this result answers.
+          ...(sdk.stamp ? { user_message_uuid: message.uuid } : {}),
         };
       }
     })();
@@ -64,9 +76,12 @@ function fakeSdk() {
     };
   }
 
-  return {
+  return Object.assign(sdk, {
     spawned,
     deleted,
+    beforeNextReply(...items) {
+      before.push(items);
+    },
     hangNextTurn() {
       hangNext = true;
     },
@@ -84,7 +99,7 @@ function fakeSdk() {
     async deleteSession(id, opts) {
       deleted.push({ id, dir: opts && opts.dir });
     },
-  };
+  });
 }
 
 function makePool(sdk, options = {}) {
@@ -315,4 +330,78 @@ test('shutdown closes every live session', async () => {
   await pool.shutdown();
   assert.equal(pool.stats().live, 0);
   assert.ok(sdk.spawned.every((s) => s.closed));
+});
+
+// What the CLI sends for a turn it runs itself on a background task's
+// notification, e.g. the empty one after resuming a session whose task was cut
+// off.
+const ownTurnResult = {
+  type: 'result',
+  subtype: 'success',
+  result: '',
+  origin: { kind: 'task-notification' },
+};
+
+test('a result from a turn Claude ran on its own does not answer the pending turn', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  sdk.beforeNextReply(ownTurnResult);
+  const { result } = await send(pool, 'a', 'one');
+  assert.equal(result.result, 'echo:one');
+  await pool.shutdown();
+});
+
+test('a message folded into a turn Claude started is answered by the result naming it', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  sdk.beforeNextReply((message) => ({
+    ...ownTurnResult,
+    result: 'folded',
+    user_message_uuid: message.uuid,
+  }));
+  const { result } = await send(pool, 'a', 'one');
+  assert.equal(result.result, 'folded');
+  await pool.shutdown();
+});
+
+test('without a stamped message id, a turn Claude started is told apart by its origin', async () => {
+  const sdk = fakeSdk();
+  sdk.stamp = false;
+  const pool = makePool(sdk);
+  sdk.beforeNextReply(ownTurnResult);
+  const { result } = await send(pool, 'a', 'one');
+  assert.equal(result.result, 'echo:one');
+  await pool.shutdown();
+});
+
+test('background work keeps a session past the idle timeout until it ends', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk, { idleMs: 40 });
+  sdk.beforeNextReply({ type: 'system', subtype: 'task_started', task_id: 't1' });
+  await send(pool, 'a', 'one');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(pool.stats().live, 1, 'a running background task is not idle');
+
+  sdk.beforeNextReply({
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: 't1',
+    status: 'completed',
+  });
+  await send(pool, 'a', 'two');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(pool.stats().live, 0, 'idle once the task ended');
+  await pool.shutdown();
+});
+
+test('the live-process cap evicts a session without background work first', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk, { maxLive: 2 });
+  sdk.beforeNextReply({ type: 'system', subtype: 'task_started', task_id: 't1' });
+  await send(pool, 'a', 'one');
+  await send(pool, 'b', 'one');
+  await send(pool, 'c', 'one');
+  assert.equal(sdk.spawned[0].closed, false, 'the session with background work stays');
+  assert.equal(sdk.spawned[1].closed, true, 'the more recent idle one is evicted');
+  await pool.shutdown();
 });
