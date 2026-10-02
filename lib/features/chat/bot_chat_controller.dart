@@ -1817,26 +1817,23 @@ class BotChatController extends ChangeNotifier {
     // the push service worker shows its copy whether or not the tab is focused,
     // so a browser this backend can actually push to must not also show the
     // event-stream copy — that is the duplicate.
-    if (_webPushDelivers(quota: true)) return;
+    if (!_quotaPushEnabled || _webPushDelivers) return;
     await _showNotificationOrSystemMessage(message, tag: 'quota');
   }
 
   Future<void> _showBackgroundTurnNotification(BackgroundTurn turn) async {
-    if (_webPushDelivers(quota: false)) return;
+    if (!_taskPushEnabled || _webPushDelivers) return;
     await _showNotificationOrSystemMessage(
       _strings.backgroundSessionFinished(turn.agentLabel, turn.sessionName),
       tag: 'task:${turn.agentKey}:${turn.sessionId}',
     );
   }
 
-  /// Whether this browser's push subscription will already deliver an alert of
-  /// this category, making an in-page notification a duplicate. False off the
-  /// web, and false until a subscription is actually registered — a backend
-  /// with no VAPID keys never pushes, so the in-page copy stays the only one.
-  bool _webPushDelivers({required bool quota}) {
-    if (!kIsWeb || !_webPushActive) return false;
-    return quota ? _quotaPushEnabled : _taskPushEnabled;
-  }
+  /// Whether this browser's push subscription will already deliver an enabled
+  /// alert, making an in-page notification a duplicate. False off the web, and
+  /// false until a subscription is actually registered — a backend with no
+  /// VAPID keys never pushes, so the in-page copy stays the only one.
+  bool get _webPushDelivers => kIsWeb && _webPushActive;
 
   Future<void> _showNotificationOrSystemMessage(
     String message, {
