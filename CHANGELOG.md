@@ -4,6 +4,9 @@
 
 ### Added
 
+- A Windows x64 backend release ZIP with Node.js, npm, locked production
+  dependencies, and setup/service/credential command entry points. Agent CLIs
+  are installed and authenticated separately on the host.
 - Fenced code blocks in chat get syntax highlighting, a language label, and a
   copy button; inline code renders in the bundled monospace font instead of
   italics.

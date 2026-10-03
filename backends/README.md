@@ -89,6 +89,14 @@ service PATH includes common Homebrew and per-user binary locations.
 
 ### Windows
 
+For release 0.1.7, `relay-backend-windows-x64-v0.1.7.zip` includes the Node.js
+runtime, npm, and locked production dependencies. Extract the whole ZIP to a
+permanent writable directory and run `.\setup.cmd` from PowerShell there.
+Agent CLIs and optional `cloudflared` must still be installed on the host.
+The bundle's `README.md` explains setup and updates; `.\start.cmd`,
+`.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
+same service adapters below. The Scheduled Task starts at this user's login.
+
 ```powershell
 .\backends\windows\status.ps1
 .\backends\windows\start.ps1

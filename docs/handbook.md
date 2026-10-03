@@ -349,6 +349,36 @@ npm --prefix server start
 The server serves `build/web` when present. CanvasKit is bundled locally and the
 service worker is disabled to keep the self-hosted client current.
 
+### Windows backend release bundle
+
+Build the backend bundle on Windows x64 using a complete Node.js distribution
+(including npm and its license), Git, and access to the npm registry:
+
+```powershell
+.\scripts\package_windows_backend.ps1
+# Optional: select a different installed runtime or output directory.
+.\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+```
+
+The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
+matching `.sha256`, taking the version from `server/package.json`. It refuses
+to overwrite an existing ZIP. A fresh staging directory copies only allowed,
+tracked backend sources, installs production dependencies with `npm ci`, and
+audits the application tree before compression. It never copies deployment
+state or the checkout's `node_modules`. Staging directories stay under the
+output directory for inspection. The bundle manifest records the source HEAD,
+Node version, architecture, and lockfile hash; source files include current
+working-tree edits. Review those edits before publishing a bundle.
+
+The ZIP carries its own Node.js/npm distribution and preserves dependency
+licenses, including Windows `node-pty` binaries. The Windows adapters prefer
+`runtime/node` when present; a source checkout continues using Node on PATH.
+The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
+entry points, with the same state paths and login Scheduled Task as the source
+installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
+client is included. Keep the extracted directory fixed, and follow the bundled
+README when migrating a deployment to a new directory.
+
 ### Desktop clients
 
 Desktop runner projects exist for Windows, macOS, and Linux, but each target

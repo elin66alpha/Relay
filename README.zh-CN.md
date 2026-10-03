@@ -102,6 +102,11 @@ Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机�
 在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude 与
 Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管理的 provider 配置。
 
+Windows x64 用户可从 [0.1.7 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.7)
+下载 `relay-backend-windows-x64-v0.1.7.zip`，解压后运行 `.\setup.cmd`。这个后端包
+已包含 Node.js 和生产依赖；agent CLI 仍需自行安装并认证。
+`relay-windows-x64-v0.1.7.zip` 是桌面客户端。
+
 在仓库根目录执行对应系统的安装命令：
 
 | 后端系统 | 安装命令 |

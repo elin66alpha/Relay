@@ -106,6 +106,12 @@ Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
 Claude and Codex must already be logged in on that host; OpenCode and Hermes use
 the provider configuration managed there.
 
+Windows x64 users can download `relay-backend-windows-x64-v0.1.7.zip` from
+[release 0.1.7](https://github.com/elin66alpha/Relay/releases/tag/v0.1.7), extract
+it, and run `.\setup.cmd`. This backend bundle includes Node.js and production
+dependencies; install and authenticate your agent CLIs separately. The asset
+`relay-windows-x64-v0.1.7.zip` is the desktop client.
+
 Run the setup command for your backend OS from the repository root:
 
 | Backend OS | Setup command |
