@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -398,6 +399,12 @@ class _BotChatScreenState extends State<BotChatScreen>
     );
     return Scaffold(
       drawerScrimColor: Colors.black54,
+      // Let mobile users open the drawer from anywhere in the chat.
+      drawerEdgeDragWidth: !kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS)
+          ? MediaQuery.sizeOf(context).width
+          : null,
       drawer: usePermanentSidebar
           ? null
           : Drawer(child: SafeArea(child: sidebar)),
