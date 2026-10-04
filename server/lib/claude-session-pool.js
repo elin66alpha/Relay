@@ -55,6 +55,11 @@ function sessionLostError(cause) {
 // that turn's message. The CLI stamps it even when the message was folded into
 // a turn of its own; older CLIs stamp nothing, and then a turn they started
 // themselves is told apart by its origin.
+//
+// A turn Claude starts while the session is idle is a *background turn*: it
+// opens on its first assistant message and closes on the next result. It is
+// handed to the scope's `onBackgroundTurn`, and owns the stream until that
+// result, since the CLI runs one turn at a time.
 function answersTurn(turn, result) {
   if (result.user_message_uuid) return result.user_message_uuid === turn.uuid;
   return !result.origin || result.origin.kind === 'human';
@@ -179,7 +184,7 @@ function createClaudeSessionPool(options = {}) {
     clearIdleTimer(entry);
     if (entry.closed) return;
     entry.idleTimer = setTimeout(() => {
-      if (entry.turn) return;
+      if (entry.turn || entry.background) return;
       // Background work keeps the session alive; check again later.
       if (entry.tasks.size) return scheduleIdleClose(entry);
       closeEntry(entry).catch(() => {});
@@ -209,6 +214,7 @@ function createClaudeSessionPool(options = {}) {
       lost.emitted = turn.emitted;
       return turn.reject(lost);
     });
+    settleBackground(entry, (handle) => handle.fail(sessionLostError(err)));
     try {
       entry.input.end();
     } catch (_err) {
@@ -228,7 +234,7 @@ function createClaudeSessionPool(options = {}) {
   function lruIdleEntry() {
     let victim = null;
     for (const entry of live.values()) {
-      if (entry.turn || entry.closed) continue;
+      if (entry.turn || entry.background || entry.closed) continue;
       if (!victim || evictsBefore(entry, victim)) victim = entry;
     }
     return victim;
@@ -248,15 +254,81 @@ function createClaudeSessionPool(options = {}) {
     }
   }
 
+  function startBackground(entry) {
+    const notices = entry.notices;
+    entry.notices = [];
+    let handle = null;
+    try {
+      if (entry.onBackgroundTurn) handle = entry.onBackgroundTurn({ notices });
+    } catch (_err) {
+      handle = null;
+    }
+    clearIdleTimer(entry);
+    // Tracked even with nobody to hand it to, so its messages never leak into
+    // the next turn.
+    entry.background = {
+      handle: handle || { onMessage() {}, finish() {}, fail() {} },
+      timer: setTimeout(() => {
+        closeEntry(entry, new Error('background turn timed out')).catch(() => {});
+      }, turnTimeoutMs),
+    };
+    if (typeof entry.background.timer.unref === 'function') {
+      entry.background.timer.unref();
+    }
+  }
+
+  function settleBackground(entry, settle) {
+    const background = entry.background;
+    if (!background) return;
+    entry.background = null;
+    clearTimeout(background.timer);
+    try {
+      settle(background.handle);
+    } catch (_err) {
+      // The listener's failure must not take the session down.
+    }
+    if (!entry.closed && !entry.turn) scheduleIdleClose(entry);
+    pumpWaiters();
+  }
+
   function routeMessage(entry, message) {
     if (message && message.session_id) entry.sessionId = message.session_id;
     entry.lastActivity = now();
     // The last background task ending starts a full idle window, so the turn
     // the CLI runs on its result is not cut short.
-    if (trackTask(entry, message) && !entry.turn) scheduleIdleClose(entry);
+    if (trackTask(entry, message) && !entry.turn && !entry.background) {
+      scheduleIdleClose(entry);
+    }
+    if (!message) return;
     const turn = entry.turn;
-    if (!turn) return;
-    if (message && message.type === 'result') {
+    // A background turn keeps everything up to its own result, even once a
+    // turn has been pushed behind it.
+    if (
+      entry.background &&
+      !(turn && message.type === 'result' && message.user_message_uuid === turn.uuid)
+    ) {
+      if (message.type === 'result') {
+        settleBackground(entry, (handle) => handle.finish(message));
+      } else {
+        try {
+          entry.background.handle.onMessage(message);
+        } catch (_err) {
+          // A rendering failure must not take the session down.
+        }
+      }
+      return;
+    }
+    if (!turn) {
+      // What woke Claude up arrives before the turn it runs on it.
+      if (message.type === 'system' && message.subtype === 'task_notification') {
+        entry.notices.push(message);
+      } else if (message.type === 'assistant') {
+        startBackground(entry);
+        routeMessage(entry, message);
+      }
+      return;
+    }
+    if (message.type === 'result') {
       if (!answersTurn(turn, message)) return;
       settleTurn(entry, (settled) => {
         if (settled.cancelled) settled.reject(cancelledError());
@@ -266,7 +338,7 @@ function createClaudeSessionPool(options = {}) {
     }
     // Only assistant messages reach the user, and they are what makes a silent
     // retry unsafe.
-    if (message && message.type === 'assistant') turn.emitted = true;
+    if (message.type === 'assistant') turn.emitted = true;
     try {
       turn.onMessage(message);
     } catch (_err) {
@@ -286,6 +358,9 @@ function createClaudeSessionPool(options = {}) {
       optionsKey: request.optionsKey,
       sessionId: request.resumeId || null,
       tasks: new Set(),
+      notices: [],
+      background: null,
+      onBackgroundTurn: request.onBackgroundTurn || null,
       input,
       query: null,
       turn: null,
@@ -344,6 +419,8 @@ function createClaudeSessionPool(options = {}) {
       };
       entry.turn = turn;
       entry.lastActivity = now();
+      // Notices nobody acted on yet are folded into this turn by the CLI.
+      entry.notices = [];
       clearIdleTimer(entry);
 
       const stop = (reason) => {
@@ -432,6 +509,8 @@ function createClaudeSessionPool(options = {}) {
     // A restart resumes the conversation it replaced; the live session's id
     // wins over the caller's, which may be one turn behind.
     if (!entry) entry = await spawnEntry({ ...request, resumeId });
+    // The latest turn says where a later background turn is delivered.
+    entry.onBackgroundTurn = request.onBackgroundTurn || null;
     try {
       return await runTurn(entry, request);
     } catch (err) {

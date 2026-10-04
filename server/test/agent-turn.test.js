@@ -8,6 +8,7 @@ const {
   createNoopResponder,
   runAgentTurn,
 } = require('../lib/agent-turn');
+const { claudeBackgroundTurn } = require('../lib/agents');
 
 const agent = { key: 'claude', label: 'Claude' };
 const session = { id: 'default', name: 'Main' };
@@ -368,4 +369,79 @@ test('no-op responder broadcasts scheduled progress and does not require task no
     'quota resumed',
   ]);
   assert.equal(messages[1].content, 'scheduled done');
+});
+
+test('the lines that say why a turn exists outlast the step lines', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    for (let i = 1; i <= 8; i += 1) {
+      onEvent({ type: 'progress', line: `step ${i}` });
+    }
+    onEvent({ type: 'delta', text: 'done' });
+    return 'done';
+  });
+
+  await runAgentTurn(turnOptions({
+    dependencies: harness.dependencies,
+    initialProgressLines: ['Background task: sleep finished'],
+    recordUserMessage: false,
+  }));
+
+  const messages = harness.histories.get('scope');
+  assert.equal(messages.length, 1, 'no user message before it');
+  assert.deepEqual(messages[0].metadata.progressLines, [
+    'Background task: sleep finished',
+    'step 4',
+    'step 5',
+    'step 6',
+    'step 7',
+    'step 8',
+  ]);
+});
+
+function claudeText(id, text) {
+  return { type: 'assistant', message: { id, content: [{ type: 'text', text }] } };
+}
+
+function claudeTool(id) {
+  return {
+    type: 'assistant',
+    message: { id, content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] },
+  };
+}
+
+test('a background turn that only runs tools never reaches the conversation', () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), []);
+  turn.onMessage(claudeTool('m1'));
+  turn.finish({ type: 'result', subtype: 'success', result: '' });
+  assert.equal(started.length, 0);
+});
+
+test('a background turn opens on its first text and replays what came before', async () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), [
+    { type: 'system', subtype: 'task_notification', summary: 'sleep  finished' },
+  ]);
+  turn.onMessage(claudeTool('m1'));
+  turn.onMessage(claudeText('m2', 'All done.'));
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].progressLines, ['Background task: sleep finished']);
+
+  const events = [];
+  const done = started[0].run((event) => events.push(event));
+  turn.onMessage(claudeText('m3', 'One more thing.'));
+  turn.finish({ type: 'result', subtype: 'success', result: 'One more thing.' });
+  assert.equal(await done, 'One more thing.');
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['progress', 'segment', 'delta', 'progress', 'segment', 'delta', 'progress'],
+  );
+});
+
+test('a background turn without a known trigger still says it started on its own', () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), []);
+  turn.onMessage(claudeText('m1', 'Hi again.'));
+  assert.deepEqual(started[0].progressLines, ['Claude continued on its own.']);
+  turn.fail(new Error('gone'));
 });

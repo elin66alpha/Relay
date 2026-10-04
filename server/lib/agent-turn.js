@@ -177,6 +177,8 @@ async function runAgentTurn(options) {
     historyMetadata = {},
     initialProgressLines = [],
     notifyTaskCompletion,
+    // Where a turn the agent later runs on its own is delivered (Claude only).
+    onBackgroundTurn,
     onAfterDone,
     onAfterError,
     onBeforeDone,
@@ -278,6 +280,12 @@ async function runAgentTurn(options) {
     });
   };
 
+  // The initial lines say why the turn exists, so they outlast the step lines
+  // that scroll past.
+  const pinnedLines = Math.min(
+    initialProgressLines.filter((line) => typeof line === 'string').length,
+    5,
+  );
   const persistProgressLine = (line) => {
     updateAssistantHistory((message) => {
       const lines = Array.isArray(message.metadata.progressLines)
@@ -288,7 +296,7 @@ async function runAgentTurn(options) {
       if (lines.length === 0 || lines[lines.length - 1] !== line) {
         lines.push(line);
       }
-      while (lines.length > 6) lines.shift();
+      while (lines.length > 6) lines.splice(pinnedLines, 1);
       return {
         ...message,
         updatedAt: new Date().toISOString(),
@@ -471,6 +479,7 @@ async function runAgentTurn(options) {
           ...(signal ? { signal } : {}),
           workdir,
           settings: getSettings(agentKey, scopeKey, contextKey),
+          ...(onBackgroundTurn ? { onBackgroundTurn } : {}),
         });
       } finally {
         runningScopes.delete(concurrencyKey);

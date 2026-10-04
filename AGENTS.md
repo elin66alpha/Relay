@@ -88,7 +88,9 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
     Claude also runs turns nobody sent (a background task finishing, or resume
     after one was cut off), which end in a `result` too: a turn settles only on
     the result whose `user_message_uuid` names the message it pushed. Running
-    background tasks keep a process from idle eviction.
+    background tasks keep a process from idle eviction. A turn Claude starts
+    while idle is a background turn: in solo chat it becomes a reply of its
+    own, queued on the scope and not cancellable, once it writes text.
   - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
     speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
     session cap, idle eviction and cancellation; a `driver` supplies the

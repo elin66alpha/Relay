@@ -15,6 +15,9 @@ function fakeSdk() {
   // Messages to emit before the reply to the next prompt: what the CLI sends
   // for a turn it runs on its own. A function receives the pushed message.
   const before = [];
+  // Messages to emit after the reply's result: a turn the CLI runs on its own
+  // while the session is idle.
+  const after = [];
   const sdk = { stamp: true };
 
   function query({ prompt, options }) {
@@ -60,6 +63,9 @@ function fakeSdk() {
           // Like the CLI, name the message this result answers.
           ...(sdk.stamp ? { user_message_uuid: message.uuid } : {}),
         };
+        for (const item of after.shift() || []) {
+          yield { session_id: session.sessionId, ...item };
+        }
       }
     })();
     return {
@@ -81,6 +87,9 @@ function fakeSdk() {
     deleted,
     beforeNextReply(...items) {
       before.push(items);
+    },
+    afterNextReply(...items) {
+      after.push(items);
     },
     hangNextTurn() {
       hangNext = true;
@@ -403,5 +412,121 @@ test('the live-process cap evicts a session without background work first', asyn
   await send(pool, 'c', 'one');
   assert.equal(sdk.spawned[0].closed, false, 'the session with background work stays');
   assert.equal(sdk.spawned[1].closed, true, 'the more recent idle one is evicted');
+  await pool.shutdown();
+});
+
+function recordBackground() {
+  const turns = [];
+  let started;
+  const firstStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  const onBackgroundTurn = ({ notices }) => {
+    const turn = { notices, messages: [], result: null, error: null };
+    let settle;
+    turn.settled = new Promise((resolve) => {
+      settle = resolve;
+    });
+    turns.push(turn);
+    started(turn);
+    return {
+      onMessage: (message) => turn.messages.push(message),
+      finish: (result) => settle((turn.result = result)),
+      fail: (err) => settle((turn.error = err)),
+    };
+  };
+  return { turns, firstStarted, onBackgroundTurn };
+}
+
+function texts(messages) {
+  return messages
+    .filter((message) => message.type === 'assistant')
+    .map((message) => message.message.content[0].text);
+}
+
+function bgText(text) {
+  return {
+    type: 'assistant',
+    message: { id: 'bg', content: [{ type: 'text', text }] },
+  };
+}
+
+const bgResult = { type: 'result', subtype: 'success', result: 'later' };
+
+test('a turn Claude runs on its own while idle is handed to onBackgroundTurn', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  const bg = recordBackground();
+  const notice = {
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: 't1',
+    status: 'completed',
+    summary: 'sleep finished',
+  };
+  sdk.afterNextReply(notice, bgText('later'), bgResult);
+  await send(pool, 'a', 'one', { onBackgroundTurn: bg.onBackgroundTurn });
+  await (await bg.firstStarted).settled;
+  assert.equal(bg.turns.length, 1);
+  assert.deepEqual(
+    bg.turns[0].notices.map((item) => item.summary),
+    ['sleep finished'],
+    'what woke Claude up comes with the turn',
+  );
+  assert.deepEqual(texts(bg.turns[0].messages), ['later']);
+  assert.equal(bg.turns[0].result.result, 'later');
+  await pool.shutdown();
+});
+
+test('a background turn keeps the stream until its result, even with a turn queued behind it', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  const bg = recordBackground();
+  sdk.afterNextReply(bgText('later'));
+  await send(pool, 'a', 'one', { onBackgroundTurn: bg.onBackgroundTurn });
+  await bg.firstStarted;
+  // The CLI finishes its own turn before it gets to the one pushed meanwhile.
+  sdk.beforeNextReply(bgText('later, continued'), bgResult);
+  const seen = [];
+  const { result } = await send(pool, 'a', 'two', {
+    onBackgroundTurn: bg.onBackgroundTurn,
+    onMessage: (message) => {
+      if (message.type === 'assistant') seen.push(message.message.content[0].text);
+    },
+  });
+  assert.equal(result.result, 'echo:two');
+  assert.deepEqual(seen, ['echo:two'], 'the queued turn gets only its own reply');
+  await bg.turns[0].settled;
+  assert.deepEqual(texts(bg.turns[0].messages), ['later', 'later, continued']);
+  await pool.shutdown();
+});
+
+test('a background turn is not idle-closed, and fails when its session closes', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk, { idleMs: 40 });
+  const bg = recordBackground();
+  sdk.afterNextReply(bgText('later'));
+  await send(pool, 'a', 'one', { onBackgroundTurn: bg.onBackgroundTurn });
+  await bg.firstStarted;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(pool.stats().live, 1, 'a running background turn is not idle');
+  await pool.shutdown();
+  await bg.turns[0].settled;
+  assert.equal(bg.turns[0].error.code, 'CLAUDE_SESSION_LOST');
+});
+
+test('without a listener a background turn is dropped, not leaked into the next turn', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  sdk.afterNextReply(bgText('later'));
+  await send(pool, 'a', 'one');
+  sdk.beforeNextReply(bgResult);
+  const seen = [];
+  await send(pool, 'a', 'two', {
+    onMessage: (message) => {
+      if (message.type === 'assistant') seen.push(message.message.content[0].text);
+    },
+  });
+  assert.deepEqual(seen, ['echo:two']);
   await pool.shutdown();
 });

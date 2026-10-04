@@ -708,6 +708,39 @@ function agentTurnDependencies() {
   };
 }
 
+// Where a turn Claude runs on its own lands: a reply of its own in the
+// conversation, with no user message before it, queued on the scope like any
+// other turn so a message sent meanwhile waits for it, as it does in the CLI.
+// It cannot be cancelled, and a session deleted meanwhile drops it.
+function backgroundTurnHandler({ agent, contextKey, sessionId, workdir }) {
+  return ({ progressLines, run }) => {
+    const session = resolveChatSession(contextKey, sessionId);
+    if (!session) return;
+    runAgentTurn({
+      agent,
+      contextKey,
+      dependencies: {
+        ...agentTurnDependencies(),
+        runAgent: (_agentKey, _prompt, onEvent) => run(onEvent),
+      },
+      deviceId: 'agent-background',
+      finalizeContent({ content, streamedText }) {
+        return String(content || streamedText || '').trim();
+      },
+      initialProgressLines: progressLines,
+      notifyTaskCompletion,
+      prompt: '',
+      recordUserMessage: false,
+      requestId: `${agent.key}.background.${randomUUID()}`,
+      scopeKey: scopeKeyFor(agent.key, workdir, session.id),
+      session,
+      workdir,
+    }).catch((err) => {
+      console.error(`[${agent.key}] background turn failed: ${err.message}`);
+    });
+  };
+}
+
 async function runScheduledQuotaMessage(schedule) {
   const agent = getAgent(schedule.agentKey);
   if (!agent) {
@@ -777,6 +810,12 @@ async function runScheduledQuotaMessage(schedule) {
     },
     prompt: schedule.prompt,
     requestId,
+    onBackgroundTurn: backgroundTurnHandler({
+      agent,
+      contextKey,
+      sessionId: chatSession.id,
+      workdir: schedule.workdir,
+    }),
     responder: createNoopResponder(),
     scopeKey,
     session: chatSession,
@@ -818,6 +857,7 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
+  backgroundTurnHandler,
   bearerToken,
   broadcastScope,
   buildDiagnostics,
