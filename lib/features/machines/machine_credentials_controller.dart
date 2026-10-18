@@ -29,7 +29,6 @@ class MachineCredentialsController extends ChangeNotifier {
 
   List<MachineCredential> get credentials =>
       List<MachineCredential>.unmodifiable(_credentials);
-  String? get activeMachineId => _activeMachineId;
   bool get isLoaded => _isLoaded;
 
   MachineCredential? get activeMachine {

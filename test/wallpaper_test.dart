@@ -38,10 +38,18 @@ void main() {
     expect(settings.wallpaper.bytes, isNull);
     expect(settings.wallpaper.lightOpacity, 0.8);
     expect(settings.wallpaper.darkOpacity, 0.2);
+    expect(settings.wallpaper.blur, Wallpaper.defaultBlur);
+    expect(settings.wallpaper.tint, Wallpaper.defaultTint);
     final Uint8List bytes =
         await prepareWallpaper(img.encodePng(img.Image(width: 12, height: 8)));
     await settings.saveWallpaper(
-      Wallpaper(bytes: bytes, lightOpacity: 0.65, darkOpacity: 0.35),
+      Wallpaper(
+        bytes: bytes,
+        lightOpacity: 0.65,
+        darkOpacity: 0.35,
+        blur: 12,
+        tint: 0.4,
+      ),
     );
     final AppSettingsController restored = AppSettingsController();
     addTearDown(restored.dispose);
@@ -49,6 +57,8 @@ void main() {
     expect(restored.wallpaper.bytes, bytes);
     expect(restored.wallpaper.lightOpacity, 0.65);
     expect(restored.wallpaper.darkOpacity, 0.35);
+    expect(restored.wallpaper.blur, 12);
+    expect(restored.wallpaper.tint, 0.4);
     await restored
         .saveWallpaper(const Wallpaper(lightOpacity: 0.65, darkOpacity: 0.35));
     await settings.load();
@@ -345,6 +355,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(settings.wallpaper.lightOpacity, lightDraft);
     expect(settings.wallpaper.darkOpacity, darkDraft);
+  });
+
+  testWidgets(
+      'acrylic number fields preview before Save and reject out-of-range values',
+      (WidgetTester tester) async {
+    final AppSettingsController settings = AppSettingsController();
+    addTearDown(settings.dispose);
+    await settings.saveWallpaper(
+      Wallpaper(bytes: img.encodePng(img.Image(width: 6, height: 4))),
+    );
+    await tester.pumpWidget(
+      AppScope(
+        controller: settings,
+        child: MaterialApp(home: WallpaperScreen(settingsController: settings)),
+      ),
+    );
+    WallpaperScope preview() =>
+        tester.widget<WallpaperScope>(find.byType(WallpaperScope));
+    final Finder blur = find.byKey(const ValueKey<String>('wallpaper-blur'));
+    final Finder tint = find.byKey(const ValueKey<String>('wallpaper-tint'));
+    await tester.ensureVisible(blur);
+    await tester.enterText(blur, '12');
+    await tester.enterText(tint, '40');
+    await tester.pump();
+    expect((preview().blur, preview().tint), (12, 0.4));
+    expect(settings.wallpaper.blur, Wallpaper.defaultBlur);
+    await tester.enterText(blur, '31');
+    await tester.pump();
+    final TextField field = tester.widget<TextField>(
+      find.descendant(of: blur, matching: find.byType(TextField)),
+    );
+    expect(field.decoration!.errorText, '0–30');
+    expect(preview().blur, 12);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect((settings.wallpaper.blur, settings.wallpaper.tint), (12, 0.4));
   });
 
   testWidgets(

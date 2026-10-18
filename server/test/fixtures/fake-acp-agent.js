@@ -77,7 +77,7 @@ function handlePrompt(msg) {
   if (text === 'die-quiet') {
     // Dies once, so a retry on a fresh process can succeed — the pool's cold
     // fallback is only useful if the next attempt is allowed to work.
-    let already = false;
+    let already;
     try {
       already = fs.readFileSync(statePath, 'utf8').includes('died');
     } catch (_err) {

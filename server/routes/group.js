@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { wantsStream, writeStreamEvent, endStream } = require('../lib/sse');
 
 const {
   listGroups,
@@ -38,30 +39,6 @@ function maxMentionHops(env = process.env) {
   return Math.min(raw, 20);
 }
 
-function wantsStream(req) {
-  return String(req.get('accept') || '')
-    .toLowerCase()
-    .includes('text/event-stream');
-}
-
-function writeSse(res, type, payload) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
-  } catch (_err) {
-    // The client may have closed the tab while the round keeps running.
-  }
-}
-
-function endSse(res) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.end();
-  } catch (_err) {
-    // Already gone; the server-side round still finishes.
-  }
-}
-
 // A responder shared across every agent turn in one round. Unlike the single-chat
 // responder it does NOT end the stream after each agent (final()), so the route
 // can close it once the whole round drains. Non-streaming requests get one JSON
@@ -78,25 +55,25 @@ function createRoundResponder(res, streaming) {
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
       });
-      writeSse(res, 'ready', { ok: true, requestId });
+      writeStreamEvent(res, 'ready', { ok: true, requestId });
     },
     event(type, payload) {
       if (!streaming) return false;
-      writeSse(res, type, payload);
+      writeStreamEvent(res, type, payload);
       return true;
     },
     async fallbackText() {},
     final(reply) {
-      if (streaming) writeSse(res, 'agent_done', reply);
+      if (streaming) writeStreamEvent(res, 'agent_done', reply);
     },
     cancelled(payload) {
-      if (streaming) writeSse(res, 'agent_cancelled', payload);
+      if (streaming) writeStreamEvent(res, 'agent_cancelled', payload);
     },
     authError(payload) {
-      if (streaming) writeSse(res, 'agent_error', payload);
+      if (streaming) writeStreamEvent(res, 'agent_error', payload);
     },
     error(payload) {
-      if (streaming) writeSse(res, 'agent_error', payload);
+      if (streaming) writeStreamEvent(res, 'agent_error', payload);
     },
   };
 }
@@ -600,8 +577,8 @@ module.exports = function createGroupRouter(ctx) {
       createdAt: new Date().toISOString(),
     });
     if (responder.streaming) {
-      writeSse(res, 'group_done', { ...summary, createdAt: new Date().toISOString() });
-      endSse(res);
+      writeStreamEvent(res, 'group_done', { ...summary, createdAt: new Date().toISOString() });
+      endStream(res);
       return undefined;
     }
     return res.json(summary);

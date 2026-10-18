@@ -28,14 +28,6 @@ function nonEmpty(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function fileHasText(fsModule, filePath) {
-  try {
-    return fsModule.readFileSync(filePath, 'utf8').trim().length > 0;
-  } catch (_err) {
-    return false;
-  }
-}
-
 function expiryOrNull(value) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -149,7 +141,7 @@ function hasApiKeyLikeValue(value, keyName = '') {
 }
 
 function hermesConfigAuthed(fsModule, homeDir) {
-  let text = '';
+  let text;
   try {
     text = fsModule.readFileSync(
       path.join(homeDir, '.hermes', 'config.yaml'),

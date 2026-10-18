@@ -104,7 +104,7 @@ function listChatSessions(contextKey) {
 function resolveChatSession(contextKey, requestedSessionId) {
   const context = contextFor(contextKey);
   const requested = validSessionId(requestedSessionId);
-  let session = null;
+  let session;
   if (String(requestedSessionId || '').trim()) {
     session = requested
       ? context.sessions.find((item) => item.id === requested)

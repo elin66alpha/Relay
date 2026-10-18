@@ -19,6 +19,8 @@
 // "no warm process" identical to Relay's previous behaviour rather than a new
 // one.
 const crypto = require('crypto');
+const { boundedInteger } = require('./bounded-integer');
+const { createSessionSlots } = require('./session-slots');
 
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_LIVE = 3;
@@ -29,13 +31,6 @@ const INTERRUPT_GRACE_MS = 5000;
 // Reading the context size is a local control request (~150 ms warm), but a
 // wedged CLI must never hold a finished reply back.
 const CONTEXT_READ_MS = 3000;
-
-function positiveInt(value, fallbackValue, min, max) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max
-    ? parsed
-    : fallbackValue;
-}
 
 function cancelledError() {
   const err = new Error('request cancelled');
@@ -158,7 +153,7 @@ function createClaudeSessionPool(options = {}) {
   // clamped to a sane range.
   const idleMs =
     options.idleMs ??
-    positiveInt(
+    boundedInteger(
       env.RELAY_CLAUDE_IDLE_MS,
       DEFAULT_IDLE_MS,
       10 * 1000,
@@ -166,7 +161,7 @@ function createClaudeSessionPool(options = {}) {
     );
   const maxLive =
     options.maxLive ??
-    positiveInt(env.RELAY_CLAUDE_MAX_LIVE, DEFAULT_MAX_LIVE, 1, 64);
+    boundedInteger(env.RELAY_CLAUDE_MAX_LIVE, DEFAULT_MAX_LIVE, 1, 64);
   const now = options.now || (() => Date.now());
   const turnTimeoutMs = options.turnTimeoutMs || 60 * 60 * 1000;
   const interruptGraceMs = options.interruptGraceMs ?? INTERRUPT_GRACE_MS;
@@ -181,39 +176,22 @@ function createClaudeSessionPool(options = {}) {
   }
 
   const live = new Map();
-  const slotWaiters = [];
-
-  function releaseSlot() {
-    const waiter = slotWaiters.shift();
-    if (waiter) waiter();
-  }
-
-  // A finished turn frees the session for eviction but not the slot: the
-  // process stays live. Group chats summon several members at once, so without
-  // this a caller waiting on the cap would never be woken by a turn ending —
-  // only by an unrelated eviction.
-  function pumpWaiters() {
-    if (!slotWaiters.length) return;
-    const victim = lruIdleEntry();
-    if (victim) closeEntry(victim).catch(() => {});
-  }
-
-  function clearIdleTimer(entry) {
-    if (entry.idleTimer) clearTimeout(entry.idleTimer);
-    entry.idleTimer = null;
-  }
-
-  function scheduleIdleClose(entry) {
-    clearIdleTimer(entry);
-    if (entry.closed) return;
-    entry.idleTimer = setTimeout(() => {
-      if (entry.turn || entry.background) return;
-      // Background work keeps the session alive; check again later.
-      if (entry.tasks.size) return scheduleIdleClose(entry);
-      closeEntry(entry).catch(() => {});
-    }, idleMs);
-    if (typeof entry.idleTimer.unref === 'function') entry.idleTimer.unref();
-  }
+  const slots = createSessionSlots({
+    live,
+    maxLive,
+    idleMs,
+    closeEntry,
+    isBusy: (entry) => entry.turn || entry.background,
+    keepAlive: (entry) => entry.tasks.size > 0,
+    evictsBefore,
+  });
+  const {
+    acquireSlot,
+    releaseSlot,
+    pumpWaiters,
+    clearIdleTimer,
+    scheduleIdleClose,
+  } = slots;
 
   function settleTurn(entry, settle) {
     const turn = entry.turn;
@@ -249,32 +227,6 @@ function createClaudeSessionPool(options = {}) {
       // Already gone.
     }
     releaseSlot();
-  }
-
-  // Evict the least recently used session that is not mid-turn, preferring
-  // one with no background work: that is only cut off when nothing else can
-  // make room.
-  function lruIdleEntry() {
-    let victim = null;
-    for (const entry of live.values()) {
-      if (entry.turn || entry.background || entry.closed) continue;
-      if (!victim || evictsBefore(entry, victim)) victim = entry;
-    }
-    return victim;
-  }
-
-  async function acquireSlot() {
-    // The cap covers every live CLI process the pool owns. When every session
-    // is mid-turn there is nothing safe to evict, so the caller waits for a
-    // slot rather than the pool quietly exceeding its own memory budget.
-    while (live.size >= maxLive) {
-      const victim = lruIdleEntry();
-      if (victim) {
-        await closeEntry(victim);
-        continue;
-      }
-      await new Promise((resolve) => slotWaiters.push(resolve));
-    }
   }
 
   // Interrupt is best-effort: if the CLI does not wind the turn down promptly,
@@ -621,7 +573,7 @@ function createClaudeSessionPool(options = {}) {
       live: live.size,
       maxLive,
       idleMs,
-      waiting: slotWaiters.length,
+      waiting: slots.waiting,
       keys: [...live.keys()],
     };
   }

@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node scripts/run-tests.js",
+    "lint": "eslint .",
     "credential": "node scripts/create-credential.js"
   },
   "allowScripts": {
@@ -28,5 +29,10 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0"
   }
 }

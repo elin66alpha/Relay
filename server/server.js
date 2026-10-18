@@ -5,7 +5,6 @@ require('dotenv').config();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const express = require('express');
 const compression = require('compression');
@@ -29,12 +28,15 @@ const {
   validateWorkdir,
 } = require('./lib/workdir');
 const {
-  FilesystemError,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,
   resolveUploadTarget,
   resolveAbsoluteUploadTarget,
+  safeDownloadName,
+  sendDirectoryZip,
+  sendFilesystemError,
+  streamUploadToFile,
   uploadedEntry,
 } = require('./lib/filesystem');
 const {
@@ -66,7 +68,6 @@ const {
   finalizeAllStaleStreamingHistory,
   flushHistory,
   clearHistory,
-  redactSensitiveText,
   recentWorkdirs,
   searchHistory,
   markdownForConversation,
@@ -85,19 +86,18 @@ const {
 } = require('./lib/chat-sessions');
 const {
   agentPayload,
+  createBackgroundTurnHandler,
   createChatResponder,
   createNoopResponder,
+  createTaskCompletionNotifier,
   runAgentTurn,
   sessionPayload,
 } = require('./lib/agent-turn');
 const {
   cancelQuotaSchedule,
   createQuotaSchedule,
-  dueQuotaSchedulesForReset,
+  createQuotaScheduleRunner,
   listQuotaSchedules,
-  markQuotaScheduleFailed,
-  markQuotaScheduleRunning,
-  markQuotaScheduleSent,
   reconcileRunningSchedules,
 } = require('./lib/quota-schedules');
 const createFsRouter = require('./routes/fs');
@@ -202,53 +202,6 @@ const runningScopes = new Set();
 // in-flight turn (the underlying `claude --resume` session cannot run two turns
 // at once), then runs automatically. Maps scopeKey -> tail Promise.
 const scopeChains = new Map();
-function uploadTooLargeError() {
-  return new FilesystemError('upload exceeds the size limit', {
-    status: 413,
-    code: 'FS_UPLOAD_TOO_LARGE',
-  });
-}
-
-// Stream an upload body straight to disk instead of buffering it in memory
-// (uploads run up to MAX_UPLOAD_BYTES; a few concurrent buffered ones used to
-// spike RSS by hundreds of MB). The bytes land in a fresh temp file next to the
-// target ('wx' so we never write through anything pre-existing), then rename
-// into place — atomic, and replacing rather than following a symlink at the
-// target. Over-limit transfers are cut off mid-stream.
-function streamUploadToFile(req, targetPath, maxBytes) {
-  const tmpPath = `${targetPath}.upload-${randomUUID()}`;
-  return new Promise((resolve, reject) => {
-    const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode: 0o644 });
-    let received = 0;
-    let failed = false;
-    const fail = (err) => {
-      if (failed) return;
-      failed = true;
-      req.unpipe(out);
-      out.destroy();
-      fs.unlink(tmpPath, () => {});
-      reject(err);
-    };
-    req.on('error', fail);
-    req.on('aborted', () => fail(new Error('upload aborted')));
-    out.on('error', fail);
-    req.on('data', (chunk) => {
-      received += chunk.length;
-      if (received > maxBytes) fail(uploadTooLargeError());
-    });
-    out.on('finish', () => {
-      if (failed) return;
-      try {
-        fs.renameSync(tmpPath, targetPath);
-        resolve(received);
-      } catch (err) {
-        fail(err);
-      }
-    });
-    req.pipe(out);
-  });
-}
-
 // Compress responses before they cross the tunnel. The JavaScript and CanvasKit
 // bundles dominate first-load bytes, so compression materially reduces startup
 // time. `compressible` does not flag application/wasm, so allow it explicitly.
@@ -309,14 +262,6 @@ function bearerToken(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
-function formatUptime(seconds) {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  return `${d}d ${h}h ${m}m ${s}s`;
-}
-
 // Warn loudly when the device token will travel in cleartext: PUBLIC_BASE_URL is
 // http:// (no TLS) to a routable host. An https:// URL (reverse proxy or a
 // Cloudflare Tunnel) terminates TLS and is fine; localhost is irrelevant. A
@@ -367,136 +312,6 @@ function sendWorkdirError(res, err) {
     });
   }
   return res.status(500).json({ error: err.message });
-}
-
-function sendFilesystemError(res, err) {
-  if (err instanceof FilesystemError) {
-    return res.status(err.status || 400).json({
-      error: err.message,
-      code: err.code,
-    });
-  }
-  return res.status(500).json({ error: err.message });
-}
-
-function queryBool(value) {
-  return value === true || String(value || '').toLowerCase() === 'true';
-}
-
-function attachmentHeader(filename) {
-  const fallback = String(filename || 'download')
-    .replace(/[^\x20-\x7e]/g, '_')
-    .replace(/["\\]/g, '_');
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
-}
-
-function safeDownloadName(value, fallback = 'download') {
-  const cleaned = String(value || '')
-    .replace(/[^\w.-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-  return cleaned || fallback;
-}
-
-function cleanupTempZip(zipPath) {
-  fs.unlink(zipPath, () => {
-    fs.rm(path.dirname(zipPath), { recursive: true, force: true }, () => {});
-  });
-}
-
-function sendWindowsDirectoryZip(download, res) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-zip-'));
-  const tempZip = path.join(tempDir, `${randomUUID()}.zip`);
-  const sourcePath = path.join(download.zipCwd, download.zipEntryName);
-  const powershell = process.env.POWERSHELL_BIN || 'powershell.exe';
-  const child = spawn(
-    powershell,
-    [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
-      sourcePath,
-      tempZip,
-    ],
-    { windowsHide: true },
-  );
-  let stderr = '';
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-  });
-  child.on('error', (err) => {
-    cleanupTempZip(tempZip);
-    if (!res.headersSent) {
-      return res.status(500).json({ error: `zip failed: ${err.message}` });
-    }
-    return res.destroy(err);
-  });
-  child.on('close', (code) => {
-    if (code !== 0) {
-      cleanupTempZip(tempZip);
-      const message = stderr.trim() || `zip exited with code ${code}`;
-      if (!res.headersSent) {
-        return res.status(500).json({ error: message });
-      }
-      return res.destroy(new Error(message));
-    }
-    return res.download(tempZip, download.filename, (err) => {
-      cleanupTempZip(tempZip);
-      if (err && !res.headersSent) {
-        return sendFilesystemError(res, err);
-      }
-      return undefined;
-    });
-  });
-}
-
-function sendUnixDirectoryZip(download, res) {
-  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
-    cwd: download.zipCwd,
-  });
-  let stderr = '';
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-  });
-  child.on('error', (err) => {
-    if (!res.headersSent) {
-      return res.status(500).json({ error: `zip failed: ${err.message}` });
-    }
-    return res.destroy(err);
-  });
-  child.on('close', (code) => {
-    if (code !== 0 && !res.destroyed) {
-      const message = stderr.trim() || `zip exited with code ${code}`;
-      if (!res.headersSent) {
-        return res.status(500).json({ error: message });
-      }
-      return res.destroy(new Error(message));
-    }
-    return undefined;
-  });
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
-  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
-  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
-  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
-  let sentBytes = 0;
-  child.stdout.on('data', (chunk) => {
-    sentBytes += chunk.length;
-    if (sentBytes > MAX_DOWNLOAD_BYTES) {
-      child.kill('SIGKILL');
-      res.destroy();
-    }
-  });
-  return child.stdout.pipe(res);
-}
-
-function sendDirectoryZip(download, res) {
-  if (process.platform === 'win32') {
-    return sendWindowsDirectoryZip(download, res);
-  }
-  return sendUnixDirectoryZip(download, res);
 }
 
 function sendEvent(type, payload) {
@@ -671,31 +486,6 @@ function broadcastScope(
   });
 }
 
-function taskCompletionSnippet(value) {
-  const redacted = redactSensitiveText(value);
-  const firstLine =
-    redacted
-      .split(/\r?\n/)
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .find((line) => line.length > 0) || '';
-  if (!firstLine) return 'Task completed.';
-  if (firstLine.length <= 140) return firstLine;
-  return `${firstLine.slice(0, 137)}...`;
-}
-
-function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
-  if (hasPresence(scopeWorkdir)) return;
-  const body = taskCompletionSnippet(content);
-  notifyAll({
-    title: `${agent.label} finished`,
-    titleZh: `${agent.label} 已完成`,
-    message: body,
-    messageZh: body,
-    scopeWorkdir,
-    category: 'task',
-  });
-}
-
 function agentTurnDependencies() {
   return {
     broadcastScope,
@@ -711,152 +501,25 @@ function agentTurnDependencies() {
   };
 }
 
-// Where a turn Claude runs on its own lands: a reply of its own in the
-// conversation, with no user message before it, queued on the scope like any
-// other turn so a message sent meanwhile waits for it, as it does in the CLI.
-// Stop cancels it like any turn, and a session deleted meanwhile drops it.
-function backgroundTurnHandler({ agent, contextKey, sessionId, workdir }) {
-  return ({ progressLines, run, cancel }) => {
-    const session = resolveChatSession(contextKey, sessionId);
-    if (!session) return;
-    const requestId = `${agent.key}.background.${randomUUID()}`;
-    const scopeKey = scopeKeyFor(agent.key, workdir, session.id);
-    const abortController = new AbortController();
-    abortController.signal.addEventListener('abort', cancel, { once: true });
-    const runState = {
-      requestId,
-      agent,
-      session,
-      deviceId: 'agent-background',
-      scopeKey,
-      scopeWorkdir: workdir,
-      cancelled: false,
-      cancelEventSent: false,
-      abortController,
-    };
-    activeRequests.set(requestId, runState);
-    runAgentTurn({
-      agent,
-      contextKey,
-      dependencies: {
-        ...agentTurnDependencies(),
-        runAgent: (_agentKey, _prompt, onEvent) => run(onEvent),
-      },
-      deviceId: 'agent-background',
-      finalizeContent({ content, streamedText }) {
-        return String(content || streamedText || '').trim();
-      },
-      initialProgressLines: progressLines,
-      notifyTaskCompletion,
-      prompt: '',
-      recordUserMessage: false,
-      requestId,
-      runState,
-      scopeKey,
-      session,
-      workdir,
-    }).catch((err) => {
-      console.error(`[${agent.key}] background turn failed: ${err.message}`);
-    }).finally(() => activeRequests.delete(requestId));
-  };
-}
-
-async function runScheduledQuotaMessage(schedule) {
-  const agent = getAgent(schedule.agentKey);
-  if (!agent) {
-    markQuotaScheduleFailed(schedule.id, `unknown agent: ${schedule.agentKey}`);
-    return;
-  }
-
-  const contextKey = sessionContextKeyFor(agent.key, schedule.workdir);
-  const chatSession = resolveChatSession(contextKey, schedule.sessionId);
-  if (!chatSession) {
-    markQuotaScheduleFailed(schedule.id, 'scheduled chat session was deleted');
-    return;
-  }
-
-  const runningSchedule = markQuotaScheduleRunning(schedule.id) || schedule;
-  const requestId = `quota.${schedule.id}`;
-  const deviceId = 'quota-scheduler';
-  const scopeKey = scopeKeyFor(agent.key, schedule.workdir, chatSession.id);
-
-  await runAgentTurn({
-    agent,
-    agentKey: agent.key,
-    contextKey,
-    defaultErrorCode: 'SCHEDULED_AGENT_ERROR',
-    dependencies: agentTurnDependencies(),
-    deviceId,
-    finalizeBeforeDone: true,
-    finalizeContent({ content, streamedText }) {
-      return String(content || streamedText || '').trim();
-    },
-    historyMetadata: {
-      scheduledQuotaMessageId: schedule.id,
-      quotaSourceKey: schedule.sourceKey,
-    },
-    initialProgressLines: ['Scheduled after quota reset.'],
-    onBeforeDone() {
-      markQuotaScheduleSent(schedule.id);
-    },
-    onAfterDone() {
-      sendEvent('quota_schedule_sent', {
-        scopeWorkdir: schedule.workdir,
-        schedule: {
-          ...runningSchedule,
-          status: 'sent',
-          sentAt: new Date().toISOString(),
-        },
-        message: `Scheduled ${agent.label} message was sent after quota reset.`,
-        messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
-        createdAt: new Date().toISOString(),
-      });
-    },
-    onBeforeError({ errorMessage }) {
-      markQuotaScheduleFailed(schedule.id, errorMessage);
-    },
-    onAfterError({ errorMessage }) {
-      sendEvent('quota_schedule_failed', {
-        scopeWorkdir: schedule.workdir,
-        schedule: {
-          ...runningSchedule,
-          status: 'failed',
-          error: errorMessage,
-        },
-        message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
-        messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
-        createdAt: new Date().toISOString(),
-      });
-    },
-    prompt: schedule.prompt,
-    requestId,
-    onBackgroundTurn: backgroundTurnHandler({
-      agent,
-      contextKey,
-      sessionId: chatSession.id,
-      workdir: schedule.workdir,
-    }),
-    responder: createNoopResponder(),
-    scopeKey,
-    session: chatSession,
-    workdir: schedule.workdir,
-  });
-}
-
-async function processDueQuotaSchedules(info) {
-  const sourceKey = info && info.key;
-  const due = dueQuotaSchedulesForReset(sourceKey);
-  for (const schedule of due) {
-    try {
-      await runScheduledQuotaMessage(schedule);
-    } catch (err) {
-      console.error(
-        `[quota:${sourceKey}] scheduled message ${schedule.id} failed: ${err.message}`,
-      );
-      markQuotaScheduleFailed(schedule.id, err.message);
-    }
-  }
-}
+const notifyTaskCompletion = createTaskCompletionNotifier({ hasPresence, notifyAll });
+const backgroundTurnHandler = createBackgroundTurnHandler({
+  activeRequests,
+  agentTurnDependencies,
+  notifyTaskCompletion,
+  resolveChatSession,
+  scopeKeyFor,
+});
+const processDueQuotaSchedules = createQuotaScheduleRunner({
+  agentTurnDependencies,
+  backgroundTurnHandler,
+  createNoopResponder,
+  getAgent,
+  resolveChatSession,
+  runAgentTurn,
+  scopeKeyFor,
+  sendEvent,
+  sessionContextKeyFor,
+});
 
 const routeContext = {
   CLI,
@@ -897,7 +560,6 @@ const routeContext = {
   eventWorkdir,
   fcm,
   finalizeStaleStreamingHistory,
-  formatUptime,
   fs,
   getAgent,
   getDefaultWorkdir,
@@ -917,7 +579,6 @@ const routeContext = {
   prepareDownloadAbsolute,
   push,
   pushCategoriesFromBody,
-  queryBool,
   randomUUID,
   readHistory,
   recentWorkdirs,

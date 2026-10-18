@@ -46,7 +46,9 @@ shared across all agent chats, Swarms and the chat home. Drag the single slider
 to preview the current theme's image opacity, then select **Save** to apply.
 Light/dark defaults are 80%/20%. Apps keep the original image at full
 resolution; the Web stores a compressed copy. Chat panels, message bubbles and
-every other page share one acrylic surface over the centered, filling image.
+every other page share one acrylic surface over the centered, filling image;
+two fields below the slider set its blur (0-30, default 6) and tint (0-100%,
+default 55%) for both themes.
 
 <a href="assets/screenshots/relay-chat-web.png">
   <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">

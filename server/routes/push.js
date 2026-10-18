@@ -20,7 +20,7 @@ module.exports = function createPushRouter(ctx) {
     if (!subscription || !subscription.endpoint) {
       return res.status(400).json({ error: 'subscription is required' });
     }
-    let workdir = '';
+    let workdir;
     try {
       workdir = requestWorkdir(req);
     } catch (_err) {
@@ -40,7 +40,7 @@ module.exports = function createPushRouter(ctx) {
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'token is required' });
     }
-    let workdir = '';
+    let workdir;
     try {
       workdir = requestWorkdir(req);
     } catch (_err) {

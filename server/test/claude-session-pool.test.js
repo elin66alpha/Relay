@@ -286,19 +286,25 @@ test('result messages settle the turn and are not replayed as progress', async (
   await pool.shutdown();
 });
 
-test('message listener failures warn once per session and turns still complete', async (t) => {
+test('message listener failures warn once per session and leave it usable', async (t) => {
   const warn = t.mock.method(console, 'warn', () => {});
   const sdk = fakeSdk();
   const pool = makePool(sdk);
   t.after(() => pool.shutdown());
   for (const prompt of ['one', 'two']) {
+    let delivered = false;
     const { result } = await send(pool, 'a', prompt, {
-      onMessage() { throw new Error('listener failed'); },
+      onMessage() {
+        delivered = true;
+        throw new Error('listener failed');
+      },
     });
+    assert.equal(delivered, true);
     assert.equal(result.result, `echo:${prompt}`);
   }
+  assert.equal(sdk.spawned.length, 1, 'session survives listener failures');
+  assert.equal(sdk.spawned[0].closed, false);
   assert.equal(warn.mock.calls.length, 1);
-  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: listener failed/);
 });
 
 test('a dead warm session is retried cold rather than failing the turn', async () => {
@@ -498,7 +504,7 @@ test('a turn Claude runs on its own while idle is handed to onBackgroundTurn', a
   await pool.shutdown();
 });
 
-test('background start failures warn once per session without interrupting later turns', async (t) => {
+test('background start failures warn once per session and leave it usable', async (t) => {
   const warn = t.mock.method(console, 'warn', () => {});
   const sdk = fakeSdk();
   const pool = makePool(sdk);
@@ -517,28 +523,37 @@ test('background start failures warn once per session without interrupting later
   const { result } = await send(pool, 'a', 'three');
   assert.equal(result.result, 'echo:three');
   assert.equal(starts, 2);
+  assert.equal(sdk.spawned.length, 1, 'session survives listener failures');
+  assert.equal(sdk.spawned[0].closed, false);
   assert.equal(warn.mock.calls.length, 1);
-  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: background start failed/);
 });
 
-test('background listener failures are logged without interrupting later turns', async (t) => {
+test('background listener failures warn for each failure and leave the session usable', async (t) => {
   const warn = t.mock.method(console, 'warn', () => {});
   const sdk = fakeSdk();
   const pool = makePool(sdk);
   t.after(() => pool.shutdown());
+  const failures = new Set();
   sdk.afterNextReply(bgText('later'), bgText('continued'), bgResult);
   await send(pool, 'a', 'one', {
     onBackgroundTurn: () => ({
-      onMessage() { throw new Error('background listener failed'); },
-      finish() { throw new Error('background finish failed'); },
+      onMessage() {
+        failures.add('message');
+        throw new Error('background listener failed');
+      },
+      finish() {
+        failures.add('finish');
+        throw new Error('background finish failed');
+      },
       fail() {},
     }),
   });
   const { result } = await send(pool, 'a', 'two');
   assert.equal(result.result, 'echo:two');
+  assert.deepEqual([...failures], ['message', 'finish']);
+  assert.equal(sdk.spawned.length, 1, 'session survives listener failures');
+  assert.equal(sdk.spawned[0].closed, false);
   assert.equal(warn.mock.calls.length, 2);
-  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: background listener failed/);
-  assert.match(warn.mock.calls[1].arguments[0], /\[claude\].*a: background finish failed/);
 });
 
 test('a background turn keeps the stream until its result, even with a turn queued behind it', async () => {

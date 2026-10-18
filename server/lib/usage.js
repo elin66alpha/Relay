@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const { createJsonStore } = require('./json-store');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -28,6 +29,10 @@ const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_CACHE_MS = 60_000;
 const CLAUDE_CACHE_MS = 60_000;
 const USAGE_CACHE_FILE = path.join(__dirname, '..', 'usage-cache.json');
+const usageCacheStore = createJsonStore(USAGE_CACHE_FILE, {
+  pretty: true,
+  trailingNewline: true,
+});
 const USAGE_BACKOFF_BASE_MS = parseInt(
   process.env.USAGE_BACKOFF_BASE_MS || '30000',
   10,
@@ -56,7 +61,6 @@ function attachTimeout(req, url) {
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
-let persistedUsageCache = null;
 const usageBackoff = {
   claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
@@ -89,27 +93,8 @@ class UsageQueryError extends Error {
   }
 }
 
-function loadUsageCache() {
-  if (persistedUsageCache) return persistedUsageCache;
-  try {
-    const decoded = JSON.parse(fs.readFileSync(USAGE_CACHE_FILE, 'utf-8'));
-    persistedUsageCache = decoded && typeof decoded === 'object' ? decoded : {};
-  } catch (_err) {
-    persistedUsageCache = {};
-  }
-  return persistedUsageCache;
-}
-
-function saveUsageCache() {
-  const tmp = `${USAGE_CACHE_FILE}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(loadUsageCache(), null, 2)}\n`, {
-    mode: 0o600,
-  });
-  fs.renameSync(tmp, USAGE_CACHE_FILE);
-}
-
 function persistedRecord(key) {
-  const record = loadUsageCache()[key];
+  const record = usageCacheStore.load()[key];
   if (!record || typeof record !== 'object' || !record.value) return null;
   return {
     fetchedAt: String(record.fetchedAt || record.savedAt || ''),
@@ -136,8 +121,9 @@ function rememberUsageSuccess(key, value, setMemoryCache) {
     fetchedAt,
     value: stripUsageMetadata(value),
   };
-  loadUsageCache()[key] = record;
-  saveUsageCache();
+  usageCacheStore.mutate((cache) => {
+    cache[key] = record;
+  });
   setMemoryCache({
     at: Date.now(),
     fetchedAt,

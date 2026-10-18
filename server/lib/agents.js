@@ -206,7 +206,7 @@ function finishRun(resultPromise, { agentKey, onEvent, retry }) {
 
 function toolBrief(name, input) {
   const data = input || {};
-  let detail = '';
+  let detail;
   if (name === 'Bash') detail = data.command || '';
   else if (
     name === 'Read' ||

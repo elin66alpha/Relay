@@ -4,8 +4,10 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
 const {
+  createBackgroundTurnHandler,
   createChatResponder,
   createNoopResponder,
+  createTaskCompletionNotifier,
   runAgentTurn,
 } = require('../lib/agent-turn');
 const { claudeBackgroundTurn } = require('../lib/agents');
@@ -482,4 +484,67 @@ test('a cancelled background turn interrupts Claude and rejects as cancelled', a
   assert.equal(interrupted, 1);
   turn.finish({ type: 'result', subtype: 'error_during_execution' });
   await assert.rejects(done, { name: 'AgentCancelledError' });
+});
+
+test('a finished turn notifies only when no device has its workdir open', () => {
+  const sent = [];
+  const notify = createTaskCompletionNotifier({
+    hasPresence: (workdir) => workdir === '/open',
+    notifyAll: (payload) => sent.push(payload),
+  });
+
+  notify({ agent, scopeWorkdir: '/open', content: 'done' });
+  notify({ agent, scopeWorkdir: '/away', content: '\n  first   line \nsecond' });
+  notify({ agent, scopeWorkdir: '/away', content: 'x'.repeat(200) });
+  notify({ agent, scopeWorkdir: '/away', content: '' });
+
+  assert.deepEqual(sent.map((payload) => payload.message), [
+    'first line',
+    `${'x'.repeat(137)}...`,
+    'Task completed.',
+  ]);
+  assert.equal(sent[0].title, 'Claude finished');
+  assert.equal(sent[0].category, 'task');
+  assert.equal(sent[0].scopeWorkdir, '/away');
+});
+
+test('a background turn lands as a reply of its own unless its session is gone', async () => {
+  const harness = makeHarness(async () => 'unused');
+  const activeRequests = new Map();
+  let notified = null;
+  const handler = createBackgroundTurnHandler({
+    activeRequests,
+    agentTurnDependencies: () => harness.dependencies,
+    notifyTaskCompletion: (payload) => {
+      notified = payload;
+    },
+    resolveChatSession: (_contextKey, sessionId) => (sessionId === 'gone' ? null : session),
+    scopeKeyFor: (agentKey, workdir, sessionId) => `${workdir}|${agentKey}|${sessionId}`,
+  });
+  const failRun = async () => {
+    throw new Error('a dropped turn must not run');
+  };
+
+  handler({ agent, contextKey: 'context', sessionId: 'gone', workdir: '/w' })({
+    progressLines: [],
+    run: failRun,
+    cancel() {},
+  });
+  assert.equal(activeRequests.size, 0);
+
+  handler({ agent, contextKey: 'context', sessionId: session.id, workdir: '/w' })({
+    progressLines: ['task finished'],
+    run: async (onEvent) => {
+      onEvent({ type: 'delta', text: 'background reply' });
+      return 'background reply';
+    },
+    cancel() {},
+  });
+  assert.equal(activeRequests.size, 1);
+  while (activeRequests.size > 0) await new Promise((resolve) => setImmediate(resolve));
+
+  const history = harness.histories.get('/w|claude|default');
+  assert.deepEqual(history.map((message) => message.role), ['assistant']);
+  assert.equal(history[0].content, 'background reply');
+  assert.equal(notified.content, 'background reply');
 });

@@ -1,9 +1,13 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
+
 const {
   AgentAuthError,
   AgentCancelledError,
 } = require('./agents');
+const { redactSensitiveText } = require('./history');
+const { wantsStream, writeStreamEvent, endStream } = require('./sse');
 
 function agentPayload(agent) {
   return { key: agent.key, label: agent.label };
@@ -11,30 +15,6 @@ function agentPayload(agent) {
 
 function sessionPayload(session) {
   return session ? { id: session.id, name: session.name } : null;
-}
-
-function wantsChatStream(req) {
-  return String(req.get('accept') || '')
-    .toLowerCase()
-    .includes('text/event-stream');
-}
-
-function writeStreamEvent(res, type, payload) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
-  } catch (_err) {
-    // The client may have closed the app/web tab while the CLI keeps running.
-  }
-}
-
-function endStream(res) {
-  if (res.destroyed || res.writableEnded) return;
-  try {
-    res.end();
-  } catch (_err) {
-    // The request can already be gone; the server-side run still finishes.
-  }
 }
 
 function sleep(ms) {
@@ -74,7 +54,7 @@ function createNoopResponder() {
 }
 
 function createChatResponder({ req, res }) {
-  const streaming = wantsChatStream(req);
+  const streaming = wantsStream(req);
   return {
     streaming,
     ready(requestId) {
@@ -646,10 +626,99 @@ async function runAgentTurn(options) {
   }
 }
 
+function taskCompletionSnippet(value) {
+  const redacted = redactSensitiveText(value);
+  const firstLine =
+    redacted
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .find((line) => line.length > 0) || '';
+  if (!firstLine) return 'Task completed.';
+  if (firstLine.length <= 140) return firstLine;
+  return `${firstLine.slice(0, 137)}...`;
+}
+
+// A finished turn notifies devices only when none has its workdir open, since
+// those already see the reply arrive.
+function createTaskCompletionNotifier({ hasPresence, notifyAll }) {
+  return function notifyTaskCompletion({ agent, scopeWorkdir, content }) {
+    if (hasPresence(scopeWorkdir)) return;
+    const body = taskCompletionSnippet(content);
+    notifyAll({
+      title: `${agent.label} finished`,
+      titleZh: `${agent.label} 已完成`,
+      message: body,
+      messageZh: body,
+      scopeWorkdir,
+      category: 'task',
+    });
+  };
+}
+
+// Where a turn Claude runs on its own lands: a reply of its own in the
+// conversation, with no user message before it, queued on the scope like any
+// other turn so a message sent meanwhile waits for it, as it does in the CLI.
+// Stop cancels it like any turn, and a session deleted meanwhile drops it.
+function createBackgroundTurnHandler({
+  activeRequests,
+  agentTurnDependencies,
+  notifyTaskCompletion,
+  resolveChatSession,
+  scopeKeyFor,
+}) {
+  return function backgroundTurnHandler({ agent, contextKey, sessionId, workdir }) {
+    return ({ progressLines, run, cancel }) => {
+      const session = resolveChatSession(contextKey, sessionId);
+      if (!session) return;
+      const requestId = `${agent.key}.background.${randomUUID()}`;
+      const scopeKey = scopeKeyFor(agent.key, workdir, session.id);
+      const abortController = new AbortController();
+      abortController.signal.addEventListener('abort', cancel, { once: true });
+      const runState = {
+        requestId,
+        agent,
+        session,
+        deviceId: 'agent-background',
+        scopeKey,
+        scopeWorkdir: workdir,
+        cancelled: false,
+        cancelEventSent: false,
+        abortController,
+      };
+      activeRequests.set(requestId, runState);
+      runAgentTurn({
+        agent,
+        contextKey,
+        dependencies: {
+          ...agentTurnDependencies(),
+          runAgent: (_agentKey, _prompt, onEvent) => run(onEvent),
+        },
+        deviceId: 'agent-background',
+        finalizeContent({ content, streamedText }) {
+          return String(content || streamedText || '').trim();
+        },
+        initialProgressLines: progressLines,
+        notifyTaskCompletion,
+        prompt: '',
+        recordUserMessage: false,
+        requestId,
+        runState,
+        scopeKey,
+        session,
+        workdir,
+      }).catch((err) => {
+        console.error(`[${agent.key}] background turn failed: ${err.message}`);
+      }).finally(() => activeRequests.delete(requestId));
+    };
+  };
+}
+
 module.exports = {
   agentPayload,
+  createBackgroundTurnHandler,
   createChatResponder,
   createNoopResponder,
+  createTaskCompletionNotifier,
   runAgentTurn,
   sessionPayload,
 };

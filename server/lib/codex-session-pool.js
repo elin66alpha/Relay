@@ -137,7 +137,7 @@ function createCodexDriver(rpc) {
         }
         const entry = rpc.sessionFor(params.threadId);
         const turn = entry && entry.turn;
-        let approve = false;
+        let approve;
         try {
           approve = !!(
             turn &&

@@ -137,7 +137,6 @@ module.exports = function createChatRouter(ctx) {
 
   router.post('/api/chat/cancel', (req, res) => {
     const requestId = String(req.body.requestId || '').trim();
-    const deviceId = normalizeDeviceId(req.get('x-device-id'));
     if (!requestId) {
       return res.status(400).json({ error: 'requestId is required' });
     }

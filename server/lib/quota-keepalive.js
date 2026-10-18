@@ -62,7 +62,7 @@ function startClaudeQuotaKeepalive({
   let nextPrimeAllowedAt = 0;
 
   async function tick() {
-    let waitMs = ERROR_RETRY_MS;
+    let waitMs;
     try {
       const usage = await readUsage();
       const plan = planKeepalive({
