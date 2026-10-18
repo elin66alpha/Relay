@@ -1,6 +1,13 @@
 enum ChatRole { user, assistant, system }
 
-String _newMessageId() => DateTime.now().microsecondsSinceEpoch.toString();
+int _lastMessageId = 0;
+
+String _newMessageId() {
+  // Windows can return the same clock tick for consecutive messages.
+  final int now = DateTime.now().microsecondsSinceEpoch;
+  _lastMessageId = now > _lastMessageId ? now : _lastMessageId + 1;
+  return _lastMessageId.toString();
+}
 
 /// One assistant message within a single turn. A turn can produce several of
 /// these — the agent's mid-task follow-up notes plus its final answer — and each

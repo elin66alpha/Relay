@@ -184,6 +184,7 @@ const List<_Release> _zhReleases = <_Release>[
       '压缩对话后，上下文用量会马上刷新。',
       '对敏感文件的访问保护更严格了。',
       '后端安装更稳：装完会检查终端组件能不能正常用。',
+      '修复 Windows 上快速创建消息时，消息按钮或显示可能混乱的问题。',
     ],
   ),
 ];
@@ -220,6 +221,7 @@ const List<_Release> _enReleases = <_Release>[
       'After compacting a conversation, context usage updates right away.',
       'Sensitive files are better protected from access.',
       'Backend setup is sturdier: it checks that the terminal component really works.',
+      'Quickly created messages no longer mix up their actions or display on Windows.',
     ],
   ),
 ];

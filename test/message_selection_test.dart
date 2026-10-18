@@ -383,6 +383,10 @@ void main() {
     final ChatMessage pending = chat.messages.last;
     expect(chat.isStreaming(pending), isTrue);
     expect(
+      chat.messages.map((ChatMessage message) => message.id).toSet(),
+      hasLength(chat.messages.length),
+    );
+    expect(
       find.descendant(
         of: find.byKey(ValueKey<String>(pending.id)),
         matching: find.byType(IconButton),
@@ -409,6 +413,10 @@ void main() {
     final ChatMessage queued = chat.messages.last;
     expect(queued.content, _userText);
     expect(chat.isQueued(queued), isTrue);
+    expect(
+      chat.messages.map((ChatMessage message) => message.id).toSet(),
+      hasLength(chat.messages.length),
+    );
     expect(composer.controller!.text, isEmpty);
     expect(backend.prompts, <String>['Run task']);
     expect(

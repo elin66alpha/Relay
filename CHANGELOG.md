@@ -40,6 +40,8 @@
 
 ### Fixed
 
+- Messages created within one clock tick now receive distinct IDs, avoiding
+  message action and rendering mix-ups on Windows.
 - A Claude reply started on its own no longer spins forever when a message
   sent meanwhile is folded into it, and Stop now stops such a reply. The folded
   answer appears once, under the message it answers.
