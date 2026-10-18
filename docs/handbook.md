@@ -231,6 +231,11 @@ session (`setsid`). A Claude process with background tasks still running
 (background subagents, Monitor, background shells) is not closed as idle, and
 is evicted for the cap only when no other idle process can make room.
 
+When such work wakes Claude while the chat is idle, the turn it starts is
+shown in solo chat as a reply of its own once Claude writes text, queued behind
+any waiting turn and stopped by Stop like any other. A turn that only runs tools
+stays invisible. Swarm members and the other agents do not surface these turns.
+
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
 last step is best effort because the external CLI can reject or fail deletion;

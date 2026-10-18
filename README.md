@@ -17,7 +17,7 @@ A private, self-hosted remote cockpit for Claude Code, Codex, OpenCode, and Herm
 </div>
 
 <a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="Relay home screen showing connected coding agents, recent sessions, and a multi-agent Swarm" width="100%">
+  <img src="assets/screenshots/relay-overview-web.png" alt="Relay home screen in the dark theme with a wallpaper, showing the current machine and workspace beside the agent and Swarm drawer" width="100%">
 </a>
 
 Relay leaves your source code, shell access, and CLI credentials on the computer
@@ -49,7 +49,7 @@ resolution; the Web stores a compressed copy. Chat panels, message bubbles and
 every other page share one acrylic surface over the centered, filling image.
 
 <a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation in the Relay Web client" width="100%">
+  <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">
 </a>
 
 ### Chat, coordinate, and manage files from mobile
@@ -67,7 +67,7 @@ every other page share one acrylic surface over the centered, filling image.
   </tr>
 </table>
 
-<sub>These screenshots were captured in Chromium against an isolated demo backend; they contain no production credentials or project data.</sub>
+<sub>These screenshots use the dark theme with a wallpaper set in Settings → Wallpaper. They were captured in Chromium against an isolated demo backend and contain no production credentials or project data.</sub>
 
 ## How it fits together
 
@@ -94,13 +94,14 @@ can run concurrently without sharing a global backend directory.
 
 | | Capability | What it gives you |
 |---|---|---|
-| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. |
+| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. Replies Claude starts on its own, such as when a background task finishes, appear as messages of their own. |
 | 📎 | **Chat attachments and context** | Attach files to upload them to the workspace and add their paths to the draft. Above the solo-chat composer, see context tokens as `<used> / <window>`; `?` means unknown. |
 | 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
 | 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, Claude credential expiry, and Fast mode for Claude/Codex. |
 | 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
 | 📊 | **Quota workflows** | Claude/Codex usage views plus one queued prompt for the next detected five-hour reset. |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
+| 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
 
 Claude Code and Codex are the primary integrations. OpenCode and Hermes are
 available as experimental, host-managed integrations. All four keep their
@@ -147,6 +148,7 @@ device.
 Choose the backend, set the workdir, and open an agent conversation or Swarm.
 Home shows the current machine, current workspace, and up to three recent
 workspaces. Tap the machine for CLI status checks, device tokens, and Enter SSH.
+In the Android and iOS apps, swipe right anywhere in a chat to open the drawer.
 Use File system → Set as work path to select the project before sending a task.
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
