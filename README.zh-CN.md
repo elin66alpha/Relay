@@ -174,7 +174,8 @@ npm --prefix server start
 ```
 
 Web 参数会有意禁用 service worker，并在本地打包 CanvasKit。Windows release 已实际
-验证；macOS/Linux 桌面打包和安全存储验证成熟度较低。详见
+验证；macOS/Linux 桌面打包和安全存储验证成熟度较低。Android release 构建需要签名密钥，
+见 [Android release signing](docs/handbook.md#android-release-signing)。详见
 [开发手册](docs/handbook.md#development-and-builds)。
 
 ```text

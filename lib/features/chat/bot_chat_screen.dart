@@ -444,15 +444,19 @@ class _BotChatScreenState extends State<BotChatScreen>
             : Drawer(
                 backgroundColor: acrylic ? Colors.transparent : null,
                 surfaceTintColor: acrylic ? Colors.transparent : null,
-                child: ChatChromeSurface(
-                  acrylic: acrylic,
-                  color: Theme.of(context).colorScheme.surfaceContainerLow,
-                  border: Border(
-                    right: BorderSide(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+                // The drawer covers the chat and its scrim, so it blurs a
+                // backdrop of its own rather than the page's shared one.
+                child: BackdropGroup(
+                  child: ChatChromeSurface(
+                    acrylic: acrylic,
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    border: Border(
+                      right: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                     ),
+                    child: SafeArea(child: sidebar),
                   ),
-                  child: SafeArea(child: sidebar),
                 ),
               ),
         appBar: usePermanentSidebar

@@ -190,7 +190,9 @@ npm --prefix server start
 
 The Web flags intentionally disable the service worker and bundle CanvasKit
 locally. Windows release builds have been exercised; macOS/Linux desktop
-packaging and secure-storage validation are less mature. See the
+packaging and secure-storage validation are less mature. Android release builds
+need a signing key; see
+[Android release signing](docs/handbook.md#android-release-signing). See the
 [development handbook](docs/handbook.md#development-and-builds).
 
 ```text

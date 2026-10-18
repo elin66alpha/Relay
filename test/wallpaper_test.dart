@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -70,16 +71,19 @@ void main() {
       ),
     );
     await tester.enterText(find.byType(TextField), 'draft');
-    expect(find.byType(ChatChromeSurface), findsNothing);
+    expect(find.byType(ChatWallpaper), findsNothing);
     await settings.saveWallpaper(
       Wallpaper(bytes: img.encodePng(img.Image(width: 4, height: 3))),
     );
     await tester.pump();
     expect(find.text('draft'), findsOneWidget);
+    // The image itself is blurred, so the page reads no backdrop.
     expect(
-      tester.widget<ChatChromeSurface>(find.byType(ChatChromeSurface)).acrylic,
+      tester.widget<ChatWallpaper>(find.byType(ChatWallpaper)).blurred,
       isTrue,
     );
+    expect(find.byType(ImageFiltered), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
     expect(
       Theme.of(tester.element(find.byType(TextField))).scaffoldBackgroundColor,
       Colors.transparent,
@@ -229,6 +233,69 @@ void main() {
       });
     }
   }
+
+  testWidgets('the wallpaper decodes only what covers the display',
+      (WidgetTester tester) async {
+    tester.view.display.size = const Size(1000, 2000);
+    addTearDown(tester.view.display.resetSize);
+    Future<ImageProvider> providerFor(int width, int height) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ChatWallpaper(
+            wallpaper: Wallpaper(
+              bytes: img.encodePng(img.Image(width: width, height: height)),
+            ),
+            child: const SizedBox(),
+          ),
+        ),
+      );
+      return tester.widget<Image>(find.byType(Image)).image;
+    }
+
+    // Short side 3000 shrinks to the display's long side 2000, so a 4500 x
+    // 3000 image fits a 3000 box whichever way it is oriented.
+    for (final (int w, int h) in <(int, int)>[(4500, 3000), (3000, 4500)]) {
+      final ResizeImage resized = await providerFor(w, h) as ResizeImage;
+      expect((resized.width, resized.height), (3000, 3000));
+      expect(resized.policy, ResizeImagePolicy.fit);
+    }
+    expect(await providerFor(1500, 2000), isA<MemoryImage>());
+  });
+
+  testWidgets('chat surfaces share one backdrop unless nested',
+      (WidgetTester tester) async {
+    Widget surface({Widget child = const SizedBox(height: 40)}) =>
+        ChatChromeSurface(
+          acrylic: true,
+          color: Colors.white,
+          border: const Border(),
+          child: child,
+        );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatWallpaper(
+          wallpaper: Wallpaper(
+            bytes: img.encodePng(img.Image(width: 4, height: 3)),
+          ),
+          child: Column(
+            children: <Widget>[
+              surface(),
+              surface(),
+              surface(child: surface()),
+            ],
+          ),
+        ),
+      ),
+    );
+    final List<BackdropKey?> keys = tester
+        .renderObjectList<RenderBackdropFilter>(find.byType(BackdropFilter))
+        .map((RenderBackdropFilter filter) => filter.backdropKey)
+        .toList();
+    expect(keys, hasLength(4));
+    expect(keys.take(3).toSet(), hasLength(1));
+    expect(keys.first, isNotNull);
+    expect(keys.last, isNot(keys.first));
+  });
 
   testWidgets(
       'the single slider follows theme changes without losing either draft',

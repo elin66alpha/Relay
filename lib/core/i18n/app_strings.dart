@@ -498,6 +498,14 @@ class AppStrings {
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';
+  String get checkForUpdates => isZh ? '检查更新' : 'Check for updates';
+  String upToDate(String version) =>
+      isZh ? '已是最新版本 $version' : 'You are on the latest version, $version';
+  String updateAvailable(String version) => isZh
+      ? '有新版本 $version，可在 GitHub Releases 下载'
+      : 'Version $version is available on GitHub Releases';
+  String get updateCheckFailed =>
+      isZh ? '无法检查更新，请稍后再试' : 'Could not check for updates. Try again later.';
   String get fontSize => isZh ? '字体大小' : 'Font size';
   String get fontSizeDescription =>
       isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';

@@ -205,7 +205,9 @@ agent/chat sessions, history, settings, context windows, groups, quota
 state/schedules, usage cache, and push/FCM stores. They are deployment state,
 not fixtures. Keep them, along with any referenced FCM service-account JSON,
 out of patches and release archives. `server/models-extra.json` is also a local
-override, not a shared catalog.
+override, not a shared catalog. The Android release keystore and
+`android/key.properties` are signing secrets: never commit or upload them;
+`android/key.properties.example` is the template.
 
 ## Verification expectations
 

@@ -74,6 +74,7 @@ Dependency direction: server routes -> lib -> json-store; lib/features/chat -> o
 | Device-local shared wallpaper (explicit Save, one live opacity slider for the current theme, centered cover; first-level pages (chat, home, Swarm) make every surface on the wallpaper acrylic; other pushed pages show it behind a full-page acrylic layer with solid content) | core/settings, core/widgets, features/settings, features/chat | active |
 | What's new (Home entry above Tutorial; per release 1-3 plain-language highlights plus other changes in small text) | features/settings/whats_new_screen, features/chat home | active |
 | Credential onboarding | scripts/create-credential, core/credentials, features/machines | active |
+| Update check (Settings → Check for updates compares with the latest GitHub release and only reports it; no download) | features/settings | active |
 
 Deprecated features stay listed until their code is deleted, then the row is
 removed.
@@ -87,11 +88,13 @@ removed.
 - `npm --prefix server test` -> "# fail 0"
 - `(cd server && node -e "require('node-pty')")` -> exit 0
 - `flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn` -> exit 0, `build/web/index.html` exists
+- `flutter build apk --release --no-pub` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows SHA-256 `3e4dea3f…720f`
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
 - File browser: tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.
+- Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher it shows "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later."
 - `grep -rn "import '\.\./chat/\|features/chat/" lib/features --include=*.dart | grep -v '^lib/features/chat/'` -> no output
 - `grep -rn "features/" lib/core --include=*.dart` -> no output
 - After a reply in solo chat with any of the four agents, the line above the composer shows `<used> / <window>` (e.g. `42k / 200k`) at its right end. A new or cleared conversation shows `0 / <window>`; a conversation whose replies predate the feature shows `? / <window>`; `<window>` reads `?` until that agent + model has replied once.
@@ -117,7 +120,7 @@ one summary line.
 ## Review
 
 Last review: 2026-10-17
-Features since last review: 2
+Features since last review: 3
 Last result: Intent Problem, Structure Problem, Entropy Problem, Test value Problem, Documentation Problem, Operability Problem, Evolution Problem, Performance Problem; 13 findings (F1-F13 in the second 2026-10-17 audit), all addressed on 2026-10-17.
 
 ## Deviations

@@ -88,8 +88,10 @@ in one replacement. Leaving the editor without saving keeps the prior settings.
 
 Imports accept JPG, PNG and WebP. On Android, iOS and desktop, **Save** copies
 the original file unchanged into the app support directory (`wallpaper/`), the
-preference keeps only its file name, and chat shows it at full resolution with
-no size limit; replacing or removing it deletes the previous copy. The Web keeps
+preference keeps only its file name, with no size limit; replacing or removing
+it deletes the previous copy. Chat decodes only the pixels the display can show
+(the short side at the display's long side), so a large photo stays sharp
+without costing frame time. The Web keeps
 the image inline in localStorage, so it accepts up to 20 MiB and 40 million
 pixels and makes a JPEG copy with a long edge of at most 1920 pixels, reduced
 further to fit 256 KiB, using asynchronous browser bitmap decoding and canvas
@@ -102,8 +104,11 @@ first-level pages (solo chat, the chat home and Swarm) make everything drawn on
 the wallpaper acrylic: headers, sidebars, drawers, banners, home cards,
 composers and message bubbles share one 72% theme tint over clipped backdrop
 blur, and the composer surface reaches the bottom edge behind the gesture bar.
-Every other page opened from the app (File System, Quota Usage, Settings, ...)
-shows the blurred wallpaper under the same tint and keeps solid content. An empty chat
+Those surfaces never overlap, so a page blurs one shared backdrop snapshot
+(`BackdropGroup`) instead of one per surface; the drawer, which covers the chat,
+and a surface nested in another take their own. Every other page opened from
+the app (File System, Quota Usage, Settings, ...) shows the wallpaper image
+itself blurred under the same tint and keeps solid content. An empty chat
 shows only the wallpaper. Removing the image restores solid surfaces after Save.
 
 ## Credentials and agent login
@@ -426,6 +431,11 @@ npm --prefix server start
 The server serves `build/web` when present. CanvasKit is bundled locally and the
 service worker is disabled to keep the self-hosted client current.
 
+`scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
+backend JavaScript (`SKIP_CHECK=1` skips this), restarts or recreates
+`relay-server`, and waits until the port answers. `scripts/build_flow.sh` also
+rebuilds Web and an APK.
+
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution
@@ -499,6 +509,27 @@ Copy `android/key.properties.example` to `android/key.properties`, set
 `storeFile` to the keystore's absolute path, and fill in both passwords; with a
 PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 `flutter build apk --release` produces a release-signed APK.
+
+### Release assets
+
+A GitHub release `v<VERSION>` carries:
+
+- `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
+- `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
+  service adapters, without tests, dependencies, or deployment state:
+
+  ```bash
+  V=<VERSION>
+  git archive --format=tar.gz --prefix=relay-backend-setup-v$V/ \
+    -o relay-backend-setup-v$V.tar.gz HEAD $(git ls-tree -r --name-only HEAD |
+    grep -E '^(CHANGELOG\.md|LICENSE|README(\.zh-CN)?\.md|SECURITY\.md|docs/handbook\.md|scripts/setup\.sh|backends/README(\.zh-CN)?\.md|backends/(linux|macos)/(lib/)?[^/]+\.sh|backends/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
+  ```
+
+- `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
+  (`build/windows/x64/runner/Release/`);
+- `relay-backend-windows-x64-v<VERSION>.zip` — see
+  [Windows backend release bundle](#windows-backend-release-bundle);
+- `SHA256SUMS` — `sha256sum` of every asset above.
 
 ## Configuration
 

@@ -13,9 +13,11 @@ Relay has two parts:
   filesystem and process permissions.
 
 There is no Relay-hosted account or control plane. The client connects only to
-the backend URL in an imported credential. Prompts, files, agent output, and CLI
-credentials stay between your devices, backend host, and the CLI providers you
-already use.
+the backend URL in an imported credential, with one exception: Settings → Check
+for updates, when tapped, reads the latest release version from GitHub's public
+API (`api.github.com`). That request carries no Relay data, but GitHub sees the
+device's IP address. Prompts, files, agent output, and CLI credentials stay
+between your devices, backend host, and the CLI providers you already use.
 
 ## Credentials and device tokens
 
@@ -137,6 +139,16 @@ Uploads stream to a temporary file and default to 100 MB. Downloads default to
 300 MB. Configure smaller proxy and Relay limits when the deployment does not
 need those sizes. Unix directory downloads invoke the host's `zip` command;
 Windows uses PowerShell `Compress-Archive`.
+
+## Android APK signing
+
+Official Android APKs from 0.1.8 on are signed with the Relay release key,
+certificate SHA-256
+`3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`. Check a
+downloaded APK with `apksigner verify --print-certs`; one signed by another
+certificate is not an official build. Releases up to 0.1.7 were signed with a
+debug certificate. The keystore and `android/key.properties` stay outside
+version control.
 
 ## Production requirements
 

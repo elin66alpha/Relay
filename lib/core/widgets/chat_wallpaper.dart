@@ -1,8 +1,12 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 
 import '../i18n/app_strings.dart';
+import '../platform/wallpaper_processor_common.dart';
 import '../settings/wallpaper.dart';
 
 class WallpaperScope extends InheritedWidget {
@@ -24,11 +28,17 @@ class WallpaperScope extends InheritedWidget {
 }
 
 /// A single centered image spans the transcript and its surrounding chrome.
+///
+/// Every acrylic surface in [child] blurs from one shared backdrop snapshot,
+/// rather than copying the screen once per surface. That is exact as long as
+/// sibling surfaces never overlap; a surface that covers other content, such
+/// as a drawer, wraps itself in its own [BackdropGroup].
 class ChatWallpaper extends StatelessWidget {
   const ChatWallpaper({
     required this.wallpaper,
     required this.child,
     this.opacity,
+    this.blurred = false,
     super.key,
   });
 
@@ -36,9 +46,55 @@ class ChatWallpaper extends StatelessWidget {
   final Widget child;
   final Animation<double>? opacity;
 
+  /// Blurs the image itself, for a page that shows it through one full-page
+  /// tint: the image is all that is behind, so no backdrop needs reading.
+  final bool blurred;
+
+  static final Expando<img.DecodeInfo> _sizes = Expando<img.DecodeInfo>();
+
+  /// Decodes only as many pixels as the display can show: a full-size camera
+  /// photo costs hundreds of MB of texture that every frame samples. The square
+  /// box keeps the short side at the display's long side, so the image still
+  /// covers the screen in either orientation; the stored file stays original.
+  static ImageProvider _provider(BuildContext context, Uint8List bytes) {
+    final MemoryImage image = MemoryImage(bytes);
+    final img.DecodeInfo info;
+    try {
+      info = _sizes[bytes] ??= wallpaperInfo(bytes);
+    } on FormatException {
+      return image;
+    }
+    final Size display = View.of(context).display.size;
+    final double scale = math.max(display.width, display.height) /
+        math.min(info.width, info.height);
+    if (scale >= 1) return image;
+    final int box = (math.max(info.width, info.height) * scale).ceil();
+    return ResizeImage(
+      image,
+      width: box,
+      height: box,
+      policy: ResizeImagePolicy.fit,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final Widget image = wallpaper.bytes == null
+        ? const SizedBox.expand()
+        : Image(
+            image: _provider(context, wallpaper.bytes!),
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            gaplessPlayback: true,
+            opacity: opacity ??
+                AlwaysStoppedAnimation<double>(
+                  theme.brightness == Brightness.dark
+                      ? wallpaper.darkOpacity
+                      : wallpaper.lightOpacity,
+                ),
+            errorBuilder: (_, __, ___) => const SizedBox.expand(),
+          );
     return WallpaperScope(
       enabled: wallpaper.bytes != null,
       child: Stack(
@@ -50,28 +106,22 @@ class ChatWallpaper extends StatelessWidget {
                 child: IgnorePointer(
                   child: ColoredBox(
                     color: theme.scaffoldBackgroundColor,
-                    child: wallpaper.bytes == null
-                        ? const SizedBox.expand()
-                        : Image.memory(
-                            wallpaper.bytes!,
-                            fit: BoxFit.cover,
-                            alignment: Alignment.center,
-                            gaplessPlayback: true,
-                            opacity: opacity ??
-                                AlwaysStoppedAnimation<double>(
-                                  theme.brightness == Brightness.dark
-                                      ? wallpaper.darkOpacity
-                                      : wallpaper.lightOpacity,
-                                ),
-                            errorBuilder: (_, __, ___) =>
-                                const SizedBox.expand(),
-                          ),
+                    child: blurred
+                        ? ImageFiltered(
+                            imageFilter: ImageFilter.blur(
+                              sigmaX: 20,
+                              sigmaY: 20,
+                              tileMode: TileMode.clamp,
+                            ),
+                            child: image,
+                          )
+                        : image,
                   ),
                 ),
               ),
             ),
           ),
-          child,
+          BackdropGroup(child: child),
         ],
       ),
     );
@@ -106,12 +156,14 @@ class ChatChromeSurface extends StatelessWidget {
       child: Material(type: MaterialType.transparency, child: child),
     );
     if (!acrylic) return surface;
+    final ImageFilter blur = ImageFilter.blur(sigmaX: 20, sigmaY: 20);
+    // A nested surface must blur this one too, so it starts a fresh group.
+    final Widget layered = BackdropGroup(child: surface);
     return ClipRRect(
       borderRadius: borderRadius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: surface,
-      ),
+      child: BackdropGroup.of(context) == null
+          ? BackdropFilter(filter: blur, child: layered)
+          : BackdropFilter.grouped(filter: blur, child: layered),
     );
   }
 }
@@ -156,11 +208,11 @@ class WallpaperBackdrop extends StatelessWidget {
           child: on
               ? ChatWallpaper(
                   wallpaper: wallpaper,
-                  child: ChatChromeSurface(
-                    acrylic: true,
-                    color: theme.scaffoldBackgroundColor,
-                    border: const Border(),
-                    child: const SizedBox.expand(),
+                  blurred: true,
+                  child: ColoredBox(
+                    color: theme.scaffoldBackgroundColor.withValues(
+                      alpha: 0.72,
+                    ),
                   ),
                 )
               : const SizedBox.shrink(),
