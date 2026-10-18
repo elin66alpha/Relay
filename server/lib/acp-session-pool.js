@@ -109,7 +109,7 @@ function createAcpDriver(rpc) {
         const entry = rpc.sessionFor(params.sessionId);
         const turn = entry && entry.turn;
         const title = (params.toolCall && params.toolCall.title) || 'tool call';
-        let approve = false;
+        let approve;
         try {
           approve = !!(turn && turn.onPermission && turn.onPermission({ title }));
         } catch (_err) {

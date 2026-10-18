@@ -229,7 +229,7 @@ const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 let extraModelsCache = { stamp: null, value: null };
 
 function readExtraModels() {
-  let stamp = '';
+  let stamp;
   try {
     const stat = fs.statSync(EXTRA_MODELS_FILE);
     stamp = `${stat.size}:${stat.mtimeMs}`;

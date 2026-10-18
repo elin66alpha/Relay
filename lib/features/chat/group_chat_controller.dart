@@ -47,7 +47,6 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? _selected;
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _loadingGroups = false;
-  bool _loadingHistory = false;
   String? _activeRequestId;
   String? _error;
   StreamSubscription<BackendEvent>? _eventsSub;
@@ -62,7 +61,6 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? get selected => _selected;
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   bool get loadingGroups => _loadingGroups;
-  bool get loadingHistory => _loadingHistory;
   bool get sending => _activeRequestId != null;
   String? get error => _error;
 
@@ -252,7 +250,6 @@ class GroupChatController extends ChangeNotifier {
   }
 
   Future<void> _loadHistory(String groupId) async {
-    _loadingHistory = true;
     _safeNotify();
     try {
       final GroupHistory history = await _client.fetchGroupHistory(groupId);
@@ -266,7 +263,6 @@ class GroupChatController extends ChangeNotifier {
     } on BackendException catch (err) {
       _error = friendlyErrorText(_strings, err);
     } finally {
-      _loadingHistory = false;
       _safeNotify();
     }
   }

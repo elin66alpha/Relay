@@ -3,6 +3,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
+const { randomUUID } = require('crypto');
 
 const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
 const { TOKENS_FILE } = require('./tokens');
@@ -493,6 +495,179 @@ function uploadedEntry(root, target) {
   };
 }
 
+function uploadTooLargeError() {
+  return new FilesystemError('upload exceeds the size limit', {
+    status: 413,
+    code: 'FS_UPLOAD_TOO_LARGE',
+  });
+}
+
+// Stream an upload body straight to disk instead of buffering it in memory
+// (uploads run up to MAX_UPLOAD_BYTES; a few concurrent buffered ones used to
+// spike RSS by hundreds of MB). The bytes land in a fresh temp file next to the
+// target ('wx' so we never write through anything pre-existing), then rename
+// into place — atomic, and replacing rather than following a symlink at the
+// target. Over-limit transfers are cut off mid-stream.
+function streamUploadToFile(req, targetPath, maxBytes) {
+  const tmpPath = `${targetPath}.upload-${randomUUID()}`;
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode: 0o644 });
+    let received = 0;
+    let failed = false;
+    const fail = (err) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(out);
+      out.destroy();
+      fs.unlink(tmpPath, () => {});
+      reject(err);
+    };
+    req.on('error', fail);
+    req.on('aborted', () => fail(new Error('upload aborted')));
+    out.on('error', fail);
+    req.on('data', (chunk) => {
+      received += chunk.length;
+      if (received > maxBytes) fail(uploadTooLargeError());
+    });
+    out.on('finish', () => {
+      if (failed) return;
+      try {
+        fs.renameSync(tmpPath, targetPath);
+        resolve(received);
+      } catch (err) {
+        fail(err);
+      }
+    });
+    req.pipe(out);
+  });
+}
+
+function sendFilesystemError(res, err) {
+  if (err instanceof FilesystemError) {
+    return res.status(err.status || 400).json({
+      error: err.message,
+      code: err.code,
+    });
+  }
+  return res.status(500).json({ error: err.message });
+}
+
+function attachmentHeader(filename) {
+  const fallback = String(filename || 'download')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function safeDownloadName(value, fallback = 'download') {
+  const cleaned = String(value || '')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return cleaned || fallback;
+}
+
+function cleanupTempZip(zipPath) {
+  fs.unlink(zipPath, () => {
+    fs.rm(path.dirname(zipPath), { recursive: true, force: true }, () => {});
+  });
+}
+
+function sendWindowsDirectoryZip(download, res) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-zip-'));
+  const tempZip = path.join(tempDir, `${randomUUID()}.zip`);
+  const sourcePath = path.join(download.zipCwd, download.zipEntryName);
+  const powershell = process.env.POWERSHELL_BIN || 'powershell.exe';
+  const child = spawn(
+    powershell,
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
+      sourcePath,
+      tempZip,
+    ],
+    { windowsHide: true },
+  );
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    cleanupTempZip(tempZip);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0) {
+      cleanupTempZip(tempZip);
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return res.download(tempZip, download.filename, (err) => {
+      cleanupTempZip(tempZip);
+      if (err && !res.headersSent) {
+        return sendFilesystemError(res, err);
+      }
+      return undefined;
+    });
+  });
+}
+
+function sendUnixDirectoryZip(download, res, maxBytes) {
+  const child = spawn('zip', ['-r', '-q', '-y', '-', download.zipEntryName], {
+    cwd: download.zipCwd,
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on('error', (err) => {
+    if (!res.headersSent) {
+      return res.status(500).json({ error: `zip failed: ${err.message}` });
+    }
+    return res.destroy(err);
+  });
+  child.on('close', (code) => {
+    if (code !== 0 && !res.destroyed) {
+      const message = stderr.trim() || `zip exited with code ${code}`;
+      if (!res.headersSent) {
+        return res.status(500).json({ error: message });
+      }
+      return res.destroy(new Error(message));
+    }
+    return undefined;
+  });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', attachmentHeader(download.filename));
+  // Defence in depth: the pre-flight size check uses the uncompressed total, so a
+  // compliant zip is always smaller. If the stream ever exceeds the cap anyway
+  // (e.g. files grew mid-zip), abort rather than blow the tunnel's budget.
+  let sentBytes = 0;
+  child.stdout.on('data', (chunk) => {
+    sentBytes += chunk.length;
+    if (sentBytes > maxBytes) {
+      child.kill('SIGKILL');
+      res.destroy();
+    }
+  });
+  return child.stdout.pipe(res);
+}
+
+function sendDirectoryZip(download, res, maxBytes) {
+  if (process.platform === 'win32') {
+    return sendWindowsDirectoryZip(download, res);
+  }
+  return sendUnixDirectoryZip(download, res, maxBytes);
+}
+
 module.exports = {
   FilesystemError,
   listAbsoluteDirectory,
@@ -500,5 +675,9 @@ module.exports = {
   prepareDownloadAbsolute,
   resolveUploadTarget,
   resolveAbsoluteUploadTarget,
+  safeDownloadName,
+  sendDirectoryZip,
+  sendFilesystemError,
+  streamUploadToFile,
   uploadedEntry,
 };

@@ -80,9 +80,13 @@ unless `.relay/` is ignored.
 
 Settings → Wallpaper edits one image shared by every solo chat, Swarm and the
 chat home, independent of backend, workspace and session. The device stores one
-JSON preference record with the image reference and separate light/dark
-opacities. Defaults are no image and 80%/20% opacity. The single slider follows
-the current app theme and updates the preview during dragging. Selecting,
+JSON preference record with the image reference, separate light/dark
+opacities, and the acrylic blur and tint shared by both themes. Defaults are no
+image, 80%/20% opacity, blur 6 and tint 55%. The single slider follows the
+current app theme and updates the preview during dragging; the blur (0-30) and
+tint (0-100%) fields below it update the preview on every valid number and show
+the range as an error otherwise. The preview stays on screen while the controls
+below it scroll, so it remains visible with the keyboard open. Selecting,
 removing or adjusting an image changes a draft; **Save** applies and persists it
 in one replacement. Leaving the editor without saving keeps the prior settings.
 
@@ -343,7 +347,9 @@ otherwise run — and bill — without end. A member cannot summon itself, and a
 turn that failed or was cancelled summons no one.
 
 At creation, a Swarm selects its work tree and per-member model, effort,
-permission, nickname, and prompt/persona. The work tree cannot be changed later.
+permission, nickname, and prompt/persona. The work tree cannot be changed later
+because it is part of the keys for the Swarm transcript and each member's
+resumable session; changing it would address a different conversation.
 Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.

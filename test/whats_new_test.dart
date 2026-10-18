@@ -22,10 +22,43 @@ void main() {
         ),
       );
       expect(find.text(strings.whatsNew), findsOneWidget);
-      expect(find.text('0.1.8'), findsOneWidget);
-      expect(find.byType(Card), findsNWidgets(3));
-      expect(find.text(strings.otherChanges), findsOneWidget);
-      expect(whatsNewSummary(strings), startsWith('0.1.8 · '));
+      final RegExp versionPattern = RegExp(r'^\d+\.\d+\.\d+$');
+      final Map<String, int> highlights = <String, int>{};
+      String? version;
+      for (final Widget widget in tester.widgetList(
+        find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is Card ||
+              widget is Text && versionPattern.hasMatch(widget.data ?? ''),
+        ),
+      )) {
+        if (widget is Text) {
+          version = widget.data!;
+          expect(highlights.containsKey(version), isFalse);
+          highlights[version] = 0;
+        } else {
+          expect(version, isNotNull, reason: 'Highlights follow their release');
+          highlights[version!] = highlights[version]! + 1;
+        }
+      }
+      expect(highlights, isNotEmpty);
+      for (final int count in highlights.values) {
+        expect(count, inInclusiveRange(1, 3));
+      }
+      final List<String> versions = highlights.keys.toList();
+      final List<String> newestFirst = versions.toList()
+        ..sort((String a, String b) {
+          final List<int> left = a.split('.').map(int.parse).toList();
+          final List<int> right = b.split('.').map(int.parse).toList();
+          for (int i = 0; i < left.length; i++) {
+            final int comparison = right[i].compareTo(left[i]);
+            if (comparison != 0) return comparison;
+          }
+          return 0;
+        });
+      expect(versions, newestFirst);
+      expect(find.text(strings.otherChanges), findsNWidgets(versions.length));
+      expect(whatsNewSummary(strings), startsWith('${versions.first} · '));
       expect(tester.takeException(), isNull);
     });
   }

@@ -101,8 +101,13 @@ class AppSettingsScreen extends StatelessWidget {
                         Card(
                           margin: const EdgeInsets.only(bottom: 24),
                           child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             leading: const Icon(Icons.wallpaper_outlined),
                             title: Text(context.l10n.wallpaper),
+                            subtitle: Text(context.l10n.wallpaperEntryHint),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.of(context).push<void>(
                               MaterialPageRoute<void>(

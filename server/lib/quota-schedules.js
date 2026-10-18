@@ -239,8 +239,120 @@ function dueQuotaSchedulesForReset(sourceKey, now = new Date()) {
     .map(publicSchedule);
 }
 
+// Sends every schedule due at a quota reset, one at a time, as a turn of its
+// own in the conversation it was scheduled from.
+function createQuotaScheduleRunner({
+  agentTurnDependencies,
+  backgroundTurnHandler,
+  createNoopResponder,
+  getAgent,
+  resolveChatSession,
+  runAgentTurn,
+  scopeKeyFor,
+  sendEvent,
+  sessionContextKeyFor,
+}) {
+  async function runScheduledQuotaMessage(schedule) {
+    const agent = getAgent(schedule.agentKey);
+    if (!agent) {
+      markQuotaScheduleFailed(schedule.id, `unknown agent: ${schedule.agentKey}`);
+      return;
+    }
+
+    const contextKey = sessionContextKeyFor(agent.key, schedule.workdir);
+    const chatSession = resolveChatSession(contextKey, schedule.sessionId);
+    if (!chatSession) {
+      markQuotaScheduleFailed(schedule.id, 'scheduled chat session was deleted');
+      return;
+    }
+
+    const runningSchedule = markQuotaScheduleRunning(schedule.id) || schedule;
+    const requestId = `quota.${schedule.id}`;
+    const deviceId = 'quota-scheduler';
+    const scopeKey = scopeKeyFor(agent.key, schedule.workdir, chatSession.id);
+
+    await runAgentTurn({
+      agent,
+      agentKey: agent.key,
+      contextKey,
+      defaultErrorCode: 'SCHEDULED_AGENT_ERROR',
+      dependencies: agentTurnDependencies(),
+      deviceId,
+      finalizeBeforeDone: true,
+      finalizeContent({ content, streamedText }) {
+        return String(content || streamedText || '').trim();
+      },
+      historyMetadata: {
+        scheduledQuotaMessageId: schedule.id,
+        quotaSourceKey: schedule.sourceKey,
+      },
+      initialProgressLines: ['Scheduled after quota reset.'],
+      onBeforeDone() {
+        markQuotaScheduleSent(schedule.id);
+      },
+      onAfterDone() {
+        sendEvent('quota_schedule_sent', {
+          scopeWorkdir: schedule.workdir,
+          schedule: {
+            ...runningSchedule,
+            status: 'sent',
+            sentAt: new Date().toISOString(),
+          },
+          message: `Scheduled ${agent.label} message was sent after quota reset.`,
+          messageZh: `已在额度刷新后发送预设的 ${agent.label} 消息。`,
+          createdAt: new Date().toISOString(),
+        });
+      },
+      onBeforeError({ errorMessage }) {
+        markQuotaScheduleFailed(schedule.id, errorMessage);
+      },
+      onAfterError({ errorMessage }) {
+        sendEvent('quota_schedule_failed', {
+          scopeWorkdir: schedule.workdir,
+          schedule: {
+            ...runningSchedule,
+            status: 'failed',
+            error: errorMessage,
+          },
+          message: `Scheduled ${agent.label} message failed: ${errorMessage}`,
+          messageZh: `预设的 ${agent.label} 消息发送失败：${errorMessage}`,
+          createdAt: new Date().toISOString(),
+        });
+      },
+      prompt: schedule.prompt,
+      requestId,
+      onBackgroundTurn: backgroundTurnHandler({
+        agent,
+        contextKey,
+        sessionId: chatSession.id,
+        workdir: schedule.workdir,
+      }),
+      responder: createNoopResponder(),
+      scopeKey,
+      session: chatSession,
+      workdir: schedule.workdir,
+    });
+  }
+
+  return async function processDueQuotaSchedules(info) {
+    const sourceKey = info && info.key;
+    const due = dueQuotaSchedulesForReset(sourceKey);
+    for (const schedule of due) {
+      try {
+        await runScheduledQuotaMessage(schedule);
+      } catch (err) {
+        console.error(
+          `[quota:${sourceKey}] scheduled message ${schedule.id} failed: ${err.message}`,
+        );
+        markQuotaScheduleFailed(schedule.id, err.message);
+      }
+    }
+  };
+}
+
 module.exports = {
   createQuotaSchedule,
+  createQuotaScheduleRunner,
   cancelQuotaSchedule,
   dueQuotaSchedulesForReset,
   listQuotaSchedules,

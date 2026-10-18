@@ -68,7 +68,6 @@ class BotChatController extends ChangeNotifier {
   // settling after a newer one started can't flash the empty placeholder.
   int _historyLoadSeq = 0;
   bool _isCancelling = false;
-  String? _lastError;
   // A turn is in flight on this device exactly while a request id is active;
   // `isThinking` derives from it so the two can't drift apart.
   String? _activeRequestId;
@@ -110,7 +109,6 @@ class BotChatController extends ChangeNotifier {
   bool get isThinking => _activeRequestId != null;
   bool get isHistoryLoading => _historyLoading;
   bool get isCancelling => _isCancelling;
-  String? get lastError => _lastError;
   CliAgent get agent => _agent;
   MachineCredential? get machine => _machine;
   // Exposed so the composer's per-agent Model/Effort/Permission controls can
@@ -394,7 +392,6 @@ class BotChatController extends ChangeNotifier {
     _clearStreamBuffers();
     _pendingQueue.clear();
     _historyLoading = false;
-    _lastError = null;
     _isCancelling = false;
     _activeRequestId = null;
     _localStreamActive = false;
@@ -427,14 +424,12 @@ class BotChatController extends ChangeNotifier {
     _messages.clear();
     _clearStreamBuffers();
     _pendingQueue.clear();
-    _lastError = null;
     notifyListeners();
   }
 
   Future<void> compressConversation() async {
     if (isThinking || _machine == null) return;
     _isCancelling = false;
-    _lastError = null;
     final String requestId = _newRequestId(_agent);
     _activeRequestId = requestId;
     notifyListeners();
@@ -463,9 +458,6 @@ class BotChatController extends ChangeNotifier {
           },
         );
       }
-    } catch (err) {
-      _lastError = _friendlyError(err);
-      rethrow;
     } finally {
       if (_activeRequestId == requestId) _activeRequestId = null;
       _isCancelling = false;
@@ -538,7 +530,8 @@ class BotChatController extends ChangeNotifier {
         // outcome instead of forcing a cancelled state here.
         return;
       }
-      _lastError = _friendlyError(err);
+      _isCancelling = false;
+      _appendSystemMessage(_friendlyError(err));
     } finally {
       notifyListeners();
     }
@@ -705,7 +698,6 @@ class BotChatController extends ChangeNotifier {
     _pendingQueue.clear();
     _historyLoading = true;
     final int loadSeq = ++_historyLoadSeq;
-    _lastError = null;
     _isCancelling = false;
     _activeRequestId = null;
     _localStreamActive = false;
@@ -1090,7 +1082,6 @@ class BotChatController extends ChangeNotifier {
   Future<void> _runTurn(CliAgent agent, ChatMessage userMessage) async {
     _isCancelling = false;
     _localStreamActive = false;
-    _lastError = null;
     final String requestId = _newRequestId(agent);
     final ChatStreamHandle streamHandle = ChatStreamHandle();
     final String initialSessionId = activeSessionId ?? '';
@@ -1173,7 +1164,6 @@ class BotChatController extends ChangeNotifier {
           _authStatus[agent.key] = false;
         }
         _markUserDeliveryFailed(userMessage.id, detail);
-        _lastError = detail;
       }
     } finally {
       final bool ownsForeground = identical(_foregroundTurn, turn);

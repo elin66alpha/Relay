@@ -59,7 +59,6 @@ class AppStrings {
   String get swarmWorkTreeDefault =>
       isZh ? '默认（当前工作区）' : 'Default (current workspace)';
   String get swarmChooseWorkTree => isZh ? '选择工作目录' : 'Choose work tree';
-  String get swarmConfigureMembers => isZh ? '配置成员' : 'Configure members';
   String get swarmConfigureMembersHint => isZh
       ? '为每个成员选择模型、思考深度与权限'
       : 'Pick a model, reasoning effort, and permission per member';
@@ -83,7 +82,6 @@ class AppStrings {
   String get browse => isZh ? '浏览' : 'Browse';
   String get usage => isZh ? '额度' : 'Usage';
   String get usageQuery => isZh ? '额度查询' : 'Quota usage';
-  String get usageTitle => isZh ? '额度剩余' : 'Quota remaining';
   String get loadingUsage => isZh ? '正在查询额度...' : 'Loading quota...';
   String get fiveHourQuota => isZh ? '5 小时' : '5 hours';
   String get weeklyQuota => isZh ? '本周' : 'This week';
@@ -408,8 +406,6 @@ class AppStrings {
   String get agentEffortExtraHigh => isZh ? '极高' : 'Extra high';
   String get agentEffortMax => isZh ? '最高' : 'Max';
   String get agentEffortUltra => isZh ? '极限' : 'Ultra';
-  String get agentControlsUnsupported =>
-      isZh ? '该智能体不支持此项' : 'Not supported by this agent';
   String get agentControlsLoadFailed =>
       isZh ? '加载失败,点按重试' : 'Failed to load — tap to retry';
   String agentSettingSaveFailed(Object err) =>
@@ -520,26 +516,21 @@ class AppStrings {
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get wallpaper => isZh ? '壁纸' : 'Wallpaper';
+  String get wallpaperEntryHint => isZh
+      ? '聊天背景图片，以及亚克力的模糊度和底色。'
+      : 'Chat background image, plus acrylic blur and tint.';
   String get save => isZh ? '保存' : 'Save';
   String get wallpaperSaved => isZh ? '壁纸已保存' : 'Wallpaper saved';
   String get wallpaperProcessing => isZh ? '正在处理壁纸…' : 'Processing wallpaper…';
   String get wallpaperPreviewPrompt =>
       isZh ? '查看壁纸效果' : 'Preview the wallpaper';
-  String get wallpaperDescription => isZh
-      ? '选择一张共用壁纸，仅保存在当前设备。点击保存后应用。'
-      : 'Choose one shared wallpaper for this device. Select Save to apply.';
   String get chooseWallpaper => isZh ? '选择图片' : 'Choose image';
   String get replaceWallpaper => isZh ? '更换图片' : 'Replace image';
   String get removeWallpaper => isZh ? '移除壁纸' : 'Remove wallpaper';
   String get noWallpaper => isZh ? '未设置壁纸' : 'No wallpaper';
-  String get wallpaperFit => isZh ? '居中 · 均匀填充' : 'Centered · Fill';
-  String get wallpaperFileHint => isZh
-      ? 'JPG、PNG 或 WebP。App 保存原图并按原始分辨率显示；网页版最大 20 MB / 4000 万像素，会缩放压缩后存入浏览器。'
-      : 'JPG, PNG or WebP. Apps keep the original at full resolution; on the Web, images up to 20 MB / 40 MP are resized and compressed into browser storage.';
   String get wallpaperOpacity => isZh ? '图片不透明度' : 'Image opacity';
-  String get wallpaperOpacityHint => isZh
-      ? '调节当前主题的图片不透明度，预览实时更新。亮色与暗色分别保存。'
-      : 'Adjust image opacity for the current theme with a live preview. Light and dark values are saved separately.';
+  String get acrylicBlur => isZh ? '亚克力模糊度' : 'Acrylic blur';
+  String get acrylicTint => isZh ? '亚克力底色' : 'Acrylic tint';
   String get wallpaperPreview => isZh ? '壁纸预览' : 'Wallpaper preview';
   String get wallpaperPreviewText =>
       isZh ? '文字与控件仍跟随主题。' : 'Text and controls follow your theme.';

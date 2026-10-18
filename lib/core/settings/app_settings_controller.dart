@@ -71,6 +71,12 @@ class AppSettingsController extends ChangeNotifier {
               _wallpaperOpacity((data['light'] as num?)?.toDouble() ?? 0.8),
           darkOpacity:
               _wallpaperOpacity((data['dark'] as num?)?.toDouble() ?? 0.2),
+          blur: _wallpaperBlur(
+            (data['blur'] as num?)?.toDouble() ?? Wallpaper.defaultBlur,
+          ),
+          tint: _wallpaperOpacity(
+            (data['tint'] as num?)?.toDouble() ?? Wallpaper.defaultTint,
+          ),
         );
       } catch (_) {
         // Damaged local image data must not prevent application startup.
@@ -80,12 +86,15 @@ class AppSettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Persists the prepared image and both theme opacities in one replacement.
+  /// Persists the prepared image, both theme opacities and the acrylic look in
+  /// one replacement.
   Future<void> saveWallpaper(Wallpaper value) async {
     final Wallpaper normalized = Wallpaper(
       bytes: value.bytes,
       lightOpacity: _wallpaperOpacity(value.lightOpacity),
       darkOpacity: _wallpaperOpacity(value.darkOpacity),
+      blur: _wallpaperBlur(value.blur),
+      tint: _wallpaperOpacity(value.tint),
     );
     // An opacity-only change keeps the stored image instead of copying it again.
     final String? image = identical(value.bytes, _wallpaper.bytes)
@@ -113,10 +122,16 @@ class AppSettingsController extends ChangeNotifier {
         'image': image,
         'light': value.lightOpacity,
         'dark': value.darkOpacity,
+        'blur': value.blur,
+        'tint': value.tint,
       });
 
   double _wallpaperOpacity(double value) =>
       value.isFinite ? value.clamp(0.0, 1.0).toDouble() : 0.0;
+
+  double _wallpaperBlur(double value) => value.isFinite
+      ? value.clamp(0.0, Wallpaper.maxBlur).toDouble()
+      : Wallpaper.defaultBlur;
 
   Future<void> setLanguage(AppLanguage value) async {
     if (_language == value) return;

@@ -119,17 +119,25 @@ test('several scopes share one agent process', async () => {
   await done();
 });
 
-test('message listener failures warn once per process and turns still complete', async (t) => {
+test('message listener failures warn once per process and leave it usable', async (t) => {
   const warn = t.mock.method(console, 'warn', () => {});
-  const { pool, done } = makePool();
+  const { pool, state, done } = makePool();
   for (const key of ['a', 'b']) {
+    let delivered = false;
     const { result } = await send(pool, key, 'one', {
-      onMessage() { throw new Error('listener failed'); },
+      onMessage() {
+        delivered = true;
+        throw new Error('listener failed');
+      },
     });
+    assert.equal(delivered, true);
     assert.equal(result.stopReason, 'end_turn');
   }
+  const updates = [];
+  await send(pool, 'a', 'recovered', { onMessage: (u) => updates.push(u) });
+  assert.equal(textOf(updates), 'echo:recovered');
+  assert.equal(state().filter((line) => line.startsWith('spawn ')).length, 1);
   assert.equal(warn.mock.calls.length, 1);
-  assert.match(warn.mock.calls[0].arguments[0], /\[fake\].*session\/update: listener failed/);
   await done();
 });
 

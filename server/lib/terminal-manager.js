@@ -2,18 +2,12 @@
 
 const crypto = require('crypto');
 const os = require('os');
+const { boundedInteger } = require('./bounded-integer');
 
 const DEFAULT_IDLE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 const TICKET_TTL_MS = 30 * 1000;
 const MAX_INPUT_BYTES = 64 * 1024;
-
-function boundedInteger(value, fallback, min, max) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max
-    ? parsed
-    : fallback;
-}
 
 function terminalError(message, code) {
   const err = new Error(message);

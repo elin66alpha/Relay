@@ -13,18 +13,25 @@ class WallpaperScope extends InheritedWidget {
   const WallpaperScope({
     required this.enabled,
     required super.child,
+    this.blur = Wallpaper.defaultBlur,
+    this.tint = Wallpaper.defaultTint,
     super.key,
   });
 
   final bool enabled;
+  final double blur;
+  final double tint;
 
-  static bool enabledOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<WallpaperScope>()?.enabled ??
-      false;
+  static WallpaperScope? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<WallpaperScope>();
+
+  static bool enabledOf(BuildContext context) => of(context)?.enabled ?? false;
 
   @override
   bool updateShouldNotify(WallpaperScope oldWidget) =>
-      enabled != oldWidget.enabled;
+      enabled != oldWidget.enabled ||
+      blur != oldWidget.blur ||
+      tint != oldWidget.tint;
 }
 
 /// A single centered image spans the transcript and its surrounding chrome.
@@ -97,6 +104,8 @@ class ChatWallpaper extends StatelessWidget {
           );
     return WallpaperScope(
       enabled: wallpaper.bytes != null,
+      blur: wallpaper.blur,
+      tint: wallpaper.tint,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -121,9 +130,36 @@ class ChatWallpaper extends StatelessWidget {
               ),
             ),
           ),
-          BackdropGroup(child: child),
+          ScrollConfiguration(
+            behavior: wallpaper.bytes == null
+                ? ScrollConfiguration.of(context)
+                : const _GlowScrollBehavior(),
+            child: BackdropGroup(child: child),
+          ),
         ],
       ),
+    );
+  }
+}
+
+/// Android's stretch overscroll renders the list into an offscreen layer,
+/// where acrylic surfaces have no wallpaper to blur; the glow paints in place.
+class _GlowScrollBehavior extends MaterialScrollBehavior {
+  const _GlowScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    if (getPlatform(context) != TargetPlatform.android) {
+      return super.buildOverscrollIndicator(context, child, details);
+    }
+    return GlowingOverscrollIndicator(
+      axisDirection: details.direction,
+      color: Theme.of(context).colorScheme.secondary,
+      child: child,
     );
   }
 }
@@ -147,16 +183,20 @@ class ChatChromeSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final WallpaperScope? scope = acrylic ? WallpaperScope.of(context) : null;
     final Widget surface = DecoratedBox(
       decoration: BoxDecoration(
-        color: acrylic ? color.withValues(alpha: 0.72) : color,
+        color: acrylic
+            ? color.withValues(alpha: scope?.tint ?? Wallpaper.defaultTint)
+            : color,
         border: border,
         borderRadius: borderRadius,
       ),
       child: Material(type: MaterialType.transparency, child: child),
     );
     if (!acrylic) return surface;
-    final ImageFilter blur = ImageFilter.blur(sigmaX: 20, sigmaY: 20);
+    final double sigma = scope?.blur ?? Wallpaper.defaultBlur;
+    final ImageFilter blur = ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
     // A nested surface must blur this one too, so it starts a fresh group.
     final Widget layered = BackdropGroup(child: surface);
     return ClipRRect(

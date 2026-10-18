@@ -2,6 +2,10 @@
 
 const express = require('express');
 
+function queryBool(value) {
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
 module.exports = function createFsRouter(ctx) {
   const {
     MAX_DOWNLOAD_BYTES,
@@ -12,7 +16,6 @@ module.exports = function createFsRouter(ctx) {
     path,
     prepareDownload,
     prepareDownloadAbsolute,
-    queryBool,
     recentWorkdirs,
     requestWorkdir,
     resolveAbsoluteUploadTarget,
@@ -99,7 +102,7 @@ module.exports = function createFsRouter(ctx) {
       });
     }
 
-    return sendDirectoryZip(download, res);
+    return sendDirectoryZip(download, res, MAX_DOWNLOAD_BYTES);
   });
 
   router.post('/api/fs/upload', async (req, res) => {

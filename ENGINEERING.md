@@ -2,7 +2,7 @@
 
 Engineering contract for this repository. Every agent reads this before any
 change. Keep each section short; this file is the map, not the manual.
-Operational detail lives in `AGENTS.md` and `docs/handbook.md`.
+Contributor rules live in `AGENTS.md`; operational detail lives in `docs/handbook.md`.
 
 ## Purpose
 
@@ -29,22 +29,26 @@ Out:
 
 | Module | Responsibility | Interface | Depends on |
 |---|---|---|---|
-| server/server.js | config, middleware, auth, scope queue, SSE fan-out, route context, static Web | HTTP on PORT | lib/*, routes/* |
-| server/routes/* | HTTP API per area (meta, push, fs, chat, group, sessions, quota, terminal) | factory(routeContext) -> express.Router | routeContext, some lib/* |
+| server/server.js | config, middleware, auth, scope queue, SSE fan-out, workdir presence, route context wiring, static Web; holds no feature logic | HTTP on PORT | lib/*, routes/* |
+| server/routes/* | HTTP API per area (meta, push, fs, chat, group, sessions, quota, terminal); group.js also orchestrates Swarm waves | factory(routeContext) -> express.Router | routeContext, some lib/* |
 | server/lib/agents.js | process-runner boundary | runAgent(agent, prompt, onEvent, {workdir, settings, sessionKey}); onEvent receives progress, delta, segment, and `context` ({used, size}) events; purgeSession | session pools, agent-options |
-| server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK |
-| server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers | pool API, driver | child_process |
+| server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK, session-slots, bounded-integer |
+| server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers | pool API, driver | child_process, session-slots, bounded-integer |
+| server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work policy | createSessionSlots; acquireSlot/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
+| server/lib/sse.js | shared SSE negotiation, event writes and stream close | wantsStream, writeStreamEvent, endStream | none |
+| server/lib/bounded-integer.js | bounded integer parsing with a fallback | boundedInteger | none |
 | server/lib/model-discovery.js | locate each CLI and read its model catalog, cached for a minute (including "not installed") | discoverModels, clearModelDiscoveryCache | child_process |
 | server/lib/agent-status.js, diagnostics.js | agent install/auth state from stored CLI auth files; GET /api/diagnostics report | getAgentStatuses, clearAgentStatusCache; buildDiagnostics | agents, tokens, workdir |
 | server/lib/credential-file.js | encrypted relay.credentials.v1 payload for QR/file onboarding | encryptCredential | crypto |
 | server/lib/agent-options.js / agent-settings.js | option validation and representation / persisted per-session settings | describeAgent, normalizeSettings, getSettings/setSettings | model-discovery, json-store |
-| server/lib/agent-turn.js / group-turn.js | one solo turn / Swarm prompt building | runAgentTurn, responders | agents |
+| server/lib/agent-turn.js | one solo turn, background Claude turns and the task-completion notification | runAgentTurn, responders, createBackgroundTurnHandler, createTaskCompletionNotifier | agents, history, sse |
+| server/lib/group-turn.js | Swarm prompt building | parseMentions, deltaSince, buildGroupPrompt | none |
 | server/lib/context-windows.js | last context window size each agent + model reported, so a conversation without a reply can still show its limit | recordContextWindow(agent, model, size), contextWindowFor(agent, model); GET /api/history returns it as `contextWindow` | json-store |
 | server/lib/history.js, chat-sessions.js, groups.js, tokens.js | persistence | per-module load/save | json-store (history: own async writer) |
-| server/lib/filesystem.js, workdir.js | path policy | resolve/list/prepare | tokens |
-| server/lib/usage.js, quota-*.js | quota reporting, schedules, keepalive | buildUsageReport, schedule API | json-store |
+| server/lib/filesystem.js, workdir.js | path policy, streamed uploads under a byte cap, directory zip downloads | resolve/list/prepare, streamUploadToFile, sendDirectoryZip | tokens |
+| server/lib/usage.js, quota-*.js | quota reporting, schedules and sending them at a reset, keepalive | buildUsageReport, schedule API, createQuotaScheduleRunner | json-store |
 | server/lib/notify.js, push.js, fcm.js | notifications | notifyAll | subscription-store |
-| server/lib/terminal-manager.js | resumable PTY per token | createTerminalManager | node-pty |
+| server/lib/terminal-manager.js | resumable PTY per token | createTerminalManager | node-pty, bounded-integer |
 | lib/core/backend | authenticated transport, SSE codec, API client | ApiTransport, BackendClient | http |
 | lib/core/{models,storage,credentials,notifications,platform,widgets,i18n,theme,util,settings,download} | data models, cached stores, credential decode, platform adapters, shared widgets (agent icon, code block, wallpaper and acrylic surfaces), strings, theme and status colours, helpers, app settings and one device-local wallpaper (original file on native, bounded inline copy on Web), download progress | classes; AppSettingsController wallpaper/saveWallpaper; platform prepareWallpaper/storeWallpaperImage/loadWallpaperImage | core only |
 | lib/features/chat | app shell: solo chat, Swarm, and the drawer that opens every other screen | BotChatController, GroupChatController, screens | other lib/features, lib/core |
@@ -71,7 +75,7 @@ Dependency direction: server routes -> lib -> json-store; lib/features/chat -> o
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
 | Quota + schedules + keepalive | usage, quota-*, features/quota | active |
 | Notifications (Web Push, FCM) | notify, push, fcm, core/notifications | active |
-| Device-local shared wallpaper (explicit Save, one live opacity slider for the current theme, centered cover; first-level pages (chat, home, Swarm) make every surface on the wallpaper acrylic; other pushed pages show it behind a full-page acrylic layer with solid content) | core/settings, core/widgets, features/settings, features/chat | active |
+| Device-local shared wallpaper (explicit Save, one live opacity slider for the current theme, blur and tint number fields shared by both themes, centered cover; first-level pages (chat, home, Swarm) make every surface on the wallpaper acrylic; other pushed pages show it behind a full-page acrylic layer with solid content) | core/settings, core/widgets, features/settings, features/chat | active |
 | What's new (Home entry above Tutorial; per release 1-3 plain-language highlights plus other changes in small text) | features/settings/whats_new_screen, features/chat home | active |
 | Credential onboarding | scripts/create-credential, core/credentials, features/machines | active |
 | Update check (Settings → Check for updates compares with the latest GitHub release and only reports it; no download) | features/settings | active |
@@ -83,8 +87,21 @@ removed.
 
 - `flutter analyze --no-pub` -> "No issues found!"
 - `flutter test --no-pub` -> "All tests passed!"
-- Settings → Wallpaper: choosing/removing an image and moving the single current-theme opacity slider updates the preview before Save; Save commits one shared image and both theme values; on native the original file appears under the app support `wallpaper/` directory and the previous copy is deleted. Import/processing shows a spinner. Agent switches keep the same image. With an image, chat chrome and both message bubbles use one 72% tint, clipped to their boundaries, and on chat, home and Swarm the header, banners, home cards and drawer machine tile are acrylic too, the composer surface reaches the screen bottom behind the gesture bar; every other pushed page (File System, Quota Usage, Settings, ...) shows the blurred wallpaper under a 72% tint with solid content. An empty chat with an image shows no agent icon or "Start chatting" text. Removing the image restores solid surfaces and that placeholder.
+- Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
+- Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
+- Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.
+- Settings → Wallpaper: entering blur (0-30) or tint (0-100) updates the preview before Save; an out-of-range number displays the allowed range as an error and leaves the preview unchanged.
+- Settings → Wallpaper: the preview remains visible while the keyboard is open.
+- Settings → Wallpaper: Save commits one shared image, both theme opacity values, blur and tint; reopening the page shows those saved values.
+- Native wallpaper storage: the original file appears under the app support `wallpaper/` directory after Save, and the previous copy is deleted.
+- Switching agents keeps the same wallpaper image.
+- With a wallpaper, chat chrome and both message bubbles apply the saved tint (default 55%) over the saved blur (default 6), clipped to each surface's boundaries.
+- Android overscroll on wallpaper pages shows a glow instead of a stretch.
+- With a wallpaper, chat, home and Swarm headers, banners, home cards and the drawer machine tile use acrylic surfaces; the composer surface extends to the screen bottom behind the gesture bar.
+- With a wallpaper, every other pushed page (File System, Quota Usage, Settings, ...) displays blurred wallpaper under a 72% tint and solid content.
+- An empty chat with a wallpaper displays neither an agent icon nor "Start chatting" text; removing the image restores solid surfaces and that placeholder.
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
+- `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
 - `(cd server && node -e "require('node-pty')")` -> exit 0
 - `flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn` -> exit 0, `build/web/index.html` exists
@@ -103,8 +120,8 @@ removed.
 
 | Milestone | Completion criteria | Status |
 |---|---|---|
-| 0.1.7 | four version locations read 0.1.7; CHANGELOG has 0.1.7 entry | done |
-| 0.1.8 | four version locations read 0.1.8; CHANGELOG and What's new have 0.1.8 entries | done |
+| 0.1.7 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.7; `CHANGELOG.md` has a 0.1.7 entry | done |
+| 0.1.8 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.8; `CHANGELOG.md` and `lib/features/settings/whats_new_screen.dart` have 0.1.8 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new) | done |
 
 ## Changes
 
@@ -116,14 +133,16 @@ one summary line.
 - 2026-10-17: feature dependencies made acyclic: the drawer moved into features/chat, quota state moved from BotChatController to features/quota QuotaController, non-chat features take BackendClient and callbacks. Reason: features/* imported BotChatController and formed three cycles.
 - 2026-10-17: code_block.dart moved from features/chat to core/widgets. Reason: the file preview reuses it, and features must not import each other.
 - 2026-10-17: added server/lib/context-windows.js (state file context-windows.json). Reason: no CLI exposes a model's context window before a reply, so the last reported size per agent + model is remembered.
+- 2026-10-18: upload streaming and zip download moved from server.js to lib/filesystem.js, background turns and the task-completion notification to lib/agent-turn.js, the scheduled-message runner to lib/quota-schedules.js. Reason: server.js loads by starting the server, so that logic could not be tested.
+- 2026-10-18: extracted session-slots for both session pools, sse for solo/Swarm streams and bounded-integer for pools/terminal settings. Reason: duplicated cap/eviction/idle policies and helpers could drift; Claude retains its background-work exemptions.
 
 ## Review
 
-Last review: 2026-10-17
-Features since last review: 3
-Last result: Intent Problem, Structure Problem, Entropy Problem, Test value Problem, Documentation Problem, Operability Problem, Evolution Problem, Performance Problem; 13 findings (F1-F13 in the second 2026-10-17 audit), all addressed on 2026-10-17.
+Last review: 2026-10-18
+Features since last review: 0
+Last result: Intent Problem, Structure Problem, Entropy Problem, Test value Problem, Documentation Problem, Operability OK, Evolution Problem, Performance OK; 11 open findings.
 
 ## Deviations
 
-- [open] 2026-10-17: history.js and usage.js keep their own JSON writers instead of json-store. Reason: history needs debounced async writes; usage has none.
+- [open] 2026-10-17: history.js keeps its own JSON writer instead of json-store. Reason: history needs debounced async writes.
 - [closed] 2026-10-17: features/* import features/chat/bot_chat_controller (reverse edges). Reason: none given; BotChatController predates the split. Closed 2026-10-17: no feature outside chat imports it.

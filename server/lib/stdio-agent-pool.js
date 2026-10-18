@@ -3,6 +3,8 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
+const { boundedInteger } = require('./bounded-integer');
+const { createSessionSlots } = require('./session-slots');
 
 // Persistent agent sessions over a line-delimited JSON-RPC process.
 //
@@ -35,13 +37,6 @@ const CANCEL_GRACE_MS = 5000;
 // Closing stdin is how these agents are asked to exit; the kill is the backstop.
 const KILL_GRACE_MS = 2000;
 const MAX_STDERR = 8192;
-
-function positiveInt(value, fallbackValue, min, max) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max
-    ? parsed
-    : fallbackValue;
-}
 
 function cancelledError() {
   const err = new Error('request cancelled');
@@ -80,7 +75,7 @@ function createStdioAgentPool(options = {}) {
   // clamped to a sane range.
   const idleMs =
     options.idleMs ??
-    positiveInt(
+    boundedInteger(
       env.RELAY_AGENT_IDLE_MS,
       DEFAULT_IDLE_MS,
       10 * 1000,
@@ -88,7 +83,7 @@ function createStdioAgentPool(options = {}) {
     );
   const maxSessions =
     options.maxSessions ??
-    positiveInt(env.RELAY_AGENT_MAX_SESSIONS, DEFAULT_MAX_SESSIONS, 1, 64);
+    boundedInteger(env.RELAY_AGENT_MAX_SESSIONS, DEFAULT_MAX_SESSIONS, 1, 64);
   const turnTimeoutMs = options.turnTimeoutMs || 60 * 60 * 1000;
   const cancelGraceMs = options.cancelGraceMs ?? CANCEL_GRACE_MS;
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
@@ -99,7 +94,19 @@ function createStdioAgentPool(options = {}) {
   const createDriver = options.driver;
 
   const live = new Map();
-  const slotWaiters = [];
+  const slots = createSessionSlots({
+    live,
+    maxLive: maxSessions,
+    idleMs,
+    closeEntry: closeSession,
+  });
+  const {
+    acquireSlot,
+    releaseSlot,
+    pumpWaiters,
+    clearIdleTimer,
+    scheduleIdleClose,
+  } = slots;
   let conn = null;
   let connPromise = null;
   let connectionIdleTimer = null;
@@ -107,45 +114,6 @@ function createStdioAgentPool(options = {}) {
   // Callers between "released a session" and "about to open one" hold the
   // process, so the swap does not look like the pool going idle.
   let holds = 0;
-
-  function releaseSlot() {
-    const waiter = slotWaiters.shift();
-    if (waiter) waiter();
-  }
-
-  // A finished turn frees the session for eviction but not the slot: the
-  // session stays open. Group chats summon several members at once, so without
-  // this a caller waiting on the cap would never be woken by a turn ending —
-  // only by an unrelated eviction.
-  function pumpWaiters() {
-    if (!slotWaiters.length) return;
-    const victim = lruIdleEntry();
-    if (victim) closeSession(victim).catch(() => {});
-  }
-
-  // Evict the least recently used session that is not mid-turn.
-  function lruIdleEntry() {
-    let victim = null;
-    for (const entry of live.values()) {
-      if (entry.turn || entry.closed) continue;
-      if (!victim || entry.lastActivity < victim.lastActivity) victim = entry;
-    }
-    return victim;
-  }
-
-  async function acquireSlot() {
-    // The cap covers every live session the pool owns. When they are all
-    // mid-turn there is nothing safe to evict, so the caller waits for a slot
-    // rather than the pool quietly exceeding its own memory budget.
-    while (live.size >= maxSessions) {
-      const victim = lruIdleEntry();
-      if (victim) {
-        await closeSession(victim);
-        continue;
-      }
-      await new Promise((resolve) => slotWaiters.push(resolve));
-    }
-  }
 
   // ---------------------------------------------------------------- transport
 
@@ -355,21 +323,6 @@ function createStdioAgentPool(options = {}) {
 
   // ------------------------------------------------------------------ sessions
 
-  function clearIdleTimer(entry) {
-    if (entry.idleTimer) clearTimeout(entry.idleTimer);
-    entry.idleTimer = null;
-  }
-
-  function scheduleIdleClose(entry) {
-    clearIdleTimer(entry);
-    if (entry.closed) return;
-    entry.idleTimer = setTimeout(() => {
-      if (entry.turn) return;
-      closeSession(entry).catch(() => {});
-    }, idleMs);
-    if (typeof entry.idleTimer.unref === 'function') entry.idleTimer.unref();
-  }
-
   function settleTurn(entry, settle) {
     const turn = entry.turn;
     if (!turn) return;
@@ -412,7 +365,7 @@ function createStdioAgentPool(options = {}) {
     // to use this process; tearing it down here would fail their turn with a
     // lost session — and respawning the CLI is exactly what the pool exists to
     // avoid.
-    if (connPromise || slotWaiters.length || holds > 0) return;
+    if (connPromise || slots.waiting || holds > 0) return;
     dropConnection(conn, null, shuttingDown);
   }
 
@@ -725,7 +678,7 @@ function createStdioAgentPool(options = {}) {
       live: live.size,
       maxSessions,
       idleMs,
-      waiting: slotWaiters.length,
+      waiting: slots.waiting,
       connected: !!(conn && !conn.closed),
       keys: [...live.keys()],
     };

@@ -5,7 +5,7 @@ const { after, test } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { pipeline } = require('node:stream/promises');
+const { Readable } = require('node:stream');
 const express = require('express');
 const createFsRouter = require('../routes/fs');
 
@@ -367,9 +367,6 @@ async function upload(t, filesystem, workdir, query) {
     path,
     MAX_UPLOAD_BYTES: 1024,
     requestWorkdir: (req) => req.get('x-workdir'),
-    streamUploadToFile: (req, target) => pipeline(req, fs.createWriteStream(target)),
-    sendFilesystemError: (res, err) =>
-      res.status(err.status || 500).json({ error: err.message, code: err.code }),
   }));
   const server = await new Promise((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
@@ -538,4 +535,53 @@ test('directories sort ahead of files and carry absolute paths', async () => {
   );
   assert.equal(listing.entries[0].absolutePath, path.join(dir, 'zeta'));
   assert.equal(listing.parentPath, path.dirname(dir));
+});
+
+test('an upload over the byte limit is cut off mid-stream and leaves no file', async () => {
+  const dir = scratchCase();
+  const target = path.join(dir, 'big.bin');
+  const { streamUploadToFile } = loadFilesystem();
+
+  await assert.rejects(
+    streamUploadToFile(Readable.from([Buffer.alloc(600), Buffer.alloc(600)]), target, 1024),
+    (err) => err.status === 413 && err.code === 'FS_UPLOAD_TOO_LARGE',
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(fs.readdirSync(dir), []);
+
+  const received = await streamUploadToFile(Readable.from([Buffer.from('ok')]), target, 1024);
+  assert.equal(received, 2);
+  assert.deepEqual(fs.readdirSync(dir), ['big.bin']);
+});
+
+test('a directory downloads as a zip and is aborted past the byte cap', { skip: process.platform === 'win32' }, async (t) => {
+  const dir = scratchCase();
+  fs.mkdirSync(path.join(dir, 'docs'));
+  fs.writeFileSync(path.join(dir, 'docs', 'a.txt'), 'a'.repeat(4096));
+  const { sendDirectoryZip } = loadFilesystem();
+  const app = express();
+  app.get('/zip', (req, res) => sendDirectoryZip(
+    { zipCwd: dir, zipEntryName: 'docs', filename: 'docs.zip' },
+    res,
+    Number(req.query.max),
+  ));
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const url = (max) => `http://127.0.0.1:${server.address().port}/zip?max=${max}`;
+
+  const response = await fetch(url(1024 * 1024));
+  assert.equal(response.headers.get('content-type'), 'application/zip');
+  const body = Buffer.from(await response.arrayBuffer());
+  assert.equal(body.subarray(0, 2).toString(), 'PK');
+  assert.ok(body.includes('docs/a.txt'));
+
+  await assert.rejects(async () => {
+    const capped = await fetch(url(10));
+    await capped.arrayBuffer();
+  });
 });

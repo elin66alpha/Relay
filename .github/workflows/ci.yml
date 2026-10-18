@@ -60,5 +60,8 @@ jobs:
         run: git ls-files '*.js' | xargs -r -n1 node --check
         working-directory: server
 
+      - run: npm run lint
+        working-directory: server
+
       - run: npm test
         working-directory: server

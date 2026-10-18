@@ -29,6 +29,7 @@ flutter test --no-pub
 flutter test --no-pub test/agent_controls_test.dart
 
 (cd server && git ls-files '*.js' | xargs -r -n1 node --check)
+npm --prefix server run lint
 npm --prefix server test
 npm --prefix server start
 
@@ -213,15 +214,15 @@ override, not a shared catalog. The Android release keystore and
 
 - Flutter-only changes: format touched Dart files, run analyze, then focused and
   full Flutter tests when practical.
-- Backend changes: run `node --check` on touched JavaScript and
-  `npm --prefix server test`.
+- Backend changes: run `node --check` on touched JavaScript,
+  `npm --prefix server run lint`, and `npm --prefix server test`.
 - Cross-stack API changes: verify both suites and keep old payload parsing safe
   when adding response fields.
 - Documentation changes: verify local Markdown links, commands, environment
   names, English/Chinese README parity, and the embedded guides in
   `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
   rather than old docs.
-- Release bumps touch five places, which drift apart if any is missed:
+- Release bumps update these files together:
   `pubspec.yaml`, `server/package.json`, `_applicationVersion` in
   `lib/features/settings/app_settings_screen.dart`, a `CHANGELOG.md` entry, and
   a plain-language English and Chinese entry (1-3 highlights, other changes as

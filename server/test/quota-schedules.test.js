@@ -17,6 +17,7 @@ process.env.RELAY_QUOTA_SCHEDULES_FILE = schedulesFile;
 const {
   createQuotaSchedule,
   cancelQuotaSchedule,
+  createQuotaScheduleRunner,
   dueQuotaSchedulesForReset,
   listQuotaSchedules,
   markQuotaScheduleFailed,
@@ -225,4 +226,71 @@ test('finished records are capped while live ones are always kept', () => {
   const onDisk = JSON.parse(fs.readFileSync(schedulesFile, 'utf-8'));
   assert.equal(onDisk.filter((item) => item.status === 'cancelled').length, 50);
   assert.equal(onDisk.filter((item) => item.id === pending.id).length, 1);
+});
+
+// --- sending at a reset -------------------------------------------------------
+
+function runnerHarness({ runAgentTurn, sessions = { main: { id: 'main', name: 'Main' } } } = {}) {
+  const events = [];
+  const turns = [];
+  const runner = createQuotaScheduleRunner({
+    agentTurnDependencies: () => ({}),
+    backgroundTurnHandler: () => () => {},
+    createNoopResponder: () => ({}),
+    getAgent: (key) => (key === 'claude' ? { key: 'claude', label: 'Claude' } : null),
+    resolveChatSession: (_contextKey, sessionId) => sessions[sessionId] || null,
+    runAgentTurn: async (options) => {
+      turns.push(options);
+      return runAgentTurn(options);
+    },
+    scopeKeyFor: (agentKey, workdir, sessionId) => `${workdir}|${agentKey}|${sessionId}`,
+    sendEvent: (type, payload) => events.push({ type, payload }),
+    sessionContextKeyFor: (agentKey, workdir) => `${workdir}|${agentKey}`,
+  });
+  return { events, runner, turns };
+}
+
+function statusOf(id) {
+  return listQuotaSchedules().find((schedule) => schedule.id === id);
+}
+
+test('a reset sends each due schedule as a turn in its own conversation', async () => {
+  const sent = makeSchedule();
+  const other = makeSchedule({ sourceKey: 'codex', workdir: '/other' });
+  const { events, runner, turns } = runnerHarness({
+    runAgentTurn: async (options) => {
+      options.onBeforeDone();
+      options.onAfterDone();
+    },
+  });
+
+  await runner({ key: 'claude' });
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].prompt, 'continue the refactor');
+  assert.equal(turns[0].scopeKey, '/work/app|claude|main');
+  assert.equal(statusOf(sent.id).status, 'sent');
+  assert.equal(statusOf(other.id).status, 'pending');
+  assert.deepEqual(events.map((event) => event.type), ['quota_schedule_sent']);
+  assert.equal(events[0].payload.scopeWorkdir, '/work/app');
+});
+
+test('a schedule fails instead of sending when its agent, session or turn is gone', async () => {
+  const unknownAgent = makeSchedule({ agentKey: 'nope' });
+  const deletedSession = makeSchedule({ workdir: '/two', sessionId: 'gone' });
+  const failingTurn = makeSchedule({ workdir: '/three' });
+  const { runner, turns } = runnerHarness({
+    runAgentTurn: async () => {
+      throw new Error('agent crashed');
+    },
+  });
+
+  await runner({ key: 'claude' });
+
+  assert.equal(turns.length, 1);
+  assert.equal(statusOf(unknownAgent.id).status, 'failed');
+  assert.equal(statusOf(unknownAgent.id).error, 'unknown agent: nope');
+  assert.equal(statusOf(deletedSession.id).error, 'scheduled chat session was deleted');
+  assert.equal(statusOf(failingTurn.id).status, 'failed');
+  assert.equal(statusOf(failingTurn.id).error, 'agent crashed');
 });
