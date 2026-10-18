@@ -77,7 +77,7 @@ function clearFlushTimers() {
   }
 }
 
-function flushPendingHistory() {
+function flushHistory() {
   clearFlushTimers();
   if (!dirty) return false;
   saveAll(ensureLoaded());
@@ -104,10 +104,6 @@ function scheduleFlush() {
     maxFlushTimer = setTimeout(flushFromTimer, FLUSH_MAX_MS);
     unrefTimer(maxFlushTimer);
   }
-}
-
-function flushHistory() {
-  return flushPendingHistory();
 }
 
 function readHistory(scopeKey) {
@@ -349,7 +345,6 @@ module.exports = {
   flushHistory,
   clearHistory,
   redactSensitiveText,
-  historyScopesFor,
   recentWorkdirs,
   searchHistory,
   markdownForConversation,

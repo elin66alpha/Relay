@@ -103,6 +103,12 @@ module.exports = function createFsRouter(ctx) {
   });
 
   router.post('/api/fs/upload', async (req, res) => {
+    if (req.query.mkdir !== undefined && req.query.mkdir !== '1') {
+      return res.status(400).json({
+        error: 'mkdir must be 1 when provided',
+        code: 'FS_INVALID_MKDIR',
+      });
+    }
     // Refuse oversized transfers before reading any body bytes when the client
     // declares a length; undeclared (chunked) bodies are cut off mid-stream.
     const declared = parseInt(req.get('content-length') || '', 10);
@@ -118,7 +124,9 @@ module.exports = function createFsRouter(ctx) {
       if (req.query.path && path.isAbsolute(String(req.query.path))) {
         target = resolveAbsoluteUploadTarget(req.query.path, req.query.name);
       } else {
-        target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req));
+        target = resolveUploadTarget(req.query.path, req.query.name, requestWorkdir(req), {
+          createDirectory: req.query.mkdir === '1',
+        });
       }
       if (fs.existsSync(target.target)) {
         const realTarget = fs.realpathSync(target.target);

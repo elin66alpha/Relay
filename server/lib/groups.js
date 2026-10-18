@@ -228,7 +228,6 @@ module.exports = {
   MAX_GROUPS_PER_WORKDIR,
   MAX_MEMBERS,
   validGroupId,
-  normalizeMembers,
   listGroups,
   getGroup,
   createGroup,

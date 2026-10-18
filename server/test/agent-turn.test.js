@@ -8,6 +8,7 @@ const {
   createNoopResponder,
   runAgentTurn,
 } = require('../lib/agent-turn');
+const { claudeBackgroundTurn } = require('../lib/agents');
 
 const agent = { key: 'claude', label: 'Claude' };
 const session = { id: 'default', name: 'Main' };
@@ -100,6 +101,9 @@ function makeHarness(runAgentImpl, options = {}) {
       getSettings(agentKey, scopeKey, fallbackKey) {
         calls.push({ type: 'settings', agentKey, scopeKey, fallbackKey });
         return settings;
+      },
+      recordContextWindow(agentKey, model, size) {
+        calls.push({ type: 'contextWindow', agentKey, model, size });
       },
       runningScopes,
       runAgent(agentKey, prompt, onEvent, runOptions) {
@@ -336,6 +340,27 @@ test('single-message turn keeps the runner result and one timestamped segment', 
   assert.ok(assistant.metadata.segments[0].ts);
 });
 
+test('the last context size the agent reports is kept on the reply and in history', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    onEvent({ type: 'context', used: 1000, size: 200000 });
+    onEvent({ type: 'delta', text: 'done' });
+    onEvent({ type: 'context', used: 1800.4, size: 200000 });
+    // A malformed report never replaces a good one.
+    onEvent({ type: 'context', used: 5, size: 0 });
+    return 'done';
+  }, { settings: { model: 'test-model' } });
+
+  const result = await runAgentTurn(turnOptions({ dependencies: harness.dependencies }));
+
+  assert.deepEqual(result.reply.message.context, { used: 1800, size: 200000 });
+  const assistant = harness.histories.get('scope')[1];
+  assert.deepEqual(assistant.metadata.context, { used: 1800, size: 200000 });
+  assert.deepEqual(harness.calls.filter((call) => call.type === 'contextWindow'), [
+    { type: 'contextWindow', agentKey: agent.key, model: 'test-model', size: 200000 },
+    { type: 'contextWindow', agentKey: agent.key, model: 'test-model', size: 200000 },
+  ]);
+});
+
 test('no-op responder broadcasts scheduled progress and does not require task notification', async () => {
   const harness = makeHarness(async (onEvent) => {
     onEvent({ type: 'progress', line: 'quota resumed' });
@@ -368,4 +393,93 @@ test('no-op responder broadcasts scheduled progress and does not require task no
     'quota resumed',
   ]);
   assert.equal(messages[1].content, 'scheduled done');
+});
+
+test('the lines that say why a turn exists outlast the step lines', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    for (let i = 1; i <= 8; i += 1) {
+      onEvent({ type: 'progress', line: `step ${i}` });
+    }
+    onEvent({ type: 'delta', text: 'done' });
+    return 'done';
+  });
+
+  await runAgentTurn(turnOptions({
+    dependencies: harness.dependencies,
+    initialProgressLines: ['Background task: sleep finished'],
+    recordUserMessage: false,
+  }));
+
+  const messages = harness.histories.get('scope');
+  assert.equal(messages.length, 1, 'no user message before it');
+  assert.deepEqual(messages[0].metadata.progressLines, [
+    'Background task: sleep finished',
+    'step 4',
+    'step 5',
+    'step 6',
+    'step 7',
+    'step 8',
+  ]);
+});
+
+function claudeText(id, text) {
+  return { type: 'assistant', message: { id, content: [{ type: 'text', text }] } };
+}
+
+function claudeTool(id) {
+  return {
+    type: 'assistant',
+    message: { id, content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] },
+  };
+}
+
+test('a background turn that only runs tools never reaches the conversation', () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), []);
+  turn.onMessage(claudeTool('m1'));
+  turn.finish({ type: 'result', subtype: 'success', result: '' });
+  assert.equal(started.length, 0);
+});
+
+test('a background turn opens on its first text and replays what came before', async () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), [
+    { type: 'system', subtype: 'task_notification', summary: 'sleep  finished' },
+  ]);
+  turn.onMessage(claudeTool('m1'));
+  turn.onMessage(claudeText('m2', 'All done.'));
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].progressLines, ['Background task: sleep finished']);
+
+  const events = [];
+  const done = started[0].run((event) => events.push(event));
+  turn.onMessage(claudeText('m3', 'One more thing.'));
+  turn.finish({ type: 'result', subtype: 'success', result: 'One more thing.' });
+  assert.equal(await done, 'One more thing.');
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['progress', 'segment', 'delta', 'progress', 'segment', 'delta', 'progress'],
+  );
+});
+
+test('a background turn without a known trigger still says it started on its own', () => {
+  const started = [];
+  const turn = claudeBackgroundTurn((start) => started.push(start), []);
+  turn.onMessage(claudeText('m1', 'Hi again.'));
+  assert.deepEqual(started[0].progressLines, ['Claude continued on its own.']);
+  turn.fail(new Error('gone'));
+});
+
+test('a cancelled background turn interrupts Claude and rejects as cancelled', async () => {
+  const started = [];
+  let interrupted = 0;
+  const turn = claudeBackgroundTurn((start) => started.push(start), [], () => {
+    interrupted += 1;
+  });
+  turn.onMessage(claudeText('m1', 'Working.'));
+  const done = started[0].run(() => {});
+  started[0].cancel();
+  assert.equal(interrupted, 1);
+  turn.finish({ type: 'result', subtype: 'error_during_execution' });
+  await assert.rejects(done, { name: 'AgentCancelledError' });
 });

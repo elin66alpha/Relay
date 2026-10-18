@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import 'getting_started_screen.dart';
+import 'update_check.dart';
+import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.7';
+const String _applicationVersion = '0.1.8';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
@@ -96,6 +98,21 @@ class AppSettingsScreen extends StatelessWidget {
                             ),
                           ),
                         ),
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 24),
+                          child: ListTile(
+                            leading: const Icon(Icons.wallpaper_outlined),
+                            title: Text(context.l10n.wallpaper),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context).push<void>(
+                              MaterialPageRoute<void>(
+                                builder: (_) => WallpaperScreen(
+                                  settingsController: settingsController,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                         _buildSectionTitle(context, context.l10n.language),
                         Card(
                           margin: const EdgeInsets.only(bottom: 24),
@@ -177,14 +194,25 @@ class AppSettingsScreen extends StatelessWidget {
                         _buildSectionTitle(context, context.l10n.about),
                         Card(
                           margin: const EdgeInsets.only(bottom: 24),
-                          child: ListTile(
-                            leading: const Icon(Icons.info_outline),
-                            title: Text(context.l10n.aboutApp),
-                            subtitle: Text(
-                              '${context.l10n.version} $_applicationVersion',
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => _showAbout(context),
+                          child: Column(
+                            children: <Widget>[
+                              ListTile(
+                                leading: const Icon(Icons.info_outline),
+                                title: Text(context.l10n.aboutApp),
+                                subtitle: Text(
+                                  '${context.l10n.version} '
+                                  '$_applicationVersion',
+                                ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => _showAbout(context),
+                              ),
+                              const Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                              ),
+                              const _UpdateCheckTile(),
+                            ],
                           ),
                         ),
                       ],
@@ -316,6 +344,54 @@ class AppSettingsScreen extends StatelessWidget {
         const SizedBox(height: 12),
         Text('${context.l10n.license}: ${context.l10n.licenseText}'),
       ],
+    );
+  }
+}
+
+/// Compares this build with the newest GitHub release and only reports the
+/// result; nothing is downloaded.
+class _UpdateCheckTile extends StatefulWidget {
+  const _UpdateCheckTile();
+
+  @override
+  State<_UpdateCheckTile> createState() => _UpdateCheckTileState();
+}
+
+class _UpdateCheckTileState extends State<_UpdateCheckTile> {
+  bool _checking = false;
+
+  Future<void> _check() async {
+    final AppStrings strings = context.l10n;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() => _checking = true);
+    String message;
+    try {
+      final String latest = await fetchLatestVersion();
+      message = isNewerVersion(latest, _applicationVersion)
+          ? strings.updateAvailable(latest)
+          : strings.upToDate(_applicationVersion);
+    } catch (_) {
+      message = strings.updateCheckFailed;
+    }
+    if (!mounted) return;
+    setState(() => _checking = false);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.system_update_outlined),
+      title: Text(context.l10n.checkForUpdates),
+      trailing: _checking
+          ? const SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : null,
+      onTap: _checking ? null : _check,
     );
   }
 }

@@ -183,10 +183,14 @@ require_node() {
 install_server_deps() {
   cd "$SERVER_DIR"
   if [ ! -d node_modules ] ||
-     [ ! -d node_modules/node-pty ] ||
+     ! node -e "require('node-pty')" >/dev/null 2>&1 ||
      [ ! -d node_modules/ws ]; then
     c_info "Installing backend dependencies..."
     npm install
+    if ! node -e "require('node-pty')" >/dev/null 2>&1; then
+      npm rebuild node-pty
+    fi
+    node -e "require('node-pty')"
   fi
 }
 

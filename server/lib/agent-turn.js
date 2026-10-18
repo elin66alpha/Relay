@@ -144,24 +144,6 @@ function directEventPayload({ requestId, agent, session, deviceId, ...payload })
   };
 }
 
-function defaultDependencies(dependencies) {
-  const missing = [
-    'broadcastScope',
-    'enqueueScope',
-    'getSettings',
-    'runAgent',
-    'runningScopes',
-    'scopeChains',
-    'touchChatSession',
-    'updateHistoryMessage',
-    'upsertHistoryMessage',
-  ].filter((key) => !dependencies || !dependencies[key]);
-  if (missing.length > 0) {
-    throw new Error(`runAgentTurn missing dependencies: ${missing.join(', ')}`);
-  }
-  return dependencies;
-}
-
 function defaultFinalizeContent({ content }) {
   return content;
 }
@@ -177,6 +159,8 @@ async function runAgentTurn(options) {
     historyMetadata = {},
     initialProgressLines = [],
     notifyTaskCompletion,
+    // Where a turn the agent later runs on its own is delivered (Claude only).
+    onBackgroundTurn,
     onAfterDone,
     onAfterError,
     onBeforeDone,
@@ -204,13 +188,14 @@ async function runAgentTurn(options) {
     broadcastScope,
     enqueueScope,
     getSettings,
+    recordContextWindow,
     runAgent,
     runningScopes,
     scopeChains,
     touchChatSession,
     updateHistoryMessage,
     upsertHistoryMessage,
-  } = defaultDependencies(dependencies);
+  } = dependencies;
 
   const agentKey = options.agentKey || agent.key;
   const createdAt = new Date().toISOString();
@@ -278,6 +263,12 @@ async function runAgentTurn(options) {
     });
   };
 
+  // The initial lines say why the turn exists, so they outlast the step lines
+  // that scroll past.
+  const pinnedLines = Math.min(
+    initialProgressLines.filter((line) => typeof line === 'string').length,
+    5,
+  );
   const persistProgressLine = (line) => {
     updateAssistantHistory((message) => {
       const lines = Array.isArray(message.metadata.progressLines)
@@ -288,7 +279,7 @@ async function runAgentTurn(options) {
       if (lines.length === 0 || lines[lines.length - 1] !== line) {
         lines.push(line);
       }
-      while (lines.length > 6) lines.shift();
+      while (lines.length > 6) lines.splice(pinnedLines, 1);
       return {
         ...message,
         updatedAt: new Date().toISOString(),
@@ -351,6 +342,7 @@ async function runAgentTurn(options) {
         ...message.metadata,
         ...baseHistoryMetadata,
         ...(segments.length ? { segments: serializeSegments() } : {}),
+        ...(context ? { context } : {}),
         ...metadata,
         streaming: false,
         awaitingFirstToken: false,
@@ -367,6 +359,9 @@ async function runAgentTurn(options) {
   responder.ready(requestId);
 
   let streamedText = '';
+  // The latest context size the agent reported, kept on the finished reply.
+  let context = null;
+  let settings;
   const emitRunEvent = (event) => {
     if (!event || event.type === 'progress') {
       const line = event && event.line ? String(event.line) : '';
@@ -388,6 +383,16 @@ async function runAgentTurn(options) {
           deviceId,
           line,
         });
+      }
+      return;
+    }
+    if (event.type === 'context') {
+      // Reported by the CLI process, so only well-formed sizes are kept.
+      const used = Number(event.used);
+      const size = Number(event.size);
+      if (Number.isFinite(used) && used >= 0 && Number.isFinite(size) && size > 0) {
+        context = { used: Math.round(used), size: Math.round(size) };
+        recordContextWindow(agentKey, settings.model, context.size);
       }
       return;
     }
@@ -466,11 +471,13 @@ async function runAgentTurn(options) {
       if (runState.cancelled) throw new AgentCancelledError();
       runningScopes.add(concurrencyKey);
       try {
+        settings = getSettings(agentKey, scopeKey, contextKey);
         return await runAgent(agentKey, prompt, emitRunEvent, {
           sessionKey: scopeKey,
           ...(signal ? { signal } : {}),
           workdir,
-          settings: getSettings(agentKey, scopeKey, contextKey),
+          settings,
+          ...(onBackgroundTurn ? { onBackgroundTurn } : {}),
         });
       } finally {
         runningScopes.delete(concurrencyKey);
@@ -543,6 +550,7 @@ async function runAgentTurn(options) {
         role: 'assistant',
         content: finalContent,
         segments: serializeSegments(),
+        ...(context ? { context } : {}),
         createdAt: completedAt,
       },
     };

@@ -11,26 +11,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  buildArgs,
   normalizeSettings,
   describeAgent,
-  defaultsFor,
   acpSessionOptions,
+  claudeSdkOptions,
+  codexSessionOptions,
 } = require('../lib/agent-options');
 
-// --- defaultsFor ------------------------------------------------------------
-
-test('defaultsFor derives the model from the newest catalog entry', () => {
-  assert.deepEqual(defaultsFor('claude'), {
-    effort: 'high',
-    permission: 'acceptEdits',
-    fast: 'off',
-    model: 'claude-opus-4-8',
-  });
-});
-
 test('Codex static fallback keeps effort choices valid for its pinned models', () => {
-  assert.deepEqual(defaultsFor('codex'), {
+  assert.deepEqual(describeAgent('codex').defaults, {
     effort: 'medium',
     permission: 'workspace-write',
     fast: 'off',
@@ -46,88 +35,9 @@ test('Codex static fallback keeps effort choices valid for its pinned models', (
   assert.equal(codex.effortByModel['gpt-5.4'].some((option) => option.id === 'minimal'), false);
 });
 
-// --- buildArgs --------------------------------------------------------------
-
-test('buildArgs emits model, effort, permission in a stable order from defaults', () => {
-  assert.deepEqual(buildArgs('claude', {}), [
-    '--model', 'claude-opus-4-8',
-    '--effort', 'high',
-    '--permission-mode', 'acceptEdits',
-    '--settings', '{"fastMode":false}',
-  ]);
-});
-
-test('buildArgs maps explicit valid selections to their flags', () => {
-  assert.deepEqual(
-    buildArgs('claude', {
-      model: 'claude-sonnet-4-6',
-      effort: 'low',
-      permission: 'plan',
-    }),
-    [
-      '--model', 'claude-sonnet-4-6',
-      '--effort', 'low',
-      '--permission-mode', 'plan',
-      '--settings', '{"fastMode":false}',
-    ],
-  );
-});
-
-test('buildArgs falls back to defaults for forged/unknown option ids (no arg injection)', () => {
-  const args = buildArgs('claude', {
-    model: '; rm -rf /',
-    effort: '$(whoami)',
-    permission: '--dangerously-skip-permissions',
-  });
-  // None of the attacker-controlled strings make it into argv.
-  for (const token of args) {
-    assert.ok(
-      !['; rm -rf /', '$(whoami)', '--dangerously-skip-permissions'].includes(
-        token,
-      ),
-      `unexpected forged token: ${token}`,
-    );
-  }
-  // It degrades to the safe defaults instead.
-  assert.deepEqual(args, [
-    '--model', 'claude-opus-4-8',
-    '--effort', 'high',
-    '--permission-mode', 'acceptEdits',
-    '--settings', '{"fastMode":false}',
-  ]);
-});
-
-test('buildArgs maps opencode model/effort/permission to its CLI flags', () => {
-  // Default: model from the catalog + bypass permission (effort is opt-in).
-  assert.deepEqual(buildArgs('opencode', {}), [
-    '-m', 'opencode/big-pickle',
-    '--dangerously-skip-permissions',
-  ]);
-  // Explicit effort (--variant) and the "ask" permission tier (no flag).
-  assert.deepEqual(
-    buildArgs('opencode', {
-      model: 'opencode/deepseek-v4-flash-free',
-      effort: 'high',
-      permission: 'ask',
-    }),
-    ['-m', 'opencode/deepseek-v4-flash-free', '--variant', 'high'],
-  );
-});
-
-test('buildArgs maps hermes permission to --yolo (model from config)', () => {
-  // No model picker (uses hermes config default); yolo is the default tier.
-  assert.deepEqual(buildArgs('hermes', {}), ['--yolo']);
-  assert.deepEqual(buildArgs('hermes', { permission: 'cautious' }), []);
-});
-
-test('buildArgs returns [] for an unknown agent', () => {
-  assert.deepEqual(buildArgs('nope', { permission: 'bypass' }), []);
-});
-
 // --- acpSessionOptions ------------------------------------------------------
 // opencode and hermes run as persistent ACP sessions, so their settings are
-// resolved into protocol values instead of the argv above (which the two
-// buildArgs cases still cover as the shared option table).
+// resolved into protocol values.
 
 test('acpSessionOptions resolves opencode defaults to a model and auto-approval', () => {
   assert.deepEqual(acpSessionOptions('opencode', {}), {
@@ -206,7 +116,7 @@ test('normalizeSettings drops groups an agent does not support', () => {
 
 // --- describeAgent ----------------------------------------------------------
 
-test('describeAgent advertises supported groups and strips internal args', () => {
+test('describeAgent advertises supported groups', () => {
   const claude = describeAgent('claude');
   assert.deepEqual(claude.supports, {
     model: true,
@@ -214,10 +124,8 @@ test('describeAgent advertises supported groups and strips internal args', () =>
     permission: true,
     fast: true,
   });
-  // The public catalog never leaks the internal argv tokens.
   for (const group of ['model', 'effort', 'permission', 'fast']) {
     for (const option of claude[group]) {
-      assert.equal('args' in option, false, `${group} option leaked args`);
       assert.ok(typeof option.id === 'string' && option.id.length > 0);
     }
   }
@@ -232,12 +140,9 @@ test('describeAgent advertises supported groups and strips internal args', () =>
 });
 
 test('fast mode is explicit and limited to Claude Code and Codex', () => {
-  assert.deepEqual(buildArgs('claude', { fast: 'on' }).slice(-2), [
-    '--settings', '{"fastMode":true}',
-  ]);
-  const codexOn = buildArgs('codex', { fast: 'on' });
-  assert.deepEqual(codexOn.slice(-2), ['-c', 'service_tier="fast"']);
-  const codexOff = buildArgs('codex', { fast: 'off' });
-  assert.deepEqual(codexOff.slice(-2), ['-c', 'service_tier="default"']);
+  assert.equal(claudeSdkOptions({ fast: 'on' }).settings.fastMode, true);
+  assert.equal(claudeSdkOptions({ fast: 'off' }).settings.fastMode, false);
+  assert.equal(codexSessionOptions({ fast: 'on' }).serviceTier, 'fast');
+  assert.equal(codexSessionOptions({ fast: 'off' }).serviceTier, 'default');
   assert.equal(normalizeSettings('opencode', { fast: 'on' }).fast, undefined);
 });

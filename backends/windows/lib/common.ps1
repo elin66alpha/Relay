@@ -6,6 +6,12 @@ $Script:ServerDir = Join-Path $Script:RootDir 'server'
 $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 
+# Release bundles carry their own runtime; source checkouts still use PATH.
+$bundledNodeDir = Join-Path $Script:RootDir 'runtime\node'
+if (Test-Path -LiteralPath (Join-Path $bundledNodeDir 'node.exe')) {
+  $env:PATH = "$bundledNodeDir;$env:PATH"
+}
+
 $Script:AppDataDir = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA 'Relay'
 } else {
@@ -235,11 +241,20 @@ function Install-ServerDeps {
   Push-Location $Script:ServerDir
   try {
     $nodeModules = Join-Path $Script:ServerDir 'node_modules'
+    & node -e "try { require('node-pty'); } catch (_) { process.exit(1); }"
+    $ptyReady = $LASTEXITCODE -eq 0
     if ((-not (Test-Path -LiteralPath $nodeModules)) -or
-        (-not (Test-Path -LiteralPath (Join-Path $nodeModules 'node-pty'))) -or
+        (-not $ptyReady) -or
         (-not (Test-Path -LiteralPath (Join-Path $nodeModules 'ws')))) {
       Write-Info 'Installing backend dependencies...'
-      & npm install
+      & npm.cmd ci --omit=dev --no-audit --no-fund
+      if ($LASTEXITCODE -ne 0) {
+        Write-Fail 'Backend dependency installation failed.'
+      }
+      & node -e "require('node-pty')"
+      if ($LASTEXITCODE -ne 0) {
+        Write-Fail 'Backend PTY dependency failed to load.'
+      }
     }
   } finally {
     Pop-Location

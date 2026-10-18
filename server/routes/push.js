@@ -35,12 +35,6 @@ module.exports = function createPushRouter(ctx) {
     res.json({ ok: true });
   });
 
-  router.post('/api/push/unsubscribe', (req, res) => {
-    const endpoint = req.body && req.body.endpoint;
-    push.removeSubscription(endpoint);
-    res.json({ ok: true });
-  });
-
   router.post('/api/push/fcm/register', (req, res) => {
     const token = req.body && req.body.token;
     if (!token || typeof token !== 'string') {

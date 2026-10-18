@@ -1,6 +1,13 @@
 enum ChatRole { user, assistant, system }
 
-String _newMessageId() => DateTime.now().microsecondsSinceEpoch.toString();
+int _lastMessageId = 0;
+
+String _newMessageId() {
+  // Windows can return the same clock tick for consecutive messages.
+  final int now = DateTime.now().microsecondsSinceEpoch;
+  _lastMessageId = now > _lastMessageId ? now : _lastMessageId + 1;
+  return _lastMessageId.toString();
+}
 
 /// One assistant message within a single turn. A turn can produce several of
 /// these — the agent's mid-task follow-up notes plus its final answer — and each
@@ -83,6 +90,17 @@ class ChatMessage {
         .whereType<Map>()
         .map((Map e) => MessageSegment.fromJson(e.cast<String, Object?>()))
         .toList(growable: false);
+  }
+
+  /// The context size the agent reported after this reply: tokens the
+  /// conversation occupies and the model's window. Null when unreported.
+  ({int used, int size})? get contextUsage {
+    final Object? raw = metadata['context'];
+    if (raw is! Map) return null;
+    final Object? used = raw['used'];
+    final Object? size = raw['size'];
+    if (used is! num || size is! num || size <= 0) return null;
+    return (used: used.toInt(), size: size.toInt());
   }
 
   ChatMessage copyWith({

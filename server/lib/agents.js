@@ -338,33 +338,15 @@ function shutdownPools() {
   );
 }
 
-// `resumeId` continues that session; when null a brand-new one is started. The
-// resolved session id is persisted under `sessionKey`.
-function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
-  const cwd = workdir || getDefaultWorkdir();
-  const prior = getSession(sessionKey);
-  const resumeId = prior && prior.id ? prior.id : null;
-  const resuming = !!resumeId;
-  // Resume reuses the saved session ID; a new conversation gets its id from
-  // the CLI's first message and persists it once the turn succeeds.
-  let sessionId = resuming ? resumeId : null;
-  let finalText = '';
-  let isError = false;
-  // A turn can contain several assistant messages (Claude's mid-task follow-up
-  // notes, then a final summary). Each distinct message id marks a new segment;
-  // emitting a `segment` boundary lets the app keep every message with its own
-  // timestamp instead of collapsing them into the final result text.
+// Turn Claude's SDK messages into run events. A turn can contain several
+// assistant messages (Claude's mid-task follow-up notes, then a final summary).
+// Each distinct message id marks a new segment; emitting a `segment` boundary
+// lets the app keep every message with its own timestamp instead of collapsing
+// them into the final result text.
+function claudeEventEmitter(onEvent) {
   let emitDelta = makeDeltaEmitter(onEvent);
   let currentMsgId = null;
-
-  // model / effort / permission for this scope. claudeSdkOptions resolves the
-  // permission tier too; an unconfigured scope defaults to the acceptEdits
-  // "auto" tier, not full bypass. These are fixed for the life of a session
-  // process, so the pool restarts (and resumes) when they change.
-  const sdkOptions = claudeSdkOptions(settings);
-
-  const onMessage = (event) => {
-    if (event.session_id) sessionId = event.session_id;
+  return (event) => {
     if (
       event.type === 'assistant' &&
       event.message &&
@@ -386,6 +368,97 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
         }
       }
     }
+  };
+}
+
+// A turn Claude ran on its own, usually on a background task it started
+// finishing. It reaches the conversation only once Claude writes text, so a
+// turn that only runs tools stays invisible. `start` receives what woke Claude
+// up as progress lines, a `run` that replays the buffered events into the
+// conversation's turn and settles with the reply, and a `cancel` that
+// interrupts the turn, after which `run` rejects as cancelled.
+function claudeBackgroundTurn(start, notices, interrupt) {
+  const buffered = [];
+  let sink = null;
+  let started = false;
+  let cancelled = false;
+  let settle;
+  const done = new Promise((resolve) => {
+    settle = resolve;
+  });
+  const onEvent = (event) => {
+    if (sink) return sink(event);
+    buffered.push(event);
+    if (started || event.type !== 'delta') return;
+    started = true;
+    const lines = notices
+      .map((notice) => oneLine(notice.summary || notice.status || ''))
+      .filter(Boolean)
+      .map((summary) => `Background task: ${summary}`);
+    start({
+      progressLines: lines.length ? lines : ['Claude continued on its own.'],
+      run(emitEvent) {
+        for (const event of buffered.splice(0)) emitEvent(event);
+        sink = emitEvent;
+        return done.then((text) => {
+          if (cancelled) throw new AgentCancelledError();
+          return text;
+        });
+      },
+      cancel() {
+        cancelled = true;
+        interrupt();
+      },
+    });
+  };
+  const onMessage = claudeEventEmitter(onEvent);
+  return {
+    onMessage,
+    finish(result) {
+      // The streamed text stands in when there is no successful result text.
+      settle(
+        result.subtype === 'success' && typeof result.result === 'string'
+          ? result.result.trim()
+          : '',
+      );
+    },
+    fail() {
+      settle('');
+    },
+  };
+}
+
+// `resumeId` continues that session; when null a brand-new one is started. The
+// resolved session id is persisted under `sessionKey`.
+function runClaude(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+) {
+  const cwd = workdir || getDefaultWorkdir();
+  const prior = getSession(sessionKey);
+  const resumeId = prior && prior.id ? prior.id : null;
+  const resuming = !!resumeId;
+  // Resume reuses the saved session ID; a new conversation gets its id from
+  // the CLI's first message and persists it once the turn succeeds.
+  let sessionId = resuming ? resumeId : null;
+  let finalText = '';
+  let isError = false;
+
+  // model / effort / permission for this scope. claudeSdkOptions resolves the
+  // permission tier too; an unconfigured scope defaults to the acceptEdits
+  // "auto" tier, not full bypass. These are fixed for the life of a session
+  // process, so the pool restarts (and resumes) when they change.
+  const sdkOptions = claudeSdkOptions(settings);
+
+  const emitEvents = claudeEventEmitter(onEvent);
+  const onMessage = (event) => {
+    if (event.session_id) sessionId = event.session_id;
+    emitEvents(event);
   };
 
   const finalize = (stderr) => {
@@ -422,10 +495,15 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
       executablePath: claudeExecutablePath(),
       signal,
       onMessage,
+      onBackgroundTurn: onBackgroundTurn
+        ? ({ notices, interrupt }) =>
+            claudeBackgroundTurn(onBackgroundTurn, notices, interrupt)
+        : null,
     })
     .then(
-      ({ result, sessionId: resolvedId, stderr }) => {
+      ({ result, sessionId: resolvedId, stderr, context }) => {
         if (resolvedId) sessionId = resolvedId;
+        if (context) emit(onEvent, { type: 'context', ...context });
         if (typeof result.result === 'string') finalText = result.result;
         // A timed-out turn reports the stop reason as the reply, not as a
         // Claude error.
@@ -448,7 +526,15 @@ function runClaude(prompt, onEvent, sessionKey, signal, workdir, settings) {
     agentKey: 'claude',
     onEvent,
     retry: () =>
-      runClaude(prompt, onEvent, sessionKey, signal, workdir, settings),
+      runClaude(
+        prompt,
+        onEvent,
+        sessionKey,
+        signal,
+        workdir,
+        settings,
+        onBackgroundTurn,
+      ),
   });
 }
 
@@ -494,6 +580,10 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   let currentItemId = null;
 
   const onMessage = (event) => {
+    if (event.type === 'context') {
+      emit(onEvent, event);
+      return;
+    }
     if (event.type === 'delta') {
       // Codex can emit several agent messages in one turn; each new item id
       // starts a segment so follow-ups keep their own timestamp.
@@ -620,6 +710,8 @@ function runAcpAgent({
       if (content.type === 'text') pushText(content.text);
     } else if (update.sessionUpdate === 'tool_call') {
       emit(onEvent, `Tool: ${oneLine(update.title || update.kind || 'tool', 60)}`);
+    } else if (update.sessionUpdate === 'usage_update') {
+      emit(onEvent, { type: 'context', used: update.used, size: update.size });
     }
   };
 
@@ -760,6 +852,7 @@ async function runAgent(agentKey, prompt, onEvent, options = {}) {
     options.signal,
     options.workdir,
     options.settings,
+    options.onBackgroundTurn,
   );
 }
 
@@ -773,13 +866,8 @@ module.exports = {
   getAgent,
   commandExists,
   runAgent,
-  getSession,
-  clearSession,
   purgeSession,
   shutdownPools,
-  claudePool,
-  opencodePool,
-  hermesPool,
-  codexPool,
   inspectCodexAccount,
+  claudeBackgroundTurn,
 };

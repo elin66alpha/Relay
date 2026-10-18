@@ -5,14 +5,16 @@ const path = require('path');
 
 const { createJsonStore } = require('./json-store');
 
-const SESSIONS_FILE = path.join(__dirname, '..', 'chat-sessions.json');
+const SESSIONS_FILE = process.env.RELAY_CHAT_SESSIONS_FILE
+  ? path.resolve(process.env.RELAY_CHAT_SESSIONS_FILE)
+  : path.join(__dirname, '..', 'chat-sessions.json');
 const LEGACY_SESSION_ID = 'default';
 // Upper bound on named chat sessions per workdir+agent (includes the default
 // "Main" session). Keeps chat-sessions.json bounded and the drawer manageable.
 const MAX_SESSIONS = 8;
 
 // Cached, atomic store. Read paths (list/resolve) normalize in memory and never
-// write; only explicit mutations (create/activate/touch/delete) persist. This
+// write; only explicit mutations (create/activate/touch/rename/delete) persist. This
 // keeps GET /api/history and friends from rewriting the file on every request.
 const store = createJsonStore(SESSIONS_FILE, { defaultValue: {} });
 
@@ -176,6 +178,15 @@ function deleteChatSession(contextKey, sessionId) {
   };
 }
 
+function renameChatSession(contextKey, sessionId, rawName) {
+  const context = contextFor(contextKey);
+  const session = context.sessions.find((item) => item.id === sessionId);
+  if (!session) return null;
+  session.name = normalizeName(rawName, '');
+  saveContext(contextKey, context);
+  return contextPayload(context);
+}
+
 module.exports = {
   LEGACY_SESSION_ID,
   MAX_SESSIONS,
@@ -185,5 +196,6 @@ module.exports = {
   setActiveChatSession,
   touchChatSession,
   deleteChatSession,
+  renameChatSession,
   sessionScopeKey,
 };

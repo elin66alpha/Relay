@@ -2,7 +2,7 @@ name: relay
 description: "A private Flutter control surface for local CLI coding agents."
 publish_to: "none"
 
-version: 0.1.7+17
+version: 0.1.8+18
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -10,7 +10,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
   flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.3.0
   http: ^1.2.0

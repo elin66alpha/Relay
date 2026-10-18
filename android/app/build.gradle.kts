@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -7,6 +9,11 @@ plugins {
 
 if (project.layout.projectDirectory.file("google-services.json").asFile.exists()) {
     pluginManager.apply("com.google.gms.google-services")
+}
+
+// Release signing comes from the gitignored android/key.properties (see docs/handbook.md).
+val keyProperties = Properties().apply {
+    rootProject.file("key.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -36,13 +43,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (!keyProperties.isEmpty) {
+            create("release") {
+                storeFile = file(keyProperties.getProperty("storeFile"))
+                storePassword = keyProperties.getProperty("storePassword")
+                keyAlias = keyProperties.getProperty("keyAlias")
+                keyPassword = keyProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Dev stage: every APK (debug and release) is debug-signed. We do not
-            // maintain a release keystore yet, so the release build reuses the debug
-            // signing config. Revisit before any public/Play Store distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
+    }
+}
+
+// Debug builds need no key; a release build without one fails instead of
+// silently shipping a debug-signed or unsigned APK.
+gradle.taskGraph.whenReady {
+    if (keyProperties.isEmpty && allTasks.any { it.project == project && it.name.contains("Release") }) {
+        throw GradleException("Release signing needs android/key.properties; see docs/handbook.md (Android release signing).")
     }
 }
 

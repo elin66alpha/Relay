@@ -142,7 +142,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '选择智能体和会话',
     body:
-        '左侧栏先列出 CLI 智能体，再列出蜂群。选择可用的智能体，并通过会话选择器新建或切换任务；每个工作目录下，每个智能体最多有八个命名会话，Main 不能删除。\n聊天标题第一行是工作区，第二行是“智能体 - 会话”。发送前核对这两行，避免在错误项目中操作。同一个工作区、智能体和会话在不同设备上共享历史。',
+        '左侧栏先列出 CLI 智能体，再列出蜂群。选择可用的智能体，并通过会话选择器新建或切换任务；每个工作目录下，每个智能体最多有八个命名会话。点击会话旁的重命名按钮可修改名称；Main 保留原始对话，不能删除或重命名。\n聊天标题第一行是工作区，第二行是“智能体 - 会话”。发送前核对这两行，避免在错误项目中操作。同一个工作区、智能体和会话在不同设备上共享历史。',
   ),
   _GettingStartedStep(
     title: '设置模型、思考强度和权限',
@@ -152,7 +152,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '描述任务，查看和找回结果',
     body:
-        '可以先发送“解释这个项目的结构”，再补充具体修改要求。回复会流式显示，执行中可以取消；切换页面后可回到原会话继续查看。\n通过历史搜索查找当前工作区的消息，并跳转到对应会话；需要保存结果时可导出当前对话为 Markdown。新任务可建立独立会话，后续追问则留在原会话。',
+        '可以先发送“解释这个项目的结构”，再补充具体修改要求。回复会流式显示，执行中可以取消；切换页面后可回到原会话继续查看。\n单聊中，点击“+ → 附加文件”可将文件上传到工作区，并把路径加入草稿，确认后再发送。“复制”可复制已完成的消息；“编辑”可将自己的消息原文放回草稿，替换现有草稿，不改写历史，也不会自动发送。输入框上方以“已用 / 窗口”显示上下文词元数，例如 42k / 200k；? 表示未知。\n通过历史搜索查找当前工作区的消息，并跳转到对应会话；需要保存结果时可导出当前对话为 Markdown。新任务可建立独立会话，后续追问则留在原会话。',
   ),
   _GettingStartedStep(
     title: '用蜂群分工协作',
@@ -162,7 +162,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '浏览、上传和下载文件',
     body:
-        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。文件列表向右滑动可返回上一级。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
+        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。文件列表向右滑动可返回上一级。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
   ),
   _GettingStartedStep(
     title: '从机器详情进入 SSH 终端',
@@ -195,7 +195,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose an agent and conversation',
     body:
-        'The drawer lists CLI agents above Swarm. Choose an available agent, then create or switch tasks through the session picker. Each agent in each workdir supports up to eight named conversations; Main cannot be deleted.\nThe chat header shows the workspace, with “Agent - Session” below it. Check both before sending a task. Devices using the same workspace, agent, and session share its history.',
+        'The drawer lists CLI agents above Swarm. Choose an available agent, then create or switch tasks through the session picker. Each agent in each workdir supports up to eight named conversations. Rename sessions with the button beside their names; Main preserves the original conversation and cannot be deleted or renamed.\nThe chat header shows the workspace, with “Agent - Session” below it. Check both before sending a task. Devices using the same workspace, agent, and session share its history.',
   ),
   _GettingStartedStep(
     title: 'Set the model, effort, and permissions',
@@ -205,7 +205,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Describe tasks and find results',
     body:
-        'Start with a request such as “explain this project structure”, then add specific changes. Replies stream as work progresses, and you can cancel a running turn. Return to the same conversation after switching pages to follow its progress.\nSearch history in the current workspace and jump to a matching conversation. Export the current conversation as Markdown to keep the result. Use separate sessions for new tasks and the existing session for follow-up questions.',
+        'Start with a request such as “explain this project structure”, then add specific changes. Replies stream as work progresses, and you can cancel a running turn. Return to the same conversation after switching pages to follow its progress.\nIn solo chat, + → Attach file uploads files to the workspace and adds their paths to the draft for you to send. Copy saves a settled message to the clipboard; Edit on your own message replaces the draft with its text, leaving history unchanged and sending nothing. Above the composer, context tokens appear as used / window (for example, 42k / 200k); ? means unknown.\nSearch history in the current workspace and jump to a matching conversation. Export the current conversation as Markdown to keep the result. Use separate sessions for new tasks and the existing session for follow-up questions.',
   ),
   _GettingStartedStep(
     title: 'Divide work with a Swarm',
@@ -215,7 +215,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Browse, upload, and download files',
     body:
-        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Swipe right on the file list to go up one directory.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
+        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. Swipe right on the file list to go up one directory.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
   ),
   _GettingStartedStep(
     title: 'Open the SSH terminal from Machine details',

@@ -206,8 +206,12 @@ function createStdioAgentPool(options = {}) {
     if (!msg.method) return;
     try {
       c.driver.handleMessage(msg);
-    } catch (_err) {
+    } catch (err) {
       // A driver or rendering failure must not take the connection down.
+      if (!c.messageErrorLogged) {
+        c.messageErrorLogged = true;
+        console.warn(`[${agentKey}] failed to handle ${msg.method}: ${err.message}`);
+      }
     }
   }
 
@@ -284,6 +288,7 @@ function createStdioAgentPool(options = {}) {
       nextId: 1,
       caps: {},
       closed: false,
+      messageErrorLogged: false,
       stderr: '',
       driver: null,
     };

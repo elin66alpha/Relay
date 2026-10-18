@@ -164,6 +164,17 @@ function createCodexDriver(rpc) {
         case 'item/completed':
           turn.onMessage({ type: 'item', item: params.item || {} });
           return;
+        case 'thread/tokenUsage/updated': {
+          // `last` is the latest model request: the whole conversation it sent
+          // plus what it wrote, i.e. what the context holds now.
+          const usage = params.tokenUsage || {};
+          turn.onMessage({
+            type: 'context',
+            used: usage.last && usage.last.totalTokens,
+            size: usage.modelContextWindow,
+          });
+          return;
+        }
         case 'turn/completed': {
           const status = (params.turn && params.turn.status) || 'completed';
           turn.finish({ stopReason: status, turn: params.turn });

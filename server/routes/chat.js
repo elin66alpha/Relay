@@ -9,12 +9,15 @@ module.exports = function createChatRouter(ctx) {
     activeRequests,
     agentRequiredOrUnknownError,
     agentTurnDependencies,
+    backgroundTurnHandler,
     broadcastScope,
     clearHistory,
+    contextWindowFor,
     purgeSession,
     createChatResponder,
     finalizeStaleStreamingHistory,
     getAgent,
+    getSettings,
     listAgents,
     listChatSessions,
     markdownForConversation,
@@ -35,6 +38,7 @@ module.exports = function createChatRouter(ctx) {
     sessionContextKeyFor,
     sessionPayload,
     touchChatSession,
+    updateHistoryMessage,
   } = ctx;
   const router = express.Router();
 
@@ -90,13 +94,19 @@ module.exports = function createChatRouter(ctx) {
     const responder = createChatResponder({ req, res });
 
     try {
-      await runAgentTurn({
+      const outcome = await runAgentTurn({
         agent,
         agentKey,
         contextKey,
         dependencies: agentTurnDependencies(),
         deviceId,
         notifyTaskCompletion,
+        onBackgroundTurn: backgroundTurnHandler({
+          agent,
+          contextKey,
+          sessionId: chatSession.id,
+          workdir,
+        }),
         prompt,
         recordHistory,
         requestId,
@@ -107,6 +117,19 @@ module.exports = function createChatRouter(ctx) {
         signal: abortController.signal,
         workdir,
       });
+      // A turn recorded nowhere (a compaction) still changes what the
+      // conversation occupies; the meter reads the latest reply, so it moves
+      // there and survives a reload.
+      const context = !recordHistory && outcome.reply && outcome.reply.message.context;
+      const latest = context && readHistory(scopeKey).findLast(
+        (message) => message.role === 'assistant' && !(message.metadata || {}).streaming,
+      );
+      if (latest) {
+        updateHistoryMessage(scopeKey, latest.id, (message) => ({
+          ...message,
+          metadata: { ...message.metadata, context },
+        }));
+      }
     } finally {
       activeRequests.delete(requestId);
     }
@@ -169,7 +192,7 @@ module.exports = function createChatRouter(ctx) {
       agentError: agentRequiredOrUnknownError,
     });
     if (!scope) return;
-    const { agent, workdir, session: chatSession, scopeKey } = scope;
+    const { agent, workdir, contextKey, session: chatSession, scopeKey } = scope;
     // Only finalize a streaming bubble as stale when nothing is running OR queued
     // for this scope; a queued turn has a persisted awaiting bubble that is not
     // yet in runningScopes and must not be prematurely marked cancelled.
@@ -181,6 +204,9 @@ module.exports = function createChatRouter(ctx) {
       workdir,
       session: sessionPayload(chatSession),
       messages: readHistory(scopeKey),
+      contextWindow: contextWindowFor(
+        agent.key, getSettings(agent.key, scopeKey, contextKey).model,
+      ),
     });
   });
 

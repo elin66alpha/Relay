@@ -4,16 +4,19 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/models/cli_agent.dart';
 import '../../core/util/time_format.dart';
-import '../chat/bot_chat_controller.dart';
+import 'quota_controller.dart';
 
 class QuotaSchedulerScreen extends StatefulWidget {
   const QuotaSchedulerScreen({
-    required this.chatController,
+    required this.quotaController,
+    required this.ensureActiveSessionId,
     super.key,
   });
 
-  final BotChatController chatController;
+  final QuotaController quotaController;
+  final Future<String> Function(CliAgent) ensureActiveSessionId;
 
   @override
   State<QuotaSchedulerScreen> createState() => _QuotaSchedulerScreenState();
@@ -34,17 +37,17 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
   @override
   void initState() {
     super.initState();
-    _seenScheduleRevision = widget.chatController.quotaScheduleRevision;
+    _seenScheduleRevision = widget.quotaController.quotaScheduleRevision;
     // Show the last known quota straight away; _load replaces it once the fresh
     // report arrives from the usage APIs.
-    _usage = widget.chatController.lastUsageReport;
-    widget.chatController.addListener(_onControllerChanged);
+    _usage = widget.quotaController.lastUsageReport;
+    widget.quotaController.addListener(_onControllerChanged);
     unawaited(_load());
   }
 
   @override
   void dispose() {
-    widget.chatController.removeListener(_onControllerChanged);
+    widget.quotaController.removeListener(_onControllerChanged);
     for (final TextEditingController controller in _controllers.values) {
       controller.dispose();
     }
@@ -52,7 +55,7 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
   }
 
   void _onControllerChanged() {
-    final int revision = widget.chatController.quotaScheduleRevision;
+    final int revision = widget.quotaController.quotaScheduleRevision;
     if (revision == _seenScheduleRevision) return;
     _seenScheduleRevision = revision;
     // A schedule event (created/sent/failed/cancelled — here or on another
@@ -67,7 +70,7 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
   Future<void> _reloadSchedules() async {
     try {
       final List<QuotaSchedule> schedules =
-          await widget.chatController.quotaSchedules();
+          await widget.quotaController.quotaSchedules();
       if (!mounted) return;
       final UsageReport? usage = _usage;
       if (usage != null) _syncControllers(usage, schedules);
@@ -84,8 +87,8 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
     });
     try {
       final List<Object> results = await Future.wait<Object>(<Future<Object>>[
-        widget.chatController.usageReport(),
-        widget.chatController.quotaSchedules(),
+        widget.quotaController.usageReport(),
+        widget.quotaController.quotaSchedules(),
       ]);
       final UsageReport usage = results[0] as UsageReport;
       final List<QuotaSchedule> schedules = results[1] as List<QuotaSchedule>;
@@ -152,10 +155,13 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
     setState(() => _savingAgents.add(agent.key));
     try {
       final UsageQuota? quota = _fiveHourQuota(agent);
+      final CliAgent targetAgent = cliAgentByKey(agent.key);
+      final String sessionId = await widget.ensureActiveSessionId(targetAgent);
       final QuotaSchedule schedule =
-          await widget.chatController.createQuotaSchedule(
+          await widget.quotaController.createQuotaSchedule(
         sourceKey: agent.key,
-        agentKey: agent.key,
+        agentKey: targetAgent.key,
+        sessionId: sessionId,
         prompt: prompt,
         targetResetsAt: quota?.resetsAt,
         replaceExisting: true,
@@ -183,7 +189,7 @@ class _QuotaSchedulerScreenState extends State<QuotaSchedulerScreen> {
   Future<void> _clear(UsageAgent agent, QuotaSchedule schedule) async {
     setState(() => _savingAgents.add(agent.key));
     try {
-      await widget.chatController.cancelQuotaSchedule(schedule.id);
+      await widget.quotaController.cancelQuotaSchedule(schedule.id);
       _controllers[agent.key]?.clear();
       _serverPrompts[agent.key] = '';
       await _reloadSchedules();

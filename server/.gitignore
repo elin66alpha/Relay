@@ -1,5 +1,7 @@
 node_modules/
 .env
+.env.*
+!.env.example
 agent-sessions.json
 chat-sessions.json
 groups.json
@@ -17,6 +19,7 @@ credentials/*.json
 credentials/*.png
 credentials/*.passphrase.txt
 agent-settings.json
+context-windows.json
 models-extra.json
 
 # Backups of the state files above are just as sensitive as the originals.

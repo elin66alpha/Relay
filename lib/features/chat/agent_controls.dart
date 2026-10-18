@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/widgets/chat_wallpaper.dart';
 import '../../core/models/agent_options.dart';
 
 /// Per-agent Model / Effort / Permission / Fast controls shown in the composer's
@@ -22,6 +23,11 @@ final Map<String, AgentOptionsCatalog> _catalogCache =
 /// Drop the cached catalogs. Call this when the app switches machines: another
 /// backend host can have different CLIs, and different versions of them.
 void clearAgentOptionsCache() => _catalogCache.clear();
+
+/// Agents whose CLI update is running. It outlives the drawer, which can close
+/// and reopen during an update that takes minutes.
+final ValueNotifier<Set<String>> _updatingAgents =
+    ValueNotifier<Set<String>>(<String>{});
 
 IconData _groupIcon(String group) {
   switch (group) {
@@ -217,12 +223,98 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
       ),
     );
     if (!mounted || result == null) return;
-    // The page saved the selection and, if it updated the CLI, refreshed the
-    // cached catalog. Adopting both is what a reload would have fetched.
+    // The page saved the selection; adopting it is what a reload would have
+    // fetched. A CLI update meanwhile may have refreshed the cached catalog.
     setState(() {
       _catalog = _catalogCache[widget.agentKey] ?? catalog;
       _adoptSettings(result);
     });
+  }
+
+  Future<void> _updateCli() async {
+    final AppStrings l10n = context.l10n;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final String agentKey = widget.agentKey;
+    final String? sessionId = widget.sessionId;
+    String version = '';
+    try {
+      version = await widget.backend.fetchAgentVersion(agentKey);
+    } catch (_) {
+      // The version line is best-effort.
+    }
+    if (!mounted) return;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(l10n.agentUpdateConfirmTitle(agentKey)),
+        content: Text(
+          version.isEmpty
+              ? l10n.agentUpdateConfirmBody
+              : '${l10n.agentCliVersion(version)}\n\n${l10n.agentUpdateConfirmBody}',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(l10n.agentUpdateCli),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || _updatingAgents.value.contains(agentKey)) return;
+    _updatingAgents.value = <String>{..._updatingAgents.value, agentKey};
+    try {
+      final AgentUpdateResult result =
+          await widget.backend.updateAgentCli(agentKey);
+      if (!result.ok) {
+        final String detail = result.timedOut
+            ? l10n.agentUpdateTimedOut
+            : result.output.isNotEmpty
+                ? result.output
+                : l10n.agentUpdateCommandFailed;
+        final String visibleDetail =
+            detail.length > 400 ? '${detail.substring(0, 400)}...' : detail;
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.agentUpdateFailed(visibleDetail))),
+        );
+        return;
+      }
+      final List<Object> refreshed = await Future.wait(<Future<Object>>[
+        widget.backend.fetchAgentOptions(agentKey),
+        widget.backend.fetchAgentSettings(agentKey, sessionId: sessionId),
+      ]);
+      // The new binary can ship different models, so replace what the option
+      // pages draw from.
+      final AgentOptionsCatalog catalog = refreshed[0] as AgentOptionsCatalog;
+      _catalogCache[agentKey] = catalog;
+      if (mounted &&
+          agentKey == widget.agentKey &&
+          sessionId == widget.sessionId) {
+        setState(() {
+          _catalog = catalog;
+          _adoptSettings(refreshed[1] as AgentSettings);
+        });
+      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.changed
+                ? l10n.agentUpdateDone(result.before, result.after)
+                : l10n.agentUpdateNoChange,
+          ),
+        ),
+      );
+    } catch (err) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.agentUpdateFailed(err))),
+      );
+    } finally {
+      _updatingAgents.value = <String>{..._updatingAgents.value}
+        ..remove(agentKey);
+    }
   }
 
   @override
@@ -260,11 +352,8 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
               catalog.optionsFor(group, modelId: modelId).isNotEmpty,
         )
         .toList(growable: false);
-    if (groups.isEmpty) return const SizedBox.shrink();
 
-    return Wrap(
-      spacing: 14,
-      runSpacing: 14,
+    return ComposerActionRow(
       children: <Widget>[
         for (final String group in groups)
           ComposerActionButton(
@@ -272,7 +361,49 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
             label: _groupLabel(context.l10n, group),
             onPressed: () => _openGroup(group),
           ),
+        ValueListenableBuilder<Set<String>>(
+          valueListenable: _updatingAgents,
+          builder: (BuildContext context, Set<String> updating, _) {
+            final bool busy = updating.contains(widget.agentKey);
+            return ComposerActionButton(
+              icon: Icons.system_update_alt_rounded,
+              label: busy
+                  ? context.l10n.agentUpdating
+                  : context.l10n.agentUpdateCli,
+              onPressed: busy ? null : _updateCli,
+            );
+          },
+        ),
       ],
+    );
+  }
+}
+
+/// One row of the composer's "+" drawer. Always four equal columns, on phones
+/// and desktops alike, so the drawer's two rows line up as a 2x4 grid.
+class ComposerActionRow extends StatelessWidget {
+  const ComposerActionRow({required this.children, super.key});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    // Capped and centered, so a wide screen keeps the grid together instead
+    // of spreading four columns across the whole composer.
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (int i = 0; i < 4; i++)
+              Expanded(
+                child:
+                    i < children.length ? children[i] : const SizedBox.shrink(),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -310,7 +441,9 @@ class ComposerActionButton extends StatelessWidget {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: colors.surface,
+                    color: WallpaperScope.enabledOf(context)
+                        ? colors.surface.withValues(alpha: 0.18)
+                        : colors.surface,
                     border: Border.all(color: colors.outlineVariant),
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -337,9 +470,8 @@ class ComposerActionButton extends StatelessWidget {
   }
 }
 
-/// Page listing the choices for one control group. Model and effort pages also
-/// expose the installed CLI version and updater because both catalogs can change
-/// with a CLI release. Saves on selection and pops with the new AgentSettings.
+/// Page listing the choices for one control group. Saves on selection and pops
+/// with the new AgentSettings.
 class _AgentOptionPage extends StatefulWidget {
   const _AgentOptionPage({
     required this.backend,
@@ -372,11 +504,8 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
   bool _saving = false;
   bool _savingFast = false;
   late bool _fastEnabled;
-  bool _updating = false;
-  String _version = '';
 
   bool get _isModel => widget.group == 'model';
-  bool get _canUpdateCli => _isModel || widget.group == 'effort';
 
   @override
   void initState() {
@@ -390,22 +519,10 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
           modelId: _modelId,
         ) ??
         '';
-    if (_canUpdateCli) _loadVersion();
-  }
-
-  Future<void> _loadVersion() async {
-    try {
-      final String version =
-          await widget.backend.fetchAgentVersion(widget.agentKey);
-      if (!mounted) return;
-      setState(() => _version = version);
-    } catch (_) {
-      // Version label is best-effort.
-    }
   }
 
   Future<void> _select(String id) async {
-    if (_saving || _updating) return;
+    if (_saving) return;
     setState(() {
       _saving = true;
       _current = id;
@@ -429,7 +546,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
   }
 
   Future<void> _toggleFast(bool enabled) async {
-    if (_savingFast || _saving || _updating) return;
+    if (_savingFast || _saving) return;
     setState(() => _savingFast = true);
     try {
       await widget.backend.updateAgentSetting(
@@ -450,89 +567,6 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
     }
   }
 
-  Future<void> _update() async {
-    final AppStrings l10n = context.l10n;
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: Text(l10n.agentUpdateConfirmTitle(widget.agentKey)),
-        content: Text(l10n.agentUpdateConfirmBody),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(l10n.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(l10n.agentUpdateCli),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() => _updating = true);
-    try {
-      final AgentUpdateResult result =
-          await widget.backend.updateAgentCli(widget.agentKey);
-      if (!result.ok) {
-        if (!mounted) return;
-        setState(() => _updating = false);
-        final String detail = result.timedOut
-            ? l10n.agentUpdateTimedOut
-            : result.output.isNotEmpty
-                ? result.output
-                : l10n.agentUpdateCommandFailed;
-        final String visibleDetail =
-            detail.length > 400 ? '${detail.substring(0, 400)}...' : detail;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.agentUpdateFailed(visibleDetail))),
-        );
-        return;
-      }
-      final List<Object> refreshed = await Future.wait(<Future<Object>>[
-        widget.backend.fetchAgentOptions(widget.agentKey),
-        widget.backend.fetchAgentSettings(
-          widget.agentKey,
-          sessionId: widget.sessionId,
-        ),
-      ]);
-      if (!mounted) return;
-      final AgentOptionsCatalog options = refreshed[0] as AgentOptionsCatalog;
-      final AgentSettings settings = refreshed[1] as AgentSettings;
-      // The new binary can ship different models, so replace what the composer
-      // will draw from next time it opens.
-      _catalogCache[widget.agentKey] = options;
-      final String? modelId = options.resolveSelection(
-        'model',
-        settings['model'],
-      );
-      final String current = options.resolveSelection(
-            widget.group,
-            settings[widget.group],
-            modelId: modelId,
-          ) ??
-          '';
-      setState(() {
-        _catalog = options;
-        _modelId = modelId;
-        _current = current;
-        _version = result.after.isNotEmpty ? result.after : _version;
-        _updating = false;
-      });
-      final String message = result.changed
-          ? l10n.agentUpdateDone(result.before, result.after)
-          : l10n.agentUpdateNoChange;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
-    } catch (err) {
-      if (!mounted) return;
-      setState(() => _updating = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.agentUpdateFailed(err))),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final AppStrings l10n = context.l10n;
@@ -547,111 +581,47 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
         title: Text(_groupTitle(l10n, widget.group)),
       ),
       body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            Expanded(
-              child: ListView.separated(
-                itemCount: options.length +
-                    (_isModel && _catalog.supportsGroup('fast') ? 1 : 0),
-                separatorBuilder: (BuildContext context, int index) =>
-                    Divider(height: 1, color: colors.outlineVariant),
-                itemBuilder: (BuildContext ctx, int index) {
-                  if (_isModel &&
-                      _catalog.supportsGroup('fast') &&
-                      index == 0) {
-                    return SwitchListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 4,
-                      ),
-                      secondary: const Icon(Icons.bolt_rounded),
-                      title: Text(l10n.agentFastMode),
-                      subtitle: Text(l10n.agentFastModeHint),
-                      value: _fastEnabled,
-                      onChanged: _savingFast || _saving || _updating
-                          ? null
-                          : _toggleFast,
-                    );
-                  }
-                  final int optionIndex = index -
-                      (_isModel && _catalog.supportsGroup('fast') ? 1 : 0);
-                  final AgentOption option = options[optionIndex];
-                  final bool selected = option.id == _current;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 4,
-                    ),
-                    onTap:
-                        _saving || _updating ? null : () => _select(option.id),
-                    leading: Icon(
-                      selected
-                          ? Icons.radio_button_checked_rounded
-                          : Icons.radio_button_unchecked_rounded,
-                      color:
-                          selected ? colors.primary : colors.onSurfaceVariant,
-                    ),
-                    title: Text(_optionLabel(l10n, widget.group, option)),
-                    subtitle: option.description == null
-                        ? null
-                        : Text(option.description!),
-                  );
-                },
-              ),
-            ),
-            if (_canUpdateCli) _buildUpdateFooter(l10n, colors),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUpdateFooter(AppStrings l10n, ColorScheme colors) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border(top: BorderSide(color: colors.outlineVariant)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          if (_isModel) ...<Widget>[
-            Text(
-              l10n.agentUpdateMissingModel,
-              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Row(
-            children: <Widget>[
-              FilledButton.tonalIcon(
-                onPressed: _updating ? null : _update,
-                icon: _updating
-                    ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.system_update_alt_rounded, size: 18),
-                label:
-                    Text(_updating ? l10n.agentUpdating : l10n.agentUpdateCli),
-              ),
-              const SizedBox(width: 12),
-              if (_version.isNotEmpty)
-                Expanded(
-                  child: Text(
-                    l10n.agentCliVersion(_version),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-                  ),
+        child: ListView.separated(
+          itemCount: options.length +
+              (_isModel && _catalog.supportsGroup('fast') ? 1 : 0),
+          separatorBuilder: (BuildContext context, int index) =>
+              Divider(height: 1, color: colors.outlineVariant),
+          itemBuilder: (BuildContext ctx, int index) {
+            if (_isModel && _catalog.supportsGroup('fast') && index == 0) {
+              return SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 4,
                 ),
-            ],
-          ),
-        ],
+                secondary: const Icon(Icons.bolt_rounded),
+                title: Text(l10n.agentFastMode),
+                subtitle: Text(l10n.agentFastModeHint),
+                value: _fastEnabled,
+                onChanged: _savingFast || _saving ? null : _toggleFast,
+              );
+            }
+            final int optionIndex =
+                index - (_isModel && _catalog.supportsGroup('fast') ? 1 : 0);
+            final AgentOption option = options[optionIndex];
+            final bool selected = option.id == _current;
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 4,
+              ),
+              onTap: _saving ? null : () => _select(option.id),
+              leading: Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected ? colors.primary : colors.onSurfaceVariant,
+              ),
+              title: Text(_optionLabel(l10n, widget.group, option)),
+              subtitle:
+                  option.description == null ? null : Text(option.description!),
+            );
+          },
+        ),
       ),
     );
   }

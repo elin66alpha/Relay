@@ -112,6 +112,9 @@ try {
   } else {
     & npm run credential -- --url $publicUrl
   }
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail 'Credential generation failed. Check the error above and retry.'
+  }
 } finally {
   Pop-Location
 }

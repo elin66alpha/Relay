@@ -13,9 +13,11 @@ Relay has two parts:
   filesystem and process permissions.
 
 There is no Relay-hosted account or control plane. The client connects only to
-the backend URL in an imported credential. Prompts, files, agent output, and CLI
-credentials stay between your devices, backend host, and the CLI providers you
-already use.
+the backend URL in an imported credential, with one exception: Settings → Check
+for updates, when tapped, reads the latest release version from GitHub's public
+API (`api.github.com`). That request carries no Relay data, but GitHub sees the
+device's IP address. Prompts, files, agent output, and CLI credentials stay
+between your devices, backend host, and the CLI providers you already use.
 
 ## Credentials and device tokens
 
@@ -71,8 +73,9 @@ Implemented controls include:
 
 Relay never logs a CLI agent in. Every agent's credential is created on the
 backend host with that CLI's own login flow or provider configuration.
-`server/lib/agent-status.js` reads authentication state and, for Claude Code and
-Codex, the stored OAuth expiry timestamp. `server/lib/usage.js` additionally
+`server/lib/agent-status.js` reads authentication state and Claude Code's stored
+OAuth expiry timestamp. Codex has no login-expiry timestamp: its managed
+short-lived tokens refresh automatically. `server/lib/usage.js` additionally
 reads their OAuth tokens for quota queries and can refresh an expired access
 token in the CLI's credential file. Token values may therefore be sent to the
 provider's OAuth and API endpoints, but neither Relay's API nor the app ever
@@ -120,9 +123,11 @@ can access. It always rejects these current sensitive locations:
 - `~/.ssh`;
 - Claude Code's `.credentials.json` and Codex's `auth.json`.
 
-The same policy applies to listing, upload, download, and atomic temp-file
-variants. A directory download is also rejected when its tree would contain a
-denied path.
+The same policy applies to listing, upload, download, and siblings whose names
+start with a sensitive basename followed by a dot, including `.tmp`, `.bak`, and
+`.old` copies. A directory download is also rejected when its tree would contain
+a denied path. Both the requested path and its resolved symlink destination
+must satisfy the denylist and `RELAY_FS_ROOTS` allowlist.
 
 This list is intentionally precise, not a promise to detect every secret. It
 does not automatically cover arbitrary OpenCode, Hermes, provider, or
@@ -134,6 +139,16 @@ Uploads stream to a temporary file and default to 100 MB. Downloads default to
 300 MB. Configure smaller proxy and Relay limits when the deployment does not
 need those sizes. Unix directory downloads invoke the host's `zip` command;
 Windows uses PowerShell `Compress-Archive`.
+
+## Android APK signing
+
+Official Android APKs from 0.1.8 on are signed with the Relay release key,
+certificate SHA-256
+`3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`. Check a
+downloaded APK with `apksigner verify --print-certs`; one signed by another
+certificate is not an official build. Releases up to 0.1.7 were signed with a
+debug certificate. The keystore and `android/key.properties` stay outside
+version control.
 
 ## Production requirements
 

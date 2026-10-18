@@ -14,12 +14,16 @@ import '../../core/notifications/notification_service.dart';
 import '../../core/notifications/web_push.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/error_text.dart';
+import '../quota/quota_controller.dart';
 import 'agent_controls.dart';
 import 'background_turn_registry.dart';
+import 'context_meter.dart';
 
 class BotChatController extends ChangeNotifier {
-  BotChatController({BackendClient? backendClient})
-      : _backendClient = backendClient ?? BackendClient();
+  BotChatController({
+    required BackendClient backendClient,
+    required this.quotaController,
+  }) : _backendClient = backendClient;
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -34,6 +38,7 @@ class BotChatController extends ChangeNotifier {
   static const String _queuedKey = 'queued';
 
   final BackendClient _backendClient;
+  final QuotaController quotaController;
   String? _activeWorkdir;
 
   CliAgent _agent = defaultCliAgents.first;
@@ -50,6 +55,7 @@ class BotChatController extends ChangeNotifier {
       <String, List<_StreamSegment>>{};
   final Set<String> _loadingSessions = <String>{};
   final List<ChatMessage> _messages = <ChatMessage>[];
+  int? _contextWindow;
   // Ids of follow-up messages typed while a turn was running, in send order.
   // They show as pending bubbles and are sent automatically, one at a time, as
   // each turn finishes — so the composer behaves like Claude Code / Codex.
@@ -91,7 +97,6 @@ class BotChatController extends ChangeNotifier {
   // if the shared event stream misses the agent_done edge during the reconnect.
   String? _reattachRequestId;
   _ForegroundTurn? _foregroundTurn;
-  int _quotaScheduleRevision = 0;
   bool _quotaPushEnabled = true;
   bool _taskPushEnabled = true;
 
@@ -101,6 +106,7 @@ class BotChatController extends ChangeNotifier {
   List<ChatMessage> get messages =>
       UnmodifiableListView<ChatMessage>(_messages);
   int get messageCount => _messages.length;
+  int? get contextWindow => _contextWindow;
   bool get isThinking => _activeRequestId != null;
   bool get isHistoryLoading => _historyLoading;
   bool get isCancelling => _isCancelling;
@@ -115,15 +121,10 @@ class BotChatController extends ChangeNotifier {
   String? get activeWorkdir => _activeWorkdir;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
-  int get quotaScheduleRevision => _quotaScheduleRevision;
   AppStrings get _strings => AppStrings(_language);
 
   String? activeSessionIdFor(String agentKey) =>
       _activeSessionByAgent[agentKey];
-
-  AgentSession? activeSessionFor(String agentKey) {
-    return sessionById(agentKey, activeSessionIdFor(agentKey));
-  }
 
   List<AgentSession> sessionsFor(String agentKey) =>
       List<AgentSession>.unmodifiable(
@@ -216,7 +217,7 @@ class BotChatController extends ChangeNotifier {
     }
   }
 
-  Future<String> _ensureActiveSessionId(CliAgent agent) async {
+  Future<String> ensureActiveSessionId(CliAgent agent) async {
     final String? current = _activeSessionByAgent[agent.key];
     if (current != null && current.isNotEmpty) return current;
     final AgentSessionList? result = await _refreshSessionsFor(agent.key);
@@ -260,6 +261,23 @@ class BotChatController extends ChangeNotifier {
     _activeSessionByAgent[agent.key] = result.activeSession.id;
     _agent = agent;
     await _reloadConversation(reattachTurn: reattachTurn);
+  }
+
+  Future<void> renameSession(
+    CliAgent agent,
+    String sessionId,
+    String name,
+  ) async {
+    final MachineCredential? machine = _machine;
+    if (machine == null || sessionId.isEmpty) return;
+    final AgentSessionList result = await _backendClient.renameSession(
+      agent.key,
+      sessionId,
+      name,
+    );
+    if (_machine?.id != machine.id) return;
+    _sessionsByAgent[agent.key] = result.sessions;
+    notifyListeners();
   }
 
   Future<void> deleteSession(CliAgent agent, String sessionId) async {
@@ -351,7 +369,7 @@ class BotChatController extends ChangeNotifier {
       _pendingDrafts.clear();
       // Another host can have different CLIs, versions, and quota.
       clearAgentOptionsCache();
-      _lastUsageReport = null;
+      quotaController.clearUsageReport();
       unawaited(refreshWorkdir());
     }
     if (sameContext && activeSessionId != null) {
@@ -371,6 +389,7 @@ class BotChatController extends ChangeNotifier {
     if (isThinking || _remoteActive) return;
     if (_machine == null && _messages.isEmpty && !_historyLoading) return;
     _machine = null;
+    _contextWindow = null;
     _messages.clear();
     _clearStreamBuffers();
     _pendingQueue.clear();
@@ -390,7 +409,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> clearHistory() async {
     final CliAgent agent = _agent;
-    final String sessionId = await _ensureActiveSessionId(agent);
+    final String sessionId = await ensureActiveSessionId(agent);
     // Reset the machine-side session first; otherwise the next prompt may
     // resume context that the user just cleared locally. Only wipe the on-screen
     // history once the backend confirms — if the clear fails (e.g. a turn is
@@ -403,6 +422,8 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     _stopHistoryPolling();
+    // An emptied conversation still shows its limit: 0 / window.
+    _contextWindow = latestContextUsage(_messages)?.size ?? _contextWindow;
     _messages.clear();
     _clearStreamBuffers();
     _pendingQueue.clear();
@@ -418,12 +439,30 @@ class BotChatController extends ChangeNotifier {
     _activeRequestId = requestId;
     notifyListeners();
     try {
-      final String sessionId = await _ensureActiveSessionId(_agent);
-      await _backendClient.compressConversation(
+      final String sessionId = await ensureActiveSessionId(_agent);
+      final Map<String, Object?>? context =
+          await _backendClient.compressConversation(
         agentKey: _agent.key,
         sessionId: sessionId,
         requestId: requestId,
       );
+      // Compacting records no reply, so its reading moves onto the latest
+      // one, as the backend does in history.
+      final int latest = _messages.lastIndexWhere(
+        (ChatMessage m) =>
+            m.role == ChatRole.assistant &&
+            !isStreaming(m) &&
+            !isNoticeMessage(m) &&
+            !isSystemMessage(m),
+      );
+      if (context != null && latest != -1) {
+        _messages[latest] = _messages[latest].copyWith(
+          metadata: <String, Object?>{
+            ..._messages[latest].metadata,
+            'context': context,
+          },
+        );
+      }
     } catch (err) {
       _lastError = _friendlyError(err);
       rethrow;
@@ -516,42 +555,6 @@ class BotChatController extends ChangeNotifier {
     await _runTurn(_agent, _messages[index]);
   }
 
-  Future<String> statusText(
-    AppStrings strings, {
-    Duration timeout = const Duration(seconds: 8),
-  }) async {
-    try {
-      final BackendDiagnostics diagnostics = await _backendClient.diagnostics(
-        timeout: timeout,
-      );
-      return diagnostics.toDisplayText(strings);
-    } on BackendException catch (err) {
-      if (err.status != 404) rethrow;
-      final BackendStatus status = await _backendClient.status(
-        timeout: timeout,
-      );
-      return status.toDisplayText(strings);
-    }
-  }
-
-  UsageReport? _lastUsageReport;
-
-  /// The most recent quota report, kept so the usage and scheduler screens can
-  /// paint the previous numbers immediately instead of holding a spinner for a
-  /// round trip that reaches Anthropic and OpenAI. Cleared on a machine switch,
-  /// since quota belongs to the host's credentials.
-  UsageReport? get lastUsageReport => _lastUsageReport;
-
-  /// Queries every quota source, or only [source]. A single-source result is
-  /// merged into [lastUsageReport] and the merged report returned, so sources
-  /// queried separately can land one at a time.
-  Future<UsageReport> usageReport({String? source}) async {
-    final UsageReport report = await _backendClient.usageReport(source: source);
-    final UsageReport? last = _lastUsageReport;
-    return _lastUsageReport =
-        source == null || last == null ? report : last.merge(report);
-  }
-
   // Registers this browser for Web Push so quota/scheduled-message alerts arrive
   // even when the tab is closed. Web-only and best-effort: a no-op off the web,
   // when the backend has no VAPID keys, or until the user grants permission
@@ -604,14 +607,6 @@ class BotChatController extends ChangeNotifier {
     }
   }
 
-  Future<List<DeviceToken>> deviceTokens() => _backendClient.deviceTokens();
-
-  Future<void> revokeDeviceToken(String id) =>
-      _backendClient.revokeDeviceToken(id);
-
-  Future<void> deleteDeviceToken(String id) =>
-      _backendClient.deleteDeviceToken(id);
-
   Future<List<ChatHistorySearchResult>> searchHistory(
     String query, {
     bool currentAgentOnly = false,
@@ -623,36 +618,9 @@ class BotChatController extends ChangeNotifier {
   }
 
   Future<ConversationExport> exportCurrentSessionMarkdown() async {
-    final String sessionId = await _ensureActiveSessionId(_agent);
+    final String sessionId = await ensureActiveSessionId(_agent);
     return _backendClient.exportHistory(_agent.key, sessionId: sessionId);
   }
-
-  Future<List<QuotaSchedule>> quotaSchedules() =>
-      _backendClient.quotaSchedules();
-
-  Future<QuotaSchedule> createQuotaSchedule({
-    required String sourceKey,
-    required String agentKey,
-    required String prompt,
-    String? targetResetsAt,
-    bool replaceExisting = false,
-  }) async {
-    final CliAgent agent = cliAgentByKey(agentKey);
-    final String sessionId = await _ensureActiveSessionId(agent);
-    return _backendClient.createQuotaSchedule(
-      sourceKey: sourceKey,
-      agentKey: agent.key,
-      sessionId: sessionId,
-      prompt: prompt,
-      targetResetsAt: targetResetsAt,
-      replaceExisting: replaceExisting,
-    );
-  }
-
-  Future<void> cancelQuotaSchedule(String id) =>
-      _backendClient.cancelQuotaSchedule(id);
-
-  Future<WorkdirInfo> workdir() => _backendClient.workdir();
 
   /// Pulls this device's current work directory: its stored path, or the
   /// backend default before one is chosen. Best-effort.
@@ -731,6 +699,7 @@ class BotChatController extends ChangeNotifier {
     BackgroundTurn? reattachTurn,
   }) async {
     _stashAndClearPendingDraftsForCurrentSession();
+    _contextWindow = null;
     _messages.clear();
     _clearStreamBuffers();
     _pendingQueue.clear();
@@ -749,8 +718,8 @@ class BotChatController extends ChangeNotifier {
     unawaited(refreshAuthStatus());
     afterReset?.call();
     try {
-      final String sessionId = await _ensureActiveSessionId(agent);
-      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+      final String sessionId = await ensureActiveSessionId(agent);
+      final ChatHistory? history = await _fetchHistoryIfCurrent(
         agent,
         machine,
         sessionId,
@@ -781,32 +750,6 @@ class BotChatController extends ChangeNotifier {
       }
     }
   }
-
-  Future<FsListing> browseWorkdir(String path, {bool showHidden = false}) =>
-      _backendClient.browseWorkdir(path, showHidden: showHidden);
-
-  Future<FsDownloadStream> openFileDownload(String path) =>
-      _backendClient.openFileDownload(path);
-
-  Future<FsEntry> uploadFile({
-    required String path,
-    required String name,
-    required Uint8List bytes,
-  }) =>
-      _backendClient.uploadFile(path: path, name: name, bytes: bytes);
-
-  Future<FsEntry> uploadFileStream({
-    required String path,
-    required String name,
-    required Stream<List<int>> bytes,
-    required int length,
-  }) =>
-      _backendClient.uploadFileStream(
-        path: path,
-        name: name,
-        bytes: bytes,
-        length: length,
-      );
 
   void connectEvents() {
     _wantsEvents = true;
@@ -856,12 +799,12 @@ class BotChatController extends ChangeNotifier {
   // Fetch history, returning null if the context (agent/machine/session) drifted
   // while the request was in flight — callers must not apply a stale snapshot.
   // The session is owned by the host, so this is how the app pulls it back.
-  Future<List<ChatMessage>?> _fetchHistoryIfCurrent(
+  Future<ChatHistory?> _fetchHistoryIfCurrent(
     CliAgent agent,
     MachineCredential machine,
     String sessionId,
   ) async {
-    final List<ChatMessage> history = await _backendClient.fetchHistory(
+    final ChatHistory history = await _backendClient.fetchHistory(
       agent.key,
       sessionId: sessionId,
     );
@@ -875,7 +818,9 @@ class BotChatController extends ChangeNotifier {
 
   // Replace the visible conversation with a freshly fetched snapshot and re-derive
   // any in-flight turn from it.
-  void _applyHistorySnapshot(List<ChatMessage> history) {
+  void _applyHistorySnapshot(ChatHistory history) {
+    _contextWindow =
+        latestContextUsage(history.messages)?.size ?? history.contextWindow;
     // Locally-queued follow-ups aren't in server history yet; keep them (at the
     // end, preserving order) so a snapshot refresh never drops pending input.
     final List<ChatMessage> pending = _pendingQueue.isEmpty
@@ -885,7 +830,7 @@ class BotChatController extends ChangeNotifier {
             .toList(growable: false);
     _messages
       ..clear()
-      ..addAll(history)
+      ..addAll(history.messages)
       ..addAll(pending);
     _seedStreamBuffersFromMessages();
     _restorePendingTurnFromHistory();
@@ -1088,7 +1033,7 @@ class BotChatController extends ChangeNotifier {
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+      final ChatHistory? history = await _fetchHistoryIfCurrent(
         agent,
         machine,
         sessionId,
@@ -1098,9 +1043,11 @@ class BotChatController extends ChangeNotifier {
       // stream is the smoother, authoritative source). Once it drops or is
       // absent (reattach / cold-start restore), polling becomes authoritative.
       if (_localStreamActive) return;
-      final bool matchesCurrent = _historySnapshotMatchesCurrent(history);
+      final bool matchesCurrent =
+          _historySnapshotMatchesCurrent(history.messages);
       if (!matchesCurrent) _applyHistorySnapshot(history);
-      final bool reattachFinished = _finishReattachIfNotStreaming(history);
+      final bool reattachFinished =
+          _finishReattachIfNotStreaming(history.messages);
       if (matchesCurrent) {
         if (!(isThinking || _remoteActive)) _stopHistoryPolling();
         if (reattachFinished) notifyListeners();
@@ -1163,7 +1110,7 @@ class BotChatController extends ChangeNotifier {
 
     bool reattach = false;
     try {
-      final String sessionId = await _ensureActiveSessionId(agent);
+      final String sessionId = await ensureActiveSessionId(agent);
       turn.sessionId = sessionId;
       turn.sessionName = _sessionNameFor(agent.key, sessionId);
       if (turn.detached || !identical(_foregroundTurn, turn)) return;
@@ -1202,6 +1149,7 @@ class BotChatController extends ChangeNotifier {
           'agentKey': reply.agentKey,
           'agentLabel': reply.agentLabel,
           if (replySegments.isNotEmpty) _segmentsKey: replySegments,
+          if (reply.context != null) 'context': reply.context,
         },
       );
     } catch (err) {
@@ -1278,13 +1226,16 @@ class BotChatController extends ChangeNotifier {
     final String? sessionId = activeSessionId;
     if (sessionId == null || sessionId.isEmpty) return;
     try {
-      final List<ChatMessage>? history = await _fetchHistoryIfCurrent(
+      final ChatHistory? history = await _fetchHistoryIfCurrent(
         agent,
         machine,
         sessionId,
       );
       // Bail if our own or a remote turn started while the fetch was in flight.
-      if (history == null || isThinking || _remoteActive || history.isEmpty) {
+      if (history == null ||
+          isThinking ||
+          _remoteActive ||
+          history.messages.isEmpty) {
         return;
       }
       _applyHistorySnapshot(history);
@@ -1743,7 +1694,7 @@ class BotChatController extends ChangeNotifier {
     }
     if (event.type == 'quota_schedule_sent' ||
         event.type == 'quota_schedule_failed') {
-      _quotaScheduleRevision += 1;
+      quotaController.quotaSchedulesChanged();
       notifyListeners();
       final String message = _strings.isZh
           ? event.data['messageZh'] as String? ??
@@ -1755,7 +1706,7 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     if (event.type == 'quota_schedule_changed') {
-      _quotaScheduleRevision += 1;
+      quotaController.quotaSchedulesChanged();
       notifyListeners();
       return;
     }

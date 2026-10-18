@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+/// The colour of a quota with [remainingPercent] left: the accent while there
+/// is room, amber when it runs low, red when nearly gone.
+Color quotaTone(ColorScheme colors, double remainingPercent) {
+  if (remainingPercent < 10) return colors.error;
+  if (remainingPercent < 25) return AppTheme.statusWarn;
+  return colors.primary;
+}
+
 class AppTheme {
   /// The bundled monospace family, used wherever text is code or an
   /// identifier: chat code, model ids, paths, and the SSH terminal.

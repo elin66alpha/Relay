@@ -5,12 +5,17 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { authStatus } = require('./auth-status');
+const { getAgentStatuses } = require('./agent-status');
 const { listTokenSummaries, hasConfiguredToken } = require('./tokens');
 const { inspectWorkdir } = require('./workdir');
 
 const SERVER_DIR = path.join(__dirname, '..');
 const REPO_DIR = path.join(SERVER_DIR, '..');
+
+function authStatus(agentKey) {
+  const status = getAgentStatuses()[agentKey];
+  return status ? status.authed === true : null;
+}
 
 function safeStat(filePath) {
   try {

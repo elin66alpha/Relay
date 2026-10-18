@@ -34,8 +34,8 @@ import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/github-dark.dart';
 import 'package:re_highlight/styles/github.dart';
 
-import '../../core/i18n/app_strings.dart';
-import '../../core/theme/app_theme.dart';
+import '../i18n/app_strings.dart';
+import '../theme/app_theme.dart';
 
 // The languages agents actually write, rather than all ~190 grammars, to keep
 // the Web bundle small. Each grammar registers its own aliases (js, ts, sh, py,

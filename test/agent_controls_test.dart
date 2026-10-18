@@ -48,23 +48,24 @@ void main() {
 
     expect(find.text('Extra high'), findsOneWidget);
     expect(find.text('Medium'), findsNothing);
-    expect(find.text('Update CLI'), findsOneWidget);
     expect(find.byIcon(Icons.radio_button_checked_rounded), findsOneWidget);
   });
 
-  testWidgets('CLI update refreshes catalog and settings on effort page', (
+  testWidgets('CLI update from the drawer refreshes catalog and settings', (
     WidgetTester tester,
   ) async {
     final _OptionsBackendClient backend = _OptionsBackendClient();
     await pumpControls(tester, backend);
-    await tester.tap(find.text('Effort'));
-    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Update CLI'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('Version 1.0.0'), findsOneWidget);
     await tester.tap(find.text('Update CLI').last);
     await tester.pumpAndSettle();
+    expect(find.text('Updated: 1.0.0 → 2.0.0'), findsOneWidget);
 
+    await tester.tap(find.text('Effort'));
+    await tester.pumpAndSettle();
     expect(find.text('Max'), findsOneWidget);
     expect(find.text('Extra high'), findsNothing);
     expect(find.byIcon(Icons.radio_button_checked_rounded), findsOneWidget);
@@ -79,8 +80,6 @@ void main() {
       updateSucceeds: false,
     );
     await pumpControls(tester, backend);
-    await tester.tap(find.text('Effort'));
-    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Update CLI'));
     await tester.pumpAndSettle();

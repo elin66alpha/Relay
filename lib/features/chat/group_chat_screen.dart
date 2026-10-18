@@ -16,6 +16,7 @@ import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/time_format.dart';
 import '../../core/widgets/agent_icon.dart';
+import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import 'chat_content.dart';
@@ -32,6 +33,9 @@ class GroupChatScreen extends StatefulWidget {
     this.initialGroupId,
     super.key,
   });
+
+  /// A first-level page: it paints its own wallpaper, not the pushed-page one.
+  static const String routeName = 'swarm';
 
   final CliAgentsController agentsController;
   final AppSettingsController settingsController;
@@ -146,61 +150,83 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     return AnimatedBuilder(
-      animation: _controller,
+      animation: Listenable.merge(
+        <Listenable>[_controller, widget.settingsController],
+      ),
       builder: (BuildContext context, Widget? _) {
         final ChatGroup? group = _controller.selected;
-        return Scaffold(
-          appBar: AppBar(
-            title: InkWell(
-              onTap: _showGroupSwitcher,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Flexible(
-                    child: Text(
-                      group?.name ?? strings.groupChat,
-                      overflow: TextOverflow.ellipsis,
+        final bool acrylic = widget.settingsController.wallpaper.bytes != null;
+        return ChatWallpaper(
+          wallpaper: widget.settingsController.wallpaper,
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              backgroundColor: acrylic ? Colors.transparent : null,
+              surfaceTintColor: acrylic ? Colors.transparent : null,
+              flexibleSpace: acrylic ? const AcrylicAppBarBackground() : null,
+              title: InkWell(
+                onTap: _showGroupSwitcher,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        group?.name ?? strings.groupChat,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                  if (_controller.groups.isNotEmpty)
-                    const Icon(Icons.arrow_drop_down),
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              IconButton(
-                tooltip: strings.newGroup,
-                icon: const Icon(Icons.group_add_outlined),
-                onPressed: _createGroup,
-              ),
-              if (group != null)
-                PopupMenuButton<String>(
-                  onSelected: (String action) => _onMenu(action, group),
-                  itemBuilder: (BuildContext context) =>
-                      <PopupMenuEntry<String>>[
-                        PopupMenuItem<String>(
-                          value: 'members',
-                          child: Text(strings.manageMembers),
-                        ),
-                        PopupMenuItem<String>(
-                          value: 'clear',
-                          child: Text(strings.clearTranscript),
-                        ),
-                        PopupMenuItem<String>(
-                          value: 'delete',
-                          child: Text(strings.deleteGroup),
-                        ),
-                      ],
+                    if (_controller.groups.isNotEmpty)
+                      const Icon(Icons.arrow_drop_down),
+                  ],
                 ),
-            ],
-          ),
-          body: Column(
-            children: <Widget>[
-              if (_controller.error != null)
-                _ErrorBanner(message: _controller.error!),
-              Expanded(child: _buildBody(strings, group)),
-              if (group != null) _buildComposer(strings, group),
-            ],
+              ),
+              actions: <Widget>[
+                IconButton(
+                  tooltip: strings.newGroup,
+                  icon: const Icon(Icons.group_add_outlined),
+                  onPressed: _createGroup,
+                ),
+                if (group != null)
+                  PopupMenuButton<String>(
+                    onSelected: (String action) => _onMenu(action, group),
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'members',
+                        child: Text(strings.manageMembers),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'clear',
+                        child: Text(strings.clearTranscript),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text(strings.deleteGroup),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            body: Column(
+              children: <Widget>[
+                if (_controller.error != null)
+                  _ErrorBanner(message: _controller.error!),
+                Expanded(child: _buildBody(strings, group)),
+                if (group != null)
+                  ChatChromeSurface(
+                    acrylic: acrylic,
+                    color: acrylic
+                        ? Theme.of(context).colorScheme.surfaceContainer
+                        : Theme.of(context).scaffoldBackgroundColor,
+                    border: Border(
+                      top: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: _buildComposer(strings, group),
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -249,10 +275,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
   Widget _buildComposer(AppStrings strings, ChatGroup group) {
     final bool sending = _controller.sending;
+    // The gesture bar's own inset is the bottom gap; 8 only where it has none.
     return SafeArea(
       top: false,
+      minimum: const EdgeInsets.only(bottom: 8),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -272,7 +300,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             onPressed: isCliAgentSelectable(agent)
                                 ? () => _insertMention(member)
                                 : () =>
-                                      showAgentUnavailableSnack(context, agent),
+                                    showAgentUnavailableSnack(context, agent),
                           );
                         },
                       ),
@@ -339,43 +367,52 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   void _showGroupSwitcher() {
     final AppStrings strings = context.l10n;
     final ChatGroup? selected = _controller.selected;
+    final bool acrylic = widget.settingsController.wallpaper.bytes != null;
     showModalBottomSheet<void>(
       context: context,
+      backgroundColor: acrylic ? Colors.transparent : null,
       builder: (BuildContext context) {
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: <Widget>[
-              for (final ChatGroup group in _controller.groups)
+        return ChatChromeSurface(
+          acrylic: acrylic,
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          border:
+              Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+          child: SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: <Widget>[
+                for (final ChatGroup group in _controller.groups)
+                  ListTile(
+                    leading: const Icon(Icons.groups_2_outlined),
+                    title: Text(group.name),
+                    subtitle: Text(group.memberLabels.join(' · ')),
+                    selected: group.id == _controller.selected?.id,
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _controller.selectGroup(group);
+                    },
+                  ),
+                if (_controller.groups.isNotEmpty) const Divider(height: 1),
+                if (selected != null)
+                  ListTile(
+                    leading: const Icon(Icons.download_outlined),
+                    title: Text(strings.saveSwarmTemplate),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _saveTemplate(selected);
+                    },
+                  ),
                 ListTile(
-                  leading: const Icon(Icons.groups_2_outlined),
-                  title: Text(group.name),
-                  subtitle: Text(group.memberLabels.join(' · ')),
-                  selected: group.id == _controller.selected?.id,
+                  leading: const Icon(Icons.upload_file_outlined),
+                  title: Text(strings.importSwarmTemplate),
                   onTap: () {
                     Navigator.of(context).pop();
-                    _controller.selectGroup(group);
+                    _importTemplate();
                   },
                 ),
-              if (_controller.groups.isNotEmpty) const Divider(height: 1),
-              if (selected != null)
-                ListTile(
-                  leading: const Icon(Icons.download_outlined),
-                  title: Text(strings.saveSwarmTemplate),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _saveTemplate(selected);
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.upload_file_outlined),
-                title: Text(strings.importSwarmTemplate),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _importTemplate();
-                },
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -499,7 +536,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         template.members,
         configs: template.configs,
       );
-      if (created != null) _showSnack(strings.swarmTemplateImported(created.name));
+      if (created != null) {
+        _showSnack(strings.swarmTemplateImported(created.name));
+      }
     } on FormatException {
       _showSnack(strings.swarmTemplateInvalid);
     } catch (err) {
@@ -577,11 +616,13 @@ class _GroupComposerField extends StatelessWidget {
       onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
       minLines: 1,
       maxLines: 5,
-      textInputAction: onSubmitted == null
-          ? TextInputAction.newline
-          : TextInputAction.send,
+      textInputAction:
+          onSubmitted == null ? TextInputAction.newline : TextInputAction.send,
       decoration: InputDecoration(
         hintText: hintText,
+        fillColor: WallpaperScope.enabledOf(context)
+            ? Theme.of(context).colorScheme.surface.withValues(alpha: 0.18)
+            : null,
         border: const OutlineInputBorder(),
         isDense: true,
       ),
@@ -809,10 +850,10 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
   // Selected option ids per agent, seeded from the swarm being edited.
   late final Map<String, Map<String, String>> _configs =
       <String, Map<String, String>>{
-        for (final MapEntry<String, Map<String, String>> e
-            in widget.initialConfigs.entries)
-          e.key: <String, String>{...e.value},
-      };
+    for (final MapEntry<String, Map<String, String>> e
+        in widget.initialConfigs.entries)
+      e.key: <String, String>{...e.value},
+  };
   final Map<String, AgentOptionsCatalog> _catalogs =
       <String, AgentOptionsCatalog>{};
   final Set<String> _loading = <String>{};
@@ -893,8 +934,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     if (_catalogs.containsKey(agentKey) || _loading.contains(agentKey)) return;
     setState(() => _loading.add(agentKey));
     try {
-      final AgentOptionsCatalog catalog = await widget.backend
-          .fetchAgentOptions(agentKey);
+      final AgentOptionsCatalog catalog =
+          await widget.backend.fetchAgentOptions(agentKey);
       if (!mounted) return;
       setState(() {
         _catalogs[agentKey] = catalog;
@@ -1001,10 +1042,10 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
     }
     final Map<String, Map<String, String>> configs =
         <String, Map<String, String>>{
-          for (final String key in members)
-            if (_configs[key] != null && _configs[key]!.isNotEmpty)
-              key: <String, String>{..._configs[key]!},
-        };
+      for (final String key in members)
+        if (_configs[key] != null && _configs[key]!.isNotEmpty)
+          key: <String, String>{..._configs[key]!},
+    };
     Navigator.of(context).pop(
       _SwarmForm(
         name: _nameController.text.trim(),
@@ -1112,9 +1153,8 @@ class _SwarmFormDialogState extends State<_SwarmFormDialog> {
                 ? null
                 : TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
-          subtitle: usable
-              ? null
-              : Text(agentUnavailableMessage(strings, agent)),
+          subtitle:
+              usable ? null : Text(agentUnavailableMessage(strings, agent)),
           secondary: AgentStatusLights(agent: agent, compact: true),
           onChanged: (bool? value) => _toggleMember(agent.key, value == true),
         ),
@@ -1338,18 +1378,18 @@ class _WorkTreePickerDialogState extends State<_WorkTreePickerDialog> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                  ? Center(child: Text(_error!))
-                  : ListView(
-                      children: <Widget>[
-                        for (final FsEntry dir in dirs)
-                          ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.folder_outlined),
-                            title: Text(dir.name),
-                            onTap: () => _load(dir.absolutePath),
-                          ),
-                      ],
-                    ),
+                      ? Center(child: Text(_error!))
+                      : ListView(
+                          children: <Widget>[
+                            for (final FsEntry dir in dirs)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.folder_outlined),
+                                title: Text(dir.name),
+                                onTap: () => _load(dir.absolutePath),
+                              ),
+                          ],
+                        ),
             ),
           ],
         ),
@@ -1427,8 +1467,8 @@ class _MessageBubble extends StatelessWidget {
     final bool awaiting = awaitingFirstToken && message.content.isEmpty;
     final DateTime stampTime =
         (!isHuman && segments.isNotEmpty && segments.first.createdAt != null)
-        ? segments.first.createdAt!
-        : message.createdAt;
+            ? segments.first.createdAt!
+            : message.createdAt;
 
     final Widget content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1518,16 +1558,21 @@ class _MessageBubble extends StatelessWidget {
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.82,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
+            child: ChatChromeSurface(
+              acrylic: WallpaperScope.enabledOf(context),
               color: theme.colorScheme.primaryContainer,
+              border: WallpaperScope.enabledOf(context)
+                  ? Border.all(color: theme.colorScheme.outlineVariant)
+                  : const Border(),
               borderRadius: BorderRadius.circular(12),
-            ),
-            // The default selection colour shares this bubble's hue and barely
-            // shows on it; tint it with the text colour instead.
-            child: DefaultSelectionStyle.merge(
-              selectionColor: textColor.withValues(alpha: 0.35),
-              child: content,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: DefaultSelectionStyle.merge(
+                  selectionColor: textColor.withValues(alpha: 0.35),
+                  child: content,
+                ),
+              ),
             ),
           ),
           if (time != null)
@@ -1601,13 +1646,19 @@ class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
+    return ChatChromeSurface(
+      acrylic: WallpaperScope.enabledOf(context),
       color: theme.colorScheme.errorContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Text(
-        message,
-        style: TextStyle(color: theme.colorScheme.onErrorContainer),
+      border: const Border(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: Text(
+            message,
+            style: TextStyle(color: theme.colorScheme.onErrorContainer),
+          ),
+        ),
       ),
     );
   }

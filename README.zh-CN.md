@@ -17,7 +17,7 @@
 </div>
 
 <a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="Relay 首页，显示已连接的编程智能体、最近会话与多智能体蜂群" width="100%">
+  <img src="assets/screenshots/relay-overview-web.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
 </a>
 
 Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上。手机、Web 与桌面共用
@@ -39,8 +39,13 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 流式查看回复、取消当前回合、搜索历史、导出 Markdown；切换页面后，任务仍可继续。
 每个 `工作目录 + agent` 最多支持 8 个可恢复的命名会话。
 
+在**设置 → 壁纸**的独立页面中，选择所有 Agent 聊天、蜂群与聊天首页共用的设备本地壁纸。
+单个滑块调节当前主题的图片不透明度并实时预览，点击**保存**后应用；亮色/暗色默认值为
+80%/20%。App 保存原图并按原始分辨率显示，网页版保存压缩后的副本。图片居中均匀填充，
+聊天面板、消息气泡和其他页面使用同一种亚克力材质。
+
 <a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话" width="100%">
+  <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
 </a>
 
 ### 在手机上聊天、协作和管理文件
@@ -58,7 +63,7 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
   </tr>
 </table>
 
-<sub>这些图片由 Chromium 连接隔离的演示后端截取，不包含生产凭据或真实项目数据。</sub>
+<sub>这些截图使用暗色主题，并在“设置 → 壁纸”中设置了壁纸；由 Chromium 连接隔离的演示后端截取，不包含生产凭据或真实项目数据。</sub>
 
 ## 它是怎样连接起来的
 
@@ -85,12 +90,14 @@ flowchart LR
 
 | | 能力 | 带来的体验 |
 |---|---|---|
-| 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话、跨设备历史、搜索与 Markdown 导出。 |
+| 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话（除 Main 外均可重命名）、跨设备历史、搜索与 Markdown 导出。可复制消息，或编辑自己的消息，将原文放回草稿。Claude 自行发起的回复（例如后台任务完成时）会作为单独的消息显示。 |
+| 📎 | **聊天附件与上下文** | 添加附件会将文件上传到工作区，并把路径加入草稿。单聊输入框上方以 `<已用> / <窗口>` 显示上下文词元数；`?` 表示未知。 |
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
 | 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据、Claude 凭据到期时间，以及 Claude/Codex 快速模式。 |
-| 📁 | **文件与终端** | 受策略约束的浏览、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
+| 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
 | 📊 | **额度工作流** | 查看 Claude/Codex 用量，并预约一条消息在下一个检测到的 5 小时额度重置后发送。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
+| 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
 
 Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机管理的实验性集成。
 四种 agent 的凭据都保留在后端主机上，Relay 不会代替你登录。
@@ -101,6 +108,11 @@ Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机�
 
 在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude 与
 Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管理的 provider 配置。
+
+Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8)
+下载 `relay-backend-windows-x64-v0.1.8.zip`，解压后运行 `.\setup.cmd`。这个后端包
+已包含 Node.js 和生产依赖；agent CLI 仍需自行安装并认证。
+`relay-windows-x64-v0.1.8.zip` 是桌面客户端。
 
 在仓库根目录执行对应系统的安装命令：
 
@@ -126,6 +138,7 @@ Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管
 
 选择后端、设置工作目录，然后打开 agent 会话或蜂群。首页显示当前机器、当前工作区和
 最多三个最近工作区；点击机器可检查 CLI 状态、管理设备令牌并进入 SSH。
+在 Android 与 iOS App 中，在聊天页任意位置右滑即可打开侧栏。
 发送任务前，通过“文件系统 → 设为工作路径”选择项目。首页“教程”提供命名会话、
 智能体设置、蜂群、文件操作和手机终端快捷键的详细说明。服务命令、网络配置与各平台说明
 见[后端安装指南](backends/README.zh-CN.md)。
@@ -163,7 +176,8 @@ npm --prefix server start
 ```
 
 Web 参数会有意禁用 service worker，并在本地打包 CanvasKit。Windows release 已实际
-验证；macOS/Linux 桌面打包和安全存储验证成熟度较低。详见
+验证；macOS/Linux 桌面打包和安全存储验证成熟度较低。Android release 构建需要签名密钥，
+见 [Android release signing](docs/handbook.md#android-release-signing)。详见
 [开发手册](docs/handbook.md#development-and-builds)。
 
 ```text
@@ -172,7 +186,7 @@ Relay/
 ├── server/       Node.js 后端与测试
 ├── backends/     各系统安装和服务管理适配
 ├── docs/         运维与架构手册
-├── scripts/      开发、部署与截图工具
+├── scripts/      开发与部署工具
 └── test/         Flutter 测试
 ```
 

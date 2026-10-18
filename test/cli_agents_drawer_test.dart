@@ -9,9 +9,10 @@ import 'package:relay/core/models/machine_credential.dart';
 import 'package:relay/core/settings/app_settings_controller.dart';
 import 'package:relay/core/storage/machine_credentials_store.dart';
 import 'package:relay/features/chat/bot_chat_controller.dart';
+import 'package:relay/features/chat/cli_agents_drawer.dart';
 import 'package:relay/features/cli_agents/cli_agents_controller.dart';
-import 'package:relay/features/cli_agents/cli_agents_drawer.dart';
 import 'package:relay/features/machines/machine_credentials_controller.dart';
+import 'package:relay/features/quota/quota_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -37,6 +38,7 @@ void main() {
     final _SessionBackendClient backendClient = _SessionBackendClient();
     final BotChatController chatController = BotChatController(
       backendClient: backendClient,
+      quotaController: QuotaController(backendClient: backendClient),
     );
     addTearDown(chatController.disposeController);
 
@@ -98,6 +100,106 @@ void main() {
     expect(chatController.sessionsFor('claude'), hasLength(2));
     expect(chatController.activeSession?.name, 'Session 2');
     expect(find.text('CLI agents'), findsNothing);
+  });
+  testWidgets('session rename leaves Main protected and updates the label', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    MachineCredentialsStore.resetCacheForTest();
+
+    final MachineCredential machine = MachineCredential(
+      id: 'machine-1',
+      name: 'Local test',
+      baseUrl: 'http://127.0.0.1:8787',
+      token: 'token',
+      createdAt: DateTime.utc(2026).toIso8601String(),
+    );
+    final CliAgentsController agentsController = CliAgentsController();
+    final MachineCredentialsController machinesController =
+        MachineCredentialsController(
+      store: _MemoryMachineCredentialsStore(machine),
+    );
+    final AppSettingsController settingsController = AppSettingsController();
+    final _SessionBackendClient backendClient = _SessionBackendClient();
+    await backendClient.createSession('claude', 'First');
+    await backendClient.createSession('claude', 'Second');
+    final BotChatController chatController = BotChatController(
+      backendClient: backendClient,
+      quotaController: QuotaController(backendClient: backendClient),
+    );
+    addTearDown(chatController.disposeController);
+
+    await agentsController.load();
+    await machinesController.load();
+    await chatController.loadFor(defaultCliAgents.first, machine);
+    final String? activeId = chatController.activeSessionId;
+    final List<String> sessionIds = chatController
+        .sessionsFor('claude')
+        .map((AgentSession session) => session.id)
+        .toList();
+
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      AppScope(
+        controller: settingsController,
+        child: MaterialApp(
+          home: Scaffold(
+            body: SafeArea(
+              child: CliAgentsDrawer(
+                agentsController: agentsController,
+                chatController: chatController,
+                machinesController: machinesController,
+                settingsController: settingsController,
+                closeOnAction: false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder mainRow = find.ancestor(
+      of: find.text('Main'),
+      matching: find.byType(ListTile),
+    );
+    expect(mainRow, findsOneWidget);
+    expect(
+      find.descendant(of: mainRow, matching: find.byTooltip('Rename session')),
+      findsNothing,
+    );
+    expect(find.byTooltip('Rename session'), findsNWidgets(2));
+
+    for (final String oldName in <String>['First', 'Second']) {
+      final Finder row = find.ancestor(
+        of: find.text(oldName),
+        matching: find.byType(ListTile),
+      );
+      await tester.tap(
+        find.descendant(of: row, matching: find.byTooltip('Rename session')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextFormField, oldName), findsOneWidget);
+      await tester.enterText(find.byType(TextFormField), 'Renamed $oldName');
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Renamed $oldName'), findsOneWidget);
+      expect(find.text(oldName), findsNothing);
+      expect(chatController.activeSessionId, activeId);
+      expect(
+        chatController
+            .sessionsFor('claude')
+            .map((AgentSession session) => session.id),
+        sessionIds,
+      );
+    }
+    expect(chatController.activeSession?.name, 'Renamed Second');
+    expect(tester.takeException(), isNull);
   });
 }
 
@@ -170,11 +272,31 @@ class _SessionBackendClient extends BackendClient {
   }
 
   @override
-  Future<List<ChatMessage>> fetchHistory(
+  Future<AgentSessionList> renameSession(
+    String agentKey,
+    String sessionId,
+    String name,
+  ) async {
+    final List<AgentSession> sessions = _sessionsFor(agentKey);
+    final int index = sessions.indexWhere(
+      (AgentSession session) => session.id == sessionId,
+    );
+    final AgentSession session = sessions[index];
+    sessions[index] = AgentSession(
+      id: session.id,
+      name: name,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    );
+    return _listFor(agentKey);
+  }
+
+  @override
+  Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
   }) async {
-    return const <ChatMessage>[];
+    return const ChatHistory(messages: <ChatMessage>[]);
   }
 
   @override

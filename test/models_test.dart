@@ -39,7 +39,7 @@ void main() {
       expect(g.memberConfigs, isEmpty);
     });
 
-    test('_configsFrom skips non-map values and empty ids', () {
+    test('member configs omit non-map values and empty option ids', () {
       final ChatGroup g = ChatGroup.fromJson(<String, Object?>{
         'members': <Object?>['claude'],
         'memberConfigs': <String, Object?>{

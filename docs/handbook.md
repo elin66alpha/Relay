@@ -23,8 +23,8 @@ the backend OS user. A stable deployment should have all of the following:
 - Generate one credential per device. Revoke and delete old device tokens rather
   than sharing one token.
 - Keep `.env`, tokens, credential exports, CLI login state, push keys, history,
-  sessions, settings, groups, quota state, and FCM service-account files out of
-  git and release archives.
+  sessions, settings, `server/context-windows.json`, groups, quota state, and FCM
+  service-account files out of git and release archives.
 
 ### Reverse proxy requirements
 
@@ -50,14 +50,66 @@ but still require authentication. Failed bearer-token attempts have a separate
 
 The built-in denylist currently covers Relay's token file, `.env`, generated
 credential directory, Web Push/FCM token stores, `~/.ssh`, Claude Code OAuth
-credentials, and Codex auth. It is not a general secret scanner and does not
-cover every third-party CLI configuration. Use `RELAY_FS_ROOTS` and a restricted
-backend user for the actual production boundary.
+credentials, and Codex auth. It also covers siblings whose names start with a
+sensitive basename followed by a dot, such as `.env.bak-x`, `tokens.json.bak`,
+and `auth.json.old`, including atomic `.tmp` files. It is not a general secret
+scanner and does not cover every third-party CLI configuration. Use
+`RELAY_FS_ROOTS` and a restricted backend user for the actual production boundary.
 
 Directory downloads are zipped and rejected if the tree would contain a denied
 path. Native uploads/downloads stream; Web downloads use a browser Blob and may
 hold the file in memory up to the configured cap. Unix directory downloads call
 the host's `zip` command; Windows uses PowerShell `Compress-Archive`.
+
+Tapping a file opens a read-only preview of its first 512 KiB of UTF-8 text,
+with a notice when truncated. Binary content containing NUL bytes and invalid
+UTF-8 cannot be previewed. Supported code languages are syntax-highlighted up
+to 20,000 characters; larger or unrecognized content stays plain text. Preview
+uses the download endpoint, so its path policy and download size limit still
+apply; the download button saves the full file.
+
+`POST /api/fs/upload?path=...&name=...` accepts `mkdir=1` to create a missing
+workdir-relative upload directory and its parents. Before creation, Relay checks
+workdir confinement (including existing symlink ancestors), the denylist, and
+`RELAY_FS_ROOTS`. Absolute paths and requests without `mkdir=1` still require an
+existing directory. Solo-chat attachments use this option for
+`<workdir>/.relay/uploads/`; these files appear in the repository's git status
+unless `.relay/` is ignored.
+
+## Wallpaper
+
+Settings → Wallpaper edits one image shared by every solo chat, Swarm and the
+chat home, independent of backend, workspace and session. The device stores one
+JSON preference record with the image reference and separate light/dark
+opacities. Defaults are no image and 80%/20% opacity. The single slider follows
+the current app theme and updates the preview during dragging. Selecting,
+removing or adjusting an image changes a draft; **Save** applies and persists it
+in one replacement. Leaving the editor without saving keeps the prior settings.
+
+Imports accept JPG, PNG and WebP. On Android, iOS and desktop, **Save** copies
+the original file unchanged into the app support directory (`wallpaper/`), the
+preference keeps only its file name, with no size limit; replacing or removing
+it deletes the previous copy. Chat decodes only the pixels the display can show
+(the short side at the display's long side), so a large photo stays sharp
+without costing frame time. The Web keeps
+the image inline in localStorage, so it accepts up to 20 MiB and 40 million
+pixels and makes a JPEG copy with a long edge of at most 1920 pixels, reduced
+further to fit 256 KiB, using asynchronous browser bitmap decoding and canvas
+encoding so the loading indicator keeps animating; transparent pixels are
+flattened onto neutral gray, and clearing site data removes it. Images stay on
+the device.
+
+Chat draws a centered, aspect-preserving cover image behind its surfaces. The
+first-level pages (solo chat, the chat home and Swarm) make everything drawn on
+the wallpaper acrylic: headers, sidebars, drawers, banners, home cards,
+composers and message bubbles share one 72% theme tint over clipped backdrop
+blur, and the composer surface reaches the bottom edge behind the gesture bar.
+Those surfaces never overlap, so a page blurs one shared backdrop snapshot
+(`BackdropGroup`) instead of one per surface; the drawer, which covers the chat,
+and a surface nested in another take their own. Every other page opened from
+the app (File System, Quota Usage, Settings, ...) shows the wallpaper image
+itself blurred under the same tint and keeps solid content. An empty chat
+shows only the wallpaper. Removing the image restores solid surfaces after Save.
 
 ## Credentials and agent login
 
@@ -179,6 +231,11 @@ session (`setsid`). A Claude process with background tasks still running
 (background subagents, Monitor, background shells) is not closed as idle, and
 is evicted for the cap only when no other idle process can make room.
 
+When such work wakes Claude while the chat is idle, the turn it starts is
+shown in solo chat as a reply of its own once Claude writes text, queued behind
+any waiting turn and stopped by Stop like any other. A turn that only runs tools
+stays invisible. Swarm members and the other agents do not surface these turns.
+
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
 last step is best effort because the external CLI can reject or fail deletion;
@@ -197,19 +254,36 @@ then uses two related scopes:
 | Swarm transcript and member sessions | Swarm id plus its chosen work tree |
 
 An agent context supports up to eight named conversations. `Main` preserves the
-legacy scope key and cannot be deleted. Turns in one exact conversation scope
+legacy scope key and cannot be deleted or renamed. Renaming another session only
+changes its label, even during a running turn; its position and the active session
+stay the same. Turns in one exact conversation scope
 queue; other sessions can continue independently. Devices on the same scope
 share backend history and live events. A new session starts from a copy of the
 settings of the session it was created from; a session with no settings of its
 own (one created before settings were per session) follows Main's until its
 first change.
 
+In solo chat, **+ → Attach file** picks one or more files, including during a
+running turn. Each file uploads to `<workdir>/.relay/uploads/` with a
+`yyyyMMdd-HHmmss-` prefix from the device's local time. Each successful upload
+appends its workdir-relative path on a new line in the draft; the user sends the
+message when ready. Attachments appear in that repository's git status unless
+`.relay/` is ignored.
+
+Above the solo-chat composer, the context usage line shows `<used> / <window>`
+in tokens (for example, `42k / 200k`), using the latest reported usage in the
+conversation. A new or cleared conversation shows `0 / <window>`; a conversation
+with replies but no recorded usage shows `? / <window>`. An unknown window is
+shown as `?` until that agent and model has reported one. The backend remembers
+the last reported window per agent and model in the generated state file
+`server/context-windows.json`, so an empty conversation can show the known limit.
+
 Agent controls are capability-aware:
 
 | Agent | Model | Effort | Permission | Fast | Authentication |
 |---|---:|---:|---:|---:|---|
 | Claude Code | yes | yes | yes | yes | OAuth |
-| Codex | yes | model-specific | yes | yes | OAuth |
+| Codex | yes | model-specific | yes | yes | active app-server mode: managed ChatGPT, API key, external token, or host-managed provider |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
 | Hermes | host config/pins | no | yes | no | host-managed key |
 
@@ -238,6 +312,11 @@ recent 200 messages in each conversation or Swarm scope. This file is backend
 state, not an encrypted archive, and can contain prompts, agent output, and
 sensitive project context. Protect it and any backups with the same care as the
 backend account.
+
+In solo chat, settled messages offer **Copy**; agent replies copy the final
+answer text. Your own messages also offer **Edit**, which replaces the draft
+with that message's text for you to revise and send. Editing leaves stored
+history unchanged and sends nothing until you choose to send.
 
 The client can search the current workdir across named sessions and agents, or
 limit the search to the current agent. The backend returns at most 50 matches;
@@ -310,7 +389,8 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
 - Metadata/auth: health, client auth status, agents and their auth state, agent
   options/settings/version/update, diagnostics, device tokens, and shared events.
 - Chat: chat, cancellation, history, history search/export, and clear session.
-- Named sessions: list/create, set active, and delete.
+- Named sessions: list/create, set active, rename (`POST /api/sessions/rename`),
+  and delete.
 - Files/workdir: current workdir, recent workdirs with chat history, absolute
   directory browse, upload, and download.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.
@@ -338,6 +418,13 @@ Python 3, `make`, and a C++ compiler first (for example `build-essential` on
 Debian/Ubuntu). macOS and Windows use the package's supported prebuilt binaries
 when available. Unix hosts also need `zip` for directory downloads.
 
+`server/package.json` allows node-pty's install scripts through npm 12's
+`allowScripts` policy, so `npm install` and `npm ci` build it without manual
+approval. npm 10 ignores this field. Check the installed addon with
+`node -e "require('node-pty')"` from `server/`; if it fails, run
+`npm rebuild node-pty`. The backend setup adapters check that it loads and repair
+an incomplete installation.
+
 To let the backend serve the Flutter Web client:
 
 ```bash
@@ -348,6 +435,41 @@ npm --prefix server start
 
 The server serves `build/web` when present. CanvasKit is bundled locally and the
 service worker is disabled to keep the self-hosted client current.
+
+`scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
+backend JavaScript (`SKIP_CHECK=1` skips this), restarts or recreates
+`relay-server`, and waits until the port answers. `scripts/build_flow.sh` also
+rebuilds Web and an APK.
+
+### Windows backend release bundle
+
+Build the backend bundle on Windows x64 using a complete Node.js distribution
+(including npm and its license), Git, and access to the npm registry:
+
+```powershell
+.\scripts\package_windows_backend.ps1
+# Optional: select a different installed runtime or output directory.
+.\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+```
+
+The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
+matching `.sha256`, taking the version from `server/package.json`. It refuses
+to overwrite an existing ZIP. A fresh staging directory copies only allowed,
+tracked backend sources, installs production dependencies with `npm ci`, and
+audits the application tree before compression. It never copies deployment
+state or the checkout's `node_modules`. Staging directories stay under the
+output directory for inspection. The bundle manifest records the source HEAD,
+Node version, architecture, and lockfile hash; source files include current
+working-tree edits. Review those edits before publishing a bundle.
+
+The ZIP carries its own Node.js/npm distribution and preserves dependency
+licenses, including Windows `node-pty` binaries. The Windows adapters prefer
+`runtime/node` when present; a source checkout continues using Node on PATH.
+The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
+entry points, with the same state paths and login Scheduled Task as the source
+installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
+client is included. Keep the extracted directory fixed, and follow the bundled
+README when migrating a deployment to a new directory.
 
 ### Desktop clients
 
@@ -373,8 +495,46 @@ Build prerequisites:
 Typical artifacts are `build/windows/x64/runner/Release/`,
 `build/macos/Build/Products/Release/Relay.app`, and
 `build/linux/x64/release/bundle/`. Packaging, store signing, macOS notarization,
-and production Android signing are not configured. Android release builds in
-this repository still reuse debug signing.
+are not configured.
+
+### Android release signing
+
+Android release builds are signed with a keystore described by the gitignored
+`android/key.properties`; without that file a release build fails rather than
+falling back to debug signing. Debug builds need no key. Create the keystore
+once, outside the repository, and back it up: every later release must use the
+same key, or installed apps cannot be updated in place.
+
+```bash
+keytool -genkeypair -v -keystore ~/relay-release.jks -storetype PKCS12 \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias relay
+```
+
+Copy `android/key.properties.example` to `android/key.properties`, set
+`storeFile` to the keystore's absolute path, and fill in both passwords; with a
+PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
+`flutter build apk --release` produces a release-signed APK.
+
+### Release assets
+
+A GitHub release `v<VERSION>` carries:
+
+- `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
+- `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
+  service adapters, without tests, dependencies, or deployment state:
+
+  ```bash
+  V=<VERSION>
+  git archive --format=tar.gz --prefix=relay-backend-setup-v$V/ \
+    -o relay-backend-setup-v$V.tar.gz HEAD $(git ls-tree -r --name-only HEAD |
+    grep -E '^(CHANGELOG\.md|LICENSE|README(\.zh-CN)?\.md|SECURITY\.md|docs/handbook\.md|scripts/setup\.sh|backends/README(\.zh-CN)?\.md|backends/(linux|macos)/(lib/)?[^/]+\.sh|backends/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
+  ```
+
+- `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
+  (`build/windows/x64/runner/Release/`);
+- `relay-backend-windows-x64-v<VERSION>.zip` — see
+  [Windows backend release bundle](#windows-backend-release-bundle);
+- `SHA256SUMS` — `sha256sum` of every asset above.
 
 ## Configuration
 

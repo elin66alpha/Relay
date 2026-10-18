@@ -10,6 +10,7 @@ import 'package:relay/core/models/cli_agent.dart';
 import 'package:relay/core/models/machine_credential.dart';
 import 'package:relay/core/storage/workdir_store.dart';
 import 'package:relay/features/chat/bot_chat_controller.dart';
+import 'package:relay/features/quota/quota_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -17,8 +18,10 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     WorkdirStore.resetCacheForTest();
     final _WorkdirBackendClient backend = _WorkdirBackendClient();
-    final BotChatController controller =
-        BotChatController(backendClient: backend);
+    final BotChatController controller = BotChatController(
+      backendClient: backend,
+      quotaController: QuotaController(backendClient: backend),
+    );
     addTearDown(controller.disposeController);
 
     await controller.loadFor(defaultCliAgents.first, _machine);
@@ -26,12 +29,22 @@ void main() {
     controller.connectEvents();
     await pumpEventQueue();
     expect(controller.activeSession?.name, 'Chat in /a');
+    expect(controller.contextWindow, 200000);
+    await controller.clearHistory();
+    expect(controller.messages, isEmpty);
+    expect(controller.contextWindow, 200000);
 
     // Completing promptly is the point: the switch used to wait on the idle
     // event stream (up to its 30s heartbeat) before reloading anything.
-    await controller.setWorkdir('/b').timeout(const Duration(seconds: 2));
+    backend.historyGate = Completer<void>();
+    final Future<void> switchWorkdir = controller.setWorkdir('/b');
+    await pumpEventQueue();
+    expect(controller.contextWindow, isNull);
+    backend.historyGate!.complete();
+    await switchWorkdir.timeout(const Duration(seconds: 2));
 
     expect(controller.activeWorkdir, '/b');
+    expect(controller.contextWindow, isNull);
     expect(
       controller.sessionsFor('claude').map((AgentSession s) => s.name),
       <String>['Chat in /b'],
@@ -54,6 +67,7 @@ final MachineCredential _machine = MachineCredential(
 /// A backend whose sessions and history belong to whichever workdir is set.
 class _WorkdirBackendClient extends BackendClient {
   String _dir = '/a';
+  Completer<void>? historyGate;
   final List<StreamController<List<int>>> _bodies =
       <StreamController<List<int>>>[];
 
@@ -106,17 +120,24 @@ class _WorkdirBackendClient extends BackendClient {
   }
 
   @override
-  Future<List<ChatMessage>> fetchHistory(
+  Future<void> clearSession(String agentKey, String sessionId) async {}
+
+  @override
+  Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
   }) async {
-    return <ChatMessage>[
-      ChatMessage(
-        id: 'message$_dir',
-        role: ChatRole.user,
-        content: 'hello from $_dir',
-        createdAt: DateTime.utc(2026),
-      ),
-    ];
+    await historyGate?.future;
+    return ChatHistory(
+      messages: <ChatMessage>[
+        ChatMessage(
+          id: 'message$_dir',
+          role: ChatRole.user,
+          content: 'hello from $_dir',
+          createdAt: DateTime.utc(2026),
+        ),
+      ],
+      contextWindow: _dir == '/a' ? 200000 : null,
+    );
   }
 }

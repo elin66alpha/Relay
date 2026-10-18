@@ -119,6 +119,20 @@ test('several scopes share one agent process', async () => {
   await done();
 });
 
+test('message listener failures warn once per process and turns still complete', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const { pool, done } = makePool();
+  for (const key of ['a', 'b']) {
+    const { result } = await send(pool, key, 'one', {
+      onMessage() { throw new Error('listener failed'); },
+    });
+    assert.equal(result.stopReason, 'end_turn');
+  }
+  assert.equal(warn.mock.calls.length, 1);
+  assert.match(warn.mock.calls[0].arguments[0], /\[fake\].*session\/update: listener failed/);
+  await done();
+});
+
 test('a cold start loads the stored session id', async () => {
   const { pool, state, done } = makePool();
   const result = await send(pool, 'a', 'one', { resumeId: 'stored-id' });
