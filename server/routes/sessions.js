@@ -15,6 +15,7 @@ module.exports = function createSessionsRouter(ctx) {
     deleteSettings,
     getSettings,
     listChatSessions,
+    renameChatSession,
     resolveAgentScope,
     runningScopes,
     scopeChains,
@@ -92,6 +93,50 @@ module.exports = function createSessionsRouter(ctx) {
     if (!scope) return;
     const { agent, workdir, contextKey } = scope;
     const result = setActiveChatSession(contextKey, sessionId);
+    if (!result) {
+      return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+    }
+    return res.json({
+      ok: true,
+      agent: agentPayload(agent),
+      workdir,
+      ...result,
+    });
+  });
+
+  router.post('/api/sessions/rename', (req, res) => {
+    const agentKey = String(req.body.agent || '').trim();
+    const sessionId = String(req.body.sessionId || '').trim();
+    const name = String(req.body.name || '').trim();
+    const scope = resolveAgentScope(req, res, {
+      agentKey,
+      requireSession: false,
+      agentError: agentRequiredOrUnknownError,
+      beforeWorkdir: () => {
+        if (!sessionId) {
+          res.status(400).json({ error: 'sessionId is required' });
+          return false;
+        }
+        if (sessionId === LEGACY_SESSION_ID) {
+          res.status(400).json({
+            error: 'the default session cannot be renamed',
+            code: 'SESSION_PROTECTED',
+          });
+          return false;
+        }
+        if (!name) {
+          res.status(400).json({
+            error: 'session name is required',
+            code: 'SESSION_NAME_REQUIRED',
+          });
+          return false;
+        }
+        return true;
+      },
+    });
+    if (!scope) return;
+    const { agent, workdir, contextKey } = scope;
+    const result = renameChatSession(contextKey, sessionId, name);
     if (!result) {
       return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
     }

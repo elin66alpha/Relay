@@ -170,7 +170,6 @@ function buildGroupPrompt({
 
 module.exports = {
   HUMAN_AUTHOR,
-  DEFAULT_MAX_PROMPT_BYTES,
   authorOf,
   parseMentions,
   deltaSince,

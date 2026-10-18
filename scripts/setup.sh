@@ -154,9 +154,9 @@ if [ ! -f "$ENV_FILE" ]; then
   c_info "Created server/.env from .env.example"
 fi
 if [ ! -d node_modules ] ||
-   [ ! -d node_modules/node-pty ] ||
+   ! node -e "require('node-pty')" >/dev/null 2>&1 ||
    [ ! -d node_modules/ws ]; then
-  if [ ! -d node_modules/node-pty ]; then
+  if ! node -e "require('node-pty')" >/dev/null 2>&1; then
     need python3 || {
       c_err "python3 is required to build the Linux PTY dependency."
       exit 1
@@ -172,6 +172,10 @@ if [ ! -d node_modules ] ||
   fi
   c_info "Installing server dependencies..."
   npm install
+  if ! node -e "require('node-pty')" >/dev/null 2>&1; then
+    npm rebuild node-pty
+  fi
+  node -e "require('node-pty')"
 fi
 
 PORT_NUM="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)"

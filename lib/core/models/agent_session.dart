@@ -44,3 +44,46 @@ class AgentSession {
     };
   }
 }
+
+class AgentSessionList {
+  const AgentSessionList({
+    required this.agentKey,
+    required this.workdir,
+    required this.activeSessionId,
+    required this.sessions,
+  });
+
+  factory AgentSessionList.fromJson(Map<String, Object?> json) {
+    final Map<String, Object?> agent =
+        (json['agent'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final List<Object?> rawSessions = json['sessions'] is List
+        ? (json['sessions'] as List).cast<Object?>()
+        : const <Object?>[];
+    final List<AgentSession> sessions = rawSessions
+        .whereType<Map>()
+        .map((Map item) => AgentSession.fromJson(item.cast<String, Object?>()))
+        .toList(growable: false);
+    final String activeSessionId = json['activeSessionId'] as String? ??
+        (sessions.isNotEmpty ? sessions.first.id : AgentSession.defaultId);
+    return AgentSessionList(
+      agentKey: agent['key'] as String? ?? '',
+      workdir: json['workdir'] as String? ?? '',
+      activeSessionId: activeSessionId,
+      sessions:
+          sessions.isEmpty ? <AgentSession>[AgentSession.fallback()] : sessions,
+    );
+  }
+
+  final String agentKey;
+  final String workdir;
+  final String activeSessionId;
+  final List<AgentSession> sessions;
+
+  AgentSession get activeSession {
+    for (final AgentSession session in sessions) {
+      if (session.id == activeSessionId) return session;
+    }
+    return sessions.isNotEmpty ? sessions.first : AgentSession.fallback();
+  }
+}

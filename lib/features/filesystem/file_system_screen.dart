@@ -1,5 +1,9 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +15,7 @@ import '../../core/platform/file_drop.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/format_bytes.dart';
 import '../../core/util/time_format.dart';
-import '../chat/bot_chat_controller.dart';
+import '../../core/widgets/code_block.dart';
 
 /// Unified file browser: browse the whole filesystem (up to root), set the work
 /// path from here, upload into the current folder, and download files/folders to
@@ -19,11 +23,13 @@ import '../chat/bot_chat_controller.dart';
 /// it survives leaving and re-entering this screen.
 class FileSystemScreen extends StatefulWidget {
   const FileSystemScreen({
-    required this.chatController,
+    required this.backend,
+    required this.onSetWorkdir,
     super.key,
   });
 
-  final BotChatController chatController;
+  final BackendClient backend;
+  final Future<WorkdirInfo> Function(String) onSetWorkdir;
 
   @override
   State<FileSystemScreen> createState() => _FileSystemScreenState();
@@ -90,7 +96,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       _error = null;
     });
     try {
-      final WorkdirInfo info = await widget.chatController.workdir();
+      final WorkdirInfo info = await widget.backend.workdir();
       _workPath = info.dir;
       await _browse(info.dir);
     } catch (err) {
@@ -108,7 +114,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       _error = null;
     });
     try {
-      final FsListing listing = await widget.chatController.browseWorkdir(
+      final FsListing listing = await widget.backend.browseWorkdir(
         path,
         showHidden: _showHidden,
       );
@@ -146,7 +152,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       _workPath = target;
     });
     try {
-      final WorkdirInfo info = await widget.chatController.setWorkdir(target);
+      final WorkdirInfo info = await widget.onSetWorkdir(target);
       if (!mounted) return;
       setState(() => _workPath = info.dir);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -234,13 +240,13 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
         setState(() => _operationText = context.l10n.uploadingFile(file.name));
         final Uint8List? bytes = file.bytes;
         if (bytes != null) {
-          await widget.chatController.uploadFile(
+          await widget.backend.uploadFile(
             path: listing.absolutePath,
             name: file.name,
             bytes: bytes,
           );
         } else {
-          await widget.chatController.uploadFileStream(
+          await widget.backend.uploadFileStream(
             path: listing.absolutePath,
             name: file.name,
             bytes: file.readStream!,
@@ -278,7 +284,23 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     _downloads.startDownload(
       fileName: entry.name,
       strings: context.l10n,
-      open: () => widget.chatController.openFileDownload(entry.path),
+      open: () => widget.backend.openFileDownload(entry.path),
+    );
+  }
+
+  void _open(FsEntry entry) {
+    if (entry.isDirectory) {
+      _browse(entry.path);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => _FilePreviewScreen(
+          entry: entry,
+          open: () => widget.backend.openFileDownload(entry.path),
+          onDownload: () => _download(entry),
+        ),
+      ),
     );
   }
 
@@ -467,7 +489,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                   listing: listing,
                   isBusy: _isBusy,
                   downloadActive: _downloadActive,
-                  onOpen: (FsEntry entry) => _browse(entry.path),
+                  onOpen: _open,
                   onDownload: _download,
                   onParent: listing.parentPath == null || _isBusy
                       ? null
@@ -475,6 +497,172 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+String? _decodePreview((Uint8List, bool) input) {
+  final (Uint8List bytes, bool truncated) = input;
+  if (bytes.contains(0)) return null;
+  int end = bytes.length;
+  if (truncated) {
+    // The size cap can split the last UTF-8 character; drop it.
+    int lead = end - 1;
+    while (lead > end - 4 && lead > 0 && (bytes[lead] & 0xC0) == 0x80) {
+      lead--;
+    }
+    if (bytes[lead] >= 0xC0) end = lead;
+  }
+  try {
+    return utf8.decode(Uint8List.sublistView(bytes, 0, end));
+  } on FormatException {
+    return null;
+  }
+}
+
+class _FilePreviewScreen extends StatefulWidget {
+  const _FilePreviewScreen({
+    required this.entry,
+    required this.open,
+    required this.onDownload,
+  });
+
+  final FsEntry entry;
+  final Future<FsDownloadStream> Function() open;
+  final VoidCallback onDownload;
+
+  @override
+  State<_FilePreviewScreen> createState() => _FilePreviewScreenState();
+}
+
+class _FilePreviewScreenState extends State<_FilePreviewScreen> {
+  static const int _maxPreviewBytes = 512 * 1024;
+
+  final DownloadManager _downloads = DownloadManager.instance;
+  StreamIterator<List<int>>? _chunks;
+  bool _isLoading = true;
+  bool _truncated = false;
+  String? _text;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _chunks?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final FsDownloadStream download = await widget.open();
+      final StreamIterator<List<int>> chunks = StreamIterator(download.bytes);
+      if (!mounted) {
+        await chunks.cancel();
+        return;
+      }
+      _chunks = chunks;
+      final BytesBuilder bytes = BytesBuilder(copy: false);
+      bool truncated = false;
+      try {
+        while (bytes.length < _maxPreviewBytes && await chunks.moveNext()) {
+          final List<int> chunk = chunks.current;
+          final int remaining = _maxPreviewBytes - bytes.length;
+          if (chunk.length > remaining) {
+            bytes.add(chunk.sublist(0, remaining));
+            truncated = true;
+          } else {
+            bytes.add(chunk);
+          }
+        }
+      } finally {
+        await chunks.cancel();
+      }
+      if (!mounted) return;
+      truncated = truncated ||
+          (bytes.length == _maxPreviewBytes &&
+              (download.total ?? widget.entry.size) > _maxPreviewBytes);
+      final String? text = await compute(
+        _decodePreview,
+        (bytes.takeBytes(), truncated),
+      );
+      if (!mounted) return;
+      setState(() {
+        _text = text;
+        _truncated = truncated;
+        _isLoading = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = friendlyErrorText(context.l10n, err);
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final String name = widget.entry.name.toLowerCase();
+    final String? language = name == 'dockerfile' || name == 'makefile'
+        ? name
+        : name.contains('.')
+            ? name.substring(name.lastIndexOf('.') + 1)
+            : null;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.entry.name),
+        actions: <Widget>[
+          ListenableBuilder(
+            listenable: _downloads,
+            builder: (BuildContext context, Widget? _) => IconButton(
+              tooltip: context.l10n.download,
+              onPressed: _downloads.isActive ? null : widget.onDownload,
+              icon: const Icon(Icons.download_outlined),
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (_truncated) Text(context.l10n.filePreviewTruncated),
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _error != null || _text == null
+                        ? Center(
+                            child: Text(
+                              _error ?? context.l10n.cannotPreviewFile,
+                            ),
+                          )
+                        : SelectionArea(
+                            child: SingleChildScrollView(
+                              child: CodeBlock(
+                                code: _text!,
+                                color: theme.colorScheme.onSurface,
+                                language: language,
+                              ),
+                            ),
+                          ),
+              ),
+              ListenableBuilder(
+                listenable: _downloads,
+                builder: (BuildContext context, Widget? _) =>
+                    _DownloadStatus(downloads: _downloads),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -654,8 +842,9 @@ class _FileList extends StatelessWidget {
                   title: Text(entry.name),
                   subtitle: Text(_subtitleFor(context, entry)),
                   enabled: !isBusy,
-                  onTap:
-                      entry.isDirectory && !isBusy ? () => onOpen(entry) : null,
+                  onTap: (entry.isDirectory || entry.isFile) && !isBusy
+                      ? () => onOpen(entry)
+                      : null,
                   trailing: IconButton(
                     tooltip: context.l10n.download,
                     onPressed: isBusy || downloadActive

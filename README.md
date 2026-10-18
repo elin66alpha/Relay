@@ -41,6 +41,13 @@ Stream replies, cancel a turn, search history, export Markdown, and switch away
 while work continues. Each `workdir + agent` context supports up to eight named,
 resumable conversations.
 
+**Settings → Wallpaper** opens a separate editor for one device-local wallpaper
+shared across all agent chats, Swarms and the chat home. Drag the single slider
+to preview the current theme's image opacity, then select **Save** to apply.
+Light/dark defaults are 80%/20%. Apps keep the original image at full
+resolution; the Web stores a compressed copy. Chat panels, message bubbles and
+every other page share one acrylic surface over the centered, filling image.
+
 <a href="assets/screenshots/relay-chat-web.png">
   <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation in the Relay Web client" width="100%">
 </a>
@@ -87,10 +94,11 @@ can run concurrently without sharing a global backend directory.
 
 | | Capability | What it gives you |
 |---|---|---|
-| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions, cross-device history, search, and Markdown export. |
+| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. |
+| 📎 | **Chat attachments and context** | Attach files to upload them to the workspace and add their paths to the draft. Above the solo-chat composer, see context tokens as `<used> / <window>`; `?` means unknown. |
 | 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
 | 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, Claude credential expiry, and Fast mode for Claude/Codex. |
-| 📁 | **Files and terminal** | Allowed-path browsing, uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
+| 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
 | 📊 | **Quota workflows** | Claude/Codex usage views plus one queued prompt for the next detected five-hour reset. |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
 
@@ -106,11 +114,11 @@ Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
 Claude and Codex must already be logged in on that host; OpenCode and Hermes use
 the provider configuration managed there.
 
-Windows x64 users can download `relay-backend-windows-x64-v0.1.7.zip` from
-[release 0.1.7](https://github.com/elin66alpha/Relay/releases/tag/v0.1.7), extract
+Windows x64 users can download `relay-backend-windows-x64-v0.1.8.zip` from
+[release 0.1.8](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8), extract
 it, and run `.\setup.cmd`. This backend bundle includes Node.js and production
 dependencies; install and authenticate your agent CLIs separately. The asset
-`relay-windows-x64-v0.1.7.zip` is the desktop client.
+`relay-windows-x64-v0.1.8.zip` is the desktop client.
 
 Run the setup command for your backend OS from the repository root:
 
@@ -191,7 +199,7 @@ Relay/
 ├── server/       Node.js backend and tests
 ├── backends/     OS-specific install/service adapters
 ├── docs/         operations and architecture handbook
-├── scripts/      development, deployment, and screenshot helpers
+├── scripts/      development and deployment helpers
 └── test/         Flutter tests
 ```
 

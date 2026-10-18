@@ -1,5 +1,7 @@
 # Relay contributor guide
 
+Read ENGINEERING.md before any change. It is the engineering contract for this repository.
+
 Relay is a Flutter client plus a self-hosted Node.js backend for controlling
 Claude Code, Codex, OpenCode, and Hermes on the backend machine. Keep public usage guidance in the root READMEs, operational detail in
 `docs/handbook.md`, and security guarantees in `SECURITY.md`.
@@ -7,7 +9,8 @@ Claude Code, Codex, OpenCode, and Hermes on the backend machine. Keep public usa
 ## Working safely
 
 - Never commit hosts, tokens, QR credentials, API keys, CLI login files, or
-  generated backend state.
+  generated backend state, because they expose private deployment details,
+  account access, or conversation content.
 - Preserve unrelated working-tree changes. This repository is often used while
   agents are actively running against it.
 - Treat mobile, Web, desktop, and all backend operating systems as clients of
@@ -25,7 +28,7 @@ flutter analyze --no-pub
 flutter test --no-pub
 flutter test --no-pub test/agent_controls_test.dart
 
-(cd server && git ls-files '*.js' | xargs -r node --check)
+(cd server && git ls-files '*.js' | xargs -r -n1 node --check)
 npm --prefix server test
 npm --prefix server start
 
@@ -38,20 +41,7 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 
 ## Repository map
 
-- `lib/`: shared Flutter UI, controllers, storage, HTTP/SSE transport, and
-  platform adapters.
-- `server/server.js`: server configuration, middleware, shared runtime state,
-  scheduling, route context, and optional Web static hosting.
-- `server/routes/`: API routers for metadata, push, files, chat, Swarms,
-  sessions, quota, and the SSH terminal ticket.
-- `server/lib/`: agent runners, settings/model discovery, persistence, auth,
-  filesystem policy, history, quota, push, and orchestration helpers.
-- `backends/`: Linux, macOS, and Windows install/service adapters. Each OS has
-  `setup`, `start`, `stop`, `status`, and `uninstall` entry points.
-- `.github/workflows/ci.yml`: runs the verification commands below on pull
-  requests. Update it when those commands change.
-- `scripts/`: development, deployment, and screenshot helpers.
-- `test/` and `server/test/`: Flutter and Node test suites.
+See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the module map.
 
 ## Architecture invariants
 
@@ -60,8 +50,9 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - A device stores its active workdir locally and sends it as `X-Workdir` on
   every request. There is no global backend workdir.
 - A conversation is scoped by `workdir + agent + sessionId`. Each agent context
-  supports at most eight named sessions; `Main` keeps the legacy scope key and
-  cannot be deleted.
+  supports at most eight named sessions; `Main` cannot be deleted or renamed
+  because it preserves the legacy scope key and the original conversation from
+  before named sessions existed.
 - Turns in the same exact conversation scope serialize through `scopeChains`.
   Different sessions and different Swarm members may run concurrently.
 - Agent controls belong to a conversation: model, effort, permission, and fast
@@ -73,15 +64,17 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 ### Agents and controls
 
 - `server/lib/agents.js` is the process-runner boundary. Pass per-request state
-  through `runAgent(..., { workdir, settings, sessionKey })`; do not add globals.
-- `server/lib/agent-options.js` owns option validation and the CLI, SDK, or
+  through `runAgent(..., { workdir, settings, sessionKey })`; do not add globals,
+  because different conversation scopes run concurrently.
+- `server/lib/agent-options.js` owns option validation and the SDK or
   protocol representation of each setting. `server/lib/agent-settings.js`
   persists normalized solo-chat settings.
 - No agent runs one process per turn. All four keep a live session that turns
   are fed into. Every pool is a *cache*: the stored session id stays
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
-  per-turn `spawn` for an agent that has a pool.
+  per-turn `spawn` for an agent that has a pool, because it repeats CLI startup
+  and cuts off background work when the process exits.
   - `server/lib/claude-session-pool.js` — one Agent SDK process per scope.
     Settings resolve to SDK options (`claudeSdkOptions`) rather than argv, and
     are fixed for the life of a process, so a change restarts it with `resume`.
@@ -90,7 +83,9 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
     the result whose `user_message_uuid` names the message it pushed. Running
     background tasks keep a process from idle eviction. A turn Claude starts
     while idle is a background turn: in solo chat it becomes a reply of its
-    own, queued on the scope and not cancellable, once it writes text.
+    own, queued on the scope and stopped by Stop like any turn, once it
+    writes text. A message pushed while it runs may be folded into it; the
+    result naming that message then ends both.
   - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
     speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
     session cap, idle eviction and cancellation; a `driver` supplies the
@@ -124,7 +119,8 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   `serviceTier` of `fast` or `default` on every turn.
 - Codex models and model-specific reasoning levels come from structured CLI
   metadata, with bundled/cache/static fallbacks. Do not reintroduce binary
-  string scanning for Codex model ids.
+  string scanning for Codex model ids, because it can mistake a model-name
+  prefix for a supported model and loses per-model reasoning choices.
 - `describeAgent` and `getSettings` are hot paths for option refreshes and every
   turn, so keep them free of subprocesses and per-call file reads.
   `model-discovery.js` re-locates a CLI at most once a minute and caches the
@@ -143,7 +139,8 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
   uses `account/read` with `refreshToken: true` on the shared Codex app-server.
   `server/lib/usage.js` separately reads and may refresh OAuth credentials for
   quota reporting and keepalive. A token or account identity value must never
-  reach Relay's API or app.
+  reach Relay's API or app, because agent credentials and account details stay
+  on the backend host rather than being shared with every connected device.
 
 ### Backend modules and persistence
 
@@ -187,20 +184,28 @@ clients and bundles CanvasKit locally instead of depending on gstatic.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
 - The SSH terminal exchanges the bearer credential for a short-lived,
-  single-use WebSocket ticket. Never put the bearer token in a socket URL. A
-  token record owns one resumable PTY, which runs with the full permissions of
+  single-use WebSocket ticket. Never put the bearer token in a socket URL,
+  because URLs can expose it through access logs. A token record owns one
+  resumable PTY, which runs with the full permissions of
   the backend OS user and is not constrained by the file API denylist. Keep its
   bundled `RelayTerminalMono` family as xterm's primary font: using generic
   `monospace` can produce overly wide character cells in Chromium.
 
+### Development tooling
+
+- `scripts/` holds development and deployment helpers.
+- `test/` and `server/test/` hold the Flutter and Node test suites.
+- `.github/workflows/ci.yml` runs the verification commands on pull requests.
+  Update it when those commands change so CI checks the same contract.
+
 ## Local state and secrets
 
 Generated files under `server/` include `.env`, `tokens.json`, credentials,
-agent/chat sessions, history, settings, groups, quota state/schedules, usage
-cache, and push/FCM stores. They are deployment state, not fixtures. Keep them,
-along with any referenced FCM service-account JSON, out of patches and release
-archives. `server/models-extra.json` is also a local override, not a shared
-catalog.
+agent/chat sessions, history, settings, context windows, groups, quota
+state/schedules, usage cache, and push/FCM stores. They are deployment state,
+not fixtures. Keep them, along with any referenced FCM service-account JSON,
+out of patches and release archives. `server/models-extra.json` is also a local
+override, not a shared catalog.
 
 ## Verification expectations
 
@@ -214,6 +219,8 @@ catalog.
   names, English/Chinese README parity, and the embedded guides in
   `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
   rather than old docs.
-- Release bumps touch four places, which drift apart if any is missed:
+- Release bumps touch five places, which drift apart if any is missed:
   `pubspec.yaml`, `server/package.json`, `_applicationVersion` in
-  `lib/features/settings/app_settings_screen.dart`, and a `CHANGELOG.md` entry.
+  `lib/features/settings/app_settings_screen.dart`, a `CHANGELOG.md` entry, and
+  a plain-language English and Chinese entry (1-3 highlights, other changes as
+  short lines) at the top of `lib/features/settings/whats_new_screen.dart`.

@@ -14,6 +14,7 @@ import 'package:relay/features/chat/bot_chat_controller.dart';
 import 'package:relay/features/chat/bot_chat_screen.dart';
 import 'package:relay/features/cli_agents/cli_agents_controller.dart';
 import 'package:relay/features/machines/machine_credentials_controller.dart';
+import 'package:relay/features/quota/quota_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // The hit sits near the start of a long conversation, so it can only show up on
@@ -94,8 +95,10 @@ Future<CliAgentsController> _openChat(
     store: _MemoryMachineCredentialsStore(machine),
   );
   final AppSettingsController settingsController = AppSettingsController();
+  final _SearchBackendClient backendClient = _SearchBackendClient(hitAgentKey);
   final BotChatController chatController = BotChatController(
-    backendClient: _SearchBackendClient(hitAgentKey),
+    backendClient: backendClient,
+    quotaController: QuotaController(backendClient: backendClient),
   );
   addTearDown(chatController.disposeController);
 
@@ -209,6 +212,11 @@ class _SearchBackendClient extends BackendClient {
   final String hitAgentKey;
 
   @override
+  Future<UsageReport> usageReport({String? source}) async {
+    return UsageReport.fromJson(<String, Object?>{'agents': <Object?>[]});
+  }
+
+  @override
   Future<AgentSessionList> fetchSessions(String agentKey) async {
     return _list(agentKey);
   }
@@ -222,22 +230,24 @@ class _SearchBackendClient extends BackendClient {
   }
 
   @override
-  Future<List<ChatMessage>> fetchHistory(
+  Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
   }) async {
     final bool holdsHit = agentKey == hitAgentKey;
-    return <ChatMessage>[
-      for (int i = 0; i < _messageCount; i += 1)
-        ChatMessage(
-          id: '$agentKey-msg-$i',
-          role: i.isEven ? ChatRole.user : ChatRole.assistant,
-          content: holdsHit && i == _hitIndex
-              ? 'Note #$i about the $_term pipeline.'
-              : 'Note #$i about something else entirely.',
-          createdAt: DateTime.utc(2026, 1, 1).add(Duration(minutes: i)),
-        ),
-    ];
+    return ChatHistory(
+      messages: <ChatMessage>[
+        for (int i = 0; i < _messageCount; i += 1)
+          ChatMessage(
+            id: '$agentKey-msg-$i',
+            role: i.isEven ? ChatRole.user : ChatRole.assistant,
+            content: holdsHit && i == _hitIndex
+                ? 'Note #$i about the $_term pipeline.'
+                : 'Note #$i about something else entirely.',
+            createdAt: DateTime.utc(2026, 1, 1).add(Duration(minutes: i)),
+          ),
+      ],
+    );
   }
 
   @override

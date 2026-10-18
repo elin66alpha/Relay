@@ -4,24 +4,31 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import '../i18n/app_strings.dart';
 import '../models/agent_options.dart';
 import '../models/agent_session.dart';
+import '../models/backend_status.dart';
+import '../models/chat_history.dart';
 import '../models/chat_message.dart';
 import '../models/cli_agent.dart';
+import '../models/filesystem.dart';
 import '../models/group.dart';
 import '../models/machine_credential.dart';
+import '../models/usage.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
 import '../storage/workdir_store.dart';
-import '../util/format_bytes.dart';
 import 'api_transport.dart';
 import 'sse_codec.dart';
 
+export '../models/agent_session.dart' show AgentSessionList;
+export '../models/backend_status.dart';
+export '../models/chat_history.dart';
+export '../models/filesystem.dart';
+export '../models/usage.dart';
 export 'api_transport.dart' show BackendException;
 export 'sse_codec.dart' show BackendEvent;
 
-List<ChatMessage> _decodeHistoryMessages(String body) {
+ChatHistory _decodeHistory(String body) {
   late final Object? decoded;
   try {
     decoded = jsonDecode(body);
@@ -31,243 +38,7 @@ List<ChatMessage> _decodeHistoryMessages(String body) {
   if (decoded is! Map) {
     throw BackendException('历史响应格式不正确。');
   }
-  final List<Object?> raw = decoded['messages'] is List
-      ? (decoded['messages'] as List).cast<Object?>()
-      : const <Object?>[];
-  return raw
-      .whereType<Map>()
-      .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
-      .toList(growable: false);
-}
-
-class BackendStatus {
-  const BackendStatus({
-    required this.workdir,
-    required this.systemUptime,
-    required this.processUptime,
-    required this.agentTimeoutMs,
-    required this.quotaWatch,
-    required this.publicBaseUrl,
-  });
-
-  factory BackendStatus.fromJson(Map<String, Object?> json) {
-    return BackendStatus(
-      workdir: json['workdir'] as String? ?? '',
-      systemUptime: json['systemUptime'] as String? ?? '',
-      processUptime: json['processUptime'] as String? ?? '',
-      agentTimeoutMs: json['agentTimeoutMs'] as int? ?? 0,
-      quotaWatch: json['quotaWatch'] as bool? ?? false,
-      publicBaseUrl: json['publicBaseUrl'] as String? ?? '',
-    );
-  }
-
-  final String workdir;
-  final String systemUptime;
-  final String processUptime;
-  final int agentTimeoutMs;
-  final bool quotaWatch;
-  final String publicBaseUrl;
-
-  String toDisplayText(AppStrings strings) {
-    final int timeoutMinutes = (agentTimeoutMs / 60000).round();
-    final List<String> lines = <String>[
-      strings.backendOnline,
-      strings.workDirectoryLine(workdir),
-      strings.systemUptimeLine(systemUptime),
-      strings.processUptimeLine(processUptime),
-      if (publicBaseUrl.isNotEmpty) strings.publicBaseUrlLine(publicBaseUrl),
-      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
-      strings.quotaWatchLine(quotaWatch),
-    ];
-    return lines.join('\n');
-  }
-}
-
-class DeviceToken {
-  const DeviceToken({
-    required this.id,
-    required this.label,
-    required this.createdAt,
-    required this.revoked,
-    required this.current,
-    required this.lastDeviceId,
-    required this.lastDeviceName,
-    this.revokedAt,
-    this.lastUsedAt,
-  });
-
-  factory DeviceToken.fromJson(Map<String, Object?> json) {
-    final String revokedAt = json['revokedAt'] as String? ?? '';
-    final String lastUsedAt = json['lastUsedAt'] as String? ?? '';
-    return DeviceToken(
-      id: json['id'] as String? ?? '',
-      label: json['label'] as String? ?? '',
-      createdAt: json['createdAt'] as String? ?? '',
-      revoked: json['revoked'] as bool? ?? false,
-      current: json['current'] as bool? ?? false,
-      lastDeviceId: json['lastDeviceId'] as String? ?? '',
-      lastDeviceName: json['lastDeviceName'] as String? ?? '',
-      revokedAt: revokedAt.isEmpty ? null : revokedAt,
-      lastUsedAt: lastUsedAt.isEmpty ? null : lastUsedAt,
-    );
-  }
-
-  final String id;
-  final String label;
-  final String createdAt;
-  final bool revoked;
-  final bool current;
-  final String lastDeviceId;
-  final String lastDeviceName;
-  final String? revokedAt;
-  final String? lastUsedAt;
-
-  DeviceToken copyWith({bool? revoked, String? revokedAt}) {
-    return DeviceToken(
-      id: id,
-      label: label,
-      createdAt: createdAt,
-      revoked: revoked ?? this.revoked,
-      current: current,
-      lastDeviceId: lastDeviceId,
-      lastDeviceName: lastDeviceName,
-      revokedAt: revokedAt ?? this.revokedAt,
-      lastUsedAt: lastUsedAt,
-    );
-  }
-}
-
-class BackendDiagnostics {
-  const BackendDiagnostics(this.json);
-
-  factory BackendDiagnostics.fromJson(Map<String, Object?> json) {
-    return BackendDiagnostics(json);
-  }
-
-  final Map<String, Object?> json;
-
-  Map<String, Object?> _map(String key) =>
-      (json[key] as Map?)?.cast<String, Object?>() ?? const <String, Object?>{};
-
-  String _string(Map<String, Object?> map, String key) =>
-      map[key]?.toString() ?? '';
-
-  int _int(Map<String, Object?> map, String key) =>
-      (map[key] as num?)?.toInt() ?? 0;
-
-  bool _bool(Map<String, Object?> map, String key) =>
-      map[key] as bool? ?? false;
-
-  String toDisplayText(AppStrings strings) {
-    final Map<String, Object?> server = _map('server');
-    final Map<String, Object?> runtime = _map('runtime');
-    final Map<String, Object?> auth = _map('auth');
-    final Map<String, Object?> workdir = _map('workdir');
-    final Map<String, Object?> currentWorkdir =
-        (workdir['current'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
-    final Map<String, Object?> defaultWorkdir =
-        (workdir['default'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
-    final List<Object?> agents =
-        json['agents'] is List ? (json['agents'] as List).cast<Object?>() : [];
-    final List<Object?> storage = json['storage'] is List
-        ? (json['storage'] as List).cast<Object?>()
-        : [];
-
-    final int timeoutMinutes = (_int(server, 'agentTimeoutMs') / 60000).round();
-    final List<String> lines = <String>[
-      strings.backendOnline,
-      strings.diagnosticsGeneratedLine(json['createdAt']?.toString() ?? ''),
-      strings.diagnosticsRuntimeLine(
-        _string(server, 'platform'),
-        _string(server, 'arch'),
-        _string(server, 'node'),
-      ),
-      strings.diagnosticsListenLine(
-        _string(server, 'host'),
-        _int(server, 'port'),
-      ),
-      if (_string(server, 'publicBaseUrl').isNotEmpty)
-        strings.publicBaseUrlLine(_string(server, 'publicBaseUrl')),
-      strings.workDirectoryLine(_string(currentWorkdir, 'dir')),
-      strings.diagnosticsWorkdirLine(
-        exists: _bool(currentWorkdir, 'exists'),
-        writable: _bool(currentWorkdir, 'writable'),
-      ),
-      strings.diagnosticsDefaultWorkdirLine(_string(defaultWorkdir, 'dir')),
-      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
-      strings.quotaWatchLine(_bool(server, 'quotaWatch')),
-      strings.diagnosticsTransferLimitLine(
-        formatBytes(_int(server, 'maxUploadBytes')),
-        formatBytes(_int(server, 'maxDownloadBytes')),
-      ),
-      strings.diagnosticsTokenLine(
-        configured: _bool(auth, 'configured'),
-        active: _int(auth, 'active'),
-        total: _int(auth, 'total'),
-      ),
-      strings.diagnosticsRequestLine(
-        active: _int(runtime, 'activeRequests'),
-        running: _int(runtime, 'runningScopes'),
-        queued: _int(runtime, 'queuedScopes'),
-        sse: _int(runtime, 'sseClients'),
-      ),
-      strings.diagnosticsWebBuildLine(
-        ((server['webBuild'] as Map?)?.cast<String, Object?>() ??
-                const <String, Object?>{})['indexExists'] ==
-            true,
-      ),
-      '',
-      strings.diagnosticsAgentsHeader,
-      for (final Object? item in agents)
-        _agentLine(strings, (item as Map?)?.cast<String, Object?>()),
-      '',
-      strings.diagnosticsStorageHeader,
-      for (final Object? item in storage)
-        _storageLine(strings, (item as Map?)?.cast<String, Object?>()),
-    ];
-    return lines.where((String line) => line.trim().isNotEmpty).join('\n');
-  }
-
-  String _agentLine(AppStrings strings, Map<String, Object?>? item) {
-    final Map<String, Object?> agent = item ?? const <String, Object?>{};
-    final Map<String, Object?> cli =
-        (agent['cli'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
-    return strings.diagnosticsAgentLine(
-      agent['label']?.toString() ?? agent['key']?.toString() ?? '',
-      available: cli['available'] == true,
-      loggedIn: agent['loggedIn'] as bool?,
-      path: cli['path']?.toString() ?? '',
-    );
-  }
-
-  String _storageLine(AppStrings strings, Map<String, Object?>? item) {
-    final Map<String, Object?> file = item ?? const <String, Object?>{};
-    return strings.diagnosticsStorageLine(
-      file['name']?.toString() ?? '',
-      exists: file['exists'] == true,
-      writable: file['writable'] == true,
-      size: formatBytes((file['sizeBytes'] as num?)?.toInt() ?? 0),
-    );
-  }
-}
-
-class ChatReply {
-  const ChatReply({
-    required this.requestId,
-    required this.agentKey,
-    required this.agentLabel,
-    required this.content,
-    this.segments = const <MessageSegment>[],
-  });
-
-  final String requestId;
-  final String agentKey;
-  final String agentLabel;
-  final String content;
-  final List<MessageSegment> segments;
+  return ChatHistory.fromJson(decoded.cast<String, Object?>());
 }
 
 List<MessageSegment> _segmentsFromMessage(Map<String, Object?> message) {
@@ -277,386 +48,6 @@ List<MessageSegment> _segmentsFromMessage(Map<String, Object?> message) {
       .whereType<Map>()
       .map((Map e) => MessageSegment.fromJson(e.cast<String, Object?>()))
       .toList(growable: false);
-}
-
-class WorkdirInfo {
-  const WorkdirInfo({
-    required this.dir,
-    this.exists = true,
-    this.isDirectory = true,
-    this.busy = false,
-    this.created = false,
-  });
-
-  factory WorkdirInfo.fromJson(Map<String, Object?> json) {
-    return WorkdirInfo(
-      dir: json['dir'] as String? ?? '',
-      exists: json['exists'] as bool? ?? true,
-      isDirectory: json['isDirectory'] as bool? ?? true,
-      busy: json['busy'] as bool? ?? false,
-      created: json['created'] as bool? ?? false,
-    );
-  }
-
-  final String dir;
-  final bool exists;
-  final bool isDirectory;
-  final bool busy;
-  final bool created;
-}
-
-class AgentSessionList {
-  const AgentSessionList({
-    required this.agentKey,
-    required this.workdir,
-    required this.activeSessionId,
-    required this.sessions,
-  });
-
-  factory AgentSessionList.fromJson(Map<String, Object?> json) {
-    final Map<String, Object?> agent =
-        (json['agent'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
-    final List<Object?> rawSessions = json['sessions'] is List
-        ? (json['sessions'] as List).cast<Object?>()
-        : const <Object?>[];
-    final List<AgentSession> sessions = rawSessions
-        .whereType<Map>()
-        .map((Map item) => AgentSession.fromJson(item.cast<String, Object?>()))
-        .toList(growable: false);
-    final String activeSessionId = json['activeSessionId'] as String? ??
-        (sessions.isNotEmpty ? sessions.first.id : AgentSession.defaultId);
-    return AgentSessionList(
-      agentKey: agent['key'] as String? ?? '',
-      workdir: json['workdir'] as String? ?? '',
-      activeSessionId: activeSessionId,
-      sessions:
-          sessions.isEmpty ? <AgentSession>[AgentSession.fallback()] : sessions,
-    );
-  }
-
-  final String agentKey;
-  final String workdir;
-  final String activeSessionId;
-  final List<AgentSession> sessions;
-
-  AgentSession get activeSession {
-    for (final AgentSession session in sessions) {
-      if (session.id == activeSessionId) return session;
-    }
-    return sessions.isNotEmpty ? sessions.first : AgentSession.fallback();
-  }
-}
-
-class FsEntry {
-  const FsEntry({
-    required this.name,
-    required this.path,
-    required this.absolutePath,
-    required this.type,
-    required this.size,
-    required this.modifiedAt,
-  });
-
-  factory FsEntry.fromJson(Map<String, Object?> json) {
-    return FsEntry(
-      name: json['name'] as String? ?? '',
-      path: json['path'] as String? ?? '',
-      absolutePath: json['absolutePath'] as String? ?? '',
-      type: json['type'] as String? ?? 'other',
-      size: (json['size'] as num?)?.toInt() ?? 0,
-      modifiedAt: json['modifiedAt'] as String? ?? '',
-    );
-  }
-
-  final String name;
-  final String path;
-  final String absolutePath;
-  final String type;
-  final int size;
-  final String modifiedAt;
-
-  bool get isDirectory => type == 'directory';
-  bool get isFile => type == 'file';
-}
-
-class FsListing {
-  const FsListing({
-    required this.root,
-    required this.path,
-    required this.absolutePath,
-    required this.entries,
-    this.parentPath,
-  });
-
-  factory FsListing.fromJson(Map<String, Object?> json) {
-    final List<Object?> rawEntries = json['entries'] is List
-        ? (json['entries'] as List).cast<Object?>()
-        : const <Object?>[];
-    return FsListing(
-      root: json['root'] as String? ?? '',
-      path: json['path'] as String? ?? '',
-      absolutePath: json['absolutePath'] as String? ?? '',
-      parentPath: json['parentPath'] as String?,
-      entries: rawEntries
-          .whereType<Map>()
-          .map((Map entry) => FsEntry.fromJson(entry.cast<String, Object?>()))
-          .toList(growable: false),
-    );
-  }
-
-  final String root;
-  final String path;
-  final String absolutePath;
-  final String? parentPath;
-  final List<FsEntry> entries;
-}
-
-/// An in-progress file download: response metadata plus the live byte stream.
-/// The caller consumes [bytes] straight to its destination (a file on native, a
-/// blob on web) so a large download is never buffered whole in memory.
-class FsDownloadStream {
-  const FsDownloadStream({
-    required this.fileName,
-    required this.total,
-    required this.bytes,
-  });
-
-  final String fileName;
-
-  /// Total bytes when the server announced a Content-Length, else null.
-  final int? total;
-
-  final Stream<List<int>> bytes;
-}
-
-class ChatHistorySearchResult {
-  const ChatHistorySearchResult({
-    required this.agentKey,
-    required this.sessionId,
-    required this.sessionName,
-    required this.snippet,
-    required this.messageId,
-  });
-
-  factory ChatHistorySearchResult.fromJson(Map<String, Object?> json) {
-    return ChatHistorySearchResult(
-      agentKey: json['agentKey'] as String? ?? '',
-      sessionId: json['sessionId'] as String? ?? '',
-      sessionName: json['sessionName'] as String? ?? '',
-      snippet: json['snippet'] as String? ?? '',
-      messageId: json['messageId'] as String? ?? '',
-    );
-  }
-
-  final String agentKey;
-  final String sessionId;
-  final String sessionName;
-  final String snippet;
-  final String messageId;
-}
-
-class ConversationExport {
-  const ConversationExport({required this.fileName, required this.markdown});
-
-  factory ConversationExport.fromJson(Map<String, Object?> json) {
-    return ConversationExport(
-      fileName: json['fileName'] as String? ?? 'relay-conversation.md',
-      markdown: json['markdown'] as String? ?? '',
-    );
-  }
-
-  final String fileName;
-  final String markdown;
-}
-
-class PushConfig {
-  const PushConfig({required this.enabled, required this.publicKey});
-
-  factory PushConfig.fromJson(Map<String, Object?> json) {
-    return PushConfig(
-      enabled: json['enabled'] as bool? ?? false,
-      publicKey: json['publicKey'] as String? ?? '',
-    );
-  }
-
-  final bool enabled;
-  final String publicKey;
-}
-
-class UsageQuota {
-  const UsageQuota({
-    required this.key,
-    required this.label,
-    required this.remainingPercent,
-    required this.resetsAt,
-    this.expired = false,
-  });
-
-  factory UsageQuota.fromJson(Map<String, Object?> json) {
-    return UsageQuota(
-      key: json['key'] as String? ?? '',
-      label: json['label'] as String? ?? '',
-      remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
-      resetsAt: json['resetsAt'] as String?,
-      expired: json['expired'] as bool? ?? false,
-    );
-  }
-
-  final String key;
-  final String label;
-  final double? remainingPercent;
-  final String? resetsAt;
-
-  /// True when this is a stale cached bucket whose reset window has already
-  /// passed, so [remainingPercent] no longer reflects reality and the UI should
-  /// show a "window reset, awaiting refresh" hint instead of the old number.
-  final bool expired;
-}
-
-class UsageAgent {
-  const UsageAgent({
-    required this.key,
-    required this.label,
-    required this.available,
-    required this.stale,
-    required this.quotas,
-    this.detail = '',
-    this.asOf,
-    this.error,
-    this.unavailableReason,
-  });
-
-  factory UsageAgent.fromJson(Map<String, Object?> json) {
-    final List<Object?> rawQuotas = json['quotas'] is List
-        ? (json['quotas'] as List).cast<Object?>()
-        : const <Object?>[];
-    return UsageAgent(
-      key: json['key'] as String? ?? '',
-      label: json['label'] as String? ?? '',
-      available: json['available'] as bool? ?? false,
-      stale: json['stale'] as bool? ?? false,
-      detail: json['detail'] as String? ?? '',
-      asOf: json['asOf'] as String?,
-      error: json['error'] as String?,
-      unavailableReason: json['unavailableReason'] as String?,
-      quotas: rawQuotas
-          .whereType<Map>()
-          .map((Map q) => UsageQuota.fromJson(q.cast<String, Object?>()))
-          .toList(growable: false),
-    );
-  }
-
-  final String key;
-  final String label;
-  final bool available;
-  final bool stale;
-  final String detail;
-  final String? asOf;
-  final String? error;
-  final String? unavailableReason;
-  final List<UsageQuota> quotas;
-}
-
-class UsageReport {
-  const UsageReport({
-    required this.createdAt,
-    required this.agents,
-    required this.hasStale,
-  });
-
-  factory UsageReport.fromJson(Map<String, Object?> json) {
-    final List<Object?> rawAgents = json['agents'] is List
-        ? (json['agents'] as List).cast<Object?>()
-        : const <Object?>[];
-    return UsageReport(
-      createdAt: json['createdAt'] as String? ?? '',
-      hasStale: json['hasStale'] as bool? ?? false,
-      agents: rawAgents
-          .whereType<Map>()
-          .map(
-            (Map agent) => UsageAgent.fromJson(agent.cast<String, Object?>()),
-          )
-          .toList(growable: false),
-    );
-  }
-
-  final String createdAt;
-  final List<UsageAgent> agents;
-  final bool hasStale;
-
-  /// This report with [other]'s agents replacing same-key entries in place and
-  /// new ones appended, so per-source queries can land one at a time.
-  UsageReport merge(UsageReport other) {
-    final List<UsageAgent> merged = <String, UsageAgent>{
-      for (final UsageAgent agent in agents) agent.key: agent,
-      for (final UsageAgent agent in other.agents) agent.key: agent,
-    }.values.toList(growable: false);
-    return UsageReport(
-      createdAt: other.createdAt,
-      agents: merged,
-      hasStale: merged.any((UsageAgent agent) => agent.stale),
-    );
-  }
-}
-
-class QuotaSchedule {
-  const QuotaSchedule({
-    required this.id,
-    required this.sourceKey,
-    required this.agentKey,
-    required this.sessionId,
-    required this.workdir,
-    required this.prompt,
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-    this.sessionName = '',
-    this.targetResetsAt,
-    this.sentAt,
-    this.error,
-  });
-
-  factory QuotaSchedule.fromJson(Map<String, Object?> json) {
-    return QuotaSchedule(
-      id: json['id'] as String? ?? '',
-      sourceKey: json['sourceKey'] as String? ?? '',
-      agentKey: json['agentKey'] as String? ?? '',
-      sessionId: json['sessionId'] as String? ?? '',
-      sessionName: json['sessionName'] as String? ?? '',
-      workdir: json['workdir'] as String? ?? '',
-      prompt: json['prompt'] as String? ?? '',
-      targetResetsAt: json['targetResetsAt'] as String?,
-      status: json['status'] as String? ?? 'pending',
-      createdAt: json['createdAt'] as String? ?? '',
-      updatedAt: json['updatedAt'] as String? ?? '',
-      sentAt: json['sentAt'] as String?,
-      error: json['error'] as String?,
-    );
-  }
-
-  final String id;
-  final String sourceKey;
-  final String agentKey;
-  final String sessionId;
-  final String sessionName;
-  final String workdir;
-  final String prompt;
-  final String? targetResetsAt;
-  final String status;
-  final String createdAt;
-  final String updatedAt;
-  final String? sentAt;
-  final String? error;
-
-  bool get canCancel => status == 'pending';
-}
-
-class GroupHistory {
-  const GroupHistory({required this.group, required this.messages});
-
-  final ChatGroup group;
-  final List<ChatMessage> messages;
 }
 
 class ChatStreamHandle {
@@ -839,15 +230,6 @@ class BackendClient {
     );
   }
 
-  Future<void> unsubscribePush(String endpoint) async {
-    await _requestJson(
-      'POST',
-      '/api/push/unsubscribe',
-      body: <String, Object?>{'endpoint': endpoint},
-      timeout: const Duration(seconds: 15),
-    );
-  }
-
   Future<void> registerFcmToken(
     String token,
     String lang, {
@@ -923,15 +305,17 @@ class BackendClient {
       agentLabel: agent['label'] as String? ?? agentKey,
       content: message['content'] as String? ?? '',
       segments: _segmentsFromMessage(message),
+      context: (message['context'] as Map?)?.cast<String, Object?>(),
     );
   }
 
-  Future<void> compressConversation({
+  /// Returns the context size the agent reported after compacting, if any.
+  Future<Map<String, Object?>?> compressConversation({
     required String agentKey,
     required String sessionId,
     required String requestId,
   }) async {
-    await _requestJson(
+    final Object? json = await _requestJson(
       'POST',
       '/api/chat',
       body: <String, Object?>{
@@ -943,6 +327,10 @@ class BackendClient {
       },
       timeout: const Duration(minutes: 65),
     );
+    final Object? message = json is Map ? json['message'] : null;
+    return message is Map
+        ? (message['context'] as Map?)?.cast<String, Object?>()
+        : null;
   }
 
   Future<ChatReply> _sendMessageStreamed({
@@ -1162,6 +550,26 @@ class BackendClient {
     return AgentSessionList.fromJson(decoded.cast<String, Object?>());
   }
 
+  Future<AgentSessionList> renameSession(
+    String agentKey,
+    String sessionId,
+    String name,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/rename',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'sessionId': sessionId,
+        'name': name,
+      },
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid session rename response.');
+    }
+    return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
   Future<AgentSessionList> deleteSession(
     String agentKey,
     String sessionId,
@@ -1179,7 +587,7 @@ class BackendClient {
 
   /// Fetches the stored conversation for one agent session so the app can show
   /// the previous chat on reopen without persisting anything locally.
-  Future<List<ChatMessage>> fetchHistory(
+  Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
   }) async {
@@ -1208,9 +616,9 @@ class BackendClient {
       throw _exceptionFor(response.statusCode, response.body);
     }
     if (!kIsWeb && response.body.length > 256 * 1024) {
-      return compute(_decodeHistoryMessages, response.body);
+      return compute(_decodeHistory, response.body);
     }
-    return _decodeHistoryMessages(response.body);
+    return _decodeHistory(response.body);
   }
 
   // --- Group chat (multi-agent) ---------------------------------------------
@@ -1599,12 +1007,14 @@ class BackendClient {
     required String path,
     required String name,
     required Uint8List bytes,
+    bool createDirectory = false,
   }) async {
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(
       credential,
       '/api/fs/upload?path=${Uri.encodeQueryComponent(path)}'
-      '&name=${Uri.encodeQueryComponent(name)}',
+      '&name=${Uri.encodeQueryComponent(name)}'
+      '${createDirectory ? '&mkdir=1' : ''}',
     );
     final http.Response response = await _httpClient
         .post(
@@ -1627,12 +1037,14 @@ class BackendClient {
     required String name,
     required Stream<List<int>> bytes,
     required int length,
+    bool createDirectory = false,
   }) async {
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(
       credential,
       '/api/fs/upload?path=${Uri.encodeQueryComponent(path)}'
-      '&name=${Uri.encodeQueryComponent(name)}',
+      '&name=${Uri.encodeQueryComponent(name)}'
+      '${createDirectory ? '&mkdir=1' : ''}',
     );
     final http.StreamedRequest request = http.StreamedRequest('POST', uri);
     request.headers.addAll(
@@ -1698,6 +1110,7 @@ class BackendClient {
       agentLabel: agent['label'] as String? ?? agentKey,
       content: message['content'] as String? ?? '',
       segments: _segmentsFromMessage(message),
+      context: (message['context'] as Map?)?.cast<String, Object?>(),
     );
   }
 

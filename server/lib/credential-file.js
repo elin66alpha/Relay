@@ -48,9 +48,5 @@ function encryptCredential(machine, passphrase) {
 }
 
 module.exports = {
-  CIPHER_NAME,
-  FORMAT,
-  KDF_NAME,
-  PBKDF2_ITERATIONS,
   encryptCredential,
 };

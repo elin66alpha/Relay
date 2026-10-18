@@ -102,6 +102,9 @@ function makeHarness(runAgentImpl, options = {}) {
         calls.push({ type: 'settings', agentKey, scopeKey, fallbackKey });
         return settings;
       },
+      recordContextWindow(agentKey, model, size) {
+        calls.push({ type: 'contextWindow', agentKey, model, size });
+      },
       runningScopes,
       runAgent(agentKey, prompt, onEvent, runOptions) {
         calls.push({ type: 'runAgent', agentKey, prompt, runOptions });
@@ -337,6 +340,27 @@ test('single-message turn keeps the runner result and one timestamped segment', 
   assert.ok(assistant.metadata.segments[0].ts);
 });
 
+test('the last context size the agent reports is kept on the reply and in history', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    onEvent({ type: 'context', used: 1000, size: 200000 });
+    onEvent({ type: 'delta', text: 'done' });
+    onEvent({ type: 'context', used: 1800.4, size: 200000 });
+    // A malformed report never replaces a good one.
+    onEvent({ type: 'context', used: 5, size: 0 });
+    return 'done';
+  }, { settings: { model: 'test-model' } });
+
+  const result = await runAgentTurn(turnOptions({ dependencies: harness.dependencies }));
+
+  assert.deepEqual(result.reply.message.context, { used: 1800, size: 200000 });
+  const assistant = harness.histories.get('scope')[1];
+  assert.deepEqual(assistant.metadata.context, { used: 1800, size: 200000 });
+  assert.deepEqual(harness.calls.filter((call) => call.type === 'contextWindow'), [
+    { type: 'contextWindow', agentKey: agent.key, model: 'test-model', size: 200000 },
+    { type: 'contextWindow', agentKey: agent.key, model: 'test-model', size: 200000 },
+  ]);
+});
+
 test('no-op responder broadcasts scheduled progress and does not require task notification', async () => {
   const harness = makeHarness(async (onEvent) => {
     onEvent({ type: 'progress', line: 'quota resumed' });
@@ -444,4 +468,18 @@ test('a background turn without a known trigger still says it started on its own
   turn.onMessage(claudeText('m1', 'Hi again.'));
   assert.deepEqual(started[0].progressLines, ['Claude continued on its own.']);
   turn.fail(new Error('gone'));
+});
+
+test('a cancelled background turn interrupts Claude and rejects as cancelled', async () => {
+  const started = [];
+  let interrupted = 0;
+  const turn = claudeBackgroundTurn((start) => started.push(start), [], () => {
+    interrupted += 1;
+  });
+  turn.onMessage(claudeText('m1', 'Working.'));
+  const done = started[0].run(() => {});
+  started[0].cancel();
+  assert.equal(interrupted, 1);
+  turn.finish({ type: 'result', subtype: 'error_during_execution' });
+  await assert.rejects(done, { name: 'AgentCancelledError' });
 });

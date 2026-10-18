@@ -74,6 +74,9 @@ function fakeSdk() {
         session.closed = true;
         iterator.return();
       },
+      async getContextUsage() {
+        return { totalTokens: 1200 * session.prompts.length, maxTokens: 200000 };
+      },
       async interrupt() {
         session.interrupted += 1;
         session.hang = false;
@@ -137,6 +140,8 @@ test('a second turn reuses the live session instead of spawning again', async ()
   assert.equal(first.result.result, 'echo:one');
   assert.equal(second.result.result, 'echo:two');
   assert.equal(second.sessionId, 'sess-1');
+  // Each finished turn reports what the conversation occupies after it.
+  assert.deepEqual(second.context, { used: 2400, size: 200000 });
   await pool.shutdown();
 });
 
@@ -279,6 +284,21 @@ test('result messages settle the turn and are not replayed as progress', async (
   await send(pool, 'a', 'one', { onMessage: (m) => seen.push(m.type) });
   assert.deepEqual(seen, ['system', 'assistant']);
   await pool.shutdown();
+});
+
+test('message listener failures warn once per session and turns still complete', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  t.after(() => pool.shutdown());
+  for (const prompt of ['one', 'two']) {
+    const { result } = await send(pool, 'a', prompt, {
+      onMessage() { throw new Error('listener failed'); },
+    });
+    assert.equal(result.result, `echo:${prompt}`);
+  }
+  assert.equal(warn.mock.calls.length, 1);
+  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: listener failed/);
 });
 
 test('a dead warm session is retried cold rather than failing the turn', async () => {
@@ -478,6 +498,49 @@ test('a turn Claude runs on its own while idle is handed to onBackgroundTurn', a
   await pool.shutdown();
 });
 
+test('background start failures warn once per session without interrupting later turns', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  t.after(() => pool.shutdown());
+  let starts = 0;
+  for (const prompt of ['one', 'two']) {
+    sdk.afterNextReply(bgText('later'), bgText('continued'), bgResult);
+    const { result } = await send(pool, 'a', prompt, {
+      onBackgroundTurn() {
+        starts += 1;
+        throw new Error('background start failed');
+      },
+    });
+    assert.equal(result.result, `echo:${prompt}`);
+  }
+  const { result } = await send(pool, 'a', 'three');
+  assert.equal(result.result, 'echo:three');
+  assert.equal(starts, 2);
+  assert.equal(warn.mock.calls.length, 1);
+  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: background start failed/);
+});
+
+test('background listener failures are logged without interrupting later turns', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  t.after(() => pool.shutdown());
+  sdk.afterNextReply(bgText('later'), bgText('continued'), bgResult);
+  await send(pool, 'a', 'one', {
+    onBackgroundTurn: () => ({
+      onMessage() { throw new Error('background listener failed'); },
+      finish() { throw new Error('background finish failed'); },
+      fail() {},
+    }),
+  });
+  const { result } = await send(pool, 'a', 'two');
+  assert.equal(result.result, 'echo:two');
+  assert.equal(warn.mock.calls.length, 2);
+  assert.match(warn.mock.calls[0].arguments[0], /\[claude\].*a: background listener failed/);
+  assert.match(warn.mock.calls[1].arguments[0], /\[claude\].*a: background finish failed/);
+});
+
 test('a background turn keeps the stream until its result, even with a turn queued behind it', async () => {
   const sdk = fakeSdk();
   const pool = makePool(sdk);
@@ -528,5 +591,55 @@ test('without a listener a background turn is dropped, not leaked into the next 
     },
   });
   assert.deepEqual(seen, ['echo:two']);
+  await pool.shutdown();
+});
+
+test('a message folded into a background turn ends that turn as well as its own', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk);
+  const bg = recordBackground();
+  sdk.afterNextReply(bgText('later'));
+  await send(pool, 'a', 'one', { onBackgroundTurn: bg.onBackgroundTurn });
+  await bg.firstStarted;
+  // The CLI injects the pushed message mid-turn: one result answers both.
+  sdk.beforeNextReply(bgText('folded'), (message) => ({
+    type: 'result',
+    subtype: 'success',
+    result: 'folded',
+    user_message_uuid: message.uuid,
+  }));
+  const seen = [];
+  const { result } = await send(pool, 'a', 'two', {
+    onBackgroundTurn: bg.onBackgroundTurn,
+    onMessage: (message) => {
+      if (message.type === 'assistant') seen.push(message.message.content[0].text);
+    },
+  });
+  assert.equal(result.result, 'folded');
+  assert.deepEqual(seen, ['folded'], 'the reply after the push is the turn\'s');
+  await bg.turns[0].settled;
+  assert.deepEqual(texts(bg.turns[0].messages), ['later'], 'and is not repeated');
+  await pool.shutdown();
+});
+
+test('a background turn can be interrupted', async () => {
+  const sdk = fakeSdk();
+  const pool = makePool(sdk, { interruptGraceMs: 20 });
+  let interrupt;
+  const bg = recordBackground();
+  sdk.afterNextReply(bgText('later'));
+  await send(pool, 'a', 'one', {
+    onBackgroundTurn: (start) => {
+      interrupt = start.interrupt;
+      return bg.onBackgroundTurn(start);
+    },
+  });
+  await bg.firstStarted;
+  interrupt();
+  // The grace timer is unref'd; keep the loop alive past it.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await bg.turns[0].settled;
+  assert.equal(sdk.spawned[0].interrupted, 1);
+  assert.equal(bg.turns[0].error.code, 'CLAUDE_SESSION_LOST', 'a wedged CLI is dropped');
   await pool.shutdown();
 });

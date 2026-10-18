@@ -8,9 +8,10 @@ import '../../core/models/machine_credential.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/chat_wallpaper.dart';
 import '../../core/widgets/agent_icon.dart';
-import '../chat/bot_chat_controller.dart';
-import '../chat/group_chat_screen.dart';
+import '../cli_agents/agent_status_lights.dart';
+import '../cli_agents/cli_agents_controller.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../machines/machine_credentials_screen.dart';
 import '../machines/machine_details_screen.dart';
@@ -18,8 +19,8 @@ import '../settings/app_settings_screen.dart';
 import '../filesystem/file_system_screen.dart';
 import '../quota/quota_scheduler_screen.dart';
 import '../quota/quota_usage_screen.dart';
-import 'agent_status_lights.dart';
-import 'cli_agents_controller.dart';
+import 'bot_chat_controller.dart';
+import 'group_chat_screen.dart';
 
 class CliAgentsDrawer extends StatelessWidget {
   const CliAgentsDrawer({
@@ -93,8 +94,9 @@ class CliAgentsDrawer extends StatelessWidget {
                       if (closeOnAction) Navigator.of(context).pop();
                       Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
-                          builder: (_) =>
-                              QuotaUsageScreen(chatController: chatController),
+                          builder: (_) => QuotaUsageScreen(
+                            quotaController: chatController.quotaController,
+                          ),
                         ),
                       );
                     },
@@ -107,7 +109,9 @@ class CliAgentsDrawer extends StatelessWidget {
                       Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
                           builder: (_) => QuotaSchedulerScreen(
-                            chatController: chatController,
+                            quotaController: chatController.quotaController,
+                            ensureActiveSessionId:
+                                chatController.ensureActiveSessionId,
                           ),
                         ),
                       );
@@ -186,8 +190,10 @@ class CliAgentsDrawer extends StatelessWidget {
                 if (closeOnAction) Navigator.of(context).pop();
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(
-                    builder: (_) =>
-                        FileSystemScreen(chatController: chatController),
+                    builder: (_) => FileSystemScreen(
+                      backend: chatController.backend,
+                      onSetWorkdir: chatController.setWorkdir,
+                    ),
                   ),
                 );
               },
@@ -311,8 +317,7 @@ class CliAgentsDrawer extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   selected: session.id == activeSessionId,
-                  // The default "Main" session can't be deleted — it holds the
-                  // original, pre-multi-session conversation for this path.
+                  // Main keeps the original conversation's name and scope.
                   trailing: running || !session.isDefault
                       ? Row(
                           mainAxisSize: MainAxisSize.min,
@@ -320,6 +325,13 @@ class CliAgentsDrawer extends StatelessWidget {
                             if (running) const _RunningSessionIndicator(),
                             if (running && !session.isDefault)
                               const SizedBox(width: 4),
+                            if (!session.isDefault)
+                              IconButton(
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                                tooltip: context.l10n.renameSession,
+                                onPressed: () =>
+                                    _renameSession(context, agent, session),
+                              ),
                             if (!session.isDefault)
                               IconButton(
                                 icon:
@@ -405,6 +417,52 @@ class CliAgentsDrawer extends StatelessWidget {
       await chatController.createSessionFor(agent, name: name);
     } catch (err) {
       messenger.showSnackBar(
+        SnackBar(content: Text(strings.sessionActionFailed(err))),
+      );
+    }
+  }
+
+  Future<void> _renameSession(
+    BuildContext context,
+    CliAgent agent,
+    AgentSession session,
+  ) async {
+    final AppStrings strings = context.l10n;
+    String draftName = session.name;
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(strings.renameSession),
+          content: TextFormField(
+            initialValue: session.name,
+            autofocus: true,
+            decoration: InputDecoration(labelText: strings.sessionName),
+            textInputAction: TextInputAction.done,
+            onChanged: (String value) => draftName = value,
+            onFieldSubmitted: (String value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(strings.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(draftName.trim()),
+              child: Text(strings.ok),
+            ),
+          ],
+        );
+      },
+    );
+    if (name == null || !context.mounted) return;
+    try {
+      await chatController.renameSession(agent, session.id, name);
+    } catch (err) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(strings.sessionActionFailed(err))),
       );
     }
@@ -535,6 +593,7 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
     if (widget.closeOnAction) Navigator.of(context).pop();
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: GroupChatScreen.routeName),
         builder: (_) => GroupChatScreen(
           agentsController: widget.agentsController,
           settingsController: widget.settingsController,
@@ -666,7 +725,7 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
       MaterialPageRoute<void>(
         builder: (_) => MachineDetailsScreen(
           machine: widget.activeMachine!,
-          chatController: widget.chatController,
+          backend: widget.chatController.backend,
           agentsController: widget.agentsController,
         ),
       ),
@@ -730,12 +789,20 @@ class _ActiveMachineStatusTileState extends State<ActiveMachineStatusTile> {
     // DecoratedBox in between would hide the tap feedback.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        clipBehavior: Clip.antiAlias,
-        child: tile,
-      ),
+      child: WallpaperScope.enabledOf(context)
+          ? ChatChromeSurface(
+              acrylic: true,
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              border: const Border(),
+              borderRadius: BorderRadius.circular(12),
+              child: tile,
+            )
+          : Material(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
+              child: tile,
+            ),
     );
   }
 }

@@ -71,8 +71,9 @@ Implemented controls include:
 
 Relay never logs a CLI agent in. Every agent's credential is created on the
 backend host with that CLI's own login flow or provider configuration.
-`server/lib/agent-status.js` reads authentication state and, for Claude Code and
-Codex, the stored OAuth expiry timestamp. `server/lib/usage.js` additionally
+`server/lib/agent-status.js` reads authentication state and Claude Code's stored
+OAuth expiry timestamp. Codex has no login-expiry timestamp: its managed
+short-lived tokens refresh automatically. `server/lib/usage.js` additionally
 reads their OAuth tokens for quota queries and can refresh an expired access
 token in the CLI's credential file. Token values may therefore be sent to the
 provider's OAuth and API endpoints, but neither Relay's API nor the app ever
@@ -120,9 +121,11 @@ can access. It always rejects these current sensitive locations:
 - `~/.ssh`;
 - Claude Code's `.credentials.json` and Codex's `auth.json`.
 
-The same policy applies to listing, upload, download, and atomic temp-file
-variants. A directory download is also rejected when its tree would contain a
-denied path.
+The same policy applies to listing, upload, download, and siblings whose names
+start with a sensitive basename followed by a dot, including `.tmp`, `.bak`, and
+`.old` copies. A directory download is also rejected when its tree would contain
+a denied path. Both the requested path and its resolved symlink destination
+must satisfy the denylist and `RELAY_FS_ROOTS` allowlist.
 
 This list is intentionally precise, not a promise to detect every secret. It
 does not automatically cover arbitrary OpenCode, Hermes, provider, or

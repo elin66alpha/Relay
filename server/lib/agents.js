@@ -374,12 +374,14 @@ function claudeEventEmitter(onEvent) {
 // A turn Claude ran on its own, usually on a background task it started
 // finishing. It reaches the conversation only once Claude writes text, so a
 // turn that only runs tools stays invisible. `start` receives what woke Claude
-// up as progress lines, and a `run` that replays the buffered events into the
-// conversation's turn and settles with the reply.
-function claudeBackgroundTurn(start, notices) {
+// up as progress lines, a `run` that replays the buffered events into the
+// conversation's turn and settles with the reply, and a `cancel` that
+// interrupts the turn, after which `run` rejects as cancelled.
+function claudeBackgroundTurn(start, notices, interrupt) {
   const buffered = [];
   let sink = null;
   let started = false;
+  let cancelled = false;
   let settle;
   const done = new Promise((resolve) => {
     settle = resolve;
@@ -398,7 +400,14 @@ function claudeBackgroundTurn(start, notices) {
       run(emitEvent) {
         for (const event of buffered.splice(0)) emitEvent(event);
         sink = emitEvent;
-        return done;
+        return done.then((text) => {
+          if (cancelled) throw new AgentCancelledError();
+          return text;
+        });
+      },
+      cancel() {
+        cancelled = true;
+        interrupt();
       },
     });
   };
@@ -487,12 +496,14 @@ function runClaude(
       signal,
       onMessage,
       onBackgroundTurn: onBackgroundTurn
-        ? ({ notices }) => claudeBackgroundTurn(onBackgroundTurn, notices)
+        ? ({ notices, interrupt }) =>
+            claudeBackgroundTurn(onBackgroundTurn, notices, interrupt)
         : null,
     })
     .then(
-      ({ result, sessionId: resolvedId, stderr }) => {
+      ({ result, sessionId: resolvedId, stderr, context }) => {
         if (resolvedId) sessionId = resolvedId;
+        if (context) emit(onEvent, { type: 'context', ...context });
         if (typeof result.result === 'string') finalText = result.result;
         // A timed-out turn reports the stop reason as the reply, not as a
         // Claude error.
@@ -569,6 +580,10 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   let currentItemId = null;
 
   const onMessage = (event) => {
+    if (event.type === 'context') {
+      emit(onEvent, event);
+      return;
+    }
     if (event.type === 'delta') {
       // Codex can emit several agent messages in one turn; each new item id
       // starts a segment so follow-ups keep their own timestamp.
@@ -695,6 +710,8 @@ function runAcpAgent({
       if (content.type === 'text') pushText(content.text);
     } else if (update.sessionUpdate === 'tool_call') {
       emit(onEvent, `Tool: ${oneLine(update.title || update.kind || 'tool', 60)}`);
+    } else if (update.sessionUpdate === 'usage_update') {
+      emit(onEvent, { type: 'context', used: update.used, size: update.size });
     }
   };
 
@@ -849,14 +866,8 @@ module.exports = {
   getAgent,
   commandExists,
   runAgent,
-  getSession,
-  clearSession,
   purgeSession,
   shutdownPools,
-  claudePool,
-  opencodePool,
-  hermesPool,
-  codexPool,
   inspectCodexAccount,
   claudeBackgroundTurn,
 };

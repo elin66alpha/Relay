@@ -5,8 +5,10 @@ import 'core/i18n/app_strings.dart';
 import 'core/models/machine_credential.dart';
 import 'core/settings/app_settings_controller.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/chat_wallpaper.dart';
 import 'features/chat/bot_chat_controller.dart';
 import 'features/chat/bot_chat_screen.dart';
+import 'features/chat/group_chat_screen.dart';
 import 'features/cli_agents/cli_agents_controller.dart';
 import 'features/machines/machine_credentials_controller.dart';
 import 'features/machines/machine_credentials_screen.dart';
@@ -84,6 +86,7 @@ class _BotAppState extends State<BotApp> {
   @override
   void dispose() {
     widget.chatController.disposeController();
+    widget.chatController.quotaController.dispose();
     super.dispose();
   }
 
@@ -100,8 +103,8 @@ class _BotAppState extends State<BotApp> {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             title: strings.appName,
-            theme: AppTheme.light(),
-            darkTheme: AppTheme.dark(),
+            theme: _withWallpaperPages(AppTheme.light()),
+            darkTheme: _withWallpaperPages(AppTheme.dark()),
             themeMode: widget.settingsController.themeMode,
             builder: (BuildContext context, Widget? child) {
               final MediaQueryData mediaQuery = MediaQuery.of(context);
@@ -149,4 +152,53 @@ class _Splash extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Scaffold(body: SizedBox.shrink());
   }
+}
+
+ThemeData _withWallpaperPages(ThemeData theme) => theme.copyWith(
+      pageTransitionsTheme: PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          for (final MapEntry<TargetPlatform, PageTransitionsBuilder> entry
+              in theme.pageTransitionsTheme.builders.entries)
+            entry.key: _WallpaperPageTransitions(entry.value),
+        },
+      ),
+    );
+
+/// Every pushed page paints its own backdrop, so a transition never shows two
+/// pages through each other. First-level pages (the chat, which is the first
+/// route, and Swarm) paint their own wallpaper instead.
+class _WallpaperPageTransitions extends PageTransitionsBuilder {
+  const _WallpaperPageTransitions(this.inner);
+
+  final PageTransitionsBuilder inner;
+
+  @override
+  DelegatedTransitionBuilder? get delegatedTransition =>
+      inner.delegatedTransition;
+
+  @override
+  Duration get transitionDuration => inner.transitionDuration;
+
+  @override
+  Duration get reverseTransitionDuration => inner.reverseTransitionDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) =>
+      inner.buildTransitions<T>(
+        route,
+        context,
+        animation,
+        secondaryAnimation,
+        WallpaperBackdrop(
+          enabled: !route.isFirst &&
+              route.settings.name != GroupChatScreen.routeName,
+          child: child,
+        ),
+      );
 }

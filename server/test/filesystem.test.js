@@ -5,12 +5,16 @@ const { after, test } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { pipeline } = require('node:stream/promises');
+const express = require('express');
+const createFsRouter = require('../routes/fs');
 
 // The file API is the boundary SECURITY.md promises: a leaked device token must
 // not be able to read tokens/CLI credentials through it, and RELAY_FS_ROOTS must
 // actually narrow the reachable filesystem.
 
 const modulePath = require.resolve('../lib/filesystem');
+const tokensModulePath = require.resolve('../lib/tokens');
 // realpath so comparisons hold on hosts where the temp dir is itself a link
 // (macOS /var -> /private/var).
 const scratchRoot = fs.realpathSync(
@@ -21,11 +25,13 @@ after(() => fs.rmSync(scratchRoot, { recursive: true, force: true }));
 
 // filesystem.js reads RELAY_FS_ROOTS and the home directory once, at load time,
 // so each policy variant needs its own freshly loaded copy of the module.
-function loadFilesystem({ roots, home } = {}) {
+function loadFilesystem({ roots, home, tokensFile } = {}) {
   const prev = {
     roots: process.env.RELAY_FS_ROOTS,
     home: process.env.HOME,
     userProfile: process.env.USERPROFILE,
+    tokensFile: process.env.RELAY_TOKENS_FILE,
+    tokensModule: require.cache[tokensModulePath],
   };
   const restore = (key, value) => {
     if (value === undefined) delete process.env[key];
@@ -37,14 +43,19 @@ function loadFilesystem({ roots, home } = {}) {
     process.env.HOME = home;
     process.env.USERPROFILE = home;
   }
+  if (tokensFile !== undefined) process.env.RELAY_TOKENS_FILE = tokensFile;
   delete require.cache[modulePath];
+  delete require.cache[tokensModulePath];
   try {
     return require('../lib/filesystem');
   } finally {
     delete require.cache[modulePath];
+    delete require.cache[tokensModulePath];
+    if (prev.tokensModule) require.cache[tokensModulePath] = prev.tokensModule;
     restore('RELAY_FS_ROOTS', prev.roots);
     restore('HOME', prev.home);
     restore('USERPROFILE', prev.userProfile);
+    restore('RELAY_TOKENS_FILE', prev.tokensFile);
   }
 }
 
@@ -101,6 +112,34 @@ test('downloading a denied CLI credential file is refused', async () => {
   }
 });
 
+test('downloading a symlink to a denied file is refused', async () => {
+  const home = fakeHome();
+  const link = path.join(scratchCase(), 'key.txt');
+  fs.symlinkSync(path.join(home, '.ssh', 'id_ed25519'), link);
+  const { prepareDownloadAbsolute } = loadFilesystem({ home });
+  const err = await rejects(() => prepareDownloadAbsolute(link));
+  assert.equal(err.code, 'FS_PATH_RESTRICTED');
+  assert.equal(err.status, 403);
+});
+
+test('symlink directories cannot expose denied paths through listing, download, or upload', async () => {
+  const home = fakeHome();
+  const base = scratchCase();
+  const ssh = path.join(base, 'ssh');
+  const codex = path.join(base, 'codex');
+  fs.symlinkSync(path.join(home, '.ssh'), ssh, 'junction');
+  fs.symlinkSync(path.join(home, '.codex'), codex, 'junction');
+  const { listAbsoluteDirectory, prepareDownloadAbsolute, resolveAbsoluteUploadTarget } = loadFilesystem({ home });
+  assert.equal((await rejects(() => listAbsoluteDirectory(ssh))).code, 'FS_PATH_RESTRICTED');
+  assert.equal((await rejects(() => prepareDownloadAbsolute(codex))).code, 'FS_PATH_RESTRICTED');
+  for (const [dir, name] of [[ssh, 'new_key'], [codex, 'auth.json.bak']]) {
+    assert.throws(
+      () => resolveAbsoluteUploadTarget(dir, name),
+      (err) => err.code === 'FS_PATH_RESTRICTED',
+    );
+  }
+});
+
 test('the atomic-write temp file beside a denied path is refused too', async () => {
   const home = fakeHome();
   const tmpTwin = path.join(home, '.codex', 'auth.json.tmp');
@@ -108,6 +147,24 @@ test('the atomic-write temp file beside a denied path is refused too', async () 
   const { prepareDownloadAbsolute } = loadFilesystem({ home });
   const err = await rejects(() => prepareDownloadAbsolute(tmpTwin));
   assert.equal(err.code, 'FS_PATH_RESTRICTED');
+});
+
+test('dot-suffixed copies of sensitive files are refused', async () => {
+  const tokensFile = path.join(scratchCase(), 'tokens.json');
+  const home = fakeHome();
+  const { prepareDownloadAbsolute } = loadFilesystem({ home, tokensFile });
+  for (const denied of [
+    `${tokensFile}.bak`,
+    path.join(home, '.codex', 'auth.json.old'),
+  ]) {
+    fs.writeFileSync(denied, 'fixture');
+    const err = await rejects(() => prepareDownloadAbsolute(denied));
+    assert.equal(err.code, 'FS_PATH_RESTRICTED', denied);
+    assert.equal(err.status, 403);
+  }
+  const ordinary = `${tokensFile}-not-secret`;
+  fs.writeFileSync(ordinary, 'fixture');
+  assert.equal((await prepareDownloadAbsolute(ordinary)).target, ordinary);
 });
 
 test('uploading into a denied directory is refused', () => {
@@ -163,6 +220,32 @@ test('RELAY_FS_ROOTS refuses paths outside the configured roots', async () => {
   const err = await rejects(() => listAbsoluteDirectory(outside));
   assert.equal(err.code, 'FS_PATH_OUTSIDE_ROOTS');
   assert.equal(err.status, 403);
+});
+
+test('RELAY_FS_ROOTS checks both the symlink path and destination', async () => {
+  const base = scratchCase();
+  const allowed = path.join(base, 'allowed');
+  const outside = path.join(base, 'outside');
+  fs.mkdirSync(allowed);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'notes.txt'), 'outside');
+  fs.writeFileSync(path.join(allowed, 'notes.txt'), 'allowed');
+  const link = path.join(allowed, 'link');
+  fs.symlinkSync(outside, link, 'junction');
+  const outsideLink = path.join(outside, 'link');
+  fs.symlinkSync(allowed, outsideLink, 'junction');
+  const { listAbsoluteDirectory, prepareDownloadAbsolute, resolveAbsoluteUploadTarget } = loadFilesystem({ roots: allowed });
+  for (const dir of [link, outsideLink]) {
+    assert.equal((await rejects(() => listAbsoluteDirectory(dir))).code, 'FS_PATH_OUTSIDE_ROOTS');
+    assert.equal((await rejects(() => prepareDownloadAbsolute(path.join(dir, 'notes.txt')))).code, 'FS_PATH_OUTSIDE_ROOTS');
+    assert.throws(
+      () => resolveAbsoluteUploadTarget(dir, 'new.txt'),
+      (err) => err.code === 'FS_PATH_OUTSIDE_ROOTS',
+    );
+  }
+  const safeLink = path.join(allowed, 'safe.txt');
+  fs.symlinkSync(path.join(allowed, 'notes.txt'), safeLink);
+  assert.equal((await prepareDownloadAbsolute(safeLink)).target, safeLink);
 });
 
 test('RELAY_FS_ROOTS accepts a comma-separated list and ignores blank entries', async () => {
@@ -274,6 +357,120 @@ test('uploading requires an existing absolute directory', () => {
     () => resolveAbsoluteUploadTarget(file, 'a.txt'),
     (err) => err.code === 'FS_PATH_NOT_DIRECTORY',
   );
+});
+
+async function upload(t, filesystem, workdir, query) {
+  const app = express();
+  app.use(createFsRouter({
+    ...filesystem,
+    fs,
+    path,
+    MAX_UPLOAD_BYTES: 1024,
+    requestWorkdir: (req) => req.get('x-workdir'),
+    streamUploadToFile: (req, target) => pipeline(req, fs.createWriteStream(target)),
+    sendFilesystemError: (res, err) =>
+      res.status(err.status || 500).json({ error: err.message, code: err.code }),
+  }));
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const params = new URLSearchParams({ name: 'notes.txt', ...query });
+  return fetch(`http://127.0.0.1:${server.address().port}/api/fs/upload?${params}`, {
+    method: 'POST',
+    headers: { 'X-Workdir': workdir, 'Content-Type': 'application/octet-stream' },
+    body: 'attachment',
+  });
+}
+
+test('mkdir=1 uploads into a newly created workdir-relative directory', async (t) => {
+  const workdir = scratchCase();
+  const filesystem = loadFilesystem({ roots: workdir });
+  const response = await upload(t, filesystem, workdir, { path: '.relay/uploads', mkdir: '1' });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).entry.path, '.relay/uploads/notes.txt');
+  assert.equal(fs.readFileSync(path.join(workdir, '.relay/uploads/notes.txt'), 'utf8'), 'attachment');
+});
+
+test('uploads without mkdir and absolute uploads still require an existing directory', async (t) => {
+  const workdir = scratchCase();
+  const filesystem = loadFilesystem();
+  for (const query of [
+    { path: '.relay/uploads' },
+    { path: path.join(workdir, '.relay/uploads'), mkdir: '1' },
+  ]) {
+    const response = await upload(t, filesystem, workdir, query);
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).code, 'FS_PATH_NOT_FOUND');
+    assert.deepEqual(fs.readdirSync(workdir), []);
+  }
+});
+
+test('mkdir=1 refuses relative traversal before creating anything', async (t) => {
+  const base = scratchCase();
+  const workdir = path.join(base, 'work');
+  fs.mkdirSync(workdir);
+  const response = await upload(t, loadFilesystem(), workdir, { path: '../x', mkdir: '1' });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, 'FS_PATH_OUTSIDE_WORKDIR');
+  assert.deepEqual(fs.readdirSync(base), ['work']);
+  assert.deepEqual(fs.readdirSync(workdir), []);
+});
+
+test('mkdir=1 refuses a symlink ancestor escaping the workdir', async (t) => {
+  const workdir = scratchCase();
+  const outside = scratchCase();
+  fs.symlinkSync(outside, path.join(workdir, 'link'), 'junction');
+  const response = await upload(t, loadFilesystem(), workdir, {
+    path: 'link/.relay/uploads', mkdir: '1',
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, 'FS_PATH_OUTSIDE_WORKDIR');
+  assert.deepEqual(fs.readdirSync(outside), []);
+  assert.deepEqual(fs.readdirSync(workdir), ['link']);
+});
+
+test('mkdir=1 checks denied directories and filenames before creating parents', async (t) => {
+  const home = scratchCase();
+  const filesystem = loadFilesystem({ home });
+  for (const query of [
+    { path: '.ssh/new' },
+    { path: '.codex', name: 'auth.json' },
+    { path: '.relay/uploads', name: '../escape.txt' },
+  ]) {
+    const response = await upload(t, filesystem, home, { ...query, mkdir: '1' });
+    assert.equal(response.status, query.name === '../escape.txt' ? 400 : 403);
+    assert.deepEqual(fs.readdirSync(home), []);
+  }
+});
+
+test('mkdir=1 enforces allowed roots including symlink destinations', async (t) => {
+  const workdir = scratchCase();
+  const allowed = path.join(workdir, 'allowed');
+  const outside = path.join(workdir, 'outside');
+  fs.mkdirSync(allowed);
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(allowed, 'link'), 'junction');
+  const filesystem = loadFilesystem({ roots: allowed });
+  for (const target of ['outside/uploads', 'allowed/link/uploads']) {
+    const response = await upload(t, filesystem, workdir, { path: target, mkdir: '1' });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, 'FS_PATH_OUTSIDE_ROOTS');
+    assert.deepEqual(fs.readdirSync(outside), []);
+  }
+});
+
+test('invalid mkdir query values are rejected without creating a directory', async (t) => {
+  const workdir = scratchCase();
+  const response = await upload(t, loadFilesystem(), workdir, {
+    path: '.relay/uploads', mkdir: 'true',
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, 'FS_INVALID_MKDIR');
+  assert.deepEqual(fs.readdirSync(workdir), []);
 });
 
 // --- size caps ---------------------------------------------------------------

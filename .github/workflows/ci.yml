@@ -1,7 +1,7 @@
 name: CI
 
-# Runs the verification commands from AGENTS.md. Keep the two jobs in sync with
-# that file when the expected commands change.
+# Runs the commands from ENGINEERING.md's Verification section. Keep the two
+# jobs in sync with that section when the expected commands change.
 
 on:
   push:
@@ -32,6 +32,10 @@ jobs:
 
       - run: flutter test --no-pub
 
+      - run: |
+          flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+          test -f build/web/index.html
+
   server:
     name: Node backend
     runs-on: ubuntu-latest
@@ -49,8 +53,11 @@ jobs:
       - run: npm ci
         working-directory: server
 
+      - run: node -e "require('node-pty')"
+        working-directory: server
+
       - name: Syntax-check every backend source file
-        run: git ls-files '*.js' | xargs -r node --check
+        run: git ls-files '*.js' | xargs -r -n1 node --check
         working-directory: server
 
       - run: npm test

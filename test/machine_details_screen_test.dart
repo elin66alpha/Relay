@@ -5,7 +5,6 @@ import 'package:relay/core/i18n/app_strings.dart';
 import 'package:relay/core/models/cli_agent.dart';
 import 'package:relay/core/models/machine_credential.dart';
 import 'package:relay/core/settings/app_settings_controller.dart';
-import 'package:relay/features/chat/bot_chat_controller.dart';
 import 'package:relay/features/cli_agents/cli_agents_controller.dart';
 import 'package:relay/features/machines/machine_details_screen.dart';
 import 'package:xterm/xterm.dart';
@@ -27,10 +26,8 @@ Future<void> _pumpDetails(
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
-  final BotChatController chatController = BotChatController(
-    backendClient: _OfflineBackendClient(),
-  );
-  addTearDown(chatController.disposeController);
+  final _OfflineBackendClient backend = _OfflineBackendClient();
+  addTearDown(backend.close);
 
   await tester.pumpWidget(
     AppScope(
@@ -38,7 +35,7 @@ Future<void> _pumpDetails(
       child: MaterialApp(
         home: MachineDetailsScreen(
           machine: _machine,
-          chatController: chatController,
+          backend: backend,
           agentsController: agentsController,
         ),
       ),

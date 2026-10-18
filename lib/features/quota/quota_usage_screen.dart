@@ -7,15 +7,15 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/time_format.dart';
 import '../../core/widgets/agent_icon.dart';
-import '../chat/bot_chat_controller.dart';
+import 'quota_controller.dart';
 
 class QuotaUsageScreen extends StatefulWidget {
   const QuotaUsageScreen({
-    required this.chatController,
+    required this.quotaController,
     super.key,
   });
 
-  final BotChatController chatController;
+  final QuotaController quotaController;
 
   @override
   State<QuotaUsageScreen> createState() => _QuotaUsageScreenState();
@@ -41,7 +41,7 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   @override
   void initState() {
     super.initState();
-    _report = widget.chatController.lastUsageReport;
+    _report = widget.quotaController.lastUsageReport;
     unawaited(_refresh());
     _tick = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
@@ -67,7 +67,7 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
   Future<void> _refreshSource(String source) async {
     try {
       final UsageReport report =
-          await widget.chatController.usageReport(source: source);
+          await widget.quotaController.usageReport(source: source);
       if (!mounted) return;
       setState(() => _report = report);
     } catch (err) {
@@ -138,14 +138,6 @@ class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
       ),
     );
   }
-}
-
-/// The colour of a quota with [remainingPercent] left: the accent while there
-/// is room, amber when it runs low, red when nearly gone.
-Color quotaTone(ColorScheme colors, double remainingPercent) {
-  if (remainingPercent < 10) return colors.error;
-  if (remainingPercent < 25) return AppTheme.statusWarn;
-  return colors.primary;
 }
 
 class _UsageAgentPanel extends StatelessWidget {

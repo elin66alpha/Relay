@@ -51,6 +51,7 @@ const { createTerminalManager } = require('./lib/terminal-manager');
 const { buildUsageReport } = require('./lib/usage');
 const { describeAgent, CLI } = require('./lib/agent-options');
 const { getSettings, setSettings, deleteSettings } = require('./lib/agent-settings');
+const { recordContextWindow, contextWindowFor } = require('./lib/context-windows');
 const push = require('./lib/push');
 const fcm = require('./lib/fcm');
 const { notifyAll } = require('./lib/notify');
@@ -79,6 +80,7 @@ const {
   setActiveChatSession,
   touchChatSession,
   deleteChatSession,
+  renameChatSession,
   sessionScopeKey,
 } = require('./lib/chat-sessions');
 const {
@@ -699,6 +701,7 @@ function agentTurnDependencies() {
     broadcastScope,
     enqueueScope,
     getSettings,
+    recordContextWindow,
     runAgent,
     runningScopes,
     scopeChains,
@@ -711,11 +714,27 @@ function agentTurnDependencies() {
 // Where a turn Claude runs on its own lands: a reply of its own in the
 // conversation, with no user message before it, queued on the scope like any
 // other turn so a message sent meanwhile waits for it, as it does in the CLI.
-// It cannot be cancelled, and a session deleted meanwhile drops it.
+// Stop cancels it like any turn, and a session deleted meanwhile drops it.
 function backgroundTurnHandler({ agent, contextKey, sessionId, workdir }) {
-  return ({ progressLines, run }) => {
+  return ({ progressLines, run, cancel }) => {
     const session = resolveChatSession(contextKey, sessionId);
     if (!session) return;
+    const requestId = `${agent.key}.background.${randomUUID()}`;
+    const scopeKey = scopeKeyFor(agent.key, workdir, session.id);
+    const abortController = new AbortController();
+    abortController.signal.addEventListener('abort', cancel, { once: true });
+    const runState = {
+      requestId,
+      agent,
+      session,
+      deviceId: 'agent-background',
+      scopeKey,
+      scopeWorkdir: workdir,
+      cancelled: false,
+      cancelEventSent: false,
+      abortController,
+    };
+    activeRequests.set(requestId, runState);
     runAgentTurn({
       agent,
       contextKey,
@@ -731,13 +750,14 @@ function backgroundTurnHandler({ agent, contextKey, sessionId, workdir }) {
       notifyTaskCompletion,
       prompt: '',
       recordUserMessage: false,
-      requestId: `${agent.key}.background.${randomUUID()}`,
-      scopeKey: scopeKeyFor(agent.key, workdir, session.id),
+      requestId,
+      runState,
+      scopeKey,
       session,
       workdir,
     }).catch((err) => {
       console.error(`[${agent.key}] background turn failed: ${err.message}`);
-    });
+    }).finally(() => activeRequests.delete(requestId));
   };
 }
 
@@ -865,6 +885,7 @@ const routeContext = {
   cancelQuotaSchedule,
   clearHistory,
   purgeSession,
+  contextWindowFor,
   createChatResponder,
   createChatSession,
   createQuotaSchedule,
@@ -900,6 +921,7 @@ const routeContext = {
   randomUUID,
   readHistory,
   recentWorkdirs,
+  renameChatSession,
   requestWorkdir,
   resolveAbsoluteUploadTarget,
   resolveAgentScope,
@@ -924,6 +946,7 @@ const routeContext = {
   terminalManager,
   touchChatSession,
   tokenRecordForToken,
+  updateHistoryMessage,
   uploadedEntry,
   upsertHistoryMessage,
   validateWorkdir,

@@ -86,6 +86,11 @@ test('a turn is settled by turn/completed, not by the turn/start response', asyn
     events.filter((e) => e.type === 'item').map((e) => e.item.type),
     ['commandExecution'],
   );
+  // The context size is the latest request's, not the thread's running total.
+  assert.deepEqual(
+    events.filter((e) => e.type === 'context'),
+    [{ type: 'context', used: 4200, size: 258400 }],
+  );
 
   const second = await send(pool, 'a', 'two');
   assert.equal(second.sessionId, first.sessionId, 'same thread');

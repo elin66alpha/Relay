@@ -116,6 +116,15 @@ function handleTurnStart(msg) {
     item: { id: 'c1', type: 'commandExecution', command: ['ls', '-la'] },
   });
   notify('item/agentMessage/delta', { threadId, turnId, itemId: 'i1', delta: `echo:${text}` });
+  notify('thread/tokenUsage/updated', {
+    threadId,
+    turnId,
+    tokenUsage: {
+      total: { totalTokens: 9000 },
+      last: { totalTokens: 4200 },
+      modelContextWindow: 258400,
+    },
+  });
   finishTurn(threadId, turnId, 'completed');
 }
 

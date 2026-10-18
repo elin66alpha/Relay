@@ -79,7 +79,7 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 
 ### Windows
 
-0.1.7 的 `relay-backend-windows-x64-v0.1.7.zip` 包含 Node.js 运行时、npm 和按锁文件
+0.1.8 的 `relay-backend-windows-x64-v0.1.8.zip` 包含 Node.js 运行时、npm 和按锁文件
 安装的生产依赖。将整个 ZIP 解压到固定、可写的目录，在该目录的 PowerShell 中运行
 `.\setup.cmd`。Agent CLI 和可选的 `cloudflared` 仍需在主机自行安装。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和

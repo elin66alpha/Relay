@@ -1,5 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../platform/wallpaper_processor.dart';
+import 'wallpaper.dart';
 
 enum AppLanguage { en, zh }
 
@@ -19,6 +25,11 @@ class AppSettingsController extends ChangeNotifier {
   int _fontScaleSaveGeneration = 0;
   bool _quotaPushEnabled = true;
   bool _taskPushEnabled = true;
+  static const String _wallpaperKey = 'relay.wallpaper.v2';
+  Wallpaper _wallpaper = const Wallpaper();
+  // What the settings entry stores for the image: a file name, or base64 on Web.
+  String? _wallpaperImage;
+  Wallpaper get wallpaper => _wallpaper;
 
   AppLanguage get language => _language;
   ThemeMode get themeMode => _themeMode;
@@ -42,8 +53,70 @@ class AppSettingsController extends ChangeNotifier {
     );
     _quotaPushEnabled = prefs.getBool(_quotaPushKey) ?? true;
     _taskPushEnabled = prefs.getBool(_taskPushKey) ?? true;
+    final String? stored = prefs.getString(_wallpaperKey);
+    _wallpaperImage = null;
+    if (stored == null) {
+      _wallpaper = const Wallpaper();
+    } else {
+      try {
+        final Map<String, dynamic> data =
+            jsonDecode(stored) as Map<String, dynamic>;
+        final Object? image = data['image'];
+        final Uint8List? bytes =
+            await loadWallpaperImage(image is String ? image : null);
+        _wallpaperImage = bytes == null ? null : image as String;
+        _wallpaper = Wallpaper(
+          bytes: bytes,
+          lightOpacity:
+              _wallpaperOpacity((data['light'] as num?)?.toDouble() ?? 0.8),
+          darkOpacity:
+              _wallpaperOpacity((data['dark'] as num?)?.toDouble() ?? 0.2),
+        );
+      } catch (_) {
+        // Damaged local image data must not prevent application startup.
+        _wallpaper = const Wallpaper();
+      }
+    }
     notifyListeners();
   }
+
+  /// Persists the prepared image and both theme opacities in one replacement.
+  Future<void> saveWallpaper(Wallpaper value) async {
+    final Wallpaper normalized = Wallpaper(
+      bytes: value.bytes,
+      lightOpacity: _wallpaperOpacity(value.lightOpacity),
+      darkOpacity: _wallpaperOpacity(value.darkOpacity),
+    );
+    // An opacity-only change keeps the stored image instead of copying it again.
+    final String? image = identical(value.bytes, _wallpaper.bytes)
+        ? _wallpaperImage
+        : await storeWallpaperImage(value.bytes);
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool saved = false;
+    try {
+      saved = await prefs.setString(
+        _wallpaperKey,
+        _encodeWallpaper(image, normalized),
+      );
+    } finally {
+      // Only the image the settings point to is kept, even after a failure.
+      await discardWallpaperImages(keep: saved ? image : _wallpaperImage);
+    }
+    if (!saved) throw StateError('wallpaper storage');
+    _wallpaperImage = image;
+    _wallpaper = normalized;
+    notifyListeners();
+  }
+
+  String _encodeWallpaper(String? image, Wallpaper value) =>
+      jsonEncode(<String, Object?>{
+        'image': image,
+        'light': value.lightOpacity,
+        'dark': value.darkOpacity,
+      });
+
+  double _wallpaperOpacity(double value) =>
+      value.isFinite ? value.clamp(0.0, 1.0).toDouble() : 0.0;
 
   Future<void> setLanguage(AppLanguage value) async {
     if (_language == value) return;

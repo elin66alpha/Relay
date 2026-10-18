@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import 'getting_started_screen.dart';
+import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.7';
+const String _applicationVersion = '0.1.8';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
@@ -93,6 +94,21 @@ class AppSettingsScreen extends StatelessWidget {
                                   currentFontScale,
                                 ),
                               ],
+                            ),
+                          ),
+                        ),
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 24),
+                          child: ListTile(
+                            leading: const Icon(Icons.wallpaper_outlined),
+                            title: Text(context.l10n.wallpaper),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context).push<void>(
+                              MaterialPageRoute<void>(
+                                builder: (_) => WallpaperScreen(
+                                  settingsController: settingsController,
+                                ),
+                              ),
                             ),
                           ),
                         ),

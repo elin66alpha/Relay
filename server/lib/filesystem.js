@@ -59,12 +59,12 @@ function restrictedError() {
 }
 
 // Refuse a target that is a sensitive path, lives inside one, or is one of the
-// atomic-write temp files beside one. When RELAY_FS_ROOTS is set, the target
+// dot-suffixed siblings beside one. When RELAY_FS_ROOTS is set, the target
 // must also fall under one of the configured roots.
 function assertPathAllowed(target) {
   const resolved = path.resolve(target);
   for (const sensitive of SENSITIVE_PATHS) {
-    if (isInside(sensitive, resolved) || resolved === `${sensitive}.tmp`) {
+    if (isInside(sensitive, resolved) || resolved.startsWith(`${sensitive}.`)) {
       throw restrictedError();
     }
   }
@@ -73,6 +73,10 @@ function assertPathAllowed(target) {
       status: 403,
       code: 'FS_PATH_OUTSIDE_ROOTS',
     });
+  }
+  if (fs.existsSync(resolved)) {
+    const realTarget = fs.realpathSync(resolved);
+    if (realTarget !== resolved) assertPathAllowed(realTarget);
   }
 }
 
@@ -87,6 +91,8 @@ function assertTreeAllowed(target) {
       throw restrictedError();
     }
   }
+  const realTarget = fs.realpathSync(resolved);
+  if (realTarget !== resolved) assertTreeAllowed(realTarget);
 }
 
 function normalizeRelative(input) {
@@ -146,7 +152,7 @@ function resolveExisting(relativePath, workdir) {
       code: 'FS_PATH_OUTSIDE_WORKDIR',
     });
   }
-  assertPathAllowed(realTarget);
+  assertPathAllowed(target);
   return {
     root,
     realRoot,
@@ -235,13 +241,13 @@ async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } 
   };
 }
 
-// Recursively sum the size of every regular file under `dir`. Symlinks are
+// Sum regular file sizes until maxBytes is exceeded. Symlinks are
 // skipped so the walk cannot loop or escape via a linked directory. Used to
 // reject directory (zip) downloads before we start streaming, since the tunnel
 // has a hard size budget and a half-sent zip cannot become a clean error.
 // Async + yielding between syscalls so walking a large tree (e.g. node_modules)
 // does not block the single-threaded server for every other client and agent.
-async function directorySize(dir) {
+async function directorySize(dir, maxBytes) {
   let total = 0;
   const stack = [dir];
   while (stack.length) {
@@ -262,6 +268,7 @@ async function directorySize(dir) {
       } else if (dirent.isFile()) {
         try {
           total += (await fs.promises.lstat(full)).size;
+          if (maxBytes > 0 && total > maxBytes) return total;
         } catch (_err) {
           // Skip entries that vanish or can't be stat'd mid-walk.
         }
@@ -303,7 +310,7 @@ async function prepareDownloadAbsolute(value, { maxBytes } = {}) {
   const isDirectory = stat.isDirectory();
   if (isDirectory) assertTreeAllowed(target);
   else assertPathAllowed(target);
-  const totalBytes = isDirectory ? await directorySize(target) : stat.size;
+  const totalBytes = isDirectory ? await directorySize(target, maxBytes) : stat.size;
   if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
     throw new FilesystemError('download exceeds the size limit', {
       status: 413,
@@ -366,6 +373,7 @@ function resolveAbsoluteUploadTarget(value, filename) {
     });
   }
   assertPathAllowed(target);
+  assertPathAllowed(path.join(fs.realpathSync(directory), name));
   return { directory, target, name, root: directory, realRoot: directory };
 }
 
@@ -382,7 +390,7 @@ async function prepareDownload(relativePath, workdir, { maxBytes } = {}) {
   const isDirectory = resolved.stat.isDirectory();
   if (isDirectory) assertTreeAllowed(resolved.target);
   const totalBytes = isDirectory
-    ? await directorySize(resolved.target)
+    ? await directorySize(resolved.target, maxBytes)
     : resolved.stat.size;
   if (typeof maxBytes === 'number' && maxBytes > 0 && totalBytes > maxBytes) {
     throw new FilesystemError('download exceeds the size limit', {
@@ -402,9 +410,42 @@ async function prepareDownload(relativePath, workdir, { maxBytes } = {}) {
   };
 }
 
-function resolveUploadTarget(relativePath, filename, workdir) {
-  const resolved = resolveExisting(relativePath, workdir);
-  if (!resolved.stat.isDirectory()) {
+function resolveUploadTarget(relativePath, filename, workdir, { createDirectory = false } = {}) {
+  let resolved;
+  try {
+    resolved = resolveExisting(relativePath, workdir);
+  } catch (err) {
+    if (!createDirectory || err.code !== 'FS_PATH_NOT_FOUND') throw err;
+    const { root, realRoot } = currentRoot(workdir);
+    const directory = path.resolve(root, normalizeRelative(relativePath));
+    const missing = [];
+    let ancestor = directory;
+    while (true) {
+      try {
+        fs.lstatSync(ancestor);
+        break;
+      } catch (ancestorError) {
+        if (ancestorError.code !== 'ENOENT') throw ancestorError;
+        missing.push(ancestor);
+        ancestor = path.dirname(ancestor);
+      }
+    }
+    const realAncestor = fs.realpathSync(ancestor);
+    const realTarget = path.resolve(realAncestor, path.relative(ancestor, directory));
+    if (!isInside(realRoot, realTarget)) {
+      throw new FilesystemError('path is outside the work directory', {
+        status: 403,
+        code: 'FS_PATH_OUTSIDE_WORKDIR',
+      });
+    }
+    // Check every directory before mkdir can create any of the missing parents.
+    for (const dir of missing) {
+      assertPathAllowed(dir);
+      assertPathAllowed(path.resolve(realAncestor, path.relative(ancestor, dir)));
+    }
+    resolved = { root, realRoot, target: directory, realTarget };
+  }
+  if (resolved.stat && !resolved.stat.isDirectory()) {
     throw new FilesystemError('upload target is not a directory', {
       status: 400,
       code: 'FS_PATH_NOT_DIRECTORY',
@@ -426,6 +467,11 @@ function resolveUploadTarget(relativePath, filename, workdir) {
     });
   }
   assertPathAllowed(target);
+  assertPathAllowed(path.resolve(resolved.realTarget, name));
+  if (!resolved.stat) {
+    fs.mkdirSync(resolved.realTarget, { recursive: true });
+    resolved = resolveExisting(relativePath, workdir);
+  }
   return {
     root: resolved.root,
     realRoot: resolved.realRoot,

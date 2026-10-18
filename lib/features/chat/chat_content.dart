@@ -7,7 +7,8 @@ import '../../core/models/chat_message.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/time_format.dart';
 import '../../core/widgets/agent_icon.dart';
-import 'code_block.dart';
+import '../../core/widgets/code_block.dart';
+import '../../core/widgets/chat_wallpaper.dart';
 
 // Presentational chat-content widgets shared by the single-agent chat
 // (bot_chat_screen) and the multi-agent swarm chat (group_chat_screen), so both
@@ -25,6 +26,7 @@ class SegmentedContent extends StatefulWidget {
     required this.color,
     required this.formatInlineEmphasis,
     this.highlightQuery,
+    this.trailing,
     super.key,
   });
 
@@ -34,6 +36,7 @@ class SegmentedContent extends StatefulWidget {
 
   /// See [MessageText.highlightQuery].
   final String? highlightQuery;
+  final Widget? trailing;
 
   @override
   State<SegmentedContent> createState() => _SegmentedContentState();
@@ -42,7 +45,7 @@ class SegmentedContent extends StatefulWidget {
 class _SegmentedContentState extends State<SegmentedContent> {
   bool _expanded = false;
 
-  Widget _segmentText(MessageSegment segment) {
+  Widget _segmentText(MessageSegment segment, {Widget? trailing}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -53,15 +56,25 @@ class _SegmentedContentState extends State<SegmentedContent> {
           formatInlineEmphasis: widget.formatInlineEmphasis,
           highlightQuery: widget.highlightQuery,
         ),
-        if (segment.createdAt != null)
+        if (segment.createdAt != null || trailing != null)
           Padding(
             padding: const EdgeInsets.only(top: 3),
-            child: Text(
-              formatShortTime(context, segment.createdAt!.toIso8601String()),
-              style: TextStyle(
-                fontSize: 11,
-                color: widget.color.withValues(alpha: 0.6),
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (segment.createdAt != null)
+                  Text(
+                    formatShortTime(
+                      context,
+                      segment.createdAt!.toIso8601String(),
+                    ),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: widget.color.withValues(alpha: 0.6),
+                    ),
+                  ),
+                if (trailing != null) trailing,
+              ],
             ),
           ),
       ],
@@ -74,7 +87,9 @@ class _SegmentedContentState extends State<SegmentedContent> {
         .where((MessageSegment s) => s.text.trim().isNotEmpty)
         .toList(growable: false);
     if (nonEmpty.isEmpty) return const SizedBox.shrink();
-    if (nonEmpty.length == 1) return _segmentText(nonEmpty.first);
+    if (nonEmpty.length == 1) {
+      return _segmentText(nonEmpty.first, trailing: widget.trailing);
+    }
 
     final List<MessageSegment> earlier =
         nonEmpty.sublist(0, nonEmpty.length - 1);
@@ -136,7 +151,7 @@ class _SegmentedContentState extends State<SegmentedContent> {
           ],
         ] else
           const SizedBox(height: 8),
-        _segmentText(last),
+        _segmentText(last, trailing: widget.trailing),
       ],
     );
   }
@@ -218,9 +233,8 @@ class _MessageTextState extends State<MessageText> {
       styleSheet: _markdownStyleSheet(context, widget.color, style),
       // The search term is marked by parsing it as its own inline element, so
       // the surrounding markdown still renders normally around it.
-      inlineSyntaxes: needle.isEmpty
-          ? null
-          : <md.InlineSyntax>[_SearchHitSyntax(needle)],
+      inlineSyntaxes:
+          needle.isEmpty ? null : <md.InlineSyntax>[_SearchHitSyntax(needle)],
       builders: <String, MarkdownElementBuilder>{
         'pre': CodeBlockBuilder(widget.color),
         if (needle.isNotEmpty) _searchHitTag: _SearchHitBuilder(style),
@@ -464,9 +478,7 @@ List<String>? parseOptionPrompt(String text) {
 }
 
 String _stripInlineMarkdown(String value) {
-  return value
-      .replaceAll(RegExp(r'\*\*|__|[`*]'), '')
-      .trim();
+  return value.replaceAll(RegExp(r'\*\*|__|[`*]'), '').trim();
 }
 
 /// Splits a leading "here's my plan" preamble off an assistant answer so it can
@@ -677,6 +689,24 @@ class ReplyPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (WallpaperScope.enabledOf(context)) {
+      final ThemeData theme = Theme.of(context);
+      return SizedBox(
+        width: double.infinity,
+        child: ChatChromeSurface(
+          acrylic: true,
+          color: color ??
+              theme.cardTheme.color ??
+              theme.colorScheme.surfaceContainerLow,
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(AppTheme.panelRadius),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            child: child,
+          ),
+        ),
+      );
+    }
     return SizedBox(
       width: double.infinity,
       child: Card(
@@ -699,6 +729,7 @@ class ReplyHeader extends StatelessWidget {
     this.agentKey,
     this.time,
     this.onIconTap,
+    this.trailing,
     super.key,
   });
 
@@ -706,6 +737,7 @@ class ReplyHeader extends StatelessWidget {
   final String? agentKey;
   final String? time;
   final VoidCallback? onIconTap;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -741,6 +773,7 @@ class ReplyHeader extends StatelessWidget {
               style: AppTheme.mono(colors.outline).copyWith(fontSize: 11),
             ),
           ],
+          if (trailing != null) trailing!,
         ],
       ),
     );

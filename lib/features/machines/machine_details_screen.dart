@@ -7,7 +7,6 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/util/time_format.dart';
-import '../chat/bot_chat_controller.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../ssh/ssh_terminal_controller.dart';
@@ -18,13 +17,13 @@ import '../ssh/ssh_terminal_screen.dart';
 class MachineDetailsScreen extends StatefulWidget {
   const MachineDetailsScreen({
     required this.machine,
-    required this.chatController,
+    required this.backend,
     required this.agentsController,
     super.key,
   });
 
   final MachineCredential machine;
-  final BotChatController chatController;
+  final BackendClient backend;
   final CliAgentsController agentsController;
 
   @override
@@ -34,7 +33,7 @@ class MachineDetailsScreen extends StatefulWidget {
 class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
   // Owned by the page, so leaving and re-entering SSH reuses one terminal.
   late final SshTerminalController _sshController = SshTerminalController(
-    backend: widget.chatController.backend,
+    backend: widget.backend,
   );
   Future<String>? _status;
 
@@ -55,9 +54,27 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
     );
   }
 
+  Future<String> _loadStatus(
+    AppStrings strings, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    try {
+      final BackendDiagnostics diagnostics = await widget.backend.diagnostics(
+        timeout: timeout,
+      );
+      return diagnostics.toDisplayText(strings);
+    } on BackendException catch (err) {
+      if (err.status != 404) rethrow;
+      final BackendStatus status = await widget.backend.status(
+        timeout: timeout,
+      );
+      return status.toDisplayText(strings);
+    }
+  }
+
   Future<void> _refreshAgents() async {
     try {
-      final List<CliAgent> agents = await widget.chatController.backend
+      final List<CliAgent> agents = await widget.backend
           .fetchAgents(verifyCredentials: true);
       if (!mounted) return;
       widget.agentsController.syncAgents(agents);
@@ -76,7 +93,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
-    _status ??= widget.chatController.statusText(strings);
+    _status ??= _loadStatus(strings);
     return Scaffold(
       appBar: AppBar(title: Text(strings.machineDetails)),
       body: SafeArea(
@@ -104,7 +121,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                       onRefresh: _refreshAgents,
                     ),
                     const SizedBox(height: 20),
-                    _DeviceTokensPanel(chatController: widget.chatController),
+                    _DeviceTokensPanel(backend: widget.backend),
                     const SizedBox(height: 20),
                     Row(
                       children: <Widget>[
@@ -119,7 +136,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                           icon: const Icon(Icons.refresh_rounded),
                           tooltip: strings.refresh,
                           onPressed: () => setState(() {
-                            _status = widget.chatController.statusText(strings);
+                            _status = _loadStatus(strings);
                           }),
                         ),
                       ],
@@ -305,9 +322,9 @@ class _AgentCredentialAction extends StatelessWidget {
 }
 
 class _DeviceTokensPanel extends StatefulWidget {
-  const _DeviceTokensPanel({required this.chatController});
+  const _DeviceTokensPanel({required this.backend});
 
-  final BotChatController chatController;
+  final BackendClient backend;
 
   @override
   State<_DeviceTokensPanel> createState() => _DeviceTokensPanelState();
@@ -326,7 +343,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
   }
 
   Future<List<DeviceToken>> _loadTokens() async {
-    final List<DeviceToken> tokens = await widget.chatController.deviceTokens();
+    final List<DeviceToken> tokens = await widget.backend.deviceTokens();
     _tokens = tokens;
     return tokens;
   }
@@ -365,7 +382,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
       _revoking.add(token.id);
     });
     try {
-      await widget.chatController.revokeDeviceToken(token.id);
+      await widget.backend.revokeDeviceToken(token.id);
       if (!mounted) return;
       final String now = DateTime.now().toUtc().toIso8601String();
       final List<DeviceToken> next = _tokens
@@ -407,7 +424,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
       _deleting.add(token.id);
     });
     try {
-      await widget.chatController.deleteDeviceToken(token.id);
+      await widget.backend.deleteDeviceToken(token.id);
       if (!mounted) return;
       final List<DeviceToken> next = _tokens
           .where((DeviceToken item) => item.id != token.id)

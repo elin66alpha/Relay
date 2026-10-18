@@ -5,15 +5,14 @@ import 'package:flutter/material.dart';
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
-import '../chat/bot_chat_controller.dart';
-import 'quota_usage_screen.dart';
+import 'quota_controller.dart';
 
 /// The agents whose quota the backend reports.
 bool quotaStripSupports(String agentKey) =>
     agentKey == 'claude' || agentKey == 'codex';
 
-/// The active agent's remaining quota, pinned above the composer. Tapping it
-/// opens the full quota screen.
+/// The active agent's remaining quota, pinned above the composer. Display
+/// only: the full quota screen opens from the agents drawer.
 ///
 /// Numbers come from the controller's shared usage report. It refreshes when
 /// the agent changes and when a turn ends (the turn just spent quota), at most
@@ -21,13 +20,13 @@ bool quotaStripSupports(String agentKey) =>
 /// reads are cheap.
 class QuotaStrip extends StatefulWidget {
   const QuotaStrip({
-    required this.chatController,
+    required this.quotaController,
     required this.agentKey,
     required this.busy,
     super.key,
   });
 
-  final BotChatController chatController;
+  final QuotaController quotaController;
   final String agentKey;
 
   /// Whether a turn is running; its end triggers a refresh.
@@ -41,6 +40,9 @@ class _QuotaStripState extends State<QuotaStrip> {
   static const Duration _minInterval = Duration(minutes: 1);
 
   final Map<String, DateTime> _fetchedAt = <String, DateTime>{};
+  // Until the first report arrives a spinner holds the strip's place, so the
+  // line above the composer does not pop in late.
+  bool _loading = false;
   // Re-renders the countdowns, and refetches once a shown window has reset.
   Timer? _tick;
 
@@ -72,7 +74,7 @@ class _QuotaStripState extends State<QuotaStrip> {
 
   UsageAgent? get _usage {
     for (final UsageAgent agent
-        in widget.chatController.lastUsageReport?.agents ??
+        in widget.quotaController.lastUsageReport?.agents ??
             const <UsageAgent>[]) {
       if (agent.key == widget.agentKey) return agent;
     }
@@ -95,65 +97,53 @@ class _QuotaStripState extends State<QuotaStrip> {
     final DateTime? last = _fetchedAt[source];
     if (last != null && now.difference(last) < _minInterval) return;
     _fetchedAt[source] = now;
+    _loading = true;
     try {
-      await widget.chatController.usageReport(source: source);
+      await widget.quotaController.usageReport(source: source);
     } catch (_) {
       // The strip keeps the last numbers; the quota screen reports errors.
     }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _openQuotaScreen() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            QuotaUsageScreen(chatController: widget.chatController),
-      ),
-    );
-    // The screen refreshes the shared report; show what it fetched.
+    _loading = false;
     if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final UsageAgent? usage = _usage;
-    if (!quotaStripSupports(widget.agentKey) ||
-        usage == null ||
+    if (!quotaStripSupports(widget.agentKey)) return const SizedBox.shrink();
+    if (usage == null && _loading) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox.square(
+            dimension: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+          ),
+        ),
+      );
+    }
+    if (usage == null ||
         !usage.available ||
         usage.error != null ||
         usage.quotas.isEmpty) {
       return const SizedBox.shrink();
     }
-    final ColorScheme colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Tooltip(
-        message: context.l10n.usageQuery,
-        child: InkWell(
-          onTap: _openQuotaScreen,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Opacity(
-              // A cached report from a failed refresh: still useful, but faded.
-              opacity: usage.stale ? 0.6 : 1,
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Wrap(
-                      spacing: 18,
-                      runSpacing: 4,
-                      children: <Widget>[
-                        for (final UsageQuota quota in usage.quotas)
-                          _QuotaMeter(quota: quota),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, size: 16, color: colors.outline),
-                ],
-              ),
-            ),
-          ),
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      child: Opacity(
+        // A cached report from a failed refresh: still useful, but faded.
+        opacity: usage.stale ? 0.6 : 1,
+        child: Wrap(
+          spacing: 18,
+          runSpacing: 4,
+          children: <Widget>[
+            for (final UsageQuota quota in usage.quotas)
+              _QuotaMeter(quota: quota),
+          ],
         ),
       ),
     );

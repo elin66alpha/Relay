@@ -16,53 +16,44 @@ require.cache[discoveryPath] = {
           id: 'gpt-next-sol',
           label: 'GPT Next Sol',
           description: 'Frontier model',
-          args: ['-m', 'gpt-next-sol'],
           defaultEffort: 'low',
           efforts: [
             {
               id: 'low',
               label: 'Low',
-              args: ['-c', 'model_reasoning_effort=low'],
             },
             {
               id: 'medium',
               label: 'Medium',
-              args: ['-c', 'model_reasoning_effort=medium'],
             },
             {
               id: 'ultra',
               label: 'Ultra',
-              args: ['-c', 'model_reasoning_effort=ultra'],
             },
           ],
         },
         {
           id: 'gpt-next-luna',
           label: 'GPT Next Luna',
-          args: ['-m', 'gpt-next-luna'],
           defaultEffort: 'medium',
           efforts: [
             {
               id: 'low',
               label: 'Low',
-              args: ['-c', 'model_reasoning_effort=low'],
             },
             {
               id: 'medium',
               label: 'Medium',
-              args: ['-c', 'model_reasoning_effort=medium'],
             },
             {
               id: 'high',
               label: 'High',
-              args: ['-c', 'model_reasoning_effort=high'],
             },
           ],
         },
         {
           id: 'gpt-no-reasoning',
           label: 'GPT No Reasoning',
-          args: ['-m', 'gpt-no-reasoning'],
           efforts: [],
         },
       ];
@@ -71,14 +62,13 @@ require.cache[discoveryPath] = {
 };
 
 const {
-  buildArgs,
-  defaultsFor,
+  codexSessionOptions,
   describeAgent,
   normalizeSettings,
 } = require('../lib/agent-options');
 
 test('Codex defaults come from the discovered model catalog', () => {
-  assert.deepEqual(defaultsFor('codex'), {
+  assert.deepEqual(describeAgent('codex').defaults, {
     effort: 'low',
     permission: 'workspace-write',
     fast: 'off',
@@ -121,28 +111,13 @@ test('Codex validates effort against the selected model', () => {
       fast: 'off',
     },
   );
-  assert.deepEqual(
-    buildArgs('codex', {
-      model: 'gpt-next-sol',
-      effort: 'ultra',
-      permission: 'read-only',
-    }),
-    [
-      '-m',
-      'gpt-next-sol',
-      '-c',
-      'model_reasoning_effort=ultra',
-      '-c',
-      'sandbox_mode=read-only',
-      '-c',
-      'approval_policy=never',
-      '-c',
-      'service_tier="default"',
-    ],
+  assert.equal(
+    codexSessionOptions({ model: 'gpt-next-sol', effort: 'ultra' }).effort,
+    'ultra',
   );
 });
 
-test('Codex repairs removed models before building argv', () => {
+test('Codex repairs removed models to the catalog default', () => {
   const settings = normalizeSettings('codex', {
     model: 'gpt-removed',
     effort: 'high',
@@ -154,7 +129,6 @@ test('Codex repairs removed models before building argv', () => {
     permission: 'workspace-write',
     fast: 'off',
   });
-  assert.equal(buildArgs('codex', settings)[1], 'gpt-next-sol');
 });
 
 test('Codex does not add an effort for a model that explicitly has none', () => {
@@ -168,7 +142,4 @@ test('Codex does not add an effort for a model that explicitly has none', () => 
     permission: 'workspace-write',
     fast: 'off',
   });
-  const args = buildArgs('codex', settings);
-  assert.equal(args.includes('model_reasoning_effort=ultra'), false);
-  assert.equal(args.includes('model_reasoning_effort=medium'), false);
 });

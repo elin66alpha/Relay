@@ -96,9 +96,9 @@ class AppStrings {
   String get fiveHourQuotaShort => isZh ? '5小时' : '5h';
   String get weeklyQuotaShort => isZh ? '本周' : 'Week';
   String get quotaResetShort => isZh ? '已重置' : 'Reset';
-  String resetsIn(Duration left) => isZh
-      ? '${resetsInShort(left)}后重置'
-      : 'Resets in ${resetsInShort(left)}';
+  String get contextUsage => isZh ? '上下文' : 'Context';
+  String resetsIn(Duration left) =>
+      isZh ? '${resetsInShort(left)}后重置' : 'Resets in ${resetsInShort(left)}';
 
   /// Time until a quota window resets, compact enough for the composer strip.
   String resetsInShort(Duration left) {
@@ -117,6 +117,7 @@ class AppStrings {
     }
     return isZh ? '$mins分' : '${mins}m';
   }
+
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
@@ -242,6 +243,10 @@ class AppStrings {
   String get loadingFiles => isZh ? '正在读取文件...' : 'Loading files...';
   String get uploadFile => isZh ? '上传文件' : 'Upload file';
   String get download => isZh ? '下载' : 'Download';
+  String get cannotPreviewFile =>
+      isZh ? '无法预览此文件。' : 'Cannot preview this file.';
+  String get filePreviewTruncated =>
+      isZh ? '仅显示前 512 KiB。' : 'Only the first 512 KiB is shown.';
   String get dragDropUpload => isZh
       ? 'Web 端可以把文件拖到此页上传。'
       : 'On web, drag files onto this page to upload.';
@@ -326,6 +331,7 @@ class AppStrings {
   String get keyManagedOnHost => isZh ? '在主机上配置' : 'Configured on host';
   String get agentReady => isZh ? '已就绪' : 'Ready';
   String get copy => isZh ? '复制' : 'Copy';
+  String get edit => isZh ? '编辑' : 'Edit';
   String get copied => isZh ? '已复制。' : 'Copied.';
   String credentialExpiresInDays(int days) => isZh
       ? '还有 $days 天需要重新登录'
@@ -372,6 +378,7 @@ class AppStrings {
   String backgroundSessionFinished(String agent, String session) =>
       isZh ? '$agent · $session 已完成。' : '$agent · $session finished.';
   String get deleteSession => isZh ? '删除会话' : 'Delete session';
+  String get renameSession => isZh ? '重命名会话' : 'Rename session';
   String deleteSessionTitle(String name) =>
       isZh ? '删除 $name？' : 'Delete $name?';
   String get deleteSessionBody => isZh
@@ -382,6 +389,7 @@ class AppStrings {
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get moreChatActions => isZh ? '更多操作' : 'More actions';
+  String get attachFile => isZh ? '附加文件' : 'Attach file';
 
   // Per-agent Model / Effort / Permission controls (composer "+" drawer).
   String get agentModel => isZh ? '模型' : 'Model';
@@ -409,7 +417,6 @@ class AppStrings {
   String agentCliVersion(String version) =>
       isZh ? '当前版本 $version' : 'Version $version';
   String get agentUpdateCli => isZh ? '更新 CLI' : 'Update CLI';
-  String get agentUpdateMissingModel => isZh ? '模型不可用?' : 'Model unavailable?';
   String agentUpdateConfirmTitle(String agent) =>
       isZh ? '更新 $agent?' : 'Update $agent?';
   String get agentUpdateConfirmBody => isZh
@@ -484,6 +491,10 @@ class AppStrings {
   String get quotaAlerts => isZh ? '额度刷新提醒' : 'Quota reset alerts';
   String get taskAlerts => isZh ? '任务完成提醒' : 'Task completion alerts';
   String get tutorial => isZh ? '教程' : 'Tutorial';
+  String get whatsNew => isZh ? '新功能' : "What's new";
+  String get whatsNewHomeTitle =>
+      isZh ? '看看这个版本新增了什么' : 'See what this version adds';
+  String get otherChanges => isZh ? '其他改进' : 'Other changes';
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';
@@ -500,6 +511,36 @@ class AppStrings {
       : 'Private control surface for local Claude Code, Codex, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
+  String get wallpaper => isZh ? '壁纸' : 'Wallpaper';
+  String get save => isZh ? '保存' : 'Save';
+  String get wallpaperSaved => isZh ? '壁纸已保存' : 'Wallpaper saved';
+  String get wallpaperProcessing => isZh ? '正在处理壁纸…' : 'Processing wallpaper…';
+  String get wallpaperPreviewPrompt =>
+      isZh ? '查看壁纸效果' : 'Preview the wallpaper';
+  String get wallpaperDescription => isZh
+      ? '选择一张共用壁纸，仅保存在当前设备。点击保存后应用。'
+      : 'Choose one shared wallpaper for this device. Select Save to apply.';
+  String get chooseWallpaper => isZh ? '选择图片' : 'Choose image';
+  String get replaceWallpaper => isZh ? '更换图片' : 'Replace image';
+  String get removeWallpaper => isZh ? '移除壁纸' : 'Remove wallpaper';
+  String get noWallpaper => isZh ? '未设置壁纸' : 'No wallpaper';
+  String get wallpaperFit => isZh ? '居中 · 均匀填充' : 'Centered · Fill';
+  String get wallpaperFileHint => isZh
+      ? 'JPG、PNG 或 WebP。App 保存原图并按原始分辨率显示；网页版最大 20 MB / 4000 万像素，会缩放压缩后存入浏览器。'
+      : 'JPG, PNG or WebP. Apps keep the original at full resolution; on the Web, images up to 20 MB / 40 MP are resized and compressed into browser storage.';
+  String get wallpaperOpacity => isZh ? '图片不透明度' : 'Image opacity';
+  String get wallpaperOpacityHint => isZh
+      ? '调节当前主题的图片不透明度，预览实时更新。亮色与暗色分别保存。'
+      : 'Adjust image opacity for the current theme with a live preview. Light and dark values are saved separately.';
+  String get wallpaperPreview => isZh ? '壁纸预览' : 'Wallpaper preview';
+  String get wallpaperPreviewText =>
+      isZh ? '文字与控件仍跟随主题。' : 'Text and controls follow your theme.';
+  String get wallpaperImportError => isZh
+      ? '无法使用这张图片。请选择有效的 JPG、PNG 或 WebP（最大 20 MB / 4000 万像素）。'
+      : 'Cannot use this image. Choose a valid JPG, PNG or WebP (up to 20 MB / 40 MP).';
+  String get wallpaperSaveError => isZh
+      ? '壁纸设置未能保存，请检查设备存储后重试。'
+      : 'Could not save wallpaper settings. Check device storage and try again.';
   String get online => isZh ? '在线' : 'Online';
   String get offline => isZh ? '未在线' : 'Not online';
   String get compress => isZh ? '压缩对话' : 'Compress';

@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.1.8 - 2026-10-17
+
+### Added
+
+- A **What's new** entry on Home, above Tutorial, explaining each version's
+  highlights in plain language, with smaller notes for other changes.
+- A dedicated **Wallpaper** editor for one device-local image shared by all
+  chats, with an explicit **Save** button, a smooth current-theme opacity slider,
+  live preview, and loading indicators while images are imported and processed.
+  Android, iOS and desktop keep the original image at full resolution in the
+  app directory; the Web stores a compressed copy of up to 256 KiB.
+  On the chat, home and Swarm pages everything over the wallpaper, including
+  headers, banners and home cards, shares one readable acrylic tint; other pages
+  show the wallpaper behind the same acrylic with solid content, and an empty
+  chat shows only the wallpaper.
+- Rename any session except Main from the drawer, keeping its history, position,
+  and active selection, even during a running turn.
+- Copy settled messages in solo chat. Edit your own messages to put their text
+  back in the composer without changing history or sending automatically.
+- Read-only file previews for the first 512 KiB of UTF-8 text, with syntax
+  highlighting for supported code up to 20,000 characters.
+- Attach files from the solo-chat **+** menu: upload to the workspace's
+  `.relay/uploads/` directory and add their paths to the draft. The upload API
+  accepts `mkdir=1` to create missing workdir-relative directories and parents.
+- A context usage line above the solo-chat composer showing used tokens and
+  the model's context window, with `?` for unknown values and remembered window
+  sizes for new conversations.
+
+### Changed
+
+- **Update CLI** moved from the model and effort pages into the composer's
+  **+** drawer, whose eight actions now sit in a 2x4 grid on every screen size.
+- Android release APKs are signed with a dedicated release key instead of the
+  debug key. Uninstall a previously installed Relay APK once before installing
+  this version, then import the machine credential again.
+- CI now builds the Web client and checks that the terminal's node-pty
+  dependency loads, catching build and native dependency failures before release.
+
+### Fixed
+
+- A Claude reply started on its own no longer spins forever when a message
+  sent meanwhile is folded into it, and Stop now stops such a reply. The folded
+  answer appears once, under the message it answers.
+- Compacting a conversation updates the context usage line right away, without
+  waiting for the next reply.
+- Backend installation allows node-pty's install scripts under npm 12; setup
+  checks that the native terminal dependency loads instead of only checking its
+  directory, with a rebuild fallback on Linux and macOS.
+- File access restrictions now cover dot-suffixed copies of sensitive paths
+  and resolved symlink destinations.
+- Oversized directory downloads are refused as soon as the size scan exceeds
+  the limit, without scanning the rest of the tree.
+- CI syntax-checks every backend JavaScript file instead of only the first.
+
+### Removed
+
+- The deprecated agent command-line argument builder, superseded by live-session
+  SDK and protocol settings, and the one-time scripts for renaming AgentDeck to
+  Relay.
+
 ## 0.1.7 - 2026-10-02
 
 ### Added

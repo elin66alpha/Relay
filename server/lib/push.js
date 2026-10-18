@@ -86,10 +86,6 @@ function addSubscription({ subscription, workdir, lang, categories }) {
   });
 }
 
-function removeSubscription(endpoint) {
-  return store.remove(endpoint);
-}
-
 async function notify(payload) {
   if (!configured) return 0;
   return store.notify(payload);
@@ -99,6 +95,5 @@ module.exports = {
   isEnabled,
   publicKey,
   addSubscription,
-  removeSubscription,
   notify,
 };

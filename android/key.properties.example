@@ -1,0 +1,7 @@
+# Copy to android/key.properties (gitignored) and fill in the passwords.
+# Release builds fail without it; see docs/handbook.md (Android release signing).
+storeFile=/home/pc/relay-release.jks
+storePassword=
+keyAlias=relay
+# PKCS12 keystores use the store password for the key too.
+keyPassword=

@@ -26,6 +26,9 @@ const DEFAULT_MAX_LIVE = 3;
 // cleanly before falling back to killing the process. Interrupt is the whole
 // point of keeping the session alive, but cancel must never hang on it.
 const INTERRUPT_GRACE_MS = 5000;
+// Reading the context size is a local control request (~150 ms warm), but a
+// wedged CLI must never hold a finished reply back.
+const CONTEXT_READ_MS = 3000;
 
 function positiveInt(value, fallbackValue, min, max) {
   const parsed = Number.parseInt(value, 10);
@@ -91,6 +94,26 @@ function evictsBefore(a, b) {
 // stdin for one live session: an async iterable the SDK drains, that we push
 // user messages into as turns arrive. Staying un-ended is what keeps the CLI
 // process alive between turns.
+// What the conversation occupies now, counted the way `/context` counts it;
+// null when the session cannot say.
+async function readContext(entry) {
+  if (entry.closed || typeof entry.query.getContextUsage !== 'function') return null;
+  let timer;
+  try {
+    const usage = await Promise.race([
+      entry.query.getContextUsage(),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, CONTEXT_READ_MS, null);
+      }),
+    ]);
+    return usage ? { used: usage.totalTokens, size: usage.maxTokens } : null;
+  } catch (_err) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function createInputQueue() {
   const pending = [];
   const waiters = [];
@@ -254,24 +277,49 @@ function createClaudeSessionPool(options = {}) {
     }
   }
 
+  // Interrupt is best-effort: if the CLI does not wind the turn down promptly,
+  // drop the whole session so cancel is never a hang.
+  function interrupt(entry, stillRunning, reason) {
+    Promise.resolve()
+      .then(() => entry.query.interrupt())
+      .catch(() => {})
+      .then(() => {
+        setTimeout(() => {
+          if (stillRunning()) closeEntry(entry, reason).catch(() => {});
+        }, interruptGraceMs).unref?.();
+      });
+  }
+
   function startBackground(entry) {
     const notices = entry.notices;
     entry.notices = [];
+    const background = { handle: null, timer: null, held: [] };
     let handle = null;
     try {
-      if (entry.onBackgroundTurn) handle = entry.onBackgroundTurn({ notices });
-    } catch (_err) {
+      if (entry.onBackgroundTurn) {
+        handle = entry.onBackgroundTurn({
+          notices,
+          interrupt: () => {
+            if (entry.background !== background) return;
+            interrupt(entry, () => entry.background === background, new Error('cancelled'));
+          },
+        });
+      }
+    } catch (err) {
       handle = null;
+      if (!entry.messageErrorLogged) {
+        entry.messageErrorLogged = true;
+        console.warn(`[claude] failed to start background turn for ${entry.key}: ${err.message}`);
+      }
     }
     clearIdleTimer(entry);
     // Tracked even with nobody to hand it to, so its messages never leak into
     // the next turn.
-    entry.background = {
-      handle: handle || { onMessage() {}, finish() {}, fail() {} },
-      timer: setTimeout(() => {
-        closeEntry(entry, new Error('background turn timed out')).catch(() => {});
-      }, turnTimeoutMs),
-    };
+    background.handle = handle || { onMessage() {}, finish() {}, fail() {} };
+    background.timer = setTimeout(() => {
+      closeEntry(entry, new Error('background turn timed out')).catch(() => {});
+    }, turnTimeoutMs);
+    entry.background = background;
     if (typeof entry.background.timer.unref === 'function') {
       entry.background.timer.unref();
     }
@@ -284,8 +332,9 @@ function createClaudeSessionPool(options = {}) {
     clearTimeout(background.timer);
     try {
       settle(background.handle);
-    } catch (_err) {
+    } catch (err) {
       // The listener's failure must not take the session down.
+      console.warn(`[claude] failed to settle background turn for ${entry.key}: ${err.message}`);
     }
     if (!entry.closed && !entry.turn) scheduleIdleClose(entry);
     pumpWaiters();
@@ -302,21 +351,25 @@ function createClaudeSessionPool(options = {}) {
     if (!message) return;
     const turn = entry.turn;
     // A background turn keeps everything up to its own result, even once a
-    // turn has been pushed behind it.
-    if (
-      entry.background &&
-      !(turn && message.type === 'result' && message.user_message_uuid === turn.uuid)
-    ) {
-      if (message.type === 'result') {
-        settleBackground(entry, (handle) => handle.finish(message));
-      } else {
-        try {
-          entry.background.handle.onMessage(message);
-        } catch (_err) {
-          // A rendering failure must not take the session down.
-        }
+    // turn has been pushed behind it. The CLI runs one turn at a time, so any
+    // result ends it. It may also fold the pushed message into it, and then
+    // the result names that message: what came after the push is the pushed
+    // turn's reply, not the background turn's, so it is held until the result
+    // says whose it is. The background turn's reply would otherwise repeat it.
+    const background = entry.background;
+    if (background) {
+      if (message.type !== 'result') {
+        if (turn) background.held.push(message);
+        else deliverBackground(entry, background, message);
+        return;
       }
-      return;
+      const folded = !!turn && message.user_message_uuid === turn.uuid;
+      if (!folded) {
+        for (const held of background.held) deliverBackground(entry, background, held);
+      }
+      settleBackground(entry, (handle) => handle.finish(message));
+      if (!folded) return;
+      for (const held of background.held) deliverTurn(entry, turn, held);
     }
     if (!turn) {
       // What woke Claude up arrives before the turn it runs on it.
@@ -336,13 +389,33 @@ function createClaudeSessionPool(options = {}) {
       });
       return;
     }
+    deliverTurn(entry, turn, message);
+  }
+
+  function deliverBackground(entry, background, message) {
+    try {
+      background.handle.onMessage(message);
+    } catch (err) {
+      // A rendering failure must not take the session down.
+      if (!entry.messageErrorLogged) {
+        entry.messageErrorLogged = true;
+        console.warn(`[claude] failed to deliver background message for ${entry.key}: ${err.message}`);
+      }
+    }
+  }
+
+  function deliverTurn(entry, turn, message) {
     // Only assistant messages reach the user, and they are what makes a silent
     // retry unsafe.
     if (message.type === 'assistant') turn.emitted = true;
     try {
       turn.onMessage(message);
-    } catch (_err) {
+    } catch (err) {
       // A rendering failure must not take the session down.
+      if (!entry.messageErrorLogged) {
+        entry.messageErrorLogged = true;
+        console.warn(`[claude] failed to deliver turn message for ${entry.key}: ${err.message}`);
+      }
     }
   }
 
@@ -366,6 +439,7 @@ function createClaudeSessionPool(options = {}) {
       turn: null,
       idleTimer: null,
       closed: false,
+      messageErrorLogged: false,
       lastActivity: now(),
     };
     // Reserve the slot before the first await so two concurrent callers can't
@@ -426,16 +500,7 @@ function createClaudeSessionPool(options = {}) {
       const stop = (reason) => {
         if (entry.turn !== turn) return;
         turn.cancelled = true;
-        Promise.resolve()
-          .then(() => entry.query.interrupt())
-          .catch(() => {})
-          .then(() => {
-            // Interrupt is best-effort: if the CLI does not wind the turn down
-            // promptly, drop the whole session so cancel is never a hang.
-            setTimeout(() => {
-              if (entry.turn === turn) closeEntry(entry, reason).catch(() => {});
-            }, interruptGraceMs).unref?.();
-          });
+        interrupt(entry, () => entry.turn === turn, reason);
       };
 
       const signal = request.signal;
@@ -472,11 +537,17 @@ function createClaudeSessionPool(options = {}) {
         settleTurn(entry, (settled) => settled.reject(err));
       }
     }).then(
-      (result) => {
+      async (result) => {
+        const context = await readContext(entry);
         entry.lastActivity = now();
         scheduleIdleClose(entry);
         pumpWaiters();
-        return { result, sessionId: entry.sessionId, stderr: entry.stderr || '' };
+        return {
+          result,
+          sessionId: entry.sessionId,
+          stderr: entry.stderr || '',
+          context,
+        };
       },
       (err) => {
         entry.lastActivity = now();

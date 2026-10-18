@@ -85,6 +85,17 @@ class ChatMessage {
         .toList(growable: false);
   }
 
+  /// The context size the agent reported after this reply: tokens the
+  /// conversation occupies and the model's window. Null when unreported.
+  ({int used, int size})? get contextUsage {
+    final Object? raw = metadata['context'];
+    if (raw is! Map) return null;
+    final Object? used = raw['used'];
+    final Object? size = raw['size'];
+    if (used is! num || size is! num || size <= 0) return null;
+    return (used: used.toInt(), size: size.toInt());
+  }
+
   ChatMessage copyWith({
     String? content,
     Map<String, Object?>? metadata,

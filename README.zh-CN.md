@@ -39,6 +39,11 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 流式查看回复、取消当前回合、搜索历史、导出 Markdown；切换页面后，任务仍可继续。
 每个 `工作目录 + agent` 最多支持 8 个可恢复的命名会话。
 
+在**设置 → 壁纸**的独立页面中，选择所有 Agent 聊天、蜂群与聊天首页共用的设备本地壁纸。
+单个滑块调节当前主题的图片不透明度并实时预览，点击**保存**后应用；亮色/暗色默认值为
+80%/20%。App 保存原图并按原始分辨率显示，网页版保存压缩后的副本。图片居中均匀填充，
+聊天面板、消息气泡和其他页面使用同一种亚克力材质。
+
 <a href="assets/screenshots/relay-chat-web.png">
   <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话" width="100%">
 </a>
@@ -85,10 +90,11 @@ flowchart LR
 
 | | 能力 | 带来的体验 |
 |---|---|---|
-| 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话、跨设备历史、搜索与 Markdown 导出。 |
+| 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话（除 Main 外均可重命名）、跨设备历史、搜索与 Markdown 导出。可复制消息，或编辑自己的消息，将原文放回草稿。 |
+| 📎 | **聊天附件与上下文** | 添加附件会将文件上传到工作区，并把路径加入草稿。单聊输入框上方以 `<已用> / <窗口>` 显示上下文词元数；`?` 表示未知。 |
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
 | 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据、Claude 凭据到期时间，以及 Claude/Codex 快速模式。 |
-| 📁 | **文件与终端** | 受策略约束的浏览、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
+| 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
 | 📊 | **额度工作流** | 查看 Claude/Codex 用量，并预约一条消息在下一个检测到的 5 小时额度重置后发送。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
 
@@ -102,10 +108,10 @@ Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机�
 在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude 与
 Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管理的 provider 配置。
 
-Windows x64 用户可从 [0.1.7 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.7)
-下载 `relay-backend-windows-x64-v0.1.7.zip`，解压后运行 `.\setup.cmd`。这个后端包
+Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8)
+下载 `relay-backend-windows-x64-v0.1.8.zip`，解压后运行 `.\setup.cmd`。这个后端包
 已包含 Node.js 和生产依赖；agent CLI 仍需自行安装并认证。
-`relay-windows-x64-v0.1.7.zip` 是桌面客户端。
+`relay-windows-x64-v0.1.8.zip` 是桌面客户端。
 
 在仓库根目录执行对应系统的安装命令：
 
@@ -177,7 +183,7 @@ Relay/
 ├── server/       Node.js 后端与测试
 ├── backends/     各系统安装和服务管理适配
 ├── docs/         运维与架构手册
-├── scripts/      开发、部署与截图工具
+├── scripts/      开发与部署工具
 └── test/         Flutter 测试
 ```
 

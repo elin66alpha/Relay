@@ -2,7 +2,7 @@
 
 // Single source of truth for the per-agent Model / Effort / Permission controls
 // exposed in the chat composer's "+" drawer. The tables feed normalized settings
-// into the Claude SDK, ACP, Codex app-server, and legacy argv helpers without
+// into the Claude SDK, ACP, and Codex app-server without
 // making the runners duplicate validation.
 //
 // Capability-aware: each agent only exposes the controls supported by its CLI.
@@ -28,18 +28,16 @@ const BASE_MODELS = {
   // discovered scheme (full model id) so toggling discovery never churns a
   // stored selection.
   claude: [
-    { id: 'claude-opus-4-8', label: 'Opus 4.8', args: ['--model', 'claude-opus-4-8'] },
-    { id: 'claude-opus-4-7', label: 'Opus 4.7', args: ['--model', 'claude-opus-4-7'] },
-    { id: 'claude-opus-4-6', label: 'Opus 4.6', args: ['--model', 'claude-opus-4-6'] },
+    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+    { id: 'claude-opus-4-7', label: 'Opus 4.7' },
+    { id: 'claude-opus-4-6', label: 'Opus 4.6' },
     {
       id: 'claude-sonnet-4-6',
       label: 'Sonnet 4.6',
-      args: ['--model', 'claude-sonnet-4-6'],
     },
     {
       id: 'claude-haiku-4-5',
       label: 'Haiku 4.5',
-      args: ['--model', 'claude-haiku-4-5'],
     },
   ],
   codex: [
@@ -47,19 +45,16 @@ const BASE_MODELS = {
       id: 'gpt-5.5',
       label: 'GPT-5.5 (recommended)',
       description: 'Strongest option for complex coding and agentic work.',
-      args: ['-m', 'gpt-5.5'],
     },
     {
       id: 'gpt-5.4',
       label: 'GPT-5.4',
       description: 'Strong coding and reasoning for pinned GPT-5.4 workflows.',
-      args: ['-m', 'gpt-5.4'],
     },
     {
       id: 'gpt-5.4-mini',
       label: 'GPT-5.4 Mini (fast)',
       description: 'Faster, lower-cost option for lighter coding tasks.',
-      args: ['-m', 'gpt-5.4-mini'],
     },
   ],
   // opencode models are `provider/model`; these free entries work without
@@ -67,11 +62,11 @@ const BASE_MODELS = {
   // (plus models-extra.json) is the catalog. Run `opencode models` for the full
   // set, or add paid ids via models-extra.json.
   opencode: [
-    { id: 'opencode/big-pickle', label: 'Big Pickle (free)', args: ['-m', 'opencode/big-pickle'] },
-    { id: 'opencode/deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (free)', args: ['-m', 'opencode/deepseek-v4-flash-free'] },
-    { id: 'opencode/north-mini-code-free', label: 'North Mini Code (free)', args: ['-m', 'opencode/north-mini-code-free'] },
-    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (free)', args: ['-m', 'opencode/nemotron-3-ultra-free'] },
-    { id: 'opencode/mimo-v2.5-free', label: 'MiMo v2.5 (free)', args: ['-m', 'opencode/mimo-v2.5-free'] },
+    { id: 'opencode/big-pickle', label: 'Big Pickle (free)' },
+    { id: 'opencode/deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (free)' },
+    { id: 'opencode/north-mini-code-free', label: 'North Mini Code (free)' },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (free)' },
+    { id: 'opencode/mimo-v2.5-free', label: 'MiMo v2.5 (free)' },
   ],
   // Hermes' model is `provider/model` and is normally set via `hermes setup` /
   // config.yaml. Left empty so the configured default is used; pin specific ids
@@ -82,28 +77,28 @@ const BASE_MODELS = {
 const EFFORTS = {
   // Claude Code has a native --effort flag (low|medium|high|xhigh|max).
   claude: [
-    { id: 'low', label: 'Low', args: ['--effort', 'low'] },
-    { id: 'medium', label: 'Medium', args: ['--effort', 'medium'] },
-    { id: 'high', label: 'High', args: ['--effort', 'high'] },
-    { id: 'xhigh', label: 'Extra high', args: ['--effort', 'xhigh'] },
-    { id: 'max', label: 'Max', args: ['--effort', 'max'] },
+    { id: 'low', label: 'Low' },
+    { id: 'medium', label: 'Medium' },
+    { id: 'high', label: 'High' },
+    { id: 'xhigh', label: 'Extra high' },
+    { id: 'max', label: 'Max' },
   ],
   // Codex exposes reasoning effort via a config override, not a flag.
   codex: [
-    { id: 'minimal', label: 'Minimal', args: ['-c', 'model_reasoning_effort=minimal'] },
-    { id: 'low', label: 'Low', args: ['-c', 'model_reasoning_effort=low'] },
-    { id: 'medium', label: 'Medium', args: ['-c', 'model_reasoning_effort=medium'] },
-    { id: 'high', label: 'High', args: ['-c', 'model_reasoning_effort=high'] },
-    { id: 'xhigh', label: 'Extra high', args: ['-c', 'model_reasoning_effort=xhigh'] },
+    { id: 'minimal', label: 'Minimal' },
+    { id: 'low', label: 'Low' },
+    { id: 'medium', label: 'Medium' },
+    { id: 'high', label: 'High' },
+    { id: 'xhigh', label: 'Extra high' },
   ],
   // opencode exposes reasoning effort via `--variant`, but valid variants are
   // model-specific (an unsupported one errors), so it stays opt-in with no
   // default — selecting one adds `--variant <id>`.
   opencode: [
-    { id: 'minimal', label: 'Minimal', args: ['--variant', 'minimal'] },
-    { id: 'medium', label: 'Medium', args: ['--variant', 'medium'] },
-    { id: 'high', label: 'High', args: ['--variant', 'high'] },
-    { id: 'max', label: 'Max', args: ['--variant', 'max'] },
+    { id: 'minimal', label: 'Minimal' },
+    { id: 'medium', label: 'Medium' },
+    { id: 'high', label: 'High' },
+    { id: 'max', label: 'Max' },
   ],
   // Hermes has no per-invocation reasoning-effort flag.
   hermes: [],
@@ -114,12 +109,12 @@ const EFFORTS = {
 // the host user's global CLI preference on every invocation.
 const FAST_MODES = {
   claude: [
-    { id: 'off', label: 'Off', args: ['--settings', '{"fastMode":false}'] },
-    { id: 'on', label: 'On', args: ['--settings', '{"fastMode":true}'] },
+    { id: 'off', label: 'Off' },
+    { id: 'on', label: 'On' },
   ],
   codex: [
-    { id: 'off', label: 'Off', args: ['-c', 'service_tier="default"'] },
-    { id: 'on', label: 'On', args: ['-c', 'service_tier="fast"'] },
+    { id: 'off', label: 'Off' },
+    { id: 'on', label: 'On' },
   ],
 };
 
@@ -133,19 +128,16 @@ const PERMISSIONS = {
       id: 'bypass',
       label: 'Bypass (full auto)',
       description: 'Skip all permission checks.',
-      args: ['--dangerously-skip-permissions'],
     },
     {
       id: 'acceptEdits',
       label: 'Auto-accept edits',
       description: 'Auto-approve file edits; other tools may block in non-interactive mode.',
-      args: ['--permission-mode', 'acceptEdits'],
     },
     {
       id: 'plan',
       label: 'Plan only (read-only)',
       description: 'Read and plan, but make no changes.',
-      args: ['--permission-mode', 'plan'],
     },
   ],
   codex: [
@@ -153,47 +145,37 @@ const PERMISSIONS = {
       id: 'bypass',
       label: 'Bypass (full auto)',
       description: 'No sandbox, no approvals.',
-      args: ['--dangerously-bypass-approvals-and-sandbox'],
     },
-    // The args below are the equivalent CLI flags, kept so this stays one
-    // source of truth; codexSessionOptions is what the runner actually uses.
     {
       id: 'workspace-write',
       label: 'Workspace write',
       description: 'Edit inside the workspace; network/other paths blocked.',
-      args: ['-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never'],
     },
     {
       id: 'read-only',
       label: 'Read only',
       description: 'Inspect files but make no changes.',
-      args: ['-c', 'sandbox_mode=read-only', '-c', 'approval_policy=never'],
     },
     {
       id: 'full-access',
       label: 'Full access',
       description: 'No sandbox restrictions, approvals auto-skipped.',
-      args: ['-c', 'sandbox_mode=danger-full-access', '-c', 'approval_policy=never'],
     },
   ],
   // opencode and hermes run over ACP, where approval requests come to Relay
   // itself. Until there is an approval UI the default tier approves them all,
   // and the cautious tier refuses — which is at least deterministic, where a
-  // non-interactive CLI run could stall. The args are the equivalent CLI flags,
-  // kept so the tables stay one source of truth; acpSessionOptions is what the
-  // runners actually use.
+  // non-interactive CLI run could stall.
   opencode: [
     {
       id: 'bypass',
       label: 'Bypass (full auto)',
       description: 'Auto-approve every tool, including edits and commands.',
-      args: ['--dangerously-skip-permissions'],
     },
     {
       id: 'ask',
       label: 'Ask',
       description: 'Refuse anything that needs approval; edits may be blocked.',
-      args: [],
     },
   ],
   hermes: [
@@ -201,13 +183,11 @@ const PERMISSIONS = {
       id: 'yolo',
       label: 'Auto-approve (yolo)',
       description: 'Bypass all approval prompts.',
-      args: ['--yolo'],
     },
     {
       id: 'cautious',
       label: 'Cautious',
       description: 'Refuse anything that needs approval; edits are blocked.',
-      args: [],
     },
   ],
 };
@@ -240,10 +220,6 @@ const AGENT_DEFAULTS = {
 // Agents whose model group gets an automatic default (the newest catalog entry
 // or the CLI's configured default when available).
 const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
-
-function defaultsFor(agentKey) {
-  return defaultsForModels(agentKey, modelsFor(agentKey));
-}
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
@@ -285,22 +261,12 @@ function mergeExtraModels(agentKey, base) {
   const merged = base.slice();
   for (const item of list) {
     if (!item || typeof item.id !== 'string' || seen.has(item.id)) continue;
-    // The arg shape differs per agent; honor an explicit args array, else infer
-    // the standard model flag for that agent.
-    let args = Array.isArray(item.args) ? item.args : null;
-    if (!args) {
-      if (agentKey === 'claude') args = ['--model', item.id];
-      else if (agentKey === 'codex' || agentKey === 'opencode' || agentKey === 'hermes') {
-        args = ['-m', item.id];
-      } else args = [];
-    }
     seen.add(item.id);
     const model = {
       id: item.id,
       label: item.label || item.id,
       description:
         typeof item.description === 'string' ? item.description : undefined,
-      args,
     };
     if (agentKey === 'codex' && Array.isArray(item.efforts)) {
       const effortIds = new Set();
@@ -324,7 +290,6 @@ function mergeExtraModels(agentKey, base) {
               raw && typeof raw.description === 'string'
                 ? raw.description
                 : undefined,
-            args: ['-c', `model_reasoning_effort=${id}`],
           };
         })
         .filter(Boolean);
@@ -404,8 +369,7 @@ function groupsFor(agentKey, settings) {
   };
 }
 
-// Public-facing catalog for one agent: stripped of internal `args`, plus which
-// groups the agent actually supports. Consumed by GET /api/agent-options.
+// Public-facing catalog and supported groups for GET /api/agent-options.
 function describeAgent(agentKey) {
   const groups = groupsFor(agentKey);
   const strip = (list) =>
@@ -473,28 +437,6 @@ function normalizeSettings(agentKey, settings) {
   return out;
 }
 
-// Build the extra argv tokens implied by a settings object, in a stable order
-// (model, effort, permission). Returns [] for unknown agents.
-function buildArgs(agentKey, settings) {
-  const s = settings || {};
-  const groups = groupsFor(agentKey, s);
-  const model = pick(groups.model, s.model, groups.defaults.model);
-  const efforts = effortOptionsFor(agentKey, model);
-  const defaultEffort = effortDefaultFor(agentKey, model, efforts);
-  const effort = pick(efforts, s.effort, defaultEffort && defaultEffort.id);
-  const permission = pick(
-    groups.permission,
-    s.permission,
-    groups.defaults.permission,
-  );
-  const fast = pick(groups.fast, s.fast, groups.defaults.fast);
-  const args = [];
-  for (const chosen of [model, effort, permission, fast]) {
-    if (chosen && Array.isArray(chosen.args)) args.push(...chosen.args);
-  }
-  return args;
-}
-
 // Claude runs as a persistent Agent SDK session rather than a per-turn argv
 // invocation, so its settings are resolved into SDK options instead of flags.
 // The resolution itself is normalizeSettings', so the option tables above stay
@@ -558,7 +500,7 @@ function acpSessionOptions(agentKey, settings) {
 // Codex runs as a persistent app-server thread, so its settings resolve to
 // protocol values instead of `-c` overrides. Every tier keeps approvals off:
 // the sandbox is the boundary, and Relay has no approval UI to answer prompts
-// with — the same reason the argv tiers above pin approval_policy=never.
+// with.
 const CODEX_SANDBOXES = {
   bypass: 'danger-full-access',
   'workspace-write': 'workspace-write',
@@ -580,11 +522,9 @@ function codexSessionOptions(settings) {
 }
 
 module.exports = {
-  defaultsFor,
   CLI,
   describeAgent,
   normalizeSettings,
-  buildArgs,
   claudeSdkOptions,
   acpSessionOptions,
   codexSessionOptions,

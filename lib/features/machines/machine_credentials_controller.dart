@@ -55,18 +55,6 @@ class MachineCredentialsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<MachineCredential> importEncryptedBytes(
-    Uint8List bytes, {
-    required String passphrase,
-  }) async {
-    final MachineCredential credential = await decryptEncryptedBytes(
-      bytes,
-      passphrase: passphrase,
-    );
-    await saveCredential(credential);
-    return credential;
-  }
-
   Future<MachineCredential> decryptEncryptedBytes(
     Uint8List bytes, {
     required String passphrase,
