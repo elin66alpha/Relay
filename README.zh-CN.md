@@ -16,8 +16,8 @@
 
 </div>
 
-<a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
+<a href="assets/screenshots/relay-overview-web-zh.png">
+  <img src="assets/screenshots/relay-overview-web-zh.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
 </a>
 
 Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上。手机、Web 与桌面共用
@@ -45,17 +45,17 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 聊天面板、消息气泡和其他页面使用同一种亚克力材质；滑块下方的两个输入框设置其模糊度
 （0-30，默认 6）和底色（0-100%，默认 55%），亮色与暗色共用。
 
-<a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
+<a href="assets/screenshots/relay-chat-web-zh.png">
+  <img src="assets/screenshots/relay-chat-web-zh.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
 </a>
 
 ### 在手机上聊天、协作和管理文件
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile-zh.png"><img src="assets/screenshots/relay-chat-mobile-zh.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile-zh.png"><img src="assets/screenshots/relay-swarm-mobile-zh.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile-zh.png"><img src="assets/screenshots/relay-files-mobile-zh.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
   </tr>
   <tr>
     <td align="center"><strong>持久会话</strong><br>从任意地点继续长时间运行的 agent 任务。</td>
