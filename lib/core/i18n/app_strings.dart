@@ -93,6 +93,10 @@ class AppStrings {
       isZh ? '配额窗口已重置，等待最新数据' : 'Window reset — awaiting fresh data';
   String get fiveHourQuotaShort => isZh ? '5小时' : '5h';
   String get weeklyQuotaShort => isZh ? '本周' : 'Week';
+  String get cursorModelsQuota => isZh ? 'Cursor 模型' : 'Cursor models';
+  String get apiModelsQuota => isZh ? '其他模型' : 'API models';
+  String get cursorModelsQuotaShort => isZh ? '模型' : 'Models';
+  String get apiModelsQuotaShort => 'API';
   String get quotaResetShort => isZh ? '已重置' : 'Reset';
   String get contextUsage => isZh ? '上下文' : 'Context';
   String resetsIn(Duration left) =>
@@ -405,6 +409,7 @@ class AppStrings {
   String get agentEffortHigh => isZh ? '高' : 'High';
   String get agentEffortExtraHigh => isZh ? '极高' : 'Extra high';
   String get agentEffortMax => isZh ? '最高' : 'Max';
+  String get agentEffortNone => isZh ? '无' : 'None';
   String get agentEffortUltra => isZh ? '极限' : 'Ultra';
   String get agentControlsLoadFailed =>
       isZh ? '加载失败,点按重试' : 'Failed to load — tap to retry';
@@ -511,8 +516,8 @@ class AppStrings {
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
   String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
-      ? '用于连接本机 Claude Code、Codex、OpenCode 和 Hermes CLI 智能体的私有控制台。'
-      : 'Private control surface for local Claude Code, Codex, OpenCode, and Hermes CLI agents.';
+      ? '用于连接本机 Claude Code、Codex、Cursor、OpenCode 和 Hermes CLI 智能体的私有控制台。'
+      : 'Private control surface for local Claude Code, Codex, Cursor, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get wallpaper => isZh ? '壁纸' : 'Wallpaper';

@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const { createJsonStore } = require('./json-store');
+const { cursorAuthFile } = require('./agent-status');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -61,9 +62,11 @@ function attachTimeout(req, url) {
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
+let cursorCache = { at: 0, fetchedAt: '', value: null, stale: false };
 const usageBackoff = {
   claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
+  cursor: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
 };
 
 // Claude/Codex quota credentials are shared with the live CLIs, which rotate
@@ -74,6 +77,7 @@ const usageBackoff = {
 const USAGE_CRED_FILES = {
   claude: CLAUDE_CREDS_PATH,
   codex: CODEX_AUTH,
+  cursor: cursorAuthFile(),
 };
 
 function credentialMtimeMs(key) {
@@ -386,7 +390,11 @@ async function primeClaudeSession() {
 // Used after the keepalive ping so the fresh `resets_at` is picked up at once
 // instead of after the normal cache window.
 function invalidateUsageCache(key) {
-  const caches = { claude: () => claudeCache, codex: () => codexCache };
+  const caches = {
+    claude: () => claudeCache,
+    codex: () => codexCache,
+    cursor: () => cursorCache,
+  };
   const cache = caches[key] && caches[key]();
   if (cache) cache.at = 0;
 }
@@ -586,9 +594,136 @@ function markExpiredQuotas(quotas, stale, nowMs = Date.now()) {
   });
 }
 
+const CURSOR_API = 'https://api2.cursor.sh';
+const CURSOR_PLAN_URL = `${CURSOR_API}/aiserver.v1.DashboardService/GetPlanInfo`;
+const CURSOR_PERIOD_URL = `${CURSOR_API}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`;
+const CURSOR_EXCHANGE_URL = `${CURSOR_API}/auth/exchange_user_api_key`;
+
+function cursorEpochIso(value) {
+  const millis = Number(value);
+  if (!Number.isFinite(millis) || millis <= 0) return null;
+  return new Date(millis).toISOString();
+}
+
+function cursorQuota(key, label, usedPercent, resetsAt) {
+  const used = clampPercent(usedPercent);
+  if (used == null) return null;
+  return {
+    key,
+    label,
+    usedPercent: used,
+    remainingPercent: Math.max(0, 100 - used),
+    resetsAt: resetsAt || null,
+    expired: false,
+  };
+}
+
+// xAI Premium (and the other X plans) report one weekly included pool.
+// Older Cursor plans report two monthly pools: Cursor's own models and API
+// models. `totalPercentUsed` is percent used, matching the dashboard copy.
+function cursorUsageFromBodies(planBody, periodBody) {
+  const plan = (planBody && planBody.planInfo) || {};
+  const period = periodBody || {};
+  const usage = period.planUsage || {};
+  const weekly =
+    plan.includedUsagePeriod === 'INCLUDED_USAGE_PERIOD_WEEKLY' ||
+    plan.includedUsagePeriod === 2;
+  const weeklyReset =
+    cursorEpochIso(plan.includedUsageResetsAt) ||
+    cursorEpochIso(period.billingCycleEnd);
+  const cycleEnd = cursorEpochIso(period.billingCycleEnd);
+  let quotas;
+  if (weekly) {
+    quotas = [
+      cursorQuota('seven_day', 'Weekly quota', usage.totalPercentUsed, weeklyReset),
+    ];
+  } else {
+    quotas = [
+      cursorQuota('cursor_models', 'Cursor models', usage.autoPercentUsed, cycleEnd),
+      cursorQuota('api_models', 'API models', usage.apiPercentUsed, cycleEnd),
+    ];
+    if (!quotas.some(Boolean) && usage.totalPercentUsed != null) {
+      quotas = [
+        cursorQuota('seven_day', 'Weekly quota', usage.totalPercentUsed, cycleEnd),
+      ];
+    }
+  }
+  return {
+    plan: plan.planName || 'Cursor',
+    quotas: quotas.filter(Boolean),
+  };
+}
+
+async function readCursorAccessToken() {
+  let auth;
+  try {
+    auth = JSON.parse(fs.readFileSync(cursorAuthFile(), 'utf8'));
+  } catch (_err) {
+    auth = {};
+  }
+  if (typeof auth.accessToken === 'string' && auth.accessToken) {
+    return auth.accessToken;
+  }
+  const apiKey = process.env.CURSOR_API_KEY;
+  if (!apiKey) {
+    throw new Error('Cursor credentials were not found. Run agent login.');
+  }
+  const exchanged = await httpJson(
+    'POST',
+    CURSOR_EXCHANGE_URL,
+    { Authorization: `Bearer ${apiKey}` },
+    {},
+  );
+  if (exchanged.status !== 200 || !exchanged.body || !exchanged.body.accessToken) {
+    throw new UsageQueryError(
+      `Cursor API key was rejected (HTTP ${exchanged.status}). Run agent login again.`,
+      exchanged.status,
+    );
+  }
+  return exchanged.body.accessToken;
+}
+
+async function fetchCursorUsage() {
+  const token = await readCursorAccessToken();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Connect-Protocol-Version': '1',
+    Accept: 'application/json',
+  };
+  const [plan, period] = await Promise.all([
+    httpJson('POST', CURSOR_PLAN_URL, headers, {}),
+    httpJson('POST', CURSOR_PERIOD_URL, headers, {}),
+  ]);
+  if (plan.status === 401 || period.status === 401) {
+    throw new UsageQueryError(
+      'Cursor credentials were rejected. Run agent login again.',
+      401,
+    );
+  }
+  if (period.status !== 200 || !period.body) {
+    throw new UsageQueryError(
+      `Cursor usage query failed (HTTP ${period.status}).`,
+      period.status,
+    );
+  }
+  return cursorUsageFromBodies(plan.status === 200 ? plan.body : {}, period.body);
+}
+
+async function getCursorUsage() {
+  return cachedUsage({
+    key: 'cursor',
+    ttlMs: 60_000,
+    getMemoryCache: () => cursorCache,
+    setMemoryCache: (cache) => {
+      cursorCache = cache;
+    },
+    fetcher: fetchCursorUsage,
+  });
+}
+
 // Agents whose quota we can report. `normalize` maps each fetcher's own result
-// shape onto a common { detail, asOf, stale, fiveHour, sevenDay } so the agent
-// payload is built once below.
+// shape onto a common { detail, asOf, stale, fiveHour, sevenDay } or a ready
+// `quotas` list, so the agent payload is built once below.
 const USAGE_SOURCES = [
   {
     key: 'claude',
@@ -614,6 +749,17 @@ const USAGE_SOURCES = [
       sevenDay: r.seven_day,
     }),
   },
+  {
+    key: 'cursor',
+    label: 'Cursor',
+    fetch: getCursorUsage,
+    normalize: (r) => ({
+      detail: r.plan || '',
+      asOf: r.fetchedAt || null,
+      stale: !!r.stale,
+      quotas: Array.isArray(r.quotas) ? r.quotas : [],
+    }),
+  },
 ];
 
 async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
@@ -621,7 +767,14 @@ async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
     return { key, label, available: false, unavailableReason: unavailable, quotas: [] };
   }
   try {
-    const { detail, asOf, stale, fiveHour, sevenDay } = normalize(await fetch());
+    const normalized = normalize(await fetch());
+    const { detail, asOf, stale, fiveHour, sevenDay } = normalized;
+    const quotas = Array.isArray(normalized.quotas)
+      ? normalized.quotas
+      : [
+          quotaItem('five_hour', '5 hour quota', fiveHour),
+          quotaItem('seven_day', 'Weekly quota', sevenDay),
+        ];
     return {
       key,
       label,
@@ -629,13 +782,7 @@ async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
       detail,
       asOf,
       stale,
-      quotas: markExpiredQuotas(
-        [
-          quotaItem('five_hour', '5 hour quota', fiveHour),
-          quotaItem('seven_day', 'Weekly quota', sevenDay),
-        ],
-        stale,
-      ),
+      quotas: markExpiredQuotas(quotas, stale),
     };
   } catch (err) {
     return { key, label, available: true, error: err.message, quotas: [] };
@@ -666,6 +813,8 @@ async function buildUsageReport({ source } = {}) {
 module.exports = {
   getClaudeUsage,
   getCodexUsage,
+  getCursorUsage,
+  cursorUsageFromBodies,
   invalidateUsageCache,
   markExpiredQuotas,
   primeClaudeSession,

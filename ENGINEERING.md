@@ -6,9 +6,9 @@ Contributor rules live in `AGENTS.md`; operational detail lives in `docs/handboo
 
 ## Purpose
 
-Relay lets one person drive Claude Code, Codex, OpenCode, and Hermes running on
-their own machine from a Flutter client (mobile, Web, desktop) over an
-authenticated HTTP/SSE backend.
+Relay lets one person drive Claude Code, Codex, Cursor, OpenCode, and Hermes
+running on their own machine from a Flutter client (mobile, Web, desktop) over
+an authenticated HTTP/SSE backend.
 
 ## Scope
 
@@ -33,11 +33,11 @@ Out:
 | server/routes/* | HTTP API per area (meta, push, fs, chat, group, sessions, quota, terminal); group.js also orchestrates Swarm waves | factory(routeContext) -> express.Router | routeContext, some lib/* |
 | server/lib/agents.js | process-runner boundary | runAgent(agent, prompt, onEvent, {workdir, settings, sessionKey}); onEvent receives progress, delta, segment, and `context` ({used, size}) events; purgeSession | session pools, agent-options |
 | server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK, session-slots, bounded-integer |
-| server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers | pool API, driver | child_process, session-slots, bounded-integer |
+| server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers. The ACP driver authenticates after initialize only when the caller passes authMethod, sends clientMeta, applies ordered config options, and lists models (listModels) when the caller passes those options; a command may add env | pool API, driver | child_process, session-slots, bounded-integer |
 | server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work policy | createSessionSlots; acquireSlot/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
 | server/lib/sse.js | shared SSE negotiation, event writes and stream close | wantsStream, writeStreamEvent, endStream | none |
 | server/lib/bounded-integer.js | bounded integer parsing with a fallback | boundedInteger | none |
-| server/lib/model-discovery.js | locate each CLI and read its model catalog, cached for a minute (including "not installed") | discoverModels, clearModelDiscoveryCache | child_process |
+| server/lib/model-discovery.js | locate each CLI and read its model catalog, cached for a minute (including "not installed"); keep the catalog Cursor's ACP server lists in reported-models.json | discoverModels, clearModelDiscoveryCache, parseCursorCatalog, recordCursorCatalog | child_process, json-store |
 | server/lib/agent-status.js, diagnostics.js | agent install/auth state from stored CLI auth files; GET /api/diagnostics report | getAgentStatuses, clearAgentStatusCache; buildDiagnostics | agents, tokens, workdir |
 | server/lib/credential-file.js | encrypted relay.credentials.v1 payload for QR/file onboarding | encryptCredential | crypto |
 | server/lib/agent-options.js / agent-settings.js | option validation and representation / persisted per-session settings | describeAgent, normalizeSettings, getSettings/setSettings | model-discovery, json-store |
@@ -66,6 +66,7 @@ Dependency direction: server routes -> lib -> json-store; lib/features/chat -> o
 | Session rename (every session except Main) | routes/sessions, chat-sessions, features/chat drawer | active |
 | Message Copy (all settled replies) and Edit (user messages: text back into the composer, nothing rewritten) | features/chat | active |
 | Per-session agent controls (model/effort/permission/fast) | agent-options, agent-settings, chat/agent_controls | active |
+| Cursor agent (host `agent` CLI over ACP with Relay's own CURSOR_CONFIG_DIR `server/cursor-config/`, so the host user's `~/.cursor` is never changed; one process per distinct model + effort + fast choice; catalog from `cursor/list_available_models`; per-model effort and fast as ACP config options; tiers bypass/plan/ask; no context usage, so no meter; purge removes the session's directory; quota from Cursor's dashboard) | agents, acp-session-pool, stdio-agent-pool, agent-options, agent-status, model-discovery, usage, routes/meta, cli_agent, chat/agent_controls, chat/context_meter | active |
 | Background Claude turns | claude-session-pool, server.js backgroundTurnHandler | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
@@ -114,7 +115,13 @@ removed.
 - Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher it shows "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later."
 - `grep -rn "import '\.\./chat/\|features/chat/" lib/features --include=*.dart | grep -v '^lib/features/chat/'` -> no output
 - `grep -rn "features/" lib/core --include=*.dart` -> no output
-- After a reply in solo chat with any of the four agents, the line above the composer shows `<used> / <window>` (e.g. `42k / 200k`) at its right end. A new or cleared conversation shows `0 / <window>`; a conversation whose replies predate the feature shows `? / <window>`; `<window>` reads `?` until that agent + model has replied once.
+- After a reply in solo chat with Claude Code, Codex, OpenCode, or Hermes, the line above the composer shows `<used> / <window>` (e.g. `42k / 200k`) at its right end. A new or cleared conversation shows `0 / <window>`; a conversation whose replies predate the feature shows `? / <window>`; `<window>` reads `?` until that agent + model has replied once. With Cursor active, that line is absent.
+- Quota Usage lists Cursor after Codex. On an X Premium account the Cursor card shows plan `Premium` and one weekly remaining percent with a reset time. While Cursor is the active agent, the composer strip shows that same percent. Scheduled messages stay Claude Code and Codex only.
+- Within a minute of backend start with Cursor signed in, `server/reported-models.json` holds a `cursor` list with plain ids (`default`, `grok-4.7`, ...), and Cursor's model picker shows those names with Auto selected by default; a model with effort levels (e.g. Grok 4.7) shows its effort choices, and the model page has the Fast switch.
+- Two Cursor conversations with different models or effort answer at the same time; `ps -ef | grep 'agent acp'` shows one process per distinct choice.
+- After Cursor turns in Relay, `model` and `permissions.allow` in `~/.cursor/cli-config.json` are unchanged, and `~/.cursor/acp-sessions/` gains no directory.
+- Deleting a Cursor session in the drawer removes its directory under `server/cursor-config/acp-sessions/`.
+- `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
 
 ## Milestones
 
@@ -122,6 +129,7 @@ removed.
 |---|---|---|
 | 0.1.7 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.7; `CHANGELOG.md` has a 0.1.7 entry | done |
 | 0.1.8 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.8; `CHANGELOG.md` and `lib/features/settings/whats_new_screen.dart` have 0.1.8 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new) | done |
+| 0.1.9 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.9; `CHANGELOG.md` and `lib/features/settings/whats_new_screen.dart` have 0.1.9 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new) | in progress |
 
 ## Changes
 
@@ -135,11 +143,13 @@ one summary line.
 - 2026-10-17: added server/lib/context-windows.js (state file context-windows.json). Reason: no CLI exposes a model's context window before a reply, so the last reported size per agent + model is remembered.
 - 2026-10-18: upload streaming and zip download moved from server.js to lib/filesystem.js, background turns and the task-completion notification to lib/agent-turn.js, the scheduled-message runner to lib/quota-schedules.js. Reason: server.js loads by starting the server, so that logic could not be tested.
 - 2026-10-18: extracted session-slots for both session pools, sse for solo/Swarm streams and bounded-integer for pools/terminal settings. Reason: duplicated cap/eviction/idle policies and helpers could drift; Claude retains its background-work exemptions.
+- 2026-10-25: ACP pool gained an optional authenticate step so Cursor joins the existing session pool. Reason: Cursor's CLI rejects a session until `cursor_login`.
+- 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
 
 ## Review
 
 Last review: 2026-10-18
-Features since last review: 0
+Features since last review: 3
 Last result: Intent Problem, Structure Problem, Entropy Problem, Test value Problem, Documentation Problem, Operability OK, Evolution Problem, Performance OK; 11 open findings.
 
 ## Deviations

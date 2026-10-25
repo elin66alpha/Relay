@@ -23,7 +23,8 @@ the backend OS user. A stable deployment should have all of the following:
 - Generate one credential per device. Revoke and delete old device tokens rather
   than sharing one token.
 - Keep `.env`, tokens, credential exports, CLI login state, push keys, history,
-  sessions, settings, `server/context-windows.json`, groups, quota state, and FCM
+  sessions, settings, `server/context-windows.json`, `server/reported-models.json`,
+  `server/cursor-config/`, groups, quota state, and FCM
   service-account files out of git and release archives.
 
 ### Reverse proxy requirements
@@ -50,7 +51,8 @@ but still require authentication. Failed bearer-token attempts have a separate
 
 The built-in denylist currently covers Relay's token file, `.env`, generated
 credential directory, Web Push/FCM token stores, `~/.ssh`, Claude Code OAuth
-credentials, and Codex auth. It also covers siblings whose names start with a
+credentials, Codex auth, Cursor's `auth.json`, and Relay's own Cursor config
+directory `server/cursor-config/`. It also covers siblings whose names start with a
 sensitive basename followed by a dot, such as `.env.bak-x`, `tokens.json.bak`,
 and `auth.json.old`, including atomic `.tmp` files. It is not a general secret
 scanner and does not cover every third-party CLI configuration. Use
@@ -145,11 +147,11 @@ deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
 tokens that were already issued.
 
-Relay reports separate installed, authenticated, and usable state for all four
-known agents. Claude Code and Codex are the primary integrations; OpenCode and
-Hermes are experimental. Every agent's credential or provider configuration is
-created on the backend host with that CLI's own flow. Relay never logs a CLI in
-remotely.
+Relay reports separate installed, authenticated, and usable state for every
+known agent. Claude Code, Codex, and Cursor are signed in on the host with
+each CLI's own login (`agent login` for Cursor). OpenCode and Hermes are
+experimental. Every credential is created on the backend host. Relay never
+logs a CLI in remotely.
 
 Claude's `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json` is reported
 as `credentialExpiresAt` (epoch ms) on `/api/agents`, and the app turns it into
@@ -157,7 +159,9 @@ the days left or the days since expiry on **Machine details**. Codex is
 different: managed ChatGPT auth automatically rotates its short-lived ID and
 access tokens, while the refresh token has no client-readable deadline. Relay
 therefore always reports a null Codex `credentialExpiresAt` and shows no login
-countdown for it.
+countdown for it. Cursor's auth file has access and refresh tokens and no
+expiry field, so its `credentialExpiresAt` is null as well. The CLI binary is
+`agent`, not `cursor`.
 
 Stored Codex state distinguishes managed ChatGPT, API-key, external-token, and
 host-managed provider modes. An explicit **Recheck** calls `account/read` with
@@ -243,7 +247,9 @@ stays invisible. Swarm members and the other agents do not surface these turns.
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
 last step is best effort because the external CLI can reject or fail deletion;
-inspect the host's CLI state if guaranteed erasure is required.
+inspect the host's CLI state if guaranteed erasure is required. Cursor has no
+delete command, so Relay removes that session's directory under
+`server/cursor-config/acp-sessions/` itself.
 
 ### Workdirs, conversations, and settings
 
@@ -281,6 +287,7 @@ with replies but no recorded usage shows `? / <window>`. An unknown window is
 shown as `?` until that agent and model has reported one. The backend remembers
 the last reported window per agent and model in the generated state file
 `server/context-windows.json`, so an empty conversation can show the known limit.
+Cursor reports no context usage, so the line is hidden while Cursor is active.
 
 Agent controls are capability-aware:
 
@@ -288,25 +295,40 @@ Agent controls are capability-aware:
 |---|---:|---:|---:|---:|---|
 | Claude Code | yes | yes | yes | yes | OAuth |
 | Codex | yes | model-specific | yes | yes | active app-server mode: managed ChatGPT, API key, external token, or host-managed provider |
+| Cursor | yes | model-specific | yes | yes, models with a fast option | host auth file or `CURSOR_API_KEY` |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
 | Hermes | host config/pins | no | yes | no | host-managed key |
 
 Fast mode defaults off, may use more quota or cost more, and is visible only in
-the solo-chat composer. Relay sends an explicit Claude `fastMode` setting or
-Codex `serviceTier` on every turn. Availability still depends on
+the solo-chat composer. Relay sends an explicit Claude `fastMode` setting,
+Codex `serviceTier`, or Cursor `fast` option on every turn. Availability still depends on
 the selected model, CLI version, account, and provider. Swarm storage can retain
 the field, but the current Swarm form exposes only model, effort, and permission.
 
 Claude settings are fixed for the life of its per-conversation SDK process, so
-a change restarts that process and resumes the same conversation. OpenCode and
-Hermes settings apply over ACP without restarting their shared process. Codex
+a change restarts that process and resumes the same conversation. OpenCode
+and Hermes settings apply over ACP without restarting their shared process.
+Cursor applies a model, effort and speed to a whole process, so each distinct
+choice runs in a Cursor process of its own (conversations with the same choice
+share one), and changing it resumes the conversation in the matching process.
+These processes use Relay's own Cursor config directory, `server/cursor-config/`,
+so model choices made in Relay never change the host user's `~/.cursor`
+defaults; login is still the host's `agent login`. Codex
 applies model, effort, and service tier per turn; changing its sandbox reopens
 the thread while resuming the same conversation, without respawning the shared
 app-server process.
 
 Codex model and reasoning choices come from the installed CLI's structured
 catalog and keep each model's advertised order/default. Updating Codex clears
-the discovery cache. Other agents use their supported live or fallback catalogs;
+the discovery cache. Cursor's catalog comes from its ACP server
+(`cursor/list_available_models`) at backend startup, after a CLI update, and
+when the picker opens (at most every ten minutes). Each model offers its own
+effort levels and, where it has one, the fast switch; context size and thinking
+stay at the model's default. Relay keeps the last list in the generated state
+file `server/reported-models.json`; before the first answer, and when Cursor is
+not signed in, the picker offers only Auto, which is also the default. Other
+agents use their supported
+live or fallback catalogs;
 local pins may be added in the gitignored `server/models-extra.json`.
 
 ### History, search, and export
@@ -356,12 +378,16 @@ machine-specific workdir, id, and transcript.
 
 ### Quota and notifications
 
-The usage screen reports Claude Code and Codex. It queries each source on its
-own (`GET /api/usage?source=claude|codex`; an unknown source is a 400), so one
+The usage screen reports Claude Code, Codex, and Cursor. It queries each source on its
+own (`GET /api/usage?source=claude|codex|cursor`; an unknown source is a 400), so one
 card fills in as soon as its source answers. The solo-chat composer also pins
-the active agent's remaining quota above the input for Claude Code and Codex; it
+the active agent's remaining quota above the input for Claude Code, Codex, and Cursor; it
 reads the same per-source endpoint when the agent changes and after each turn,
 at most once a minute per agent, matching the backend's one-minute usage cache.
+Cursor reads the host auth file (or exchanges `CURSOR_API_KEY`) and asks Cursor's
+dashboard for included usage. An X plan such as Premium is one weekly pool; an
+older Cursor plan is two pools, Cursor models and API models. The query does not
+spend usage. Cursor's reset does not queue a scheduled message.
 Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.

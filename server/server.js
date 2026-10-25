@@ -19,6 +19,7 @@ const {
   purgeSession,
   shutdownPools,
   inspectCodexAccount,
+  refreshAgentModels,
 } = require('./lib/agents');
 const {
   WorkdirError,
@@ -571,6 +572,7 @@ const routeContext = {
   listTokenSummaries,
   markdownForConversation,
   inspectCodexAccount,
+  refreshAgentModels,
   normalizeDeviceId,
   notifyTaskCompletion,
   os,
@@ -690,6 +692,7 @@ const server = app.listen(PORT, HOST, () => {
         // Best-effort; discovery falls back to the static catalog at call time.
       }
     }
+    refreshAgentModels('cursor');
   });
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);

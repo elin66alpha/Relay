@@ -11,6 +11,7 @@ const {
   codexSessionOptions,
 } = require('./agent-options');
 const { createJsonStore } = require('./json-store');
+const { recordCursorCatalog } = require('./model-discovery');
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
@@ -103,6 +104,7 @@ const locateBinCache = new Map();
 const BIN_FALLBACKS = {
   opencode: [path.join(os.homedir(), '.opencode', 'bin', 'opencode')],
   hermes: [path.join(os.homedir(), '.local', 'bin', 'hermes')],
+  agent: [path.join(os.homedir(), '.local', 'bin', 'agent')],
 };
 
 function executableInPath(bin) {
@@ -240,10 +242,10 @@ function claudeExecutablePath() {
 // ever a cache over the stored session id.
 const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS });
 
-// opencode and hermes both ship an `acp` subcommand: the same idea as the
-// Claude SDK over a different protocol — one process that stays open and takes
-// turn after turn. See acp-session-pool.js. ACP itself has no delete, so the
-// purge path shells out to each CLI, which owns its own session store.
+// opencode, hermes, and cursor each ship an `acp` subcommand: the same idea as
+// the Claude SDK over a different protocol — one process that stays open and
+// takes turn after turn. See acp-session-pool.js. ACP itself has no delete, so
+// the purge path shells out to each CLI that has a delete command.
 const opencodePool = createAcpSessionPool({
   agentKey: 'opencode',
   turnTimeoutMs: TIMEOUT_MS,
@@ -271,6 +273,100 @@ const hermesPool = createAcpSessionPool({
       : null;
   },
 });
+
+// Relay's Cursor runs with a config directory of its own (CURSOR_CONFIG_DIR).
+// Cursor writes every model choice into its config as the CLI's default, and
+// keeps its ACP sessions there, so a shared directory would change the host
+// user's own Cursor setup. Login is separate and stays the host's.
+const CURSOR_CONFIG_DIR = process.env.RELAY_CURSOR_CONFIG_DIR
+  ? path.resolve(process.env.RELAY_CURSOR_CONFIG_DIR)
+  : path.join(__dirname, '..', 'cursor-config');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Cursor has no delete command or ACP call. Each ACP session is one directory
+// under acp-sessions, so purging a chat removes that directory.
+async function deleteCursorSession(sessionId) {
+  if (!UUID_RE.test(sessionId)) return false;
+  await fs.promises.rm(path.join(CURSOR_CONFIG_DIR, 'acp-sessions', sessionId), {
+    recursive: true,
+    force: true,
+  });
+  return true;
+}
+
+// Cursor applies a model, effort and speed to its whole process, not to one
+// session. Each distinct choice therefore gets a process of its own, and scopes
+// that share a choice share it, as with every other ACP agent. A scope whose
+// choice changes leaves its old process and resumes in the new one.
+const cursorPools = new Map(); // JSON of the config options -> pool
+const cursorScopes = new Map(); // scope key -> the pool key it last ran in
+
+function cursorPoolFor(poolKey) {
+  let pool = cursorPools.get(poolKey);
+  if (!pool) {
+    pool = createAcpSessionPool({
+      agentKey: 'cursor',
+      turnTimeoutMs: TIMEOUT_MS,
+      // Cursor's CLI is named `agent` and opens no session until the client
+      // authenticates with the host login.
+      authMethod: 'cursor_login',
+      clientMeta: { parameterizedModelPicker: true },
+      modelsMethod: 'cursor/list_available_models',
+      skipQuestions: true,
+      command: () => {
+        const bin = locateBin('agent');
+        return bin
+          ? { cmd: bin, args: ['acp'], env: { CURSOR_CONFIG_DIR } }
+          : null;
+      },
+    });
+    cursorPools.set(poolKey, pool);
+  }
+  return pool;
+}
+
+function cursorPoolKey(settings) {
+  return JSON.stringify(acpSessionOptions('cursor', settings).configOptions);
+}
+
+// The pool interface purgeSession and shutdownPools expect, over every Cursor
+// process.
+const cursorPool = {
+  async forget(key, opts = {}) {
+    const poolKey = cursorScopes.get(key);
+    cursorScopes.delete(key);
+    if (poolKey !== undefined) await cursorPools.get(poolKey).forget(key);
+    if (!opts.purge || !opts.sessionId) return false;
+    return deleteCursorSession(opts.sessionId).catch(() => false);
+  },
+  shutdown() {
+    return Promise.all([...cursorPools.values()].map((pool) => pool.shutdown()));
+  },
+};
+
+// Cursor's catalog belongs to the account, not the binary, so it is fetched
+// over ACP: at startup, after a CLI update (force), and when the picker opens,
+// at most once per CURSOR_CATALOG_TTL_MS.
+const CURSOR_CATALOG_TTL_MS = 10 * 60 * 1000;
+let cursorCatalogAt = 0;
+let cursorCatalogPending = null;
+
+function refreshAgentModels(agentKey, { force = false } = {}) {
+  if (agentKey !== 'cursor') return Promise.resolve();
+  if (cursorCatalogPending) return cursorCatalogPending;
+  if (!force && Date.now() - cursorCatalogAt < CURSOR_CATALOG_TTL_MS) {
+    return Promise.resolve();
+  }
+  if (!locateBin('agent')) return Promise.resolve();
+  cursorCatalogAt = Date.now();
+  cursorCatalogPending = cursorPoolFor(cursorPoolKey({}))
+    .callDriver('listModels')
+    .then(recordCursorCatalog, () => {})
+    .finally(() => {
+      cursorCatalogPending = null;
+    });
+  return cursorCatalogPending;
+}
 
 // codex speaks its own app-server protocol rather than ACP, but the pool
 // mechanics are shared. See codex-session-pool.js.
@@ -304,6 +400,7 @@ const SESSION_POOLS = {
   claude: claudePool,
   opencode: opencodePool,
   hermes: hermesPool,
+  cursor: cursorPool,
   codex: codexPool,
 };
 
@@ -663,12 +760,14 @@ function errorLines(text) {
     .trim();
 }
 
-// opencode and hermes both run as persistent ACP sessions (see
+// opencode, hermes, and cursor run as persistent ACP sessions (see
 // acp-session-pool.js): one process hosts every chat, `session/prompt` carries
 // a turn, and the reply arrives as `agent_message_chunk` updates — real
 // token-level streaming, where the old per-turn CLI paths could stream whole
 // JSON lines at best (hermes could not stream at all). A new messageId inside
 // one turn marks a follow-up message (segment).
+const AFTER_TOOL = Symbol('after tool call');
+
 function runAcpAgent({
   agentKey,
   pool,
@@ -684,7 +783,10 @@ function runAcpAgent({
   const resumeId = (prior && prior.id) || null;
   // model and mode are applied to the live session over the protocol; `approve`
   // decides how Relay answers the agent's approval requests.
-  const { modelId, modeId, approve } = acpSessionOptions(agentKey, settings);
+  const { modelId, modeId, configOptions, approve } = acpSessionOptions(
+    agentKey,
+    settings,
+  );
   // Accumulate the streamed text so a single-message turn has an authoritative
   // result; multi-message turns are rebuilt from segments by agent-turn.
   let finalText = '';
@@ -709,6 +811,9 @@ function runAcpAgent({
       const content = update.content || {};
       if (content.type === 'text') pushText(content.text);
     } else if (update.sessionUpdate === 'tool_call') {
+      // Text after a tool call is a new message, as with Claude and Codex, even
+      // when the agent keeps one message id (or none) across the call.
+      if (currentMsgId !== null) currentMsgId = AFTER_TOOL;
       emit(onEvent, `Tool: ${oneLine(update.title || update.kind || 'tool', 60)}`);
     } else if (update.sessionUpdate === 'usage_update') {
       emit(onEvent, { type: 'context', used: update.used, size: update.size });
@@ -733,6 +838,7 @@ function runAcpAgent({
       resumeId,
       modelId,
       modeId,
+      configOptions,
       signal,
       onMessage,
       onPermission,
@@ -793,6 +899,25 @@ function runHermes(prompt, onEvent, sessionKey, signal, workdir, settings) {
   });
 }
 
+async function runCursor(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  const poolKey = cursorPoolKey(settings);
+  const previous = cursorScopes.get(sessionKey);
+  if (previous !== undefined && previous !== poolKey) {
+    await cursorPools.get(previous).forget(sessionKey);
+  }
+  cursorScopes.set(sessionKey, poolKey);
+  return runAcpAgent({
+    agentKey: 'cursor',
+    pool: cursorPoolFor(poolKey),
+    prompt,
+    onEvent,
+    sessionKey,
+    signal,
+    workdir,
+    settings,
+  });
+}
+
 const AGENTS = {
   claude: {
     key: 'claude',
@@ -805,6 +930,13 @@ const AGENTS = {
     label: 'Codex',
     description: 'OpenAI Codex CLI',
     run: runCodex,
+  },
+  cursor: {
+    key: 'cursor',
+    label: 'Cursor',
+    description: 'Cursor CLI',
+    run: runCursor,
+    bin: 'agent',
   },
   // Experimental: listed in the app with explicit install/auth status.
   opencode: {
@@ -867,7 +999,9 @@ module.exports = {
   commandExists,
   runAgent,
   purgeSession,
+  refreshAgentModels,
   shutdownPools,
+  CURSOR_CONFIG_DIR,
   inspectCodexAccount,
   claudeBackgroundTurn,
 };

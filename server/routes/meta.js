@@ -47,6 +47,7 @@ module.exports = function createMetaRouter(ctx) {
     listTokenSummaries,
     normalizeDeviceId,
     os,
+    refreshAgentModels = () => Promise.resolve(),
     revokeTokenById,
     resolveAgentScope,
     runningScopes,
@@ -188,6 +189,8 @@ module.exports = function createMetaRouter(ctx) {
     if (!agent) {
       return res.status(400).json({ error: 'agent is required' });
     }
+    // Answers with the catalog it has; a refresh lands by the next open.
+    refreshAgentModels(agent.key);
     return res.json({ ok: true, ...describeAgent(agent.key) });
   });
 
@@ -264,6 +267,7 @@ module.exports = function createMetaRouter(ctx) {
     const before = await cliVersion(agent.key);
     const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
     clearModelDiscoveryCache(agent.key);
+    await refreshAgentModels(agent.key, { force: true });
     versionCache.delete(agent.key);
     const after = await cliVersion(agent.key);
     return res.json({

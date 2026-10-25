@@ -121,7 +121,9 @@ can access. It always rejects these current sensitive locations:
 - `server/tokens.json`, `server/.env`, and `server/credentials/`;
 - `server/push-subscriptions.json` and `server/fcm-tokens.json`;
 - `~/.ssh`;
-- Claude Code's `.credentials.json` and Codex's `auth.json`.
+- Claude Code's `.credentials.json`, Codex's `auth.json`, and Cursor's
+  `auth.json` (`~/.config/cursor/` on Linux);
+- `server/cursor-config/`, Relay's own Cursor config and session transcripts.
 
 The same policy applies to listing, upload, download, and siblings whose names
 start with a sensitive basename followed by a dot, including `.tmp`, `.bak`, and

@@ -72,6 +72,9 @@ const BASE_MODELS = {
   // config.yaml. Left empty so the configured default is used; pin specific ids
   // via models-extra.json to expose a picker.
   hermes: [],
+  // Cursor's live catalog is the one its ACP server lists (see
+  // model-discovery). Auto is the only id known before that.
+  cursor: [{ id: 'default', label: 'Auto' }],
 };
 
 const EFFORTS = {
@@ -104,18 +107,18 @@ const EFFORTS = {
   hermes: [],
 };
 
-// Fast mode is deliberately limited to the two CLIs with a real speed tier.
-// Both values are explicit so Relay overrides (rather than mutates or inherits)
-// the host user's global CLI preference on every invocation.
+// Fast mode is limited to the CLIs with a real speed tier. Both values are
+// explicit so Relay overrides (rather than mutates or inherits) the host user's
+// global CLI preference on every invocation. Cursor applies it only to models
+// that have a fast option.
+const FAST_CHOICES = [
+  { id: 'off', label: 'Off' },
+  { id: 'on', label: 'On' },
+];
 const FAST_MODES = {
-  claude: [
-    { id: 'off', label: 'Off' },
-    { id: 'on', label: 'On' },
-  ],
-  codex: [
-    { id: 'off', label: 'Off' },
-    { id: 'on', label: 'On' },
-  ],
+  claude: FAST_CHOICES,
+  codex: FAST_CHOICES,
+  cursor: FAST_CHOICES,
 };
 
 // Permission tiers. The bypass tier is listed first but is no longer the
@@ -190,6 +193,24 @@ const PERMISSIONS = {
       description: 'Refuse anything that needs approval; edits are blocked.',
     },
   ],
+  // Cursor's ACP modes.
+  cursor: [
+    {
+      id: 'bypass',
+      label: 'Bypass (full auto)',
+      description: 'Auto-approve every tool, including edits and commands.',
+    },
+    {
+      id: 'plan',
+      label: 'Plan only (read-only)',
+      description: 'Read and plan, but make no changes.',
+    },
+    {
+      id: 'ask',
+      label: 'Ask only (read-only)',
+      description: 'Answer questions without edits or commands.',
+    },
+  ],
 };
 
 // CLI invocation + how to query/update each binary.
@@ -199,6 +220,7 @@ const CLI = {
   // TODO(opencode/hermes): confirm version/update subcommands once installed.
   opencode: { bin: 'opencode', versionArgs: ['--version'], updateArgs: ['upgrade'] },
   hermes: { bin: 'hermes', versionArgs: ['--version'], updateArgs: ['update'] },
+  cursor: { bin: 'agent', versionArgs: ['--version'], updateArgs: ['update'] },
 };
 
 // The initial effort / permission for a never-configured scope. Every value is
@@ -215,6 +237,9 @@ const AGENT_DEFAULTS = {
   // (model-specific) and opencode's model default comes from the catalog.
   opencode: { permission: 'bypass' },
   hermes: { permission: 'yolo' },
+  // Auto, not the newest catalog entry: other models may need a paid plan.
+  // Effort defaults per model from the catalog.
+  cursor: { model: 'default', permission: 'bypass', fast: 'off' },
 };
 
 // Agents whose model group gets an automatic default (the newest catalog entry
@@ -465,7 +490,7 @@ function claudeSdkOptions(settings) {
   return options;
 }
 
-// ACP agents (opencode, hermes) hold a persistent session too, but their
+// ACP agents (opencode, hermes, cursor) hold a persistent session too, but their
 // settings are applied over the protocol rather than as argv: the model with
 // session/set_model, the permission tier as a session mode where the agent has
 // one that matches, and in every case by deciding how Relay answers the agent's
@@ -476,25 +501,43 @@ function claudeSdkOptions(settings) {
 // entirely, which is not what "Ask" means — so it relies on the answers alone.
 const ACP_PERMISSION_MODES = {
   hermes: { yolo: 'dont_ask', cautious: 'default' },
+  cursor: { bypass: 'agent', plan: 'plan', ask: 'ask' },
 };
 
 // The tier that means "approve whatever the agent asks for". Every other tier
 // refuses, because Relay has no approval UI to route the request to.
-const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo' };
+const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo', cursor: 'bypass' };
+
+// Cursor applies a model and its parameters to its whole process, as config
+// options: the model first, since choosing it resets the rest.
+function cursorConfigOptions(chosen) {
+  const model = modelsFor('cursor').find((item) => item.id === chosen.model);
+  if (!model) return [];
+  const list = [['model', model.id]];
+  if (model.effortOption && chosen.effort) list.push([model.effortOption, chosen.effort]);
+  if (model.fast) list.push(['fast', chosen.fast === 'on' ? 'true' : 'false']);
+  return list;
+}
 
 function acpSessionOptions(agentKey, settings) {
   const chosen = normalizeSettings(agentKey, settings);
-  let modelId = chosen.model || null;
-  // Hermes names models `provider:model` over ACP, while its config and
-  // models-extra.json use the CLI's `provider/model` form. Translate so a
-  // pinned id keeps selecting the same model.
-  if (agentKey === 'hermes' && modelId) modelId = modelId.replace('/', ':');
   const modes = ACP_PERMISSION_MODES[agentKey] || {};
-  return {
-    modelId,
+  const options = {
+    modelId: chosen.model || null,
     modeId: modes[chosen.permission] || null,
     approve: chosen.permission === ACP_AUTO_APPROVE[agentKey],
   };
+  // Hermes names models `provider:model` over ACP, while its config and
+  // models-extra.json use the CLI's `provider/model` form. Translate so a
+  // pinned id keeps selecting the same model.
+  if (agentKey === 'hermes' && options.modelId) {
+    options.modelId = options.modelId.replace('/', ':');
+  }
+  if (agentKey === 'cursor') {
+    options.modelId = null;
+    options.configOptions = cursorConfigOptions(chosen);
+  }
+  return options;
 }
 
 // Codex runs as a persistent app-server thread, so its settings resolve to

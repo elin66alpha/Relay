@@ -4,6 +4,10 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/theme/app_theme.dart';
 
+/// Cursor's ACP server reports no context usage, so its meter would only ever
+/// read `? / ?`.
+bool contextMeterSupports(String agentKey) => agentKey != 'cursor';
+
 /// The context size reported after the conversation's latest reply that has
 /// one. A reply still streaming has none yet, so the previous size stands.
 ({int used, int size})? latestContextUsage(List<ChatMessage> messages) {

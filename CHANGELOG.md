@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.9 - 2026-10-25
+
+### Added
+
+- Cursor as a fifth agent, listed between Codex and OpenCode. It runs the host's
+  `agent` CLI over ACP, signed in with the CLI's own `agent login` (or
+  `CURSOR_API_KEY`). The model picker lists the account's Cursor models,
+  defaulting to Auto, with each model's own effort levels and the Fast switch;
+  permission tiers are Bypass (full auto), Plan only and Ask only. Each distinct
+  model choice runs in its own Cursor process, so conversations on different
+  models run at the same time. Relay's Cursor uses its own config directory,
+  `server/cursor-config/`, so choices made in Relay never change the host's
+  Cursor defaults. Quota Usage and the composer strip show Cursor's included
+  usage.
+
+### Changed
+
+- ACP agents (OpenCode, Hermes, Cursor) start a new message after each tool
+  call, as Claude Code and Codex do, instead of running the text on either side
+  together.
+- Relay answers ACP approval requests with "allow once" instead of "allow
+  always", so Cursor no longer adds commands to the host user's own CLI
+  allowlist.
+
+### Fixed
+
+- Deleting or clearing a Cursor conversation removes its session directory
+  under `~/.cursor/acp-sessions/`.
+- The file API refuses Cursor's `auth.json`, like the Claude Code and Codex
+  credential files.
+
 ## 0.1.8 - 2026-10-17
 
 ### Added

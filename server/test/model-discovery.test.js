@@ -2,8 +2,69 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const { parseCodexCatalog } = require('../lib/model-discovery');
+// Must be set before the module loads, which is when it opens the store.
+const reportedFile = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), 'relay-reported-models-')),
+  'reported-models.json',
+);
+process.env.RELAY_REPORTED_MODELS_FILE = reportedFile;
+
+const {
+  discoverModels,
+  parseCodexCatalog,
+  recordCursorCatalog,
+} = require('../lib/model-discovery');
+
+test('Cursor catalog keeps model, effort and fast, and survives on disk', () => {
+  assert.equal(discoverModels('cursor'), null, 'nothing recorded yet');
+  const select = (id, category, currentValue, values) => ({
+    id,
+    category,
+    type: 'select',
+    currentValue,
+    options: values.map((value) => ({ value, name: value.toUpperCase() })),
+  });
+  recordCursorCatalog([
+    { value: 'default', name: 'Auto', configOptions: [] },
+    {
+      value: 'claude-opus-5',
+      name: ' Claude Opus 5 ',
+      configOptions: [
+        select('thinking', 'thought_level', 'true', ['false', 'true']),
+        select('context', 'model_config', '300k', ['300k', '1m']),
+        select('effort', 'thought_level', 'high', ['low', 'high']),
+        select('fast', 'model_config', 'false', ['false', 'true']),
+      ],
+    },
+    { value: 'claude-opus-5', name: 'duplicate' },
+    { value: 'has space', name: 'rejected' },
+    { value: 'gpt-5-mini' },
+  ]);
+  const expected = [
+    { id: 'default', label: 'Auto' },
+    {
+      id: 'claude-opus-5',
+      label: 'Claude Opus 5',
+      effortOption: 'effort',
+      efforts: [
+        { id: 'low', label: 'LOW' },
+        { id: 'high', label: 'HIGH' },
+      ],
+      defaultEffort: 'high',
+      fast: true,
+    },
+    { id: 'gpt-5-mini', label: 'gpt-5-mini' },
+  ];
+  assert.deepEqual(discoverModels('cursor'), expected);
+  assert.deepEqual(JSON.parse(fs.readFileSync(reportedFile, 'utf8')).cursor, expected);
+  recordCursorCatalog([]);
+  assert.deepEqual(discoverModels('cursor'), expected, 'an empty answer keeps the list');
+  assert.equal(discoverModels('hermes'), null);
+});
 
 test('parseCodexCatalog keeps visible models and their ordered effort metadata', () => {
   const models = parseCodexCatalog({

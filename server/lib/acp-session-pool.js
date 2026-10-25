@@ -2,16 +2,25 @@
 
 const { createStdioAgentPool } = require('./stdio-agent-pool');
 
-// The ACP (Agent Client Protocol) driver, used by opencode and hermes: both
-// ship an `acp` subcommand that speaks it on stdio. stdio-agent-pool.js owns the
-// process, the wire and the session cap; this file is only the protocol.
+// The ACP (Agent Client Protocol) driver, used by opencode, hermes, and cursor:
+// each ships an `acp` subcommand that speaks it on stdio. stdio-agent-pool.js
+// owns the process, the wire and the session cap; this file is only the protocol.
+// Cursor-only options, unset for opencode and hermes so their handshake stays
+// the same: `authMethod` (Cursor rejects session/new until `cursor_login`),
+// `clientMeta` (sent as clientCapabilities._meta; Cursor's
+// `parameterizedModelPicker` exposes effort and speed as config options) and
+// `modelsMethod` (the request that lists models without opening a session).
 //
 // ACP turns are request/response — `session/prompt` resolves when the turn ends
 // — and settings apply to a live session with no restart, which is why nothing
 // here is fixed at open time.
 const PROTOCOL_VERSION = 1;
 
-function createAcpDriver(rpc) {
+function createAcpDriver(rpc, options = {}) {
+  const authMethod = options.authMethod || null;
+  const skipQuestions = options.skipQuestions === true;
+  const clientMeta = options.clientMeta || null;
+  const modelsMethod = options.modelsMethod || null;
   return {
     async initialize() {
       const init = await rpc.request('initialize', {
@@ -21,6 +30,7 @@ function createAcpDriver(rpc) {
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
+          ...(clientMeta ? { _meta: clientMeta } : {}),
         },
       });
       const caps = (init && init.agentCapabilities) || {};
@@ -28,6 +38,9 @@ function createAcpDriver(rpc) {
       rpc.caps.loadSession = !!caps.loadSession;
       // Hermes advertises no close, so its evicted sessions are only dropped.
       rpc.caps.close = !!sessionCaps.close;
+      if (authMethod) {
+        await rpc.request('authenticate', { methodId: authMethod });
+      }
     },
 
     async openSession(req) {
@@ -74,10 +87,39 @@ function createAcpDriver(rpc) {
           // Left on the agent's own default.
         }
       };
+      // `configOptions` is an ordered [configId, value] list. Order matters:
+      // choosing a model resets its parameters, so the model goes first and a
+      // change re-applies everything after it.
+      const setConfig = async () => {
+        const list = req.configOptions || [];
+        const key = JSON.stringify(list);
+        if (!list.length || entry.applied.configOptions === key || entry.closed) return;
+        try {
+          for (const [configId, value] of list) {
+            await rpc.request('session/set_config_option', {
+              sessionId: entry.sessionId,
+              configId,
+              value,
+            });
+          }
+          entry.applied.configOptions = key;
+        } catch (_err) {
+          // Left on the agent's own default.
+        }
+      };
       return Promise.all([
         set('modelId', 'session/set_model', 'modelId'),
         set('modeId', 'session/set_mode', 'modeId'),
+        setConfig(),
       ]);
+    },
+
+    // The model catalog, without opening a session; null when the agent has
+    // no such request.
+    async listModels() {
+      if (!modelsMethod) return null;
+      const result = await rpc.request(modelsMethod, {});
+      return (result && result.models) || null;
     },
 
     startTurn(entry, req, turn) {
@@ -102,6 +144,12 @@ function createAcpDriver(rpc) {
       // Relay answers; everything else is refused explicitly so the agent never
       // hangs waiting on a reply that is not coming.
       if (msg.id !== undefined) {
+        // Cursor blocks on cursor/ask_question. Relay has no question UI, so
+        // skip it instead of letting the permission fallback pick an answer.
+        if (skipQuestions && msg.method === 'cursor/ask_question') {
+          rpc.reply(msg.id, { outcome: { outcome: 'skipped' } });
+          return;
+        }
         if (msg.method !== 'session/request_permission') {
           rpc.replyError(msg.id, -32601, `unsupported method: ${msg.method}`);
           return;
@@ -125,8 +173,10 @@ function createAcpDriver(rpc) {
           }
           return null;
         };
+        // Once, not always: Cursor writes an "always" into the host user's own
+        // CLI allowlist, and Relay answers every request anyway.
         const optionId = approve
-          ? pick('allow_always', 'allow_once')
+          ? pick('allow_once', 'allow_always')
           : pick('reject_once', 'reject_always');
         rpc.reply(
           msg.id,
@@ -150,7 +200,13 @@ function createAcpDriver(rpc) {
 }
 
 function createAcpSessionPool(options = {}) {
-  return createStdioAgentPool({ ...options, driver: createAcpDriver });
+  const { authMethod, skipQuestions, clientMeta, modelsMethod, ...poolOptions } =
+    options;
+  return createStdioAgentPool({
+    ...poolOptions,
+    driver: (rpc) =>
+      createAcpDriver(rpc, { authMethod, skipQuestions, clientMeta, modelsMethod }),
+  });
 }
 
 module.exports = { createAcpSessionPool };

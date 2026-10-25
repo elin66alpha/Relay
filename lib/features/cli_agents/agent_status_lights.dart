@@ -54,10 +54,11 @@ class AgentStatusLights extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
-    // Codex can use managed ChatGPT auth or an API key, both of which Relay can
-    // detect. Hermes/OpenCode provider keys remain outside this status contract.
+    // Codex and Cursor can use a host login or an API key, both of which Relay
+    // can detect. Hermes/OpenCode provider keys remain outside this status contract.
     final bool showAuthLight = agent.authKind == 'oauth' ||
-        (agent.key == 'codex' && agent.authKind == 'apiKey');
+        ((agent.key == 'codex' || agent.key == 'cursor') &&
+            agent.authKind == 'apiKey');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[

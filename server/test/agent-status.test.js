@@ -140,6 +140,65 @@ test('reports a null expiry when the credential carries no usable timestamp', ()
   assert.equal(result.codex.credentialExpiresAt, null);
 });
 
+test('cursor login is the host auth file or CURSOR_API_KEY, never the secret', () => {
+  const home = makeHome();
+  writeJson(path.join(home, '.config', 'cursor', 'auth.json'), {
+    accessToken: 'cursor-access',
+    refreshToken: 'cursor-refresh',
+  });
+  const authed = statuses(home, new Set(['agent']), {
+    env: {},
+    platform: 'linux',
+  });
+  assert.equal(authed.cursor.installed, true);
+  assert.equal(authed.cursor.authed, true);
+  assert.equal(authed.cursor.authKind, 'oauth');
+  assert.equal(authed.cursor.credentialExpiresAt, null);
+  assert.equal(JSON.stringify(authed).includes('cursor-access'), false);
+
+  const partial = makeHome();
+  writeJson(path.join(partial, '.config', 'cursor', 'auth.json'), {
+    accessToken: 'cursor-access',
+  });
+  assert.equal(
+    statuses(partial, new Set(['agent']), { env: {}, platform: 'linux' }).cursor
+      .authed,
+    false,
+  );
+
+  const keyed = statuses(makeHome(), new Set(['agent']), {
+    env: { CURSOR_API_KEY: 'cursor_secret' },
+    platform: 'linux',
+  });
+  assert.equal(keyed.cursor.authed, true);
+  assert.equal(keyed.cursor.authKind, 'apiKey');
+  assert.equal(JSON.stringify(keyed).includes('cursor_secret'), false);
+
+  const mac = makeHome();
+  writeJson(path.join(mac, '.cursor', 'auth.json'), {
+    accessToken: 'mac-access',
+    refreshToken: 'mac-refresh',
+  });
+  assert.equal(
+    statuses(mac, new Set(['agent']), { env: {}, platform: 'darwin' }).cursor
+      .authed,
+    true,
+  );
+
+  const win = makeHome();
+  writeJson(path.join(win, 'Cursor', 'auth.json'), {
+    accessToken: 'win-access',
+    refreshToken: 'win-refresh',
+  });
+  assert.equal(
+    statuses(win, new Set(['agent']), {
+      env: { APPDATA: win },
+      platform: 'win32',
+    }).cursor.authed,
+    true,
+  );
+});
+
 test('requires the expected credential shape for each agent', () => {
   const home = makeHome();
   writeJson(path.join(home, '.claude', '.credentials.json'), {

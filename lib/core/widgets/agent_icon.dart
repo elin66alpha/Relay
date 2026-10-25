@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// The asset for an agent's brand icon. Only Codex flips to an inverse asset in
-/// dark mode (its mark is near-black); the others read fine on both themes and
-/// keep their single asset. Returns null for unknown keys so the caller can fall
-/// back to a generic glyph.
+/// The asset for an agent's brand icon. Codex and Cursor flip in dark mode
+/// because their light-theme marks are dark; the others read fine on both
+/// themes and keep their single asset. Returns null for unknown keys so the
+/// caller can fall back to a generic glyph.
 String? agentIconAssetPath(String key, Brightness brightness) {
   final bool dark = brightness == Brightness.dark;
   return switch (key) {
@@ -11,6 +11,9 @@ String? agentIconAssetPath(String key, Brightness brightness) {
     'codex' => dark
         ? 'assets/agent_icons/codex_inverse.png'
         : 'assets/agent_icons/codex.png',
+    'cursor' => dark
+        ? 'assets/agent_icons/cursor_inverse.png'
+        : 'assets/agent_icons/cursor.png',
     'opencode' => 'assets/agent_icons/opencode.png',
     'hermes' => 'assets/agent_icons/hermes.png',
     _ => null,

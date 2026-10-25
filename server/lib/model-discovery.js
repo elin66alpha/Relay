@@ -17,6 +17,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { createJsonStore } = require('./json-store');
 
 const DISABLED =
   process.env.RELAY_MODEL_DISCOVERY === '0' ||
@@ -348,6 +349,67 @@ const STRATEGIES = {
   },
 };
 
+// Cursor lists its models over ACP (`cursor/list_available_models`, see
+// agents.js); no CLI command prints the ids its ACP server accepts. The last
+// list is kept on disk so the picker survives a restart without a subprocess.
+const REPORTED_MODELS_FILE = process.env.RELAY_REPORTED_MODELS_FILE
+  ? path.resolve(process.env.RELAY_REPORTED_MODELS_FILE)
+  : path.join(__dirname, '..', 'reported-models.json');
+const reportedStore = createJsonStore(REPORTED_MODELS_FILE, { defaultValue: {} });
+const REPORTED_ID_RE = /^[\x21-\x7e]{1,200}$/;
+
+function reportedText(value, fallback) {
+  const text = typeof value === 'string' ? value.trim().slice(0, 120) : '';
+  return text || fallback;
+}
+
+// One picker entry per Cursor model: `[{ value, name, configOptions }]`. The
+// effort control is the model's thought-level select that is not an on/off
+// switch (its id varies: effort, reasoning_effort, reasoning), and `fast` is
+// the speed switch. Context size and thinking stay at the model's default.
+function parseCursorCatalog(raw) {
+  if (!Array.isArray(raw)) return [];
+  const models = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = item && item.value;
+    if (typeof id !== 'string' || !REPORTED_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const model = { id, label: reportedText(item.name, id) };
+    for (const option of Array.isArray(item.configOptions) ? item.configOptions : []) {
+      if (!option || typeof option.id !== 'string' || !REPORTED_ID_RE.test(option.id)) continue;
+      const values = (Array.isArray(option.options) ? option.options : []).filter(
+        (choice) => choice && typeof choice.value === 'string' && REPORTED_ID_RE.test(choice.value),
+      );
+      const onOff = values.length === 2 && values.every((v) => v.value === 'true' || v.value === 'false');
+      if (option.id === 'fast' && onOff) {
+        model.fast = true;
+      } else if (option.category === 'thought_level' && !onOff && values.length && !model.effortOption) {
+        model.effortOption = option.id;
+        model.efforts = values.map((v) => ({ id: v.value, label: reportedText(v.name, v.value) }));
+        const current = values.find((v) => v.value === option.currentValue);
+        model.defaultEffort = (current || values[0]).value;
+      }
+    }
+    models.push(model);
+  }
+  return models;
+}
+
+function recordCursorCatalog(raw) {
+  const models = parseCursorCatalog(raw);
+  if (!models.length) return;
+  const all = reportedStore.load();
+  if (JSON.stringify(all.cursor) === JSON.stringify(models)) return;
+  all.cursor = models;
+  reportedStore.save(all);
+}
+
+function reportedModelsFor(agentKey) {
+  const list = reportedStore.load()[agentKey];
+  return Array.isArray(list) && list.length ? list : null;
+}
+
 // Identity of everything a discovered catalog depends on: the CLI binary, plus
 // the CLI's own model cache for codex.
 function stampFor(agentKey, bin) {
@@ -363,7 +425,7 @@ function stampFor(agentKey, bin) {
 function discoverModels(agentKey) {
   if (DISABLED) return null;
   const strategy = STRATEGIES[agentKey];
-  if (!strategy) return null;
+  if (!strategy) return reportedModelsFor(agentKey);
   const now = Date.now();
   const cached = cache.get(agentKey);
   if (cached && now - cached.checkedAt < RECHECK_MS) return cached.models;
@@ -409,4 +471,6 @@ module.exports = {
   clearModelDiscoveryCache,
   discoverModels,
   parseCodexCatalog,
+  parseCursorCatalog,
+  recordCursorCatalog,
 };

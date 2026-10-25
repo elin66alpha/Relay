@@ -20,6 +20,8 @@ credentials/*.png
 credentials/*.passphrase.txt
 agent-settings.json
 context-windows.json
+reported-models.json
+cursor-config/
 models-extra.json
 
 # Backups of the state files above are just as sensitive as the originals.

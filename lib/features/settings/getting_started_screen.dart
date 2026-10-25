@@ -137,7 +137,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '在机器详情检查 CLI 状态',
     body:
-        '点击首页或左侧栏里的机器，打开“机器详情”：这里集中显示 SSH 入口、CLI 智能体状态、设备令牌和后端状态。\n在主机上完成 Claude Code、Codex 的认证，或 OpenCode、Hermes 的 provider 配置后，重新检查状态。Codex 的显式检查会向 app-server 验证当前认证；网络或验证错误不一定表示需要重新登录，Codex 也不显示登录到期倒计时。',
+        '点击首页或左侧栏里的机器，打开“机器详情”：这里集中显示 SSH 入口、CLI 智能体状态、设备令牌和后端状态。\n在主机上完成 Claude Code、Codex、Cursor 的认证，或 OpenCode、Hermes 的 provider 配置后，重新检查状态。Codex 的显式检查会向 app-server 验证当前认证；网络或验证错误不一定表示需要重新登录，Codex 也不显示登录到期倒计时。',
   ),
   _GettingStartedStep(
     title: '选择智能体和会话',
@@ -190,7 +190,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Check CLI status in Machine details',
     body:
-        'Tap the machine on Home or in the drawer to open Machine details, which brings together Enter SSH, CLI agent status, device tokens, and backend status.\nAfter authenticating Claude Code or Codex, or configuring an OpenCode or Hermes provider on the host, recheck the status. An explicit Codex recheck verifies current authentication with its app-server. A network or verification error does not necessarily mean login is required, and Codex has no login-expiry countdown.',
+        'Tap the machine on Home or in the drawer to open Machine details, which brings together Enter SSH, CLI agent status, device tokens, and backend status.\nAfter authenticating Claude Code, Codex, or Cursor, or configuring an OpenCode or Hermes provider on the host, recheck the status. An explicit Codex recheck verifies current authentication with its app-server. A network or verification error does not necessarily mean login is required, and Codex has no login-expiry countdown.',
   ),
   _GettingStartedStep(
     title: 'Choose an agent and conversation',

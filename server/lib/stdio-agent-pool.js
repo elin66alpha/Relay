@@ -12,7 +12,7 @@ const { createSessionSlots } = require('./session-slots');
 // turn ended, so anything it started in the background died with it, and every
 // turn paid the cold-start cost of booting the CLI again.
 //
-// opencode and hermes speak ACP (`<agent> acp`); codex speaks its own app-server
+// opencode, hermes, and cursor speak ACP (`<agent> acp`); codex speaks its own app-server
 // protocol (`codex app-server`). Both are JSON-RPC 2.0 on stdio, and in both one
 // process hosts *many* sessions (the working directory is chosen per session),
 // so a pool keeps a single process per agent and multiplexes every chat through
@@ -88,7 +88,8 @@ function createStdioAgentPool(options = {}) {
   const cancelGraceMs = options.cancelGraceMs ?? CANCEL_GRACE_MS;
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
   // Resolved lazily so an agent that isn't installed fails at turn time with a
-  // real message instead of at server boot.
+  // real message instead of at server boot. `{ cmd, args, env }`: env adds to
+  // the server's own environment.
   const resolveCommand = options.command || (() => null);
   const resolveDeleteCommand = options.deleteCommand || null;
   const createDriver = options.driver;
@@ -244,7 +245,7 @@ function createStdioAgentPool(options = {}) {
       // stable: a shared process must not die because one chat's work tree was
       // renamed or deleted.
       cwd: os.homedir(),
-      env: process.env,
+      env: command.env ? { ...process.env, ...command.env } : process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       // Group leader, so killChild can take the agent's helpers down with it.
       detached: process.platform !== 'win32',

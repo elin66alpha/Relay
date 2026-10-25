@@ -4,7 +4,7 @@
 
 **Run AI coding agents on your machine. Control them from any screen.**
 
-A private, self-hosted remote cockpit for Claude Code, Codex, OpenCode, and Hermes.
+A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, and Hermes.
 
 ![Flutter client](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
 ![Node.js backend](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
@@ -77,7 +77,7 @@ default 55%) for both themes.
 flowchart LR
     C["Flutter client<br/>Phone · Web · Desktop"]
     R["Relay backend<br/>Node.js on your machine"]
-    A["Persistent agent sessions<br/>Claude · Codex · OpenCode · Hermes"]
+    A["Persistent agent sessions<br/>Claude · Codex · Cursor · OpenCode · Hermes"]
     F["Projects and files"]
     T["Resumable PTY shell"]
 
@@ -99,23 +99,23 @@ can run concurrently without sharing a global backend directory.
 | 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. Replies Claude starts on its own, such as when a background task finishes, appear as messages of their own. |
 | 📎 | **Chat attachments and context** | Attach files to upload them to the workspace and add their paths to the draft. Above the solo-chat composer, see context tokens as `<used> / <window>`; `?` means unknown. |
 | 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
-| 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, Claude credential expiry, and Fast mode for Claude/Codex. |
+| 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, Claude credential expiry, and Fast mode for Claude/Codex/Cursor. |
 | 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
-| 📊 | **Quota workflows** | Claude/Codex usage views plus one queued prompt for the next detected five-hour reset. |
+| 📊 | **Quota workflows** | Claude/Codex/Cursor usage views, plus one queued prompt for the next detected Claude or Codex five-hour reset. |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
 | 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
 
-Claude Code and Codex are the primary integrations. OpenCode and Hermes are
-available as experimental, host-managed integrations. All four keep their
-credentials on the backend host; Relay never logs an agent in for you.
+Claude Code, Codex, and Cursor are signed in on the backend host with each
+CLI's own login. OpenCode and Hermes are experimental, host-managed
+integrations. Relay never logs an agent in for you.
 
 ## Quick start
 
 ### 1. Prepare the backend machine
 
 Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
-Claude and Codex must already be logged in on that host; OpenCode and Hermes use
-the provider configuration managed there.
+Claude, Codex, and Cursor must already be logged in on that host (`agent login`
+for Cursor); OpenCode and Hermes use the provider configuration managed there.
 
 Windows x64 users can download `relay-backend-windows-x64-v0.1.8.zip` from
 [release 0.1.8](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8), extract

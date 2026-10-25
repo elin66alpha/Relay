@@ -14,6 +14,7 @@ const AUTH_KIND = {
   codex: 'oauth',
   hermes: 'apiKey',
   opencode: 'apiKeyOptional',
+  cursor: 'oauth',
 };
 
 function readJson(fsModule, filePath) {
@@ -163,9 +164,37 @@ function hermesAuthed(fsModule, homeDir) {
   return hasApiKeyLikeValue(auth) || hermesConfigAuthed(fsModule, homeDir);
 }
 
+// Same locations the Cursor CLI uses for `agent login`. The file has no
+// expiry field. A host CURSOR_API_KEY counts as logged in and is not returned.
+function cursorAuthFile(
+  homeDir = os.homedir(),
+  environment = process.env,
+  platform = process.platform,
+) {
+  if (platform === 'win32') {
+    const base = environment.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+    return path.join(base, 'Cursor', 'auth.json');
+  }
+  if (platform === 'darwin') return path.join(homeDir, '.cursor', 'auth.json');
+  const base = environment.XDG_CONFIG_HOME || path.join(homeDir, '.config');
+  return path.join(base, 'cursor', 'auth.json');
+}
+
+function cursorCredential(fsModule, homeDir, environment, platform) {
+  const auth =
+    readJson(fsModule, cursorAuthFile(homeDir, environment, platform)) || {};
+  if (nonEmpty(auth.accessToken) && nonEmpty(auth.refreshToken)) {
+    return { authed: true, authKind: 'oauth', expiresAt: null };
+  }
+  if (nonEmpty(environment.CURSOR_API_KEY)) {
+    return { authed: true, authKind: 'apiKey', expiresAt: null };
+  }
+  return { authed: false, authKind: 'oauth', expiresAt: null };
+}
+
 // Login state plus a real stored deadline when one exists. `expiresAt` is null
 // for Codex's rotating managed tokens and every host-managed API key.
-function agentCredential(agentKey, installed, fsModule, homeDir, environment) {
+function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform) {
   switch (agentKey) {
     case 'claude':
       return claudeCredential(fsModule, homeDir);
@@ -175,12 +204,14 @@ function agentCredential(agentKey, installed, fsModule, homeDir, environment) {
       return { authed: hermesAuthed(fsModule, homeDir), expiresAt: null };
     case 'opencode':
       return { authed: installed, expiresAt: null };
+    case 'cursor':
+      return cursorCredential(fsModule, homeDir, environment, platform);
     default:
       return { authed: false, expiresAt: null };
   }
 }
 
-function buildStatuses({ fsModule, homeDir, commandExistsFn, environment }) {
+function buildStatuses({ fsModule, homeDir, commandExistsFn, environment, platform }) {
   const statuses = {};
   for (const agent of Object.values(AGENTS)) {
     const installed = commandExistsFn(agent.bin || agent.key);
@@ -190,6 +221,7 @@ function buildStatuses({ fsModule, homeDir, commandExistsFn, environment }) {
       fsModule,
       homeDir,
       environment,
+      platform,
     );
     statuses[agent.key] = {
       installed,
@@ -205,6 +237,7 @@ function getAgentStatuses(options = {}) {
   const fsModule = options.fs || fs;
   const homeDir = options.homeDir || os.homedir();
   const environment = options.env || process.env;
+  const platform = options.platform || process.platform;
   const commandExistsFn = options.commandExists || commandExists;
   const now = typeof options.now === 'function' ? options.now() : Date.now();
   const useCache = options.cache !== false;
@@ -220,6 +253,7 @@ function getAgentStatuses(options = {}) {
     homeDir,
     commandExistsFn,
     environment,
+    platform,
   });
   if (useCache) statusCache.set(cacheKey, { value, at: now });
   return value;
@@ -230,6 +264,7 @@ function clearAgentStatusCache() {
 }
 
 module.exports = {
+  cursorAuthFile,
   getAgentStatuses,
   clearAgentStatusCache,
   codexAccountCredential,

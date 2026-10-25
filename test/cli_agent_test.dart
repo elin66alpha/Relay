@@ -5,6 +5,14 @@ import 'package:relay/core/models/cli_agent.dart';
 import 'package:relay/features/cli_agents/agent_status_lights.dart';
 
 void main() {
+  test('known agents list Cursor between Codex and OpenCode', () {
+    expect(
+      knownCliAgents.map((CliAgent agent) => agent.key).toList(),
+      <String>['claude', 'codex', 'cursor', 'opencode', 'hermes'],
+    );
+    expect(defaultAuthKindForAgent('cursor'), 'oauth');
+  });
+
   test('parses agent status fields from backend payload', () {
     final CliAgent agent = CliAgent.fromJson(<String, Object?>{
       'key': 'hermes',

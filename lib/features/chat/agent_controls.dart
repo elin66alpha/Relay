@@ -80,9 +80,12 @@ String _optionLabel(AppStrings l10n, String group, AgentOption option) {
     case 'high':
       return l10n.agentEffortHigh;
     case 'xhigh':
+    case 'extra-high':
       return l10n.agentEffortExtraHigh;
     case 'max':
       return l10n.agentEffortMax;
+    case 'none':
+      return l10n.agentEffortNone;
     case 'ultra':
       return l10n.agentEffortUltra;
     default:

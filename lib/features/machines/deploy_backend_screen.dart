@@ -266,7 +266,7 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '准备一台后端机器',
     body: '一台你自己的电脑或服务器都行：家里的 PC、Mac，或一台云服务器。'
-        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、OpenCode 或 Hermes），'
+        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、Cursor、OpenCode 或 Hermes），'
         '并直接在主机上完成登录或 provider 配置；Relay 不代办 CLI 登录。\n先在主机终端确认选定的 CLI 可以使用。Linux 还需 PM2、Python 3、make 和 C++ 编译器；Unix 下载文件夹需要 zip。使用 Cloudflare 隧道前需安装 cloudflared。',
   ),
   _DeployStep(
@@ -306,7 +306,7 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
     title: 'Prepare a backend machine',
     body: 'Any computer you own works: a home PC, a Mac, or a cloud server. '
         'Install Node.js 18+ and at least one CLI agent (Claude Code, Codex, '
-        'OpenCode, or Hermes), then complete its login or provider setup on '
+        'Cursor, OpenCode, or Hermes), then complete its login or provider setup on '
         'that host. Relay does not perform CLI login.\nFirst confirm the chosen CLI works in a host terminal. Linux also needs PM2, Python 3, make, and a C++ compiler; Unix folder downloads need zip. Install cloudflared before choosing either Cloudflare tunnel mode.',
   ),
   _DeployStep(

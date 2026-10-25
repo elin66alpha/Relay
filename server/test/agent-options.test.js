@@ -66,6 +66,22 @@ test('acpSessionOptions maps hermes tiers to session modes', () => {
   });
 });
 
+test('cursor defaults to Auto and full auto, and maps tiers to its ACP modes', () => {
+  assert.deepEqual(acpSessionOptions('cursor', {}), {
+    modelId: null,
+    modeId: 'agent',
+    approve: true,
+    configOptions: [['model', 'default']],
+  });
+  assert.equal(acpSessionOptions('cursor', { permission: 'plan' }).modeId, 'plan');
+  assert.equal(acpSessionOptions('cursor', { permission: 'plan' }).approve, false);
+  // An id the catalog does not list (here, an id from an older build) falls back.
+  assert.deepEqual(
+    normalizeSettings('cursor', { model: 'default[]', permission: 'ask' }),
+    { model: 'default', permission: 'ask', fast: 'off' },
+  );
+});
+
 test('acpSessionOptions translates a pinned hermes model id to ACP form', () => {
   // Hermes has no built-in catalog, so models-extra.json is the only way to
   // pin one — and it is written in the CLI's `provider/model` form.

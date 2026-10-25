@@ -8,6 +8,7 @@ const path = require('node:path');
 const { Readable } = require('node:stream');
 const express = require('express');
 const createFsRouter = require('../routes/fs');
+const { cursorAuthFile } = require('../lib/agent-status');
 
 // The file API is the boundary SECURITY.md promises: a leaked device token must
 // not be able to read tokens/CLI credentials through it, and RELAY_FS_ROOTS must
@@ -76,6 +77,8 @@ function fakeHome() {
   fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), '{}');
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(home, '.codex', 'auth.json'), '{}');
+  fs.mkdirSync(path.dirname(cursorAuthFile(home)), { recursive: true });
+  fs.writeFileSync(cursorAuthFile(home), '{}');
   return home;
 }
 
@@ -105,6 +108,7 @@ test('downloading a denied CLI credential file is refused', async () => {
   for (const denied of [
     path.join(home, '.claude', '.credentials.json'),
     path.join(home, '.codex', 'auth.json'),
+    cursorAuthFile(home),
     path.join(home, '.ssh', 'id_ed25519'),
   ]) {
     const err = await rejects(() => prepareDownloadAbsolute(denied));

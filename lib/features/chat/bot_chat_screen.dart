@@ -523,9 +523,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                         }
                         final CliAgent agent =
                             widget.agentsController.activeAgent;
-                        // Only OAuth agents (claude/codex) prompt to log in.
-                        // hermes/opencode manage their key on the host, so they
-                        // never show the "not logged in" banner.
+                        // OAuth agents prompt to log in. hermes/opencode manage
+                        // their key on the host, so they never show this banner.
                         if (agent.authKind != 'oauth' ||
                             widget.chatController.agentLoggedIn(agent.key) !=
                                 false) {
@@ -690,7 +689,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                                       )
                                     : const SizedBox.shrink(),
                               ),
-                              ContextMeter(usage: contextUsage),
+                              if (contextMeterSupports(agentKey))
+                                ContextMeter(usage: contextUsage),
                             ],
                           ),
                           backend: widget.chatController.backend,

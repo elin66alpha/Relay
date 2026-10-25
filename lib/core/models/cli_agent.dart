@@ -123,6 +123,7 @@ String defaultAuthKindForAgent(String key) {
   switch (key) {
     case 'claude':
     case 'codex':
+    case 'cursor':
       return 'oauth';
     case 'hermes':
       return 'apiKey';
@@ -157,6 +158,12 @@ const List<CliAgent> defaultCliAgents = <CliAgent>[
 /// display label regardless of current availability.
 const List<CliAgent> knownCliAgents = <CliAgent>[
   ...defaultCliAgents,
+  CliAgent(
+    key: 'cursor',
+    label: 'Cursor',
+    description: 'Cursor CLI',
+    authKind: 'oauth',
+  ),
   CliAgent(
     key: 'opencode',
     label: 'OpenCode',
