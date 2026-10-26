@@ -28,6 +28,9 @@ require.cache[discoveryPath] = {
           { id: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
         ];
       }
+      if (agentKey === 'hermes') {
+        return [{ id: 'default', label: 'deepseek-v4-flash', description: 'deepseek' }];
+      }
       if (agentKey !== 'codex') return null;
       return [
         {
@@ -187,4 +190,34 @@ test('Codex does not add an effort for a model that explicitly has none', () => 
     permission: 'workspace-write',
     fast: 'off',
   });
+});
+
+test('the model list groups Cursor models outside the plan and replaced models', () => {
+  const groupOf = (agentKey) =>
+    Object.fromEntries(describeAgent(agentKey).model.map((m) => [m.id, m.group]));
+
+  assert.deepEqual(groupOf('cursor'), {
+    default: undefined,
+    'grok-4.7': undefined,
+    'claude-opus-4-5': 'paid',
+  });
+  // Claude falls back to its static list here: only the newest of each family
+  // in the newest generation stays on the first page.
+  assert.deepEqual(groupOf('claude'), {
+    'claude-opus-4-8': undefined,
+    'claude-opus-4-7': 'legacy',
+    'claude-opus-4-6': 'legacy',
+    'claude-sonnet-4-6': undefined,
+    'claude-haiku-4-5': undefined,
+  });
+  // Ids without a version shape are never called legacy.
+  assert.ok(describeAgent('codex').model.every((m) => m.group === undefined));
+});
+
+test('Hermes shows its configured model and never sends it as a switch', () => {
+  const hermes = describeAgent('hermes');
+  assert.equal(hermes.supports.model, true);
+  assert.equal(hermes.defaults.model, 'default');
+  assert.equal(acpSessionOptions('hermes', {}).modelId, null);
+  assert.equal(acpSessionOptions('hermes', { model: 'default' }).modelId, null);
 });

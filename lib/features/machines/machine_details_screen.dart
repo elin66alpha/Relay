@@ -252,10 +252,8 @@ class _AgentCredentialStatusTile extends StatelessWidget {
     final AppStrings strings = context.l10n;
     final bool usable = isCliAgentSelectable(agent);
     final Color? textColor = usable ? null : theme.colorScheme.onSurfaceVariant;
-    final CredentialExpiry? expiry = cliAgentCredentialExpiry(agent);
     final String? subtitle = usable
-        ? (agentCredentialExpiryMessage(strings, agent) ??
-            _readySubtitle(strings, agent))
+        ? _readySubtitle(strings, agent)
         : agentUnavailableMessage(strings, agent);
     return Column(
       children: <Widget>[
@@ -268,9 +266,7 @@ class _AgentCredentialStatusTile extends StatelessWidget {
               : Text(
                   subtitle,
                   style: TextStyle(
-                    color: expiry?.expired == true
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.outline,
+                    color: theme.colorScheme.outline,
                   ),
                 ),
           trailing: Wrap(

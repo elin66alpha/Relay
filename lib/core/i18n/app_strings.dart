@@ -335,18 +335,6 @@ class AppStrings {
   String get copy => isZh ? '复制' : 'Copy';
   String get edit => isZh ? '编辑' : 'Edit';
   String get copied => isZh ? '已复制。' : 'Copied.';
-  String credentialExpiresInDays(int days) => isZh
-      ? '还有 $days 天需要重新登录'
-      : 'Log in again in $days ${days == 1 ? 'day' : 'days'}';
-  String get credentialExpiresToday =>
-      isZh ? '今天之内需要重新登录' : 'Log in again within a day';
-  String credentialExpiredDays(int days) => isZh
-      ? '已过期 $days 天，请立即在后端主机重新登录'
-      : 'Expired $days ${days == 1 ? 'day' : 'days'} ago. '
-          'Log in again on the backend host.';
-  String get credentialExpiredToday => isZh
-      ? '凭据已过期，请立即在后端主机重新登录'
-      : 'Credential expired. Log in again on the backend host.';
   String agentStatusRefreshFailed(Object err) =>
       isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
@@ -395,6 +383,11 @@ class AppStrings {
 
   // Per-agent Model / Effort / Permission controls (composer "+" drawer).
   String get agentModel => isZh ? '模型' : 'Model';
+  String get agentModelsPaid =>
+      isZh ? '需要支付方式的模型' : 'Models that need a payment method';
+  String get agentModelsLegacy => isZh ? '旧版模型' : 'Legacy models';
+  String agentModelsCurrent(String label) =>
+      isZh ? '当前：$label' : 'Current: $label';
   String get agentEffort => isZh ? '思考' : 'Effort';
   String get agentPermission => isZh ? '权限' : 'Permission';
   String get agentFastMode => isZh ? '快速模式' : 'Fast mode';

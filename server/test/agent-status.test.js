@@ -72,29 +72,25 @@ test('detects installed CLI agents and credential files without exposing values'
     installed: true,
     authed: true,
     authKind: 'oauth',
-    credentialExpiresAt: null,
   });
   assert.deepEqual(result.codex, {
     installed: true,
     authed: true,
     authKind: 'oauth',
-    credentialExpiresAt: null,
   });
   assert.deepEqual(result.hermes, {
     installed: true,
     authed: true,
     authKind: 'apiKey',
-    credentialExpiresAt: null,
   });
   assert.deepEqual(result.opencode, {
     installed: true,
     authed: true,
     authKind: 'apiKeyOptional',
-    credentialExpiresAt: null,
   });
 });
 
-test('reports Claude expiry but never Codex token rotation as login expiry', () => {
+test('Claude access and refresh tokens authenticate without a login deadline', () => {
   const home = makeHome();
   writeJson(path.join(home, '.claude', '.credentials.json'), {
     claudeAiOauth: {
@@ -114,30 +110,9 @@ test('reports Claude expiry but never Codex token rotation as login expiry', () 
 
   const result = statuses(home, new Set(['claude', 'codex']));
 
-  assert.equal(result.claude.credentialExpiresAt, 1893456000000);
-  assert.equal(result.codex.authed, true);
-  assert.equal(result.codex.credentialExpiresAt, null);
-});
-
-test('reports a null expiry when the credential carries no usable timestamp', () => {
-  const home = makeHome();
-  writeJson(path.join(home, '.claude', '.credentials.json'), {
-    claudeAiOauth: {
-      accessToken: 'access-value',
-      refreshToken: 'refresh-value',
-      expiresAt: 'not-a-number',
-    },
-  });
-  writeJson(path.join(home, '.codex', 'auth.json'), {
-    tokens: { access_token: 'codex-token', id_token: 'not-a-jwt' },
-  });
-
-  const result = statuses(home, new Set(['claude', 'codex']));
-
   assert.equal(result.claude.authed, true);
-  assert.equal(result.claude.credentialExpiresAt, null);
+  assert.equal(Object.hasOwn(result.claude, 'credentialExpiresAt'), false);
   assert.equal(result.codex.authed, true);
-  assert.equal(result.codex.credentialExpiresAt, null);
 });
 
 test('cursor login is the host auth file or CURSOR_API_KEY, never the secret', () => {
@@ -153,7 +128,6 @@ test('cursor login is the host auth file or CURSOR_API_KEY, never the secret', (
   assert.equal(authed.cursor.installed, true);
   assert.equal(authed.cursor.authed, true);
   assert.equal(authed.cursor.authKind, 'oauth');
-  assert.equal(authed.cursor.credentialExpiresAt, null);
   assert.equal(JSON.stringify(authed).includes('cursor-access'), false);
 
   const partial = makeHome();
@@ -231,7 +205,6 @@ test('detects Codex API-key and externally managed token modes', () => {
   const apiKey = statuses(apiKeyHome, new Set(['codex']));
   assert.equal(apiKey.codex.authed, true);
   assert.equal(apiKey.codex.authKind, 'apiKey');
-  assert.equal(apiKey.codex.credentialExpiresAt, null);
 
   const externalHome = makeHome();
   writeJson(path.join(externalHome, '.codex', 'auth.json'), {
@@ -255,7 +228,6 @@ test('maps Codex account/read without exposing account details', () => {
     installed: true,
     authed: false,
     authKind: 'oauth',
-    credentialExpiresAt: 123,
   };
   assert.deepEqual(
     codexAccountCredential(
@@ -273,7 +245,6 @@ test('maps Codex account/read without exposing account details', () => {
       installed: true,
       authed: true,
       authKind: 'apiKey',
-      credentialExpiresAt: null,
     },
   );
   assert.equal(
@@ -292,7 +263,6 @@ test('maps Codex account/read without exposing account details', () => {
       installed: true,
       authed: true,
       authKind: 'hostManaged',
-      credentialExpiresAt: null,
     },
   );
 });

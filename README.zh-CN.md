@@ -94,7 +94,7 @@ flowchart LR
 | 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话（除 Main 外均可重命名）、跨设备历史、搜索与 Markdown 导出。可复制消息，或编辑自己的消息，将原文放回草稿。Claude 自行发起的回复（例如后台任务完成时）会作为单独的消息显示。 |
 | 📎 | **聊天附件与上下文** | 添加附件会将文件上传到工作区，并把路径加入草稿。单聊输入框上方以 `<已用> / <窗口>` 显示上下文词元数；`?` 表示未知。 |
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
-| 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据、Claude 凭据到期时间，以及 Claude/Codex/Cursor 快速模式。 |
+| 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据，以及 Claude/Codex/Cursor 快速模式。模型页先列主力模型；Claude/Codex 的旧版模型和 Cursor 套餐外的模型放在第二页。OpenCode 列出主机上 OpenCode 提供的模型，包括在那里配置的服务商；Hermes 显示它配置好的模型。 |
 | 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
 | 📊 | **额度工作流** | 查看 Claude/Codex/Cursor 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
@@ -109,7 +109,7 @@ Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenC
 
 在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude、
 Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
-Hermes 使用主机上管理的 provider 配置。
+Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
 
 Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8)
 下载 `relay-backend-windows-x64-v0.1.8.zip`，解压后运行 `.\setup.cmd`。这个后端包
@@ -151,8 +151,8 @@ Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/re
 - 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM。
 - 终端先用 bearer token 换取短时、一次性的 WebSocket 票据，长期 token 不会进入
   socket 地址。
-- 文件 API 会拒绝已知的 Relay、SSH、Claude 与 Codex 敏感路径，还可用
-  `RELAY_FS_ROOTS` 进一步收紧。
+- 文件 API 会拒绝已知的 Relay、SSH、Claude、Codex 与 Cursor 敏感路径，以及 FCM
+  服务账号密钥，还可用 `RELAY_FS_ROOTS` 进一步收紧。
 - 额度查询可能读取并刷新主机 OAuth 文件，但 token 值绝不会进入 Relay API 或客户端。
 
 > [!IMPORTANT]

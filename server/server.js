@@ -3,9 +3,7 @@
 require('dotenv').config();
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { randomUUID } = require('crypto');
 const express = require('express');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
@@ -61,6 +59,16 @@ const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { buildDiagnostics } = require('./lib/diagnostics');
+const { getAgentStatuses } = require('./lib/agent-status');
+const { clearModelDiscoveryCache } = require('./lib/model-discovery');
+const {
+  listGroups,
+  getGroup,
+  createGroup,
+  setGroupMembers,
+  touchGroup,
+  deleteGroup,
+} = require('./lib/groups');
 const {
   readHistory,
   upsertHistoryMessage,
@@ -200,8 +208,8 @@ const activeRequests = new Map();
 // Scopes currently executing an agent turn, keyed by `workdir\0agentKey[\0sessionId]`.
 const runningScopes = new Set();
 // Per-scope serial execution chains. A new message on a busy scope waits for the
-// in-flight turn (the underlying `claude --resume` session cannot run two turns
-// at once), then runs automatically. Maps scopeKey -> tail Promise.
+// in-flight turn (one conversation's live agent session runs one turn at a
+// time), then runs automatically. Maps scopeKey -> tail Promise.
 const scopeChains = new Map();
 // Compress responses before they cross the tunnel. The JavaScript and CanvasKit
 // bundles dominate first-load bytes, so compression materially reduces startup
@@ -239,8 +247,7 @@ function requireAuth(req, res, next) {
       code: 'TOKEN_NOT_CONFIGURED',
     });
   }
-  const header = String(req.get('authorization') || '');
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const token = bearerToken(req);
   if (!isTokenAllowed(token)) {
     // Count the failure per IP; once over the limit the limiter answers 429
     // itself, otherwise we fall through to the normal 401.
@@ -548,6 +555,9 @@ const routeContext = {
   buildUsageReport,
   cancelQuotaSchedule,
   clearHistory,
+  clearModelDiscoveryCache,
+  createGroup,
+  deleteGroup,
   purgeSession,
   contextWindowFor,
   createChatResponder,
@@ -561,13 +571,15 @@ const routeContext = {
   eventWorkdir,
   fcm,
   finalizeStaleStreamingHistory,
-  fs,
   getAgent,
+  getAgentStatuses,
   getDefaultWorkdir,
+  getGroup,
   getSettings,
   listAbsoluteDirectory,
   listAgents,
   listChatSessions,
+  listGroups,
   listQuotaSchedules,
   listTokenSummaries,
   markdownForConversation,
@@ -575,13 +587,10 @@ const routeContext = {
   refreshAgentModels,
   normalizeDeviceId,
   notifyTaskCompletion,
-  os,
-  path,
   prepareDownload,
   prepareDownloadAbsolute,
   push,
   pushCategoriesFromBody,
-  randomUUID,
   readHistory,
   recentWorkdirs,
   renameChatSession,
@@ -604,10 +613,12 @@ const routeContext = {
   sessionContextKeyFor,
   sessionPayload,
   setActiveChatSession,
+  setGroupMembers,
   setSettings,
   streamUploadToFile,
   terminalManager,
   touchChatSession,
+  touchGroup,
   tokenRecordForToken,
   updateHistoryMessage,
   uploadedEntry,
@@ -673,7 +684,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     terminalManager.closeAll();
     // Live agent sessions are children of this process; close them explicitly
     // so a restart never leaves orphaned CLI processes holding memory.
-    shutdownPools().catch(() => {});
+    // shutdownPools never rejects: each pool's failure is caught inside it.
+    shutdownPools();
     flushHistoryForShutdown();
     process.exit(exitCodeForSignal(signal));
   });
@@ -692,7 +704,7 @@ const server = app.listen(PORT, HOST, () => {
         // Best-effort; discovery falls back to the static catalog at call time.
       }
     }
-    refreshAgentModels('cursor');
+    for (const agent of ['cursor', 'opencode', 'hermes']) refreshAgentModels(agent);
   });
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);

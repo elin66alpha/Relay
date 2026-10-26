@@ -2,7 +2,6 @@
 
 const assert = require('node:assert/strict');
 const { test, before, beforeEach, after } = require('node:test');
-const { randomUUID } = require('node:crypto');
 const express = require('express');
 const createChatRouter = require('../routes/chat');
 
@@ -36,7 +35,6 @@ before(async () => {
     activeRequests: new Map(),
     runningScopes: new Set(),
     scopeChains: new Map(),
-    randomUUID,
     normalizeDeviceId: () => '',
     getAgent: (key) => agents[key] || null,
     listAgents: () => Object.values(agents),

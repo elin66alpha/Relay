@@ -16,25 +16,6 @@ String agentUnavailableMessage(AppStrings strings, CliAgent agent) {
   }
 }
 
-/// How long a credential with a real deadline still has on the backend host.
-/// Codex managed auth is intentionally absent because its tokens auto-refresh.
-String? agentCredentialExpiryMessage(
-  AppStrings strings,
-  CliAgent agent, {
-  DateTime? now,
-}) {
-  final CredentialExpiry? expiry = cliAgentCredentialExpiry(agent, now: now);
-  if (expiry == null) return null;
-  if (expiry.expired) {
-    return expiry.days > 0
-        ? strings.credentialExpiredDays(expiry.days)
-        : strings.credentialExpiredToday;
-  }
-  return expiry.days > 0
-      ? strings.credentialExpiresInDays(expiry.days)
-      : strings.credentialExpiresToday;
-}
-
 void showAgentUnavailableSnack(BuildContext context, CliAgent agent) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(agentUnavailableMessage(context.l10n, agent))),

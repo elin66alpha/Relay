@@ -1,7 +1,7 @@
 'use strict';
 
+const { execFile } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 const { getDefaultWorkdir } = require('./workdir');
@@ -11,7 +11,17 @@ const {
   codexSessionOptions,
 } = require('./agent-options');
 const { createJsonStore } = require('./json-store');
-const { recordCursorCatalog } = require('./model-discovery');
+const {
+  hermesModelOptions,
+  parseOpenCodeModels,
+  recordCursorCatalog,
+  recordReportedModels,
+} = require('./model-discovery');
+const {
+  CURSOR_CONFIG_DIR,
+  executableInPath,
+  locateBin,
+} = require('./cli-paths');
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
@@ -93,66 +103,6 @@ function clearSession(sessionKey) {
     delete sessions[sessionKey];
   });
   return true;
-}
-
-// Some installers (opencode) put the binary in a per-user dir that isn't on the
-// server's PATH, so detection scans PATH first, then known fallback locations.
-// Results are cached briefly so /api/agents stays fast.
-const LOCATE_BIN_TTL_MS = 60 * 1000;
-const locateBinCache = new Map();
-
-const BIN_FALLBACKS = {
-  opencode: [path.join(os.homedir(), '.opencode', 'bin', 'opencode')],
-  hermes: [path.join(os.homedir(), '.local', 'bin', 'hermes')],
-  agent: [path.join(os.homedir(), '.local', 'bin', 'agent')],
-};
-
-function executableInPath(bin) {
-  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  const exts =
-    process.platform === 'win32'
-      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';')
-      : [''];
-  for (const dir of dirs) {
-    for (const ext of exts) {
-      const full = path.join(dir, bin + ext);
-      try {
-        fs.accessSync(full, fs.constants.X_OK);
-        return full;
-      } catch (_err) {
-        // Keep scanning.
-      }
-    }
-  }
-  return null;
-}
-
-// Resolve a CLI to a runnable path: PATH first (return the bare name so spawn
-// uses PATH), then per-user fallback locations (return the absolute path).
-// Returns null when the binary can't be found anywhere.
-function locateBin(bin) {
-  const cached = locateBinCache.get(bin);
-  if (cached && Date.now() - cached.at < LOCATE_BIN_TTL_MS) {
-    return cached.value;
-  }
-  let value = executableInPath(bin) ? bin : null;
-  if (!value) {
-    for (const candidate of BIN_FALLBACKS[bin] || []) {
-      try {
-        fs.accessSync(candidate, fs.constants.X_OK);
-        value = candidate;
-        break;
-      } catch (_err) {
-        // Try the next candidate.
-      }
-    }
-  }
-  locateBinCache.set(bin, { value, at: Date.now() });
-  return value;
-}
-
-function commandExists(bin) {
-  return locateBin(bin) !== null;
 }
 
 function emit(onEvent, event) {
@@ -274,13 +224,8 @@ const hermesPool = createAcpSessionPool({
   },
 });
 
-// Relay's Cursor runs with a config directory of its own (CURSOR_CONFIG_DIR).
-// Cursor writes every model choice into its config as the CLI's default, and
-// keeps its ACP sessions there, so a shared directory would change the host
-// user's own Cursor setup. Login is separate and stays the host's.
-const CURSOR_CONFIG_DIR = process.env.RELAY_CURSOR_CONFIG_DIR
-  ? path.resolve(process.env.RELAY_CURSOR_CONFIG_DIR)
-  : path.join(__dirname, '..', 'cursor-config');
+// Relay's Cursor keeps its config and ACP sessions in CURSOR_CONFIG_DIR (see
+// cli-paths.js), never in the host user's own Cursor directory.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Cursor has no delete command or ACP call. Each ACP session is one directory
@@ -344,28 +289,65 @@ const cursorPool = {
   },
 };
 
-// Cursor's catalog belongs to the account, not the binary, so it is fetched
-// over ACP: at startup, after a CLI update (force), and when the picker opens,
-// at most once per CURSOR_CATALOG_TTL_MS.
-const CURSOR_CATALOG_TTL_MS = 10 * 60 * 1000;
-let cursorCatalogAt = 0;
-let cursorCatalogPending = null;
+function cliOutput(bin, args) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout) =>
+      err ? reject(err) : resolve(String(stdout).trim()),
+    );
+  });
+}
+
+// Catalogs that belong to the account or the host config rather than the
+// binary, so discovery cannot read them from files: Cursor's over ACP,
+// OpenCode's from `opencode models` (free models change server-side, and it
+// lists every provider configured on the host), and Hermes' configured model.
+const CATALOG_FETCHERS = {
+  cursor: {
+    bin: 'agent',
+    fetch: () =>
+      cursorPoolFor(cursorPoolKey({})).callDriver('listModels').then(recordCursorCatalog),
+  },
+  opencode: {
+    bin: 'opencode',
+    fetch: (bin) =>
+      cliOutput(bin, ['models']).then((out) =>
+        recordReportedModels('opencode', parseOpenCodeModels(out)),
+      ),
+  },
+  hermes: {
+    bin: 'hermes',
+    fetch: async (bin) => {
+      const [model, provider] = await Promise.all([
+        cliOutput(bin, ['config', 'get', 'model.default']),
+        cliOutput(bin, ['config', 'get', 'model.provider']).catch(() => ''),
+      ]);
+      recordReportedModels('hermes', hermesModelOptions(model, provider));
+    },
+  },
+};
+
+// Fetched at startup, after a CLI update (force), and when the picker opens,
+// at most once per CATALOG_TTL_MS per agent.
+const CATALOG_TTL_MS = 10 * 60 * 1000;
+const catalogRefreshes = new Map();
 
 function refreshAgentModels(agentKey, { force = false } = {}) {
-  if (agentKey !== 'cursor') return Promise.resolve();
-  if (cursorCatalogPending) return cursorCatalogPending;
-  if (!force && Date.now() - cursorCatalogAt < CURSOR_CATALOG_TTL_MS) {
-    return Promise.resolve();
-  }
-  if (!locateBin('agent')) return Promise.resolve();
-  cursorCatalogAt = Date.now();
-  cursorCatalogPending = cursorPoolFor(cursorPoolKey({}))
-    .callDriver('listModels')
-    .then(recordCursorCatalog, () => {})
+  const fetcher = CATALOG_FETCHERS[agentKey];
+  if (!fetcher) return Promise.resolve();
+  const state = catalogRefreshes.get(agentKey) || { at: 0, pending: null };
+  catalogRefreshes.set(agentKey, state);
+  if (state.pending) return state.pending;
+  if (!force && Date.now() - state.at < CATALOG_TTL_MS) return Promise.resolve();
+  const bin = locateBin(fetcher.bin);
+  if (!bin) return Promise.resolve();
+  state.at = Date.now();
+  state.pending = fetcher
+    .fetch(bin)
+    .catch(() => {})
     .finally(() => {
-      cursorCatalogPending = null;
+      state.pending = null;
     });
-  return cursorCatalogPending;
+  return state.pending;
 }
 
 // codex speaks its own app-server protocol rather than ACP, but the pool
@@ -635,27 +617,26 @@ function runClaude(
   });
 }
 
-// The app-server names item types in camelCase; `codex exec --json` used
-// snake_case. Both spellings are accepted so the labels survive either.
+// Labels for the app-server's thread items (`item/completed`).
 function codexItemLabel(item) {
-  const type = item.type || item.item_type;
-  if (type === 'commandExecution' || type === 'command_execution') {
+  const type = item.type;
+  if (type === 'commandExecution') {
     const command = Array.isArray(item.command)
       ? item.command.join(' ')
       : item.command || '';
     return `Command: ${oneLine(command, 80)}`;
   }
-  if (type === 'fileChange' || type === 'file_change' || type === 'patch_apply') {
+  if (type === 'fileChange') {
     return 'File change';
   }
-  if (type === 'agentMessage' || type === 'agent_message') {
+  if (type === 'agentMessage') {
     return `Codex: ${oneLine(item.text || '')}`;
   }
   if (type === 'reasoning') return null;
-  if (type === 'mcpToolCall' || type === 'mcp_tool_call') {
+  if (type === 'mcpToolCall') {
     return `MCP: ${oneLine(item.tool || item.name || '', 60)}`;
   }
-  if (type === 'webSearch' || type === 'web_search') {
+  if (type === 'webSearch') {
     return `Search: ${oneLine(item.query || '', 60)}`;
   }
   return null;
@@ -666,6 +647,40 @@ function codexItemLabel(item) {
 // arrives as `item/agentMessage/delta` notifications. Every setting except the
 // sandbox applies per turn, so only a sandbox change reopens the thread — and
 // that still resumes the same conversation.
+// Settle a codex or ACP pool turn. The streamed text is the reply, and only a
+// turn that produced one saves its session id for the next turn to resume.
+function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text }) {
+  const noOutput = `(${agentKey} produced no output)`;
+  const run = sent.then(
+    ({ result, sessionId, startedNew, stderr }) => {
+      if (startedNew) {
+        emit(onEvent, 'The old session is no longer valid. Started a new one.');
+      }
+      const reply = text().trim();
+      if (reply) {
+        if (sessionId) setSession(sessionKey, { id: sessionId });
+        return reply;
+      }
+      if (result.stopReason === 'timeout') return result.message;
+      if (isAuthError(stderr)) return { __authError: true };
+      return errorLines(stderr) || noOutput;
+    },
+    (err) => {
+      if (err && err.code === 'AGENT_CANCELLED') throw new AgentCancelledError();
+      const message = (err && err.message) || '';
+      const stderr = (err && err.stderr) || '';
+      if (isAuthError(message) || isAuthError(stderr)) {
+        return { __authError: true };
+      }
+      return (
+        [message, errorLines(stderr)].filter(Boolean).join('\n').trim() ||
+        noOutput
+      );
+    },
+  );
+  return finishRun(run, { agentKey, onEvent });
+}
+
 function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
   const cwd = workdir || getDefaultWorkdir();
   const prior = getSession(sessionKey);
@@ -705,47 +720,24 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
     return false;
   };
 
-  const run = codexPool
-    .send({
-      key: sessionKey || `codex:${cwd}`,
-      prompt: String(prompt),
-      cwd,
-      resumeId,
-      // Only the sandbox is fixed when a thread is opened.
-      fixedKey: options.sandbox,
-      ...options,
-      signal,
-      onMessage,
-      onPermission,
-    })
-    .then(
-      ({ result, sessionId, startedNew, stderr }) => {
-        if (startedNew) {
-          emit(onEvent, 'The old session is no longer valid. Started a new one.');
-        }
-        if (finalText.trim()) {
-          if (sessionId) setSession(sessionKey, { id: sessionId });
-          return finalText.trim();
-        }
-        if (result.stopReason === 'timeout') return result.message;
-        if (isAuthError(stderr)) return { __authError: true };
-        return errorLines(stderr) || '(codex produced no output)';
-      },
-      (err) => {
-        if (err && err.code === 'AGENT_CANCELLED') throw new AgentCancelledError();
-        const message = (err && err.message) || '';
-        const stderr = (err && err.stderr) || '';
-        if (isAuthError(message) || isAuthError(stderr)) {
-          return { __authError: true };
-        }
-        return (
-          [message, errorLines(stderr)].filter(Boolean).join('\n').trim() ||
-          '(codex produced no output)'
-        );
-      },
-    );
-
-  return finishRun(run, { agentKey: 'codex', onEvent });
+  const run = codexPool.send({
+    key: sessionKey || `codex:${cwd}`,
+    prompt: String(prompt),
+    cwd,
+    resumeId,
+    // Only the sandbox is fixed when a thread is opened.
+    fixedKey: options.sandbox,
+    ...options,
+    signal,
+    onMessage,
+    onPermission,
+  });
+  return settlePoolTurn(run, {
+    agentKey: 'codex',
+    sessionKey,
+    onEvent,
+    text: () => finalText,
+  });
 }
 
 // Agents log freely to stderr, so when a turn produced no text at all the tail
@@ -829,48 +821,19 @@ function runAcpAgent({
     return false;
   };
 
-  const noOutput = `(${agentKey} produced no output)`;
-  const run = pool
-    .send({
-      key: sessionKey || `${agentKey}:${cwd}`,
-      prompt: String(prompt),
-      cwd,
-      resumeId,
-      modelId,
-      modeId,
-      configOptions,
-      signal,
-      onMessage,
-      onPermission,
-    })
-    .then(
-      ({ result, sessionId, startedNew, stderr }) => {
-        if (startedNew) {
-          emit(onEvent, 'The old session is no longer valid. Started a new one.');
-        }
-        if (finalText.trim()) {
-          if (sessionId) setSession(sessionKey, { id: sessionId });
-          return finalText.trim();
-        }
-        if (result.stopReason === 'timeout') return result.message;
-        if (isAuthError(stderr)) return { __authError: true };
-        return errorLines(stderr) || noOutput;
-      },
-      (err) => {
-        if (err && err.code === 'AGENT_CANCELLED') throw new AgentCancelledError();
-        const message = (err && err.message) || '';
-        const stderr = (err && err.stderr) || '';
-        if (isAuthError(message) || isAuthError(stderr)) {
-          return { __authError: true };
-        }
-        return (
-          [message, errorLines(stderr)].filter(Boolean).join('\n').trim() ||
-          noOutput
-        );
-      },
-    );
-
-  return finishRun(run, { agentKey, onEvent });
+  const run = pool.send({
+    key: sessionKey || `${agentKey}:${cwd}`,
+    prompt: String(prompt),
+    cwd,
+    resumeId,
+    modelId,
+    modeId,
+    configOptions,
+    signal,
+    onMessage,
+    onPermission,
+  });
+  return settlePoolTurn(run, { agentKey, sessionKey, onEvent, text: () => finalText });
 }
 
 function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
@@ -938,14 +901,12 @@ const AGENTS = {
     run: runCursor,
     bin: 'agent',
   },
-  // Experimental: listed in the app with explicit install/auth status.
   opencode: {
     key: 'opencode',
     label: 'OpenCode',
     description: 'OpenCode CLI',
     run: runOpencode,
     bin: 'opencode',
-    experimental: true,
   },
   hermes: {
     key: 'hermes',
@@ -953,7 +914,6 @@ const AGENTS = {
     description: 'Hermes CLI',
     run: runHermes,
     bin: 'hermes',
-    experimental: true,
   },
 };
 
@@ -996,12 +956,10 @@ module.exports = {
   TIMEOUT_MS,
   listAgents,
   getAgent,
-  commandExists,
   runAgent,
   purgeSession,
   refreshAgentModels,
   shutdownPools,
-  CURSOR_CONFIG_DIR,
   inspectCodexAccount,
   claudeBackgroundTurn,
 };

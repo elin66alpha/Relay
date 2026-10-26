@@ -9,14 +9,13 @@ import '../../core/models/agent_session.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
-import '../../core/notifications/fcm_service.dart';
 import '../../core/notifications/notification_service.dart';
-import '../../core/notifications/web_push.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/error_text.dart';
 import '../quota/quota_controller.dart';
 import 'agent_controls.dart';
 import 'background_turn_registry.dart';
+import 'chat_push_registration.dart';
 import 'context_meter.dart';
 
 class BotChatController extends ChangeNotifier {
@@ -38,6 +37,13 @@ class BotChatController extends ChangeNotifier {
   static const String _queuedKey = 'queued';
 
   final BackendClient _backendClient;
+  late final ChatPushRegistration _pushRegistration = ChatPushRegistration(
+    backendClient: _backendClient,
+    hasMachine: () => _machine != null,
+    language: () => _strings.isZh ? 'zh' : 'en',
+    quotaPushEnabled: () => _quotaPushEnabled,
+    taskPushEnabled: () => _taskPushEnabled,
+  );
   final QuotaController quotaController;
   String? _activeWorkdir;
 
@@ -311,8 +317,7 @@ class BotChatController extends ChangeNotifier {
     }
     _quotaPushEnabled = quotaPushEnabled;
     _taskPushEnabled = taskPushEnabled;
-    _pushSynced = false;
-    _fcmSynced = false;
+    _pushRegistration.invalidatePreferences();
   }
 
   bool isRetryable(ChatMessage message) =>
@@ -548,57 +553,11 @@ class BotChatController extends ChangeNotifier {
     await _runTurn(_agent, _messages[index]);
   }
 
-  // Registers this browser for Web Push so quota/scheduled-message alerts arrive
-  // even when the tab is closed. Web-only and best-effort: a no-op off the web,
-  // when the backend has no VAPID keys, or until the user grants permission
-  // (retried on the next app open). Runs at most once per session.
-  bool _pushSynced = false;
-  // Set only once a subscription is registered with the backend, so it means
-  // "push will reach this browser" rather than "we finished trying".
-  bool _webPushActive = false;
-  Future<void> syncPushSubscription({bool force = false}) async {
-    if ((!force && _pushSynced) || _machine == null || !webPushSupported()) {
-      return;
-    }
-    try {
-      final PushConfig config = await _backendClient.pushConfig();
-      if (!config.enabled || config.publicKey.isEmpty) {
-        _pushSynced = true;
-        return;
-      }
-      final String? subscription = await webPushSubscribe(config.publicKey);
-      if (subscription == null) return; // permission not granted yet
-      await _backendClient.subscribePush(
-        subscription,
-        _strings.isZh ? 'zh' : 'en',
-        quotaPushEnabled: _quotaPushEnabled,
-        taskPushEnabled: _taskPushEnabled,
-      );
-      _pushSynced = true;
-      _webPushActive = true;
-    } catch (_) {
-      // Best-effort; the next app open retries.
-    }
-  }
+  Future<void> syncPushSubscription({bool force = false}) =>
+      _pushRegistration.syncPushSubscription(force: force);
 
-  // Registers this mobile device for FCM so quota/scheduled-message alerts can
-  // arrive while the app is backgrounded or killed. Android/iOS only and
-  // best-effort; web/desktop and missing Firebase config are no-ops.
-  bool _fcmSynced = false;
-  Future<void> syncFcmRegistration({bool force = false}) async {
-    if ((!force && _fcmSynced) || _machine == null) return;
-    try {
-      final bool handled = await FcmService.instance.syncRegistration(
-        backendClient: _backendClient,
-        lang: _strings.isZh ? 'zh' : 'en',
-        quotaPushEnabled: _quotaPushEnabled,
-        taskPushEnabled: _taskPushEnabled,
-      );
-      if (handled) _fcmSynced = true;
-    } catch (_) {
-      // Best-effort; the next app open retries.
-    }
-  }
+  Future<void> syncFcmRegistration({bool force = false}) =>
+      _pushRegistration.syncFcmRegistration(force: force);
 
   Future<List<ChatHistorySearchResult>> searchHistory(
     String query, {
@@ -1797,7 +1756,7 @@ class BotChatController extends ChangeNotifier {
   /// alert, making an in-page notification a duplicate. False off the web, and
   /// false until a subscription is actually registered — a backend with no
   /// VAPID keys never pushes, so the in-page copy stays the only one.
-  bool get _webPushDelivers => kIsWeb && _webPushActive;
+  bool get _webPushDelivers => kIsWeb && _pushRegistration.webPushActive;
 
   Future<void> _showNotificationOrSystemMessage(
     String message, {

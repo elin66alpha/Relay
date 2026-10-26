@@ -15,9 +15,36 @@ process.env.RELAY_REPORTED_MODELS_FILE = reportedFile;
 
 const {
   discoverModels,
+  hermesModelOptions,
   parseCodexCatalog,
+  parseOpenCodeModels,
   recordCursorCatalog,
+  recordReportedModels,
 } = require('../lib/model-discovery');
+
+test('OpenCode lists every provider/model line and Hermes its configured model', () => {
+  const opencode = parseOpenCodeModels(
+    'opencode/big-pickle\nmyapi/gpt-x\nopenrouter/anthropic/claude-x\n' +
+      'Warning: something\nopencode/big-pickle\n/bad\n',
+  );
+  assert.deepEqual(opencode, [
+    { id: 'opencode/big-pickle', label: 'big-pickle', description: 'opencode' },
+    { id: 'myapi/gpt-x', label: 'gpt-x', description: 'myapi' },
+    {
+      id: 'openrouter/anthropic/claude-x',
+      label: 'anthropic/claude-x',
+      description: 'openrouter',
+    },
+  ]);
+  recordReportedModels('opencode', opencode);
+  recordReportedModels('opencode', []);
+  assert.deepEqual(discoverModels('opencode'), opencode, 'an empty answer keeps the list');
+
+  assert.deepEqual(hermesModelOptions('deepseek-v4-flash\n', 'deepseek'), [
+    { id: 'default', label: 'deepseek-v4-flash', description: 'deepseek' },
+  ]);
+  assert.deepEqual(hermesModelOptions('', 'deepseek'), []);
+});
 
 test('Cursor catalog keeps model, effort and fast, and survives on disk', () => {
   assert.equal(discoverModels('cursor'), null, 'nothing recorded yet');

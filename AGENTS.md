@@ -129,6 +129,18 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
       needed), recorded through `recordCursorCatalog` in `model-discovery.js`
       at startup, after a CLI update, and on picker opens at most every ten
       minutes. Cursor emits no context usage, so the app hides the meter.
+  - `refreshAgentModels` uses the same schedule for OpenCode, whose list is
+    `opencode models` (free models change on OpenCode's side, and it includes
+    every provider configured on the host), and for Hermes, whose picker
+    shows only the host's configured model as `default`. `acpSessionOptions`
+    never sends `default` to Hermes, so it keeps running that model.
+- `agent-options.js` marks each model with an optional `group` the picker lists
+  on a second page: Cursor models other than Auto, Grok and Composer are `paid`
+  (the Cursor plan covers only those; the rest bill prepaid usage), and a
+  Claude or Codex model is `legacy` when a newer version of its family exists or
+  its family has no model in the newest major generation. Ids of unknown shape
+  stay on the first page. A grouped model stays valid everywhere; Swarms list
+  only first-page models.
 - Deleting or clearing a conversation goes through `purgeSession`, not
   `clearSession`: for a pooled agent it also requests CLI-side transcript
   deletion on a best-effort basis. Cursor has no delete command, so Relay
@@ -157,9 +169,9 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
   modes; OpenCode and Hermes credentials are managed on the host and become
   selectable when installed.
 - Every credential is created on the backend host by the CLI itself. Relay does
-  not log an agent in. `server/lib/agent-status.js` reads stored auth state and
-  Claude's `credentialExpiresAt`; Codex has no login-expiry timestamp because
-  its managed short-lived tokens auto-refresh. An explicit credential recheck
+  not log an agent in. `server/lib/agent-status.js` reads stored auth state.
+  Relay reports no login deadline because every supported CLI refreshes its
+  tokens. An explicit credential recheck
   uses `account/read` with `refreshToken: true` on the shared Codex app-server.
   `server/lib/usage.js` separately reads and may refresh OAuth credentials for
   quota reporting and keepalive. A token or account identity value must never
@@ -168,7 +180,11 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Backend modules and persistence
 
-- Each route factory receives dependencies through `routeContext`. When a route
+- Each route factory receives through `routeContext` everything that holds state
+  or does I/O: server state, persistence, processes, caches, and the helpers
+  `server.js` builds. Tests replace those. A route requires directly only Node
+  built-ins, npm packages, and `lib/*` helpers that compute from their arguments
+  (SSE writers, Swarm prompt building, settings validation). When a route
   destructures a new helper, add it to the context in `server/server.js`.
 - Use `server/lib/json-store.js` for JSON state: cached reads, atomic replace,
   and owner-only file permissions. Do not create ad hoc read/modify/write stores.

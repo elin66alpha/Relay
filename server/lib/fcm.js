@@ -21,17 +21,20 @@ try {
 }
 
 const TOKENS_FILE = path.join(__dirname, '..', 'fcm-tokens.json');
-const SERVICE_ACCOUNT_FILE = String(
+const configuredServiceAccount = String(
   process.env.FCM_SERVICE_ACCOUNT_FILE || '',
 ).trim();
+// Absolute, or '' when FCM is not configured. The file API denies it.
+const SERVICE_ACCOUNT_FILE = configuredServiceAccount
+  ? path.resolve(configuredServiceAccount)
+  : '';
 
 let app = null;
 let configured = false;
 
 if (admin && SERVICE_ACCOUNT_FILE) {
   try {
-    const credentialPath = path.resolve(SERVICE_ACCOUNT_FILE);
-    const raw = fs.readFileSync(credentialPath, 'utf-8');
+    const raw = fs.readFileSync(SERVICE_ACCOUNT_FILE, 'utf-8');
     const serviceAccount = JSON.parse(raw);
     app = admin.initializeApp(
       {
@@ -114,6 +117,7 @@ async function notify(payload) {
 }
 
 module.exports = {
+  SERVICE_ACCOUNT_FILE,
   isEnabled,
   addToken,
   removeToken,

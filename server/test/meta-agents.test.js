@@ -21,13 +21,11 @@ before(async () => {
           installed: true,
           authed: true,
           authKind: 'oauth',
-          credentialExpiresAt: 1893456000000,
         },
         codex: {
           installed: true,
           authed: false,
           authKind: 'oauth',
-          credentialExpiresAt: 1893456789000,
         },
         opencode: {
           installed: true,
@@ -94,7 +92,6 @@ test('/api/agents returns every agent with install/auth usability fields', async
       authed: byKey.claude.authed,
       authKind: byKey.claude.authKind,
       usable: byKey.claude.usable,
-      credentialExpiresAt: byKey.claude.credentialExpiresAt,
     },
     {
       key: 'claude',
@@ -104,12 +101,10 @@ test('/api/agents returns every agent with install/auth usability fields', async
       authed: true,
       authKind: 'oauth',
       usable: true,
-      credentialExpiresAt: 1893456000000,
     },
   );
+  assert.equal(Object.hasOwn(byKey.claude, 'credentialExpiresAt'), false);
   assert.equal(byKey.codex.usable, false);
-  assert.equal(byKey.codex.credentialExpiresAt, null);
-  assert.equal(byKey.opencode.credentialExpiresAt, null);
   assert.equal(byKey.opencode.usable, true);
   assert.equal(byKey.hermes.authKind, 'apiKey');
   // hermes is managed out-of-band, so it is usable once installed even with no
@@ -127,7 +122,6 @@ test('/api/agents can verify Codex credentials through account/read', async () =
   assert.equal(codex.authed, true);
   assert.equal(codex.usable, true);
   assert.equal(codex.authKind, 'apiKey');
-  assert.equal(codex.credentialExpiresAt, null);
   assert.equal(JSON.stringify(codex).includes('must-not-reach'), false);
   assert.equal(accountChecks, 1);
 });

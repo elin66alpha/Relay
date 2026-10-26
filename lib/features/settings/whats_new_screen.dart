@@ -164,6 +164,9 @@ const List<_Release> _zhReleases = <_Release>[
       ),
     ],
     changes: <String>[
+      '模型列表更简洁：Cursor 只列出套餐额度内的模型，需要预付费的放到底部的“需要支付方式的模型”里；Claude Code 和 Codex 的旧版模型放到底部的“旧版模型”里。Swarm 里只列主力模型。',
+      'OpenCode 的模型列表直接读主机上的 OpenCode，免费模型变了会跟着更新；你在主机 OpenCode 里配好的 API 模型也会出现在列表里。Hermes 也有了模型入口，显示主机上配置好的模型。',
+      'Claude Code 不再误报“今天之内需要重新登录”。',
       '智能体调用工具前后说的话会分成两条消息显示，不再连成一段。',
       'Relay 自动批准 Cursor 的操作时只允许这一次，不会再往主机上 Cursor 自己的白名单里添加命令。',
       '删除或清空 Cursor 的对话时，对应的会话记录也会一起删掉。',
@@ -219,6 +222,9 @@ const List<_Release> _enReleases = <_Release>[
       ),
     ],
     changes: <String>[
+      'A tidier model list: Cursor shows only the models its plan includes, with prepaid ones under “Models that need a payment method” at the bottom; older Claude Code and Codex models move under “Legacy models”. Swarms list main models only.',
+      'OpenCode’s model list now comes straight from OpenCode on the host, so it follows changes to its free models and includes any API models you set up in OpenCode there. Hermes now has a Model entry showing the model configured on the host.',
+      'Claude Code no longer shows a false “log in again within a day” warning.',
       'What an agent says before and after using a tool now shows as two messages instead of one run-together paragraph.',
       'When Relay approves a Cursor action, it allows it once only and no longer adds commands to Cursor’s own allowlist on the host.',
       'Deleting or clearing a Cursor conversation also deletes its record.',

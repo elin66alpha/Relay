@@ -1,16 +1,9 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const express = require('express');
 const { wantsStream, writeStreamEvent, endStream } = require('../lib/sse');
 
-const {
-  listGroups,
-  getGroup,
-  createGroup,
-  setGroupMembers,
-  touchGroup,
-  deleteGroup,
-} = require('../lib/groups');
 const {
   parseMentions,
   deltaSince,
@@ -84,12 +77,15 @@ module.exports = function createGroupRouter(ctx) {
     activeRequests,
     agentTurnDependencies,
     clearHistory,
+    createGroup,
+    deleteGroup,
     purgeSession,
     finalizeStaleStreamingHistory,
     getAgent,
+    getGroup,
+    listGroups,
     normalizeDeviceId,
     notifyTaskCompletion,
-    randomUUID,
     readHistory,
     requestWorkdir,
     runAgentTurn,
@@ -99,6 +95,8 @@ module.exports = function createGroupRouter(ctx) {
     sendEvent,
     sendWorkdirError,
     sessionContextKeyFor,
+    setGroupMembers,
+    touchGroup,
     upsertHistoryMessage,
     validateWorkdir,
   } = ctx;

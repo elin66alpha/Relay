@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.9 - 2026-10-25
+## 0.1.9 - Unreleased
 
 ### Added
 
@@ -23,11 +23,22 @@
 - Relay answers ACP approval requests with "allow once" instead of "allow
   always", so Cursor no longer adds commands to the host user's own CLI
   allowlist.
+- The model page lists main models first. Cursor models outside the plan's
+  included usage, and older Claude Code and Codex models, move to a second
+  page opened from the bottom of the screen. The Swarm form lists main models
+  only.
+- OpenCode's model list comes from the host's `opencode models`, so it stays
+  current as OpenCode's free models change and includes every API provider
+  configured in the host's OpenCode. Hermes gains a Model entry showing the
+  model configured on the host.
 
 ### Fixed
 
+- Claude Code no longer shows a false "log in again within a day" warning on
+  Machine details. Relay reports no login deadline, because every supported CLI
+  refreshes its own tokens.
 - Deleting or clearing a Cursor conversation removes its session directory
-  under `~/.cursor/acp-sessions/`.
+  under `server/cursor-config/acp-sessions/`.
 - The file API refuses Cursor's `auth.json`, like the Claude Code and Codex
   credential files.
 

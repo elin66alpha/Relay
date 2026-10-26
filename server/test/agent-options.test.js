@@ -47,8 +47,9 @@ test('acpSessionOptions resolves opencode defaults to a model and auto-approval'
     approve: true,
   });
   assert.deepEqual(
-    acpSessionOptions('opencode', { model: 'opencode/mimo-v2.5-free', permission: 'ask' }),
-    { modelId: 'opencode/mimo-v2.5-free', modeId: null, approve: false },
+    acpSessionOptions('opencode', { model: 'opencode/gone-free', permission: 'ask' }),
+    { modelId: 'opencode/big-pickle', modeId: null, approve: false },
+    'a model the catalog no longer lists falls back to the default',
   );
 });
 

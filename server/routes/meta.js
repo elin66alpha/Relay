@@ -1,12 +1,11 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const os = require('os');
 const express = require('express');
 
-const { clearModelDiscoveryCache } = require('../lib/model-discovery');
 const {
   codexAccountCredential,
-  getAgentStatuses: defaultGetAgentStatuses,
   isCodexReauthError,
 } = require('../lib/agent-status');
 
@@ -34,19 +33,19 @@ module.exports = function createMetaRouter(ctx) {
     agentRequiredError,
     bearerToken,
     buildDiagnostics,
+    clearModelDiscoveryCache,
     describeAgent,
     deleteRevokedTokenById,
     eventClients,
     eventWorkdir,
     getAgent,
-    getAgentStatuses = defaultGetAgentStatuses,
+    getAgentStatuses,
     getDefaultWorkdir,
     getSettings,
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
     normalizeDeviceId,
-    os,
     refreshAgentModels = () => Promise.resolve(),
     revokeTokenById,
     resolveAgentScope,
@@ -104,12 +103,6 @@ module.exports = function createMetaRouter(ctx) {
         installed,
         authed,
         authKind: status.authKind || 'unknown',
-        // Claude stores an access-token expiry. Codex managed auth refreshes its
-        // short-lived tokens and has no client-readable login deadline.
-        credentialExpiresAt:
-          agent.key !== 'codex' && Number.isFinite(status.credentialExpiresAt)
-            ? status.credentialExpiresAt
-            : null,
         // hermes/opencode remain host-managed and do not gate on a key Relay
         // cannot reliably validate. Codex is gated on its detected auth mode.
         usable:

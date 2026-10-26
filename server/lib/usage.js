@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const { createJsonStore } = require('./json-store');
-const { cursorAuthFile } = require('./agent-status');
+const { cursorAuthFile } = require('./cli-paths');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -813,7 +813,6 @@ async function buildUsageReport({ source } = {}) {
 module.exports = {
   getClaudeUsage,
   getCodexUsage,
-  getCursorUsage,
   cursorUsageFromBodies,
   invalidateUsageCache,
   markExpiredQuotas,

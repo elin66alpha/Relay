@@ -118,6 +118,33 @@ void main() {
     expect((lite.leading! as Icon).icon, Icons.radio_button_checked_rounded);
   });
 
+  testWidgets('grouped models live on a second page opened from the bottom', (
+    WidgetTester tester,
+  ) async {
+    final _OptionsBackendClient backend = _OptionsBackendClient();
+    await pumpControls(tester, backend);
+
+    await tester.tap(find.text('Model'));
+    await tester.pumpAndSettle();
+    expect(find.text('GPT Lite'), findsOneWidget);
+    expect(find.text('GPT Old'), findsNothing);
+
+    await tester.tap(find.text('Legacy models (1)'));
+    await tester.pumpAndSettle();
+    expect(find.text('GPT Lite'), findsNothing);
+    await tester.tap(find.text('GPT Old'));
+    await tester.pumpAndSettle();
+
+    // Choosing on the second page saves and closes both pages.
+    expect(backend.lastUpdatedGroup, 'model');
+    expect(backend.lastUpdatedOption, 'gpt-old');
+    expect(find.text('Legacy models (1)'), findsNothing);
+
+    await tester.tap(find.text('Model'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current: GPT Old'), findsOneWidget);
+  });
+
   testWidgets('a cached catalog renders the controls without a spinner', (
     WidgetTester tester,
   ) async {
@@ -197,6 +224,11 @@ class _OptionsBackendClient extends BackendClient {
         'model': <Object?>[
           <String, Object?>{'id': 'gpt-new', 'label': 'GPT New'},
           <String, Object?>{'id': 'gpt-lite', 'label': 'GPT Lite'},
+          <String, Object?>{
+            'id': 'gpt-old',
+            'label': 'GPT Old',
+            'group': 'legacy',
+          },
         ],
         'effort': <Object?>[
           <String, Object?>{'id': 'medium', 'label': 'Medium'},

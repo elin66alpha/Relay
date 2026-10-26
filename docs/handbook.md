@@ -50,7 +50,8 @@ but still require authentication. Failed bearer-token attempts have a separate
 ### File API boundary
 
 The built-in denylist currently covers Relay's token file, `.env`, generated
-credential directory, Web Push/FCM token stores, `~/.ssh`, Claude Code OAuth
+credential directory, Web Push/FCM token stores, the FCM service-account key,
+`~/.ssh`, Claude Code OAuth
 credentials, Codex auth, Cursor's `auth.json`, and Relay's own Cursor config
 directory `server/cursor-config/`. It also covers siblings whose names start with a
 sensitive basename followed by a dot, such as `.env.bak-x`, `tokens.json.bak`,
@@ -153,14 +154,9 @@ each CLI's own login (`agent login` for Cursor). OpenCode and Hermes are
 experimental. Every credential is created on the backend host. Relay never
 logs a CLI in remotely.
 
-Claude's `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json` is reported
-as `credentialExpiresAt` (epoch ms) on `/api/agents`, and the app turns it into
-the days left or the days since expiry on **Machine details**. Codex is
-different: managed ChatGPT auth automatically rotates its short-lived ID and
-access tokens, while the refresh token has no client-readable deadline. Relay
-therefore always reports a null Codex `credentialExpiresAt` and shows no login
-countdown for it. Cursor's auth file has access and refresh tokens and no
-expiry field, so its `credentialExpiresAt` is null as well. The CLI binary is
+Relay reports no login deadline because every supported CLI refreshes its
+tokens. Short-lived access-token expiry is not a login deadline. Machine
+details shows ready state for authenticated agents. Cursor's CLI binary is
 `agent`, not `cursor`.
 
 Stored Codex state distinguishes managed ChatGPT, API-key, external-token, and
@@ -171,8 +167,9 @@ probe failure is reported as a check error and leaves the app's displayed state
 in place.
 Only normalized auth/status fields leave the backend: account identity and
 credential values are discarded. Separately, `server/lib/usage.js` reads the
-Claude/Codex OAuth tokens for quota reporting and can refresh an expired access
-token atomically in the CLI's credential file.
+Claude Code, Codex, and Cursor tokens for quota reporting and can refresh an
+expired Claude Code or Codex access token atomically in the CLI's credential
+file.
 
 ## SSH terminal
 
@@ -297,7 +294,7 @@ Agent controls are capability-aware:
 | Codex | yes | model-specific | yes | yes | active app-server mode: managed ChatGPT, API key, external token, or host-managed provider |
 | Cursor | yes | model-specific | yes | yes, models with a fast option | host auth file or `CURSOR_API_KEY` |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
-| Hermes | host config/pins | no | yes | no | host-managed key |
+| Hermes | shows the host's configured model; pins | no | yes | no | host-managed key |
 
 Fast mode defaults off, may use more quota or cost more, and is visible only in
 the solo-chat composer. Relay sends an explicit Claude `fastMode` setting,
@@ -326,10 +323,23 @@ when the picker opens (at most every ten minutes). Each model offers its own
 effort levels and, where it has one, the fast switch; context size and thinking
 stay at the model's default. Relay keeps the last list in the generated state
 file `server/reported-models.json`; before the first answer, and when Cursor is
-not signed in, the picker offers only Auto, which is also the default. Other
-agents use their supported
-live or fallback catalogs;
-local pins may be added in the gitignored `server/models-extra.json`.
+not signed in, the picker offers only Auto, which is also the default.
+OpenCode's list comes from `opencode models` on the same schedule: its free
+models, which change on OpenCode's side, plus every provider configured in the
+host's OpenCode (`~/.config/opencode/opencode.json` or `opencode auth login`),
+each labelled with its model name over its provider. Before the first answer it
+offers `big-pickle`. Hermes' picker shows the one model configured on the host
+(`hermes model`), read with `hermes config get model.default` on the same
+schedule; it is a label, so Hermes keeps running its configured model. Both are
+kept in `server/reported-models.json` too. Local pins may be added in the
+gitignored `server/models-extra.json`.
+
+The model page lists main models first and links to the rest from the bottom
+of the screen. For Cursor that second page holds every model outside the Cursor
+plan's included usage (anything but Auto, Grok and Composer), which bills
+prepaid usage from the first request. For Claude Code and Codex it holds legacy
+models: older versions of a family, and families with no model in the newest
+generation. They stay selectable. The Swarm form offers only main models.
 
 ### History, search, and export
 

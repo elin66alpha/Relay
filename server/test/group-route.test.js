@@ -5,7 +5,6 @@ const { test, before, after } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const express = require('express');
 
 // Isolate the on-disk state for groups + history before requiring the modules.
@@ -20,6 +19,7 @@ const history = require('../lib/history');
 const { sessionScopeKey } = require('../lib/chat-sessions');
 const { runAgentTurn } = require('../lib/agent-turn');
 const { normalizeSettings } = require('../lib/agent-options');
+const groups = require('../lib/groups');
 const createGroupRouter = require('../routes/group');
 
 const SEP = '\0';
@@ -72,6 +72,7 @@ function buildContext() {
   });
 
   return {
+    ...groups,
     MAX_PROMPT_BYTES: 100 * 1024,
     activeRequests: new Map(),
     agentTurnDependencies,
@@ -81,7 +82,6 @@ function buildContext() {
     getAgent: (key) => AGENTS[key] || null,
     normalizeDeviceId: () => '',
     notifyTaskCompletion: () => {},
-    randomUUID: crypto.randomUUID,
     readHistory: history.readHistory,
     requestWorkdir: (req) => req.get('x-workdir') || WORKDIR,
     runAgentTurn,

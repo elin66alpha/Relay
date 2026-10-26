@@ -1,5 +1,6 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
 const express = require('express');
 
 module.exports = function createChatRouter(ctx) {
@@ -23,7 +24,6 @@ module.exports = function createChatRouter(ctx) {
     markdownForConversation,
     normalizeDeviceId,
     notifyTaskCompletion,
-    randomUUID,
     readHistory,
     requestWorkdir,
     resolveAgentScope,

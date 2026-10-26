@@ -75,33 +75,28 @@ void main() {
     expect(identical(firstTerminal, secondTerminal), isTrue);
   });
 
-  testWidgets('agent credentials report only real login deadlines', (
+  testWidgets('authenticated agents show Ready', (
     WidgetTester tester,
   ) async {
-    final DateTime now = DateTime.now();
     final CliAgentsController agentsController = CliAgentsController()
       ..syncAgents(<CliAgent>[
-        CliAgent(
+        const CliAgent(
           key: 'claude',
           label: 'Claude Code',
           description: 'Anthropic Claude Code CLI',
           authKind: 'oauth',
-          credentialExpiresAt: now.add(const Duration(days: 12, hours: 1)),
         ),
-        CliAgent(
+        const CliAgent(
           key: 'codex',
           label: 'Codex',
           description: 'OpenAI Codex CLI',
           authKind: 'oauth',
-          credentialExpiresAt: now.subtract(const Duration(days: 2, hours: 1)),
         ),
       ]);
 
     await _pumpDetails(tester, agentsController);
 
-    expect(find.text('Log in again in 12 days'), findsOneWidget);
-    expect(find.text('Ready'), findsOneWidget);
-    expect(find.textContaining('Expired 2 days ago'), findsNothing);
+    expect(find.text('Ready'), findsNWidgets(2));
     expect(find.widgetWithText(FilledButton, 'Log in'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Log in again'), findsNothing);
   });

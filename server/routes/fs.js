@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 
 function queryBool(value) {
@@ -11,9 +13,7 @@ module.exports = function createFsRouter(ctx) {
     MAX_DOWNLOAD_BYTES,
     MAX_UPLOAD_BYTES,
     eventWorkdir,
-    fs,
     listAbsoluteDirectory,
-    path,
     prepareDownload,
     prepareDownloadAbsolute,
     recentWorkdirs,

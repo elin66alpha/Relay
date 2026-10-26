@@ -10,7 +10,7 @@ Cloudflare Tunnel startup to each operating system.
 
 - Node.js 18 or newer.
 - At least one supported CLI installed on the backend: Claude Code, Codex,
-  OpenCode, or Hermes.
+  Cursor (the `agent` CLI, signed in with `agent login`), OpenCode, or Hermes.
 - Every CLI must be authenticated or configured on the backend host itself.
   Relay reports status but does not perform OAuth login or collect provider
   keys.

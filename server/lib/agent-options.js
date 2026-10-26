@@ -57,20 +57,14 @@ const BASE_MODELS = {
       description: 'Faster, lower-cost option for lighter coding tasks.',
     },
   ],
-  // opencode models are `provider/model`; these free entries work without
-  // credentials. Live discovery isn't wired for opencode, so this static list
-  // (plus models-extra.json) is the catalog. Run `opencode models` for the full
-  // set, or add paid ids via models-extra.json.
+  // OpenCode's live list comes from `opencode models` (see model-discovery):
+  // its free models, which change server-side, plus every provider configured
+  // on the host. This one stands in until that first answer.
   opencode: [
-    { id: 'opencode/big-pickle', label: 'Big Pickle (free)' },
-    { id: 'opencode/deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (free)' },
-    { id: 'opencode/north-mini-code-free', label: 'North Mini Code (free)' },
-    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (free)' },
-    { id: 'opencode/mimo-v2.5-free', label: 'MiMo v2.5 (free)' },
+    { id: 'opencode/big-pickle', label: 'big-pickle', description: 'opencode' },
   ],
-  // Hermes' model is `provider/model` and is normally set via `hermes setup` /
-  // config.yaml. Left empty so the configured default is used; pin specific ids
-  // via models-extra.json to expose a picker.
+  // Hermes' picker shows the one model configured on the host (`hermes
+  // model`), reported as `default`; models-extra.json pins add real ids.
   hermes: [],
   // Cursor's live catalog is the one its ACP server lists (see
   // model-discovery). Auto is the only id known before that.
@@ -244,7 +238,7 @@ const AGENT_DEFAULTS = {
 
 // Agents whose model group gets an automatic default (the newest catalog entry
 // or the CLI's configured default when available).
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode', 'hermes']);
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
@@ -340,6 +334,68 @@ function fallbackModelsFor(agentKey) {
   }));
 }
 
+// Cursor's plan includes Auto and Cursor's own models (Grok, Composer); every
+// other model bills prepaid usage from the first request.
+const CURSOR_INCLUDED_RE = /^(?:default$|grok-|composer-)/;
+
+// Family and [major, minor] of an id, or null when the id has no known shape.
+const MODEL_VERSION_PARSERS = {
+  claude(id) {
+    const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(id);
+    return m && { family: m[1], version: [Number(m[2]), Number(m[3] || 0)] };
+  },
+  codex(id) {
+    const m = /^gpt-(\d+)(?:\.(\d+))?-([a-z]+)$/.exec(id);
+    return m && { family: m[3], version: [Number(m[1]), Number(m[2] || 0)] };
+  },
+};
+
+function compareVersions(a, b) {
+  return a[0] - b[0] || a[1] - b[1];
+}
+
+// Legacy: not the newest of its family, or a family with nothing in the newest
+// major generation. Ids of unknown shape stay current.
+function legacyModelIds(models, parse) {
+  const parsed = [];
+  for (const model of models) {
+    const info = parse(model.id);
+    if (info) parsed.push({ id: model.id, ...info });
+  }
+  if (!parsed.length) return new Set();
+  const newestMajor = Math.max(...parsed.map((p) => p.version[0]));
+  const newest = new Map();
+  for (const p of parsed) {
+    const seen = newest.get(p.family);
+    if (!seen || compareVersions(p.version, seen) > 0) newest.set(p.family, p.version);
+  }
+  return new Set(
+    parsed
+      .filter(
+        (p) =>
+          p.version[0] < newestMajor ||
+          compareVersions(p.version, newest.get(p.family)) < 0,
+      )
+      .map((p) => p.id),
+  );
+}
+
+// The picker lists grouped models on a second page: `paid` for Cursor models
+// outside the plan, `legacy` for Claude/Codex models a newer one replaced.
+function withModelGroups(agentKey, models) {
+  if (agentKey === 'cursor') {
+    return models.map((model) =>
+      CURSOR_INCLUDED_RE.test(model.id) ? model : { ...model, group: 'paid' },
+    );
+  }
+  const parse = MODEL_VERSION_PARSERS[agentKey];
+  if (!parse) return models;
+  const legacy = legacyModelIds(models, parse);
+  return models.map((model) =>
+    legacy.has(model.id) ? { ...model, group: 'legacy' } : model,
+  );
+}
+
 function modelsFor(agentKey) {
   // Prefer the live list the installed CLI ships (so the picker tracks the
   // binary, including brand-new models); fall back to the static catalog when
@@ -347,7 +403,7 @@ function modelsFor(agentKey) {
   const discovered = discoverModels(agentKey);
   const base =
     discovered && discovered.length ? discovered : fallbackModelsFor(agentKey);
-  return mergeExtraModels(agentKey, base);
+  return withModelGroups(agentKey, mergeExtraModels(agentKey, base));
 }
 
 function effortOptionsFor(agentKey, model) {
@@ -422,7 +478,12 @@ function describeAgent(agentKey) {
       permission: groups.permission.length > 0,
       fast: groups.fast.length > 0,
     },
-    model: strip(groups.model),
+    model: groups.model.map(({ id, label, description, group }) => ({
+      id,
+      label,
+      description,
+      group,
+    })),
     effort: strip(groups.effort),
     effortByModel,
     defaultEffortByModel,
@@ -529,9 +590,11 @@ function acpSessionOptions(agentKey, settings) {
   };
   // Hermes names models `provider:model` over ACP, while its config and
   // models-extra.json use the CLI's `provider/model` form. Translate so a
-  // pinned id keeps selecting the same model.
+  // pinned id keeps selecting the same model. `default` is the host's own
+  // configured model, which Hermes already runs.
   if (agentKey === 'hermes' && options.modelId) {
-    options.modelId = options.modelId.replace('/', ':');
+    options.modelId =
+      options.modelId === 'default' ? null : options.modelId.replace('/', ':');
   }
   if (agentKey === 'cursor') {
     options.modelId = null;
