@@ -527,9 +527,12 @@ function streamUploadToFile(req, targetPath, maxBytes) {
       if (failed) return;
       failed = true;
       req.unpipe(out);
+      // Opening the file is asynchronous. Wait until even an in-flight open
+      // has closed before unlinking, or cleanup can run before the file exists.
+      const cleanup = () => fs.unlink(tmpPath, () => reject(err));
+      if (out.closed) cleanup();
+      else out.once('close', cleanup);
       out.destroy();
-      fs.unlink(tmpPath, () => {});
-      reject(err);
     };
     req.on('error', fail);
     req.on('aborted', () => fail(new Error('upload aborted')));

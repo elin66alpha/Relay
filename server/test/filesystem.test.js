@@ -571,16 +571,33 @@ test('an upload over the byte limit is cut off mid-stream and leaves no file', a
   const target = path.join(dir, 'big.bin');
   const { streamUploadToFile } = loadFilesystem();
 
-  await assert.rejects(
-    streamUploadToFile(Readable.from([Buffer.alloc(600), Buffer.alloc(600)]), target, 1024),
-    (err) => err.status === 413 && err.code === 'FS_UPLOAD_TOO_LARGE',
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(fs.readdirSync(dir), []);
+  for (const chunks of [[Buffer.alloc(1200)], [Buffer.alloc(600), Buffer.alloc(600)]]) {
+    await assert.rejects(
+      streamUploadToFile(Readable.from(chunks), target, 1024),
+      (err) => err.status === 413 && err.code === 'FS_UPLOAD_TOO_LARGE',
+    );
+    assert.deepEqual(fs.readdirSync(dir), []);
+  }
 
   const received = await streamUploadToFile(Readable.from([Buffer.from('ok')]), target, 1024);
   assert.equal(received, 2);
   assert.deepEqual(fs.readdirSync(dir), ['big.bin']);
+});
+
+test('a failed upload is cleaned up before rejection and preserves the destination', async () => {
+  const dir = scratchCase();
+  const target = path.join(dir, 'existing.txt');
+  fs.writeFileSync(target, 'original');
+  const { streamUploadToFile } = loadFilesystem();
+  const failure = new Error('upload stream failed');
+  const body = Readable.from((async function* () {
+    yield Buffer.from('replacement');
+    throw failure;
+  })());
+
+  await assert.rejects(streamUploadToFile(body, target, 1024), (err) => err === failure);
+  assert.deepEqual(fs.readdirSync(dir), ['existing.txt']);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'original');
 });
 
 test('a directory downloads as a zip and is aborted past the byte cap', { skip: process.platform === 'win32' }, async (t) => {

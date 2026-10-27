@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- Failed or oversized uploads remove their temporary files before reporting an
+  error, including when the upload fails before the temporary file opens.
 - Claude Code no longer shows a false "log in again within a day" warning on
   Machine details. Relay reports no login deadline, because every supported CLI
   refreshes its own tokens.
