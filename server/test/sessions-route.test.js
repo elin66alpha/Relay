@@ -103,7 +103,7 @@ test('rename uses the create name limit and returns null for a missing session',
 
 test('rename protects Main', async () => {
   const before = sessions.listChatSessions(CONTEXT);
-  const response = await rename({ sessionId: sessions.LEGACY_SESSION_ID, name: 'New' });
+  const response = await rename({ sessionId: sessions.MAIN_SESSION_ID, name: 'New' });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, 'SESSION_PROTECTED');
   assert.deepEqual(sessions.listChatSessions(CONTEXT), before);

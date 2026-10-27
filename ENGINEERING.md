@@ -159,8 +159,8 @@ one summary line.
 ## Review
 
 Last review: 2026-10-26
-Features since last review: 2
-Last result: Intent Problem, Structure Problem, Entropy Problem, Test value OK, Documentation Problem, Operability OK, Evolution Problem, Performance OK; 13 findings. After the 2026-10-26 cleanup F2-F4, F6-F11 and F5's duplicated result handling are fixed; F1 is partly fixed (both chat screens split, BotChatController still ~1800 lines with only push registration extracted). Kept with reasons: the Swarm work-tree picker and the file browser stay separate (a modal directory chooser vs a file manager with transfers; both already use `browseWorkdir`), and the cap-wait test stays in session-slots and both pools (each pins different wiring). F13 (add/delete ratio) is a process note.
+Features since last review: 0
+Last result: Intent Problem, Structure OK, Entropy Problem, Test value Problem, Documentation Problem, Operability Problem, Evolution OK, Performance Problem; 6 open findings (0.1.9: Cursor child-process environment regression coverage, catalog refresh coordinator coverage, silent catalog/config failures, environment-specific verification assumptions, and incomplete documentation updates; existing: whole-history serialization measured at 145.83-181.10 ms for 500 synthetic scopes / 55.66 MB). Independent audit of ef5d04e..7cbffcd; clean exported checkout passed Flutter analysis, 148 Flutter tests, 308 backend tests, backend lint/syntax/native PTY loading, Web build and isolated HTTP startup; unsigned APK attempt failed at the documented missing android/key.properties guard.
 
 ## Deviations
 

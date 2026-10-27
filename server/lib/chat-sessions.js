@@ -8,7 +8,7 @@ const { createJsonStore } = require('./json-store');
 const SESSIONS_FILE = process.env.RELAY_CHAT_SESSIONS_FILE
   ? path.resolve(process.env.RELAY_CHAT_SESSIONS_FILE)
   : path.join(__dirname, '..', 'chat-sessions.json');
-const LEGACY_SESSION_ID = 'default';
+const MAIN_SESSION_ID = 'default';
 // Upper bound on named chat sessions per workdir+agent (includes the default
 // "Main" session). Keeps chat-sessions.json bounded and the drawer manageable.
 const MAX_SESSIONS = 8;
@@ -41,7 +41,7 @@ function nextSessionName(sessions) {
 
 function defaultSession(now) {
   return {
-    id: LEGACY_SESSION_ID,
+    id: MAIN_SESSION_ID,
     name: 'Main',
     createdAt: now,
     updatedAt: now,
@@ -59,7 +59,7 @@ function normalizeContext(raw, now = new Date().toISOString()) {
     seen.add(id);
     sessions.push({
       id,
-      name: normalizeName(item.name, id === LEGACY_SESSION_ID ? 'Main' : 'Session'),
+      name: normalizeName(item.name, id === MAIN_SESSION_ID ? 'Main' : 'Session'),
       createdAt: String(item.createdAt || now),
       updatedAt: String(item.updatedAt || item.createdAt || now),
     });
@@ -76,8 +76,8 @@ function normalizeContext(raw, now = new Date().toISOString()) {
 }
 
 function sessionScopeKey(contextKey, sessionId) {
-  const id = validSessionId(sessionId) || LEGACY_SESSION_ID;
-  return id === LEGACY_SESSION_ID ? contextKey : `${contextKey}\u0000${id}`;
+  const id = validSessionId(sessionId) || MAIN_SESSION_ID;
+  return id === MAIN_SESSION_ID ? contextKey : `${contextKey}\u0000${id}`;
 }
 
 function contextPayload(context) {
@@ -188,7 +188,7 @@ function renameChatSession(contextKey, sessionId, rawName) {
 }
 
 module.exports = {
-  LEGACY_SESSION_ID,
+  MAIN_SESSION_ID,
   MAX_SESSIONS,
   listChatSessions,
   resolveChatSession,

@@ -82,7 +82,7 @@ const {
   markdownForConversation,
 } = require('./lib/history');
 const {
-  LEGACY_SESSION_ID,
+  MAIN_SESSION_ID,
   MAX_SESSIONS,
   listChatSessions,
   resolveChatSession,
@@ -534,7 +534,7 @@ const routeContext = {
   DEFAULT_AGENT,
   ENABLE_QUOTA_WATCH,
   HOST,
-  LEGACY_SESSION_ID,
+  MAIN_SESSION_ID,
   MAX_DOWNLOAD_BYTES,
   MAX_PROMPT_BYTES,
   MAX_SESSIONS,
