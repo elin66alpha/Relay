@@ -48,8 +48,9 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Scope and concurrency
 
-- A device stores its active workdir locally and sends it as `X-Workdir` on
-  every request. There is no global backend workdir.
+- A device stores its active workdir locally, one per machine, and sends it as
+  `X-Workdir` on every request to that machine. There is no global backend
+  workdir, and a path never goes to a backend it was not chosen on.
 - A conversation is scoped by `workdir + agent + sessionId`. Each agent context
   supports at most eight named sessions; `Main` cannot be deleted or renamed
   because it preserves the legacy scope key and the original conversation from

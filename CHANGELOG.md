@@ -69,6 +69,10 @@
   diagnostics report use the same lookup.
 - Switching to another backend reloads that host's agent list, so agents no
   longer stay marked unavailable from the previous one.
+- The app keeps its current work directory per backend. It used to send one
+  host's path to every backend, which then failed with `EACCES: permission
+  denied, mkdir` when that path was not writable there. After updating, each
+  backend opens at its default work directory until one is chosen there.
 - Machine details shrinks narrow labels and the agent buttons instead of
   breaking words across two lines on portrait phones.
 

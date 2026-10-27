@@ -250,7 +250,7 @@ delete command, so Relay removes that session's directory under
 
 ### Workdirs, conversations, and settings
 
-Each device stores its current workdir and sends it in `X-Workdir`. Backend state
+Each device stores its current workdir per backend and sends it in `X-Workdir`. Backend state
 then uses two related scopes:
 
 | State | Scope |

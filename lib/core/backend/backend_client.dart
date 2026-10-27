@@ -81,10 +81,6 @@ class BackendClient {
   final ApiTransport _transport;
   http.Client get _httpClient => _transport.httpClient;
 
-  /// This device's current work directory, or null when it has not chosen one
-  /// (the backend then uses its default).
-  Future<String?> currentWorkdir() => _transport.currentWorkdir();
-
   Future<void> close() async {
     _transport.close();
   }
@@ -950,7 +946,9 @@ class BackendClient {
   }
 
   Future<WorkdirInfo> setWorkdir(String path, {bool create = false}) async {
-    final Object? decoded = await _requestJson(
+    final MachineCredential credential = await _requireCredential();
+    final Object? decoded = await _requestJsonWithCredential(
+      credential,
       'POST',
       '/api/workdir',
       body: <String, Object?>{'path': path, 'create': create},
@@ -964,7 +962,7 @@ class BackendClient {
     // The backend only validates the path; this device owns its current workdir,
     // so persist the canonical path locally and send it on later requests.
     if (info.dir.isNotEmpty) {
-      await _transport.writeWorkdir(info.dir);
+      await _transport.writeWorkdir(credential, info.dir);
     }
     return info;
   }
