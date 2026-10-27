@@ -5,9 +5,10 @@
 # A menu that installs, reinstalls or uninstalls the backend, shows its status,
 # and manages device tokens. Installing starts the backend with PM2, optionally
 # opens a Cloudflare tunnel, then generates the credential QR that the Relay app
-# scans. Run from the repo root:
+# scans. Run from the repo root (scripts/install.sh downloads a release and
+# runs it with `install`, which skips the menu on a fresh host):
 #
-#   ./backends/linux/setup.sh
+#   ./backends/linux/setup.sh [install]
 #
 # Network modes:
 #   1. No tunnel: for a VPS / box with a reachable public IP or domain.
@@ -112,7 +113,7 @@ ensure_tunnel_dns_route() {
 
   c_warn "Cloudflare could not create the DNS route automatically."
   c_warn "This usually means an A, AAAA, or CNAME record already exists for $hostname_value."
-  read -rp "Overwrite the existing DNS record for $hostname_value? [y/N]: " overwrite
+  read -rp "${ASK}Overwrite the existing DNS record for $hostname_value? [y/N]: " overwrite
   case "$overwrite" in
     y | Y | yes | YES)
       cloudflared tunnel route dns --overwrite-dns "$tunnel_name" "$hostname_value"
@@ -158,7 +159,7 @@ confirm_system_install() {
     exit 1
   fi
   [ "$APT_APPROVED" -eq 1 ] && return
-  read -rp "Install missing system software ($*) with sudo? [Y/n]: " answer
+  read -rp "${ASK}Install missing system software ($*) with sudo? [Y/n]: " answer
   case "${answer:-y}" in
     [Yy]*) APT_APPROVED=1 ;;
     *) c_err "Missing: $*. Install it, then rerun setup."; exit 1 ;;
@@ -174,6 +175,16 @@ apt_install() {
   c_info "Installing $*..."
   as_root apt-get update
   as_root apt-get install -y "$@"
+}
+
+# A user-owned prefix (nvm) installs without sudo; a system one needs it.
+npm_install_global() {
+  if [ -w "$(npm prefix -g)" ]; then
+    npm install -g "$@"
+  else
+    confirm_system_install "$@"
+    as_root npm install -g "$@"
+  fi
 }
 
 node_major() { node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0; }
@@ -199,13 +210,7 @@ fi
 need npm || apt_install npm
 if ! need pm2; then
   c_info "Installing pm2..."
-  # A user-owned prefix (nvm) installs without sudo; a system one needs it.
-  if [ -w "$(npm prefix -g)" ]; then
-    npm install -g pm2
-  else
-    confirm_system_install pm2
-    as_root npm install -g pm2
-  fi
+  npm_install_global pm2
   hash -r
   need pm2 || { c_err "pm2 was installed but $(npm prefix -g)/bin is not on PATH."; exit 1; }
 fi
@@ -258,6 +263,86 @@ if [ ! -d node_modules ] ||
 fi
 }
 
+# ---- agent CLIs ----
+# Each CLI's official installer. Codex ships on npm; the rest publish a script.
+# Relay never signs an agent in: the login command is printed for the user.
+AGENT_LABELS=("Claude Code" "Codex" "Cursor" "OpenCode" "Hermes")
+AGENT_BINS=(claude codex agent opencode hermes)
+AGENT_SCRIPTS=(
+  "https://claude.ai/install.sh"
+  ""
+  "https://cursor.com/install"
+  "https://opencode.ai/install"
+  "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+)
+AGENT_LOGINS=("claude" "codex login --device-auth" "agent login" "opencode auth login" "hermes setup")
+
+# The same places the backend looks (server/lib/cli-paths.js): PATH, then the
+# per-user dirs the installers use, which this shell's PATH may lack.
+agent_cli_installed() {
+  need "$1" || [ -x "$HOME/.local/bin/$1" ] ||
+    { [ "$1" = opencode ] && [ -x "$HOME/.opencode/bin/opencode" ]; }
+}
+
+install_agent_cli() {
+  local i="$1" script
+  c_info "Installing ${AGENT_LABELS[$i]}..."
+  if [ -z "${AGENT_SCRIPTS[$i]}" ]; then
+    need npm || { c_warn "Codex installs with npm, which is missing. Choose 1 to install Relay first."; return 1; }
+    npm_install_global @openai/codex
+    return
+  fi
+  need curl || apt_install ca-certificates curl
+  # Hermes' installer clones its repository.
+  [ "${AGENT_BINS[$i]}" != hermes ] || need git || apt_install git
+  # Saved to a file rather than piped, so an installer that asks questions
+  # still reads them from this terminal.
+  script="$(mktemp)"
+  trap "rm -f '$script'" EXIT
+  curl -fsSL "${AGENT_SCRIPTS[$i]}" -o "$script" && bash "$script"
+}
+
+install_agent_clis() {
+  local i n picks missing=() added=()
+  for i in "${!AGENT_BINS[@]}"; do
+    if agent_cli_installed "${AGENT_BINS[$i]}"; then
+      printf '  %d) %-12s \033[32m✔ installed\033[0m\n' "$((i + 1))" "${AGENT_LABELS[$i]}"
+    else
+      printf '  %d) %-12s \033[2m✘ not installed\033[0m\n' "$((i + 1))" "${AGENT_LABELS[$i]}"
+      missing+=("$((i + 1))")
+    fi
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    c_info "All five agent CLIs are installed."
+    return
+  fi
+  read -rp "${ASK}Install which? Numbers separated by spaces, a = all missing, Enter = skip: " picks
+  [ "$picks" != a ] || picks="${missing[*]}"
+  for n in $picks; do
+    case "$n" in [1-5]) ;; *) c_warn "Skipping invalid choice: $n"; continue ;; esac
+    i=$((n - 1))
+    if agent_cli_installed "${AGENT_BINS[$i]}"; then
+      c_warn "${AGENT_LABELS[$i]} is already installed."
+      continue
+    fi
+    # A subshell, so declining sudo or a failed installer skips only this CLI
+    # instead of exiting setup.
+    (install_agent_cli "$i") || true
+    hash -r
+    if agent_cli_installed "${AGENT_BINS[$i]}"; then
+      added+=("$i")
+    else
+      c_warn "${AGENT_LABELS[$i]} did not install. Install it by hand later; Relay finds it without a restart."
+    fi
+  done
+  [ "${#added[@]}" -gt 0 ] || return 0
+  c_info "Sign in to each new CLI on this machine (open a new terminal if a command is not found):"
+  for i in "${added[@]}"; do
+    printf '  %-12s %s\n' "${AGENT_LABELS[$i]}" "${AGENT_LOGINS[$i]}"
+  done
+  printf '  Relay picks them up within a minute; no restart needed.\n'
+}
+
 # Release packages ship build/web; RELAY_SERVE_WEB=0 keeps it unserved.
 choose_web() {
   local answer
@@ -265,7 +350,7 @@ choose_web() {
     c_warn "This copy has no Web client (build/web); the backend serves the API only."
     return
   fi
-  read -rp "Serve the Web client at the backend address? [Y/n]: " answer
+  read -rp "${ASK}Serve the Web client at the backend address? [Y/n]: " answer
   case "${answer:-y}" in
     [Yy]*) set_env RELAY_SERVE_WEB 1 ;;
     *) set_env RELAY_SERVE_WEB 0 ;;
@@ -273,28 +358,31 @@ choose_web() {
 }
 
 install_backend() {
+section "Step 1/5 · System software and server dependencies"
 install_prerequisites
 install_server_deps
+section "Step 2/5 · Agent CLIs"
+install_agent_clis
+section "Step 3/5 · Web client"
 choose_web
 
 PORT_NUM="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)"
 PORT_NUM="${PORT_NUM:-8787}"
 
-c_info "Relay setup"
+section "Step 4/5 · Network mode"
 cat <<EOF
-Choose network mode:
   1) No tunnel / direct public address
   2) Cloudflare Tunnel / named stable hostname
   3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL
 EOF
-read -rp "Network mode [1/2/3, default 3]: " NETWORK_MODE
+read -rp "${ASK}Network mode [1/2/3, default 3]: " NETWORK_MODE
 NETWORK_MODE="${NETWORK_MODE:-3}"
 
 case "$NETWORK_MODE" in
   1)
     # ---------- Direct mode (e.g. VPS with a public IP / domain) ----------
     c_info "Direct mode: the app connects straight to your address (no tunnel)."
-    read -rp "Public address the app will use (e.g. https://agent.example.com or http://1.2.3.4:${PORT_NUM}): " PUBLIC_URL
+    read -rp "${ASK}Public address the app will use (e.g. https://agent.example.com or http://1.2.3.4:${PORT_NUM}): " PUBLIC_URL
     [ -n "$PUBLIC_URL" ] || { c_err "A public address is required in direct mode."; exit 1; }
     case "$PUBLIC_URL" in
       http://* | https://*) ;;
@@ -317,18 +405,18 @@ case "$NETWORK_MODE" in
     c_warn "${PUBLIC_URL} actually reaches this machine (directly or via a reverse proxy)."
     c_warn "For HTTPS, terminate TLS at a reverse proxy (nginx/Caddy) in front of port ${PORT_NUM}."
 
-    c_info "Generating credential QR..."
+    section "Step 5/5 · Device credential (choose a password for the QR)"
     credential --url "$PUBLIC_URL"
     ;;
   2)
     # ---------- Cloudflare named tunnel ----------
     ensure_cloudflared
     c_info "Cloudflare Tunnel mode: stable hostname through a named tunnel."
-    read -rp "Public hostname for this backend (e.g. agent.example.com): " PUBLIC_HOSTNAME
+    read -rp "${ASK}Public hostname for this backend (e.g. agent.example.com): " PUBLIC_HOSTNAME
     PUBLIC_HOSTNAME="$(url_hostname "$PUBLIC_HOSTNAME")"
     [ -n "$PUBLIC_HOSTNAME" ] || { c_err "A hostname is required for Cloudflare Tunnel mode."; exit 1; }
     DEFAULT_TUNNEL_NAME="$(default_tunnel_name)"
-    read -rp "Cloudflare tunnel name [$DEFAULT_TUNNEL_NAME]: " TUNNEL_NAME
+    read -rp "${ASK}Cloudflare tunnel name [$DEFAULT_TUNNEL_NAME]: " TUNNEL_NAME
     TUNNEL_NAME="${TUNNEL_NAME:-$DEFAULT_TUNNEL_NAME}"
     TUNNEL_NAME="$(printf '%s' "$TUNNEL_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^-+|-+$//g')"
     [ -n "$TUNNEL_NAME" ] || { c_err "A tunnel name is required."; exit 1; }
@@ -351,7 +439,7 @@ case "$NETWORK_MODE" in
     pm2 start ecosystem.config.js
     pm2 save >/dev/null 2>&1 || true
 
-    c_info "Generating credential QR..."
+    section "Step 5/5 · Device credential (choose a password for the QR)"
     credential --url "$PUBLIC_URL"
     ;;
   3)
@@ -389,7 +477,7 @@ case "$NETWORK_MODE" in
       c_warn "Tunnel URL not visible yet; the credential step will retry detection."
     fi
 
-    c_info "Generating credential QR..."
+    section "Step 5/5 · Device credential (choose a password for the QR)"
     credential
     ;;
   *)
@@ -408,24 +496,30 @@ installed() { need pm2 && pm2_has "$SERVER_PROC"; }
 
 read_token_id() {
   credential --list-tokens
-  read -rp "Token id: " TOKEN_ID
+  read -rp "${ASK}Token id: " TOKEN_ID
   [ -n "$TOKEN_ID" ]
 }
 
+if [ "${1:-}" = install ] && ! installed; then
+  install_backend
+  exit 0
+fi
+
 while true; do
-  c_info "Relay backend"
+  section "Relay backend"
   cat <<'MENU'
   1) Install
   2) Reinstall (keeps tokens, chats and settings)
   3) Uninstall all services
   4) Service status (address, agents, tokens)
-  5) Create a new token
-  6) Delete a token
-  7) List tokens
-  8) Show a token's credential QR again
+  5) Install agent CLIs (Claude Code, Codex, Cursor, OpenCode, Hermes)
+  6) Create a new token
+  7) Delete a token
+  8) List tokens
+  9) Show a token's credential QR again
   0) Exit
 MENU
-  read -rp "Choose [0-8]: " CHOICE || exit 0
+  read -rp "${ASK}Choose [0-9]: " CHOICE || exit 0
   case "$CHOICE" in
     1)
       if installed; then
@@ -436,7 +530,7 @@ MENU
       exit 0
       ;;
     2)
-      read -rp "Stop Relay, reinstall its dependencies and set up the network again? [y/N]: " answer
+      read -rp "${ASK}Stop Relay, reinstall its dependencies and set up the network again? [y/N]: " answer
       case "$answer" in [Yy]*) ;; *) continue ;; esac
       if need pm2; then pm2 delete "$SERVER_PROC" "$TUNNEL_PROC" >/dev/null 2>&1 || true; fi
       rm -rf "$SERVER_DIR/node_modules"
@@ -444,27 +538,35 @@ MENU
       exit 0
       ;;
     3)
-      read -rp "Stop and remove every Relay service, including the Web client? [y/N]: " answer
+      read -rp "${ASK}Stop and remove every Relay service, including the Web client? [y/N]: " answer
       case "$answer" in [Yy]*) exec "$LINUX_ADAPTER_DIR/uninstall.sh" ;; esac
       ;;
     4) "$LINUX_ADAPTER_DIR/status.sh" || true ;;
-    5 | 6 | 7 | 8)
+    5)
+      section "Agent CLIs"
+      install_agent_clis
+      ;;
+    6 | 7 | 8 | 9)
       if [ ! -f "$ENV_FILE" ] || [ ! -d "$SERVER_DIR/node_modules" ]; then
         c_warn "Relay is not installed here yet. Choose 1 first."
         continue
       fi
       case "$CHOICE" in
-        5)
-          read -rp "Label for the device that will use it [$(hostname)]: " LABEL
+        6)
+          section "Create a token"
+          read -rp "${ASK}Label for the device that will use it [$(hostname)]: " LABEL
           credential --label "${LABEL:-$(hostname)}" || true
           ;;
-        6)
+        7)
+          section "Delete a token"
           read_token_id || continue
-          read -rp "Delete token $TOKEN_ID? Devices using it lose access. [y/N]: " answer
+          read -rp "${ASK}Delete token $TOKEN_ID? Devices using it lose access. [y/N]: " answer
           case "$answer" in [Yy]*) credential --delete "$TOKEN_ID" || true ;; esac
           ;;
-        7) credential --list-tokens ;;
-        8) if read_token_id; then credential --show "$TOKEN_ID" || true; fi ;;
+        8) credential --list-tokens ;;
+        9)
+          section "Show a token's credential QR again"
+          if read_token_id; then credential --show "$TOKEN_ID" || true; fi ;;
       esac
       ;;
     0) exit 0 ;;

@@ -26,7 +26,17 @@ Cloudflare Tunnel startup to each operating system.
 
 ## Install
 
-Run one command from the repository root:
+On Linux, one command downloads the latest release, verifies it against the
+release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the prompt, or
+`RELAY_DIR`) and runs setup. Running it again upgrades the code in place,
+keeps `server/.env`, tokens, chats and settings, and restarts the backend.
+`RELAY_VERSION=<VERSION>` installs a specific release.
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+From a copy of the repository, run one command from its root:
 
 | Backend OS | Command | Service manager |
 |---|---|---|
@@ -41,8 +51,13 @@ app and enter the passphrase you chose.
 
 On Linux, `setup.sh` opens a menu: install, reinstall (keeps tokens, chats and
 settings), uninstall, service status (address, tunnel hostnames, Web client,
-agent install and sign-in state, tokens), and create, delete, list or re-show a
-device token. Re-showing reuses the token and asks for a new QR password, since
+agent install and sign-in state, tokens), install agent CLIs, and create,
+delete, list or re-show a device token. Installing agent CLIs lists Claude Code,
+Codex, Cursor, OpenCode and Hermes with their install state, looking where the
+backend does (PATH, `~/.local/bin`, `~/.opencode/bin`), installs the ones you
+pick with each CLI's official installer (`npm install -g @openai/codex` for
+Codex), and prints their login commands; Relay never signs a CLI in. Install
+runs the same step. Re-showing reuses the token and asks for a new QR password, since
 the old one is not stored. Install and reinstall ask whether to serve the Web
 client at the backend address (default yes).
 

@@ -125,7 +125,19 @@ dependencies but not the Web client, so it serves only the API; install and
 authenticate your agent CLIs separately. The asset
 `relay-windows-x64-v0.1.8.zip` is the desktop client.
 
-Run the setup command for your backend OS from the repository root:
+On Linux, one command downloads the latest release into `~/relay` (or a
+directory you choose), checks it against the release checksums, and runs setup:
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+Setup can also install any of the five agent CLIs that are missing, then prints
+each one's login command. Running the command again upgrades the backend in
+place, keeping tokens, chats and settings.
+
+From a copy of the repository, run the setup command for your backend OS from
+its root:
 
 | Backend OS | Setup command |
 |---|---|

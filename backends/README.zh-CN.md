@@ -21,7 +21,15 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 
 ## 安装
 
-在仓库根目录运行一个命令：
+在 Linux 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到 `~/relay`
+（运行时可改，或用 `RELAY_DIR` 指定），然后运行安装脚本。再次运行即原地升级代码，保留
+`server/.env`、令牌、聊天和设置，并重启后端。`RELAY_VERSION=<版本>` 可安装指定版本。
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+使用仓库副本时，在仓库根目录运行一个命令：
 
 | 后端系统 | 命令 | 服务管理 |
 |---|---|---|
@@ -33,8 +41,12 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 凭证。然后在 app 中导入生成的 `.relay.png` 或 `.relay.json`，输入生成时设置的密码。
 
 在 Linux 上，`setup.sh` 会打开一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
-查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌），以及新建、
-删除、列出或重新展示设备令牌。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
+查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌）、安装 agent
+CLI，以及新建、删除、列出或重新展示设备令牌。安装 agent CLI 会列出 Claude Code、Codex、
+Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PATH、`~/.local/bin`、
+`~/.opencode/bin`），用各 CLI 的官方安装方式安装你选的几个（Codex 用
+`npm install -g @openai/codex`），并打印登录命令；Relay 不会替 CLI 登录。安装流程里也
+有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
 不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
 
 只有源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `build/web` 中自带编译好的

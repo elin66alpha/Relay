@@ -116,7 +116,17 @@ Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/re
 已包含 Node.js 和生产依赖，但不含 Web 前端，只提供 API；agent CLI 仍需自行安装并认证。
 `relay-windows-x64-v0.1.8.zip` 是桌面客户端。
 
-在仓库根目录执行对应系统的安装命令：
+在 Linux 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的校验和
+核对后运行安装脚本：
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+安装脚本还能替你安装缺少的 agent CLI（五个里任选），装完会打印各自的登录命令。再次运行
+这条命令就是原地升级，令牌、聊天和设置都会保留。
+
+使用仓库副本时，在仓库根目录执行对应系统的安装命令：
 
 | 后端系统 | 安装命令 |
 |---|---|

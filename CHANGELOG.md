@@ -26,9 +26,20 @@
   (address, tunnel hostnames, Web client, agent state, tokens), and create,
   delete, list or re-show a device token. `npm run credential` gains `--delete
   <id>` and `--show <id>`.
+- One-line Linux install: `curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`
+  downloads the latest release's setup bundle, checks it against `SHA256SUMS`,
+  unpacks it into `~/relay` (or the chosen directory, `RELAY_DIR`) and runs
+  setup. Running it again upgrades in place, keeps `server/.env`, tokens,
+  chats and settings, and restarts the backend. `install.sh` is a release asset.
+- Linux setup can install the agent CLIs: it shows which of Claude Code, Codex,
+  Cursor, OpenCode and Hermes are installed, installs the ones picked with each
+  CLI's official installer, and prints their login commands. Install runs this
+  step, and the menu has it as its own entry, so token entries move to 6-9.
 
 ### Changed
 
+- Linux setup opens each step and menu with a banner and marks every question,
+  so the choices stand out from installer output.
 - Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to
   install missing prerequisites with `sudo apt-get`: Node.js 24 from
   NodeSource, PM2, `zip`, the PTY build tools, and `cloudflared` for tunnel

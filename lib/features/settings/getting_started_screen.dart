@@ -132,7 +132,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '先确认工作区，再开始任务',
     body:
-        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n从左侧栏打开“文件系统”，进入项目目录，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备独立选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
+        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n从左侧栏打开“文件系统”，进入项目目录，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
   ),
   _GettingStartedStep(
     title: '在机器详情检查 CLI 状态',
@@ -185,7 +185,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose the workspace before starting',
     body:
-        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nOpen File system from the drawer, navigate to your project, and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory; switching it also changes the associated history and Swarm list.',
+        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nOpen File system from the drawer, navigate to your project, and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
   ),
   _GettingStartedStep(
     title: 'Check CLI status in Machine details',

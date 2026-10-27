@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 ask_no() {
   local answer
-  read -rp "$1 [y/N]: " answer
+  read -rp "${ASK}$1 [y/N]: " answer
   case "$answer" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
 

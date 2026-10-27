@@ -162,6 +162,12 @@ const List<_Release> _zhReleases = <_Release>[
         body:
             '左侧栏的智能体里多了 Cursor，排在 Codex 下面。只要主机上的 Cursor 已经登录（在主机终端运行 agent login），就能像 Claude Code、Codex 一样跟它聊天，选模型、思考深度、快速模式和权限，几个 Cursor 会话也能同时进行。额度页能看到它的用量。',
       ),
+      _Highlight(
+        icon: Icons.terminal_rounded,
+        title: '一行命令装好后端',
+        body:
+            '在 Linux 主机终端粘贴一行命令，就会自动下载最新的 Relay 后端并开始安装，还能顺手装上你选的 Claude Code、Codex、Cursor、OpenCode、Hermes。命令在凭证页的“如何部署后端？”里可以直接复制；以后再运行一次就是升级，聊天和设置都会保留。',
+      ),
     ],
     changes: <String>[
       '模型列表更简洁：Cursor 只列出套餐额度内的模型，需要预付费的放到底部的“需要支付方式的模型”里；Claude Code 和 Codex 的旧版模型放到底部的“旧版模型”里。Swarm 里只列主力模型。',
@@ -223,6 +229,12 @@ const List<_Release> _enReleases = <_Release>[
         title: 'Cursor joins Relay',
         body:
             'Cursor now appears in the agent list, right below Codex. Once Cursor is signed in on the host (run agent login in a terminal there), you can chat with it and pick its model, reasoning effort, Fast mode and permission just like Claude Code and Codex, with several Cursor sessions running at once. The quota page shows its usage.',
+      ),
+      _Highlight(
+        icon: Icons.terminal_rounded,
+        title: 'Install the backend with one command',
+        body:
+            'Paste one command into a Linux terminal and it downloads the latest Relay backend and starts setup, which can also install the Claude Code, Codex, Cursor, OpenCode or Hermes CLIs you pick. Copy the command from “How to deploy the backend?” on the credentials page; running it again later upgrades, keeping your chats and settings.',
       ),
     ],
     changes: <String>[

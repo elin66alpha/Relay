@@ -564,6 +564,10 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 A GitHub release `v<VERSION>` carries:
 
 - `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
+- `install.sh` — `scripts/install.sh`, the Linux one-line installer
+  (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
+  It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
+  them;
 - `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
   service adapters, without tests, dependencies, or deployment state, plus the
   compiled Web client in `build/web`. `./scripts/package_backend.sh` builds the
