@@ -45,6 +45,7 @@ module.exports = function createMetaRouter(ctx) {
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
+    locateBin = (bin) => bin,
     machineInfo,
     normalizeDeviceId,
     refreshAgentModels = () => Promise.resolve(),
@@ -137,7 +138,7 @@ module.exports = function createMetaRouter(ctx) {
   function runCliCommand(bin, args, timeoutMs) {
     return new Promise((resolve) => {
       execFile(
-        bin,
+        locateBin(bin) || bin,
         args,
         { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
         (err, stdout, stderr) => {

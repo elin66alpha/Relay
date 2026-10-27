@@ -55,8 +55,10 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   bool _autoScrollQueued = false;
   int _lastMessageCount = 0;
-  bool _agentsSynced = false;
-  bool _agentsRefreshing = false;
+  // The machine whose agent list is loaded, so switching backends fetches the
+  // new host's install/auth status instead of keeping the old one's.
+  String? _agentsMachineId;
+  String? _agentsRefreshingFor;
   late (AppLanguage, bool, bool) _lastNotificationSettings;
 
   (AppLanguage, bool, bool) get _notificationSettings => (
@@ -118,21 +120,25 @@ class _BotChatScreenState extends State<BotChatScreen>
     _syncContext();
   }
 
-  Future<void> _refreshAgents() async {
+  Future<void> _refreshAgents(String machineId) async {
     // Rapid context syncs can call this before the first fetch resolves; one
-    // in-flight request at a time is enough.
-    if (_agentsRefreshing) return;
-    _agentsRefreshing = true;
+    // in-flight request per machine is enough.
+    if (_agentsRefreshingFor == machineId) return;
+    _agentsRefreshingFor = machineId;
     try {
       final List<CliAgent> agents =
           await widget.chatController.backend.fetchAgents();
-      if (!mounted) return;
+      // A reply from a machine switched away from must not replace the list.
+      if (!mounted ||
+          widget.machinesController.activeMachine?.id != machineId) {
+        return;
+      }
       widget.agentsController.syncAgents(agents);
-      _agentsSynced = true;
+      _agentsMachineId = machineId;
     } catch (_) {
-      // Best-effort: keep the built-in list and retry on the next context sync.
+      // Best-effort: keep the current list and retry on the next context sync.
     } finally {
-      _agentsRefreshing = false;
+      if (_agentsRefreshingFor == machineId) _agentsRefreshingFor = null;
     }
   }
 
@@ -160,7 +166,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     if (machine == null) return;
     // Pull the host's live agent list and install/auth status. Retries until it
     // lands.
-    if (!_agentsSynced) unawaited(_refreshAgents());
+    if (_agentsMachineId != machine.id) unawaited(_refreshAgents(machine.id));
     if (!isCliAgentSelectable(active)) {
       if (widget.chatController.machine != null) {
         widget.chatController.goHome();

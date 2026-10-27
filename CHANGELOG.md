@@ -63,6 +63,14 @@
   under `server/cursor-config/acp-sessions/`.
 - The file API refuses Cursor's `auth.json`, like the Claude Code and Codex
   credential files.
+- The backend finds Claude Code, Codex and every other agent CLI in
+  `~/.local/bin` when the service's PATH lacks it, as with a PM2 PATH saved
+  before the CLI was installed. CLI version, update, model discovery and the
+  diagnostics report use the same lookup.
+- Switching to another backend reloads that host's agent list, so agents no
+  longer stay marked unavailable from the previous one.
+- Machine details shrinks narrow labels and the agent buttons instead of
+  breaking words across two lines on portrait phones.
 
 ## 0.1.8 - 2026-10-17
 

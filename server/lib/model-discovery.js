@@ -18,7 +18,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { createJsonStore } = require('./json-store');
-const { resolveBin } = require('./cli-paths');
+const { locateBin, resolveBin } = require('./cli-paths');
 
 const DISABLED =
   process.env.RELAY_MODEL_DISCOVERY === '0' ||
@@ -228,7 +228,9 @@ function readCodexCache({ maxAgeMs } = {}) {
     );
     const cacheVersion = String(parsed.client_version || '').trim();
     if (!cacheVersion) return [];
-    const versionResult = spawnSync('codex', ['--version'], {
+    const bin = locateBin('codex');
+    if (!bin) return [];
+    const versionResult = spawnSync(bin, ['--version'], {
       encoding: 'utf8',
       timeout: 3000,
     });
@@ -251,7 +253,9 @@ function readCodexCache({ maxAgeMs } = {}) {
 }
 
 function runCodexCatalog(args, timeout = 5000) {
-  const result = spawnSync('codex', args, {
+  const bin = locateBin('codex');
+  if (!bin) return [];
+  const result = spawnSync(bin, args, {
     encoding: 'utf8',
     timeout,
     maxBuffer: 16 * 1024 * 1024,

@@ -334,7 +334,12 @@ class _HardwareRow extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 64,
-            child: Text(label, style: TextStyle(color: colors.outline)),
+            // Shrink rather than break a word when text scaling is large.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(label, style: TextStyle(color: colors.outline)),
+            ),
           ),
           Expanded(child: Text(value)),
         ],
@@ -368,20 +373,27 @@ class _TemperatureTile extends StatelessWidget {
       ),
       child: Column(
         children: <Widget>[
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: hot ? colors.onErrorContainer : colors.outline,
+          // Four tiles share a phone's width: shrink, never wrap mid-word.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: hot ? colors.onErrorContainer : colors.outline,
+              ),
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            '${reading.celsius.round()}°C',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: hot ? colors.onErrorContainer : colors.onSurface,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              '${reading.celsius.round()}°C',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: hot ? colors.onErrorContainer : colors.onSurface,
+              ),
             ),
           ),
         ],
@@ -504,6 +516,14 @@ class _AgentCredentialStatusTile extends StatelessWidget {
   }
 }
 
+// Small enough that the agent name beside it keeps its words on one line in
+// portrait.
+final ButtonStyle _compactButton = OutlinedButton.styleFrom(
+  visualDensity: VisualDensity.compact,
+  padding: const EdgeInsets.symmetric(horizontal: 10),
+  textStyle: const TextStyle(fontSize: 12),
+);
+
 class _AgentCredentialAction extends StatelessWidget {
   const _AgentCredentialAction({required this.agent});
 
@@ -515,6 +535,7 @@ class _AgentCredentialAction extends StatelessWidget {
     if (!agent.installed) {
       return OutlinedButton(
         onPressed: null,
+        style: _compactButton,
         child: Text(strings.unavailable),
       );
     }
@@ -524,6 +545,7 @@ class _AgentCredentialAction extends StatelessWidget {
     if (agent.key == 'opencode' || agent.key == 'hermes') {
       return OutlinedButton(
         onPressed: null,
+        style: _compactButton,
         child: Text(strings.keyManagedOnHost),
       );
     }

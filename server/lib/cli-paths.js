@@ -8,17 +8,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Some installers (opencode) put the binary in a per-user dir that isn't on the
-// server's PATH, so detection scans PATH first, then known fallback locations.
-// Results are cached briefly so /api/agents stays fast.
+// Installers put CLIs in per-user dirs (~/.local/bin for claude, codex, cursor,
+// hermes; ~/.opencode/bin) that a PM2 or service PATH often lacks, e.g. one
+// saved before the CLI's installer edited the shell profile. Detection scans
+// PATH first, then those locations. Results are cached briefly so /api/agents
+// stays fast.
 const LOCATE_BIN_TTL_MS = 60 * 1000;
 const locateBinCache = new Map();
 
-const BIN_FALLBACKS = {
-  opencode: [path.join(os.homedir(), '.opencode', 'bin', 'opencode')],
-  hermes: [path.join(os.homedir(), '.local', 'bin', 'hermes')],
-  agent: [path.join(os.homedir(), '.local', 'bin', 'agent')],
-};
+function binFallbacks(bin) {
+  const list = [path.join(os.homedir(), '.local', 'bin', bin)];
+  if (bin === 'opencode') list.push(path.join(os.homedir(), '.opencode', 'bin', bin));
+  return list;
+}
 
 function executableInPath(bin) {
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
@@ -48,7 +50,7 @@ function findBin(bin) {
   let full = executableInPath(bin);
   const onPath = full !== null;
   if (!full) {
-    for (const candidate of BIN_FALLBACKS[bin] || []) {
+    for (const candidate of binFallbacks(bin)) {
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
         full = candidate;

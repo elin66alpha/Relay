@@ -184,7 +184,9 @@ function toolBrief(name, input) {
 // version, same auth, same settings as the CLI shown in the app. Falling back
 // to null lets the SDK resolve its own bundled binary.
 function claudeExecutablePath() {
-  return process.env.RELAY_CLAUDE_BIN || executableInPath('claude') || null;
+  return (
+    process.env.RELAY_CLAUDE_BIN || executableInPath('claude') || locateBin('claude')
+  );
 }
 
 // One live CLI process per scope, reused across turns instead of respawned per

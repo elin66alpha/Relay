@@ -3,9 +3,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const { getAgentStatuses } = require('./agent-status');
+const { executableInPath, locateBin } = require('./cli-paths');
 const { listTokenSummaries, hasConfiguredToken } = require('./tokens');
 const { inspectWorkdir } = require('./workdir');
 
@@ -48,23 +48,11 @@ function storageFile(name, filePath) {
   };
 }
 
+// The same lookup the runner uses, so a CLI found only in a per-user fallback
+// dir is reported where it actually runs from.
 function findCommand(command) {
-  const probe = process.platform === 'win32' ? 'where' : 'command';
-  const args = process.platform === 'win32' ? [command] : ['-v', command];
-  const result = spawnSync(probe, args, {
-    encoding: 'utf8',
-    shell: process.platform !== 'win32',
-    timeout: 3000,
-  });
-  const output = String(result.stdout || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return {
-    command,
-    available: result.status === 0 && output.length > 0,
-    path: output[0] || '',
-  };
+  const found = executableInPath(command) || locateBin(command);
+  return { command, available: Boolean(found), path: found || '' };
 }
 
 function inspectWorkdirSafe(value) {
@@ -167,7 +155,7 @@ function buildDiagnostics({
       key: agent.key,
       label: agent.label,
       description: agent.description,
-      cli: findCommand(agent.key),
+      cli: findCommand(agent.bin || agent.key),
       loggedIn: authStatus(agent.key),
     })),
     storage: [

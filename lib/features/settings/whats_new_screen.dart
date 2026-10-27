@@ -172,6 +172,9 @@ const List<_Release> _zhReleases = <_Release>[
       '删除或清空 Cursor 的对话时，对应的会话记录也会一起删掉。',
       '在 Relay 里给 Cursor 选的模型不会改变你在主机终端里使用 Cursor 时的默认设置。',
       'Cursor 的登录文件和 Claude Code、Codex 的一样，不能通过文件浏览器读取。',
+      '后端能找到装在 ~/.local/bin 里的 Claude Code、Codex 等命令行工具，不会再显示“未安装”。',
+      '切换到另一台后端后，智能体的安装和登录状态会跟着刷新，不再沿用上一台的。',
+      '机器详情在竖屏手机上不再把一个词拆成两行。',
     ],
   ),
   _Release(
@@ -230,6 +233,9 @@ const List<_Release> _enReleases = <_Release>[
       'Deleting or clearing a Cursor conversation also deletes its record.',
       'Models you pick for Cursor in Relay no longer change Cursor’s own defaults when you use it in a terminal on the host.',
       'Cursor’s login file is protected from the file browser, like those of Claude Code and Codex.',
+      'The backend finds Claude Code, Codex and other agent CLIs installed in ~/.local/bin instead of reporting them as not installed.',
+      'Switching to another backend refreshes which agents are installed and signed in, instead of keeping the previous backend’s status.',
+      'Machine details no longer splits words across two lines on portrait phones.',
     ],
   ),
   _Release(

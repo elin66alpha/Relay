@@ -62,6 +62,7 @@ const { buildDiagnostics } = require('./lib/diagnostics');
 const { machineInfo } = require('./lib/machine-info');
 const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
+const { locateBin } = require('./lib/cli-paths');
 const {
   listGroups,
   getGroup,
@@ -586,6 +587,7 @@ const routeContext = {
   listGroups,
   listQuotaSchedules,
   listTokenSummaries,
+  locateBin,
   machineInfo,
   markdownForConversation,
   inspectCodexAccount,
