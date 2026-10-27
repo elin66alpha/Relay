@@ -276,7 +276,7 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '下载 Relay，运行安装脚本',
     body:
-        'Linux 只需运行下面一行命令：它会把最新版本下载到 ~/relay 并启动安装脚本，再次运行即升级。macOS 和 Windows 请把 Relay 仓库放到这台机器上，在仓库根目录运行对应脚本。脚本会安装后端依赖、准备 server/.env，并配置对应的启动服务。安装过程中保持终端打开，按提示选择端口、网络方式和凭证密码。',
+        'Linux 只需运行下面一行命令：它会把最新版本下载到 ~/relay 并启动安装脚本，再次运行即升级。Windows 可从 GitHub Release 下载后端 ZIP，完整解压到固定目录后双击 Setup.exe；它包含 Node.js、依赖和 Web 前端，并提供安装、重装、卸载、状态及令牌管理。CLI 可按需安装，登录由你自行完成。macOS 或源码仓库用户在仓库根目录运行对应脚本。按提示选择端口、网络方式和凭证密码。',
     commands: _setupCommands,
   ),
   _DeployStep(
@@ -317,9 +317,12 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
     title: 'Download Relay and run the setup script',
     body: 'On Linux, run the one-line command below: it downloads the latest '
         'release into ~/relay and starts setup, and running it again upgrades. '
-        'On macOS and Windows, put the Relay repository on that machine and, '
-        'from the repo root, run the script for its operating system. It installs the '
-        'dependencies, prepares server/.env, and configures the startup service. Keep the terminal open and follow its prompts for the port, network mode, and credential passphrase.',
+        'On Windows, download the backend ZIP from GitHub Releases, extract it '
+        'to a permanent folder and open Setup.exe. It includes Node.js, dependencies '
+        'and Web, with install, reinstall, uninstall, status and token management. '
+        'Agent CLI installation is optional; sign in yourself afterward. On macOS '
+        'or from source, run the script for your OS from the repo root. Follow '
+        'the prompts for the port, network mode and credential passphrase.',
     commands: _setupCommands,
   ),
   _DeployStep(

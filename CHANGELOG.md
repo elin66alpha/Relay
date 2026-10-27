@@ -20,8 +20,11 @@
 - The source backend setup package includes the compiled Web client, served at
   the backend address. `RELAY_SERVE_WEB=0` in `server/.env` turns it off, and
   Linux install asks (default on). `scripts/package_backend.sh` builds that
-  package. The Windows backend bundle still has no Web client, and macOS and
-  Windows setup neither ask about it nor remove it on uninstall.
+  package. The Windows backend bundle also includes Web, served by Node with
+  the API, plus a native `Setup.exe` with Linux-equivalent install/reinstall,
+  uninstall, service status, optional agent CLI installation, Web selection,
+  three network modes and device token management. No extra Web server or
+  downloaded GUI runtime is needed. macOS serves bundled Web by default.
 - Linux `setup.sh` is a menu: install, reinstall, uninstall, service status
   (address, tunnel hostnames, Web client, agent state, tokens), and create,
   delete, list or re-show a device token. `npm run credential` gains `--delete

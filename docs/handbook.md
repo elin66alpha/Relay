@@ -487,12 +487,15 @@ rebuilds Web and an APK.
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution
-(including npm and its license), Git, and access to the npm registry:
+(including npm and its license), Git, Flutter, the system .NET Framework 4.x
+C# compiler and access to the npm registry:
 
 ```powershell
 .\scripts\package_windows_backend.ps1
 # Optional: select a different installed runtime or output directory.
 .\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+# Reuse a Web build made from the same source instead of rebuilding it.
+.\scripts\package_windows_backend.ps1 -SkipWebBuild
 ```
 
 The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
@@ -510,9 +513,19 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
-client is included, not even the Web client, so a host installed from this
-bundle serves only the API. Keep the extracted directory fixed, and follow the bundled
+installation. `Setup.exe` is a Windows Forms UI built with the system .NET
+Framework compiler, without a downloaded GUI runtime. It and the console menu
+share `backends/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+agent installation and token create/delete/list/re-show. Passwords reach the
+worker through stdin and the existing credential generator through its
+environment, never command arguments or temporary request files. The bundle
+includes `build/web`; Node serves it alongside the API, without another Web
+server. Setup enables it by default and can turn it off. Tunnel modes download
+missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows
+installers and require the user to sign in afterward. Uninstall can remove Web
+and the bundle-owned tunnel tool and optionally delete a named Cloudflare
+tunnel, while retaining backend state and other host software. Keep the
+extracted directory fixed, and follow the bundled
 README when migrating a deployment to a new directory.
 
 ### Desktop clients

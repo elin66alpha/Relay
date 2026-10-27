@@ -111,6 +111,9 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
+- On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_setup.ps1` -> setup contract passed, without host service changes.
+- On Windows, `scripts/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
+- Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
 - `flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn` -> exit 0, `build/web/index.html` exists
 - `flutter build apk --release --no-pub` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows SHA-256 `3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`

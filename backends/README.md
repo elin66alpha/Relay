@@ -61,18 +61,16 @@ runs the same step. Re-showing reuses the token and asks for a new QR password, 
 the old one is not stored. Install and reinstall ask whether to serve the Web
 client at the backend address (default yes).
 
-Only the source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
+The source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
 the compiled Web client, in `build/web`; the backend serves it at `/` unless
 `server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
-device token. Web client support is otherwise limited:
+device token. The Windows backend ZIP includes the same compiled Web client:
 
-- The Windows backend bundle (`relay-backend-windows-x64-v<VERSION>.zip`) does
-  not include the Web client, so a Windows host installed from it serves only
-  the API.
-- Only Linux setup asks whether to serve it, and only Linux uninstall removes
-  it. macOS and Windows setup do not mention it: installed from the source
-  package, they serve it, and turning it off means setting `RELAY_SERVE_WEB=0`
-  in `server/.env` by hand and restarting the backend.
+- Linux and Windows setup ask whether to serve it; uninstall removes it while
+  retaining backend state. Windows serves Web and API in one Node.js process,
+  without a separate Web server.
+- macOS setup serves a bundled Web client automatically; set
+  `RELAY_SERVE_WEB=0` in `server/.env` and restart to turn it off.
 - A source checkout has it only after `flutter build web`.
 
 ### Network modes
@@ -134,9 +132,13 @@ service PATH includes common Homebrew and per-user binary locations.
 ### Windows
 
 For release 0.1.9, `relay-backend-windows-x64-v0.1.9.zip` includes the Node.js
-runtime, npm, and locked production dependencies. Extract the whole ZIP to a
-permanent writable directory and run `.\setup.cmd` from PowerShell there.
-Agent CLIs and optional `cloudflared` must still be installed on the host.
+runtime, npm, locked production dependencies, Web client and `Setup.exe`.
+Extract the whole ZIP to a permanent writable directory and double-click
+`Setup.exe`, or run `.\setup.cmd` for the console menu. Both provide install,
+reinstall, uninstall, status, agent CLI installation and device token management,
+using shared operations. Web defaults on. Missing `cloudflared` is downloaded
+for tunnel modes. The five CLIs can be selected for installation with official
+Windows installers; sign in/configure them yourself afterward.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
 same service adapters below. The Scheduled Task starts at this user's login.

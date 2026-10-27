@@ -49,15 +49,14 @@ Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PAT
 有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
 不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
 
-只有源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `build/web` 中自带编译好的
+源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `build/web` 中自带编译好的
 Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
-下的接口始终需要设备令牌。其他情况下 Web 前端的支持有限：
+下的接口始终需要设备令牌。Windows 后端 ZIP 也包含相同的 Web 前端：
 
-- Windows 后端包（`relay-backend-windows-x64-v<版本>.zip`）不含 Web 前端，用它安装的
-  Windows 主机只提供 API。
-- 只有 Linux 安装会询问是否提供 Web 前端，也只有 Linux 卸载会删除它。macOS 和 Windows
-  的安装脚本不涉及它：用源码安装包安装时会直接提供；要关闭，需要手动在 `server/.env`
-  中设置 `RELAY_SERVE_WEB=0` 并重启后端。
+- Linux 和 Windows 安装会询问是否提供 Web 前端；卸载会删除它，同时保留后端状态。
+  Windows 的 Web 与 API 共用一个 Node.js 进程，不需要额外的 Web 服务器。
+- macOS 安装会直接提供包内的 Web 前端；要关闭，在 `server/.env` 中设置
+  `RELAY_SERVE_WEB=0` 后重启后端。
 - 源码仓库需要先运行 `flutter build web` 才有。
 
 ### 网络模式
@@ -113,9 +112,11 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 
 ### Windows
 
-0.1.9 的 `relay-backend-windows-x64-v0.1.9.zip` 包含 Node.js 运行时、npm 和按锁文件
-安装的生产依赖。将整个 ZIP 解压到固定、可写的目录，在该目录的 PowerShell 中运行
-`.\setup.cmd`。Agent CLI 和可选的 `cloudflared` 仍需在主机自行安装。包内 `README.md`
+0.1.9 的 `relay-backend-windows-x64-v0.1.9.zip` 包含 Node.js、npm、按锁文件安装的
+生产依赖、Web 前端和 `Setup.exe`。将整个 ZIP 解压到固定、可写的目录，双击
+`Setup.exe`，或运行 `.\setup.cmd` 打开命令行菜单。两种入口共用安装、重装、卸载、
+状态查询、CLI 安装和设备令牌管理功能。Web 默认开启；隧道模式缺少 `cloudflared`
+时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
 `.\uninstall.cmd` 是下面相同服务脚本的入口。计划任务在当前用户登录时启动。
 
