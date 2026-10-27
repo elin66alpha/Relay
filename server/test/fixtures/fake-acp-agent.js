@@ -90,6 +90,17 @@ function handlePrompt(msg) {
     finishPrompt(msg.id, sessionId, 'recovered');
     return;
   }
+  if (text === 'ask') {
+    const id = 2000 + counter++;
+    write({
+      jsonrpc: '2.0',
+      id,
+      method: 'cursor/ask_question',
+      params: { toolCallId: 'q1', questions: [] },
+    });
+    session.pendingQuestion = { promptId: msg.id, sessionId };
+    return;
+  }
   if (text === 'perm') {
     // Ask, then report which option the client picked so the test can assert
     // the tier policy end to end.
@@ -101,7 +112,10 @@ function handlePrompt(msg) {
       params: {
         sessionId,
         toolCall: { toolCallId: 'tc1', title: 'write /tmp/x', kind: 'edit' },
+        // "always" first, as Cursor lists it, so the test sees which kind the
+        // client prefers rather than which comes first.
         options: [
+          { optionId: 'always', name: 'Allow always', kind: 'allow_always' },
           { optionId: 'yes', name: 'Allow', kind: 'allow_once' },
           { optionId: 'no', name: 'Deny', kind: 'reject_once' },
         ],
@@ -134,10 +148,39 @@ function handlePrompt(msg) {
   finishPrompt(msg.id, sessionId, `echo:${text}`);
 }
 
+// The catalog `cursor/list_available_models` answers with.
+const MODELS = [
+  { value: 'default', name: 'Auto', configOptions: [] },
+  {
+    value: 'big',
+    name: 'Big',
+    configOptions: [
+      {
+        id: 'effort',
+        category: 'thought_level',
+        currentValue: 'high',
+        options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }],
+      },
+    ],
+  },
+];
+
 function handle(msg) {
   if (msg.method === undefined && msg.id !== undefined) {
-    // A reply to our permission request.
+    // A reply to a question or permission request we just sent.
     for (const session of sessions.values()) {
+      if (session.pendingQuestion) {
+        const pending = session.pendingQuestion;
+        session.pendingQuestion = null;
+        const outcome = (msg.result && msg.result.outcome) || {};
+        record(`question ${outcome.outcome || 'error'}`);
+        finishPrompt(
+          pending.promptId,
+          pending.sessionId,
+          `question:${outcome.outcome || 'error'}`,
+        );
+        return;
+      }
       const pending = session.pendingPermission;
       if (!pending) continue;
       session.pendingPermission = null;
@@ -156,7 +199,14 @@ function handle(msg) {
     write({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message } });
 
   switch (msg.method) {
+    case 'authenticate':
+      record(`auth ${msg.params.methodId}`);
+      reply({});
+      return;
     case 'initialize':
+      if (msg.params.clientCapabilities._meta) {
+        record(`meta ${JSON.stringify(msg.params.clientCapabilities._meta)}`);
+      }
       reply({
         protocolVersion: 1,
         agentInfo: { name: 'fake', version: '1' },
@@ -202,6 +252,14 @@ function handle(msg) {
     case 'session/set_model':
       record(`model ${msg.params.sessionId} ${msg.params.modelId}`);
       reply({});
+      return;
+    case 'session/set_config_option':
+      record(`config ${msg.params.sessionId} ${msg.params.configId}=${msg.params.value}`);
+      reply({});
+      return;
+    case 'cursor/list_available_models':
+      record('list models');
+      reply({ models: MODELS });
       return;
     case 'session/set_mode':
       record(`mode ${msg.params.sessionId} ${msg.params.modeId}`);

@@ -21,8 +21,43 @@ for proc in "$SERVER_PROC" "$TUNNEL_PROC"; do
   fi
 done
 
-printf '\nBackend URL: %s\n' "$(get_env PUBLIC_BASE_URL)"
+c_info "Address"
+printf 'Backend URL: %s\n' "$(get_env PUBLIC_BASE_URL)"
 printf 'Tunnel mode: %s\n' "$(tunnel_mode)"
+case "$(tunnel_mode)" in
+  cloudflare)
+    # CLOUDFLARED_ARGS is "tunnel --config <file> run <id>", written by setup.
+    config_file="$(get_env CLOUDFLARED_ARGS | sed -nE 's/.*--config ([^ ]+).*/\1/p')"
+    if [ -f "$config_file" ]; then
+      printf 'Tunnel name: %s\n' "$(basename "$config_file" .yml)"
+      printf 'Tunnel id:   %s\n' "$(sed -nE 's/^tunnel: *//p' "$config_file")"
+      sed -nE 's/^ *- hostname: */Hostname:    /p' "$config_file" | awk '!seen[$0]++'
+    fi
+    ;;
+  quick)
+    quick_url="$(grep -hoE 'https://[a-z0-9-]+\.trycloudflare\.com' \
+      "$PM2_LOG_DIR/$TUNNEL_PROC-error.log" "$PM2_LOG_DIR/$TUNNEL_PROC-out.log" 2>/dev/null | tail -1 || true)"
+    printf 'Quick Tunnel URL (latest in log): %s\n' "${quick_url:-not found}"
+    ;;
+esac
+printf 'Port:        %s\n' "$(get_env PORT)"
+printf 'Web client:  %s\n' "$(web_state)"
+
+if [ -d "$SERVER_DIR/node_modules" ]; then
+  c_info "Agents"
+  (cd "$SERVER_DIR" && node -e '
+const { getAgentStatuses } = require("./lib/agent-status");
+const { listAgents } = require("./lib/agents");
+const statuses = getAgentStatuses();
+for (const agent of listAgents()) {
+  const s = statuses[agent.key] || {};
+  const state = !s.installed ? "not installed" : s.authed ? "ready" : "installed, not signed in";
+  console.log(`  ${agent.label.padEnd(12)} ${state}`);
+}')
+
+  c_info "Tokens"
+  (cd "$SERVER_DIR" && node scripts/create-credential.js --list-tokens)
+fi
 
 printf '\nLogs:\n'
 printf '  %s\n' \

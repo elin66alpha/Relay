@@ -73,11 +73,11 @@ Implemented controls include:
 
 Relay never logs a CLI agent in. Every agent's credential is created on the
 backend host with that CLI's own login flow or provider configuration.
-`server/lib/agent-status.js` reads authentication state and Claude Code's stored
-OAuth expiry timestamp. Codex has no login-expiry timestamp: its managed
-short-lived tokens refresh automatically. `server/lib/usage.js` additionally
-reads their OAuth tokens for quota queries and can refresh an expired access
-token in the CLI's credential file. Token values may therefore be sent to the
+`server/lib/agent-status.js` reads authentication state only; Relay reports no
+login deadline, because every supported CLI refreshes its own short-lived
+tokens. `server/lib/usage.js` additionally reads the Claude Code, Codex, and
+Cursor tokens for quota queries and can refresh an expired Claude Code or Codex
+access token in the CLI's credential file. Token values may therefore be sent to the
 provider's OAuth and API endpoints, but neither Relay's API nor the app ever
 receives them.
 
@@ -120,8 +120,12 @@ can access. It always rejects these current sensitive locations:
 
 - `server/tokens.json`, `server/.env`, and `server/credentials/`;
 - `server/push-subscriptions.json` and `server/fcm-tokens.json`;
+- the FCM service-account key (`FCM_SERVICE_ACCOUNT_FILE`, and
+  `server/fcm-service-account.json`);
 - `~/.ssh`;
-- Claude Code's `.credentials.json` and Codex's `auth.json`.
+- Claude Code's `.credentials.json`, Codex's `auth.json`, and Cursor's
+  `auth.json` (`~/.config/cursor/` on Linux);
+- `server/cursor-config/`, Relay's own Cursor config and session transcripts.
 
 The same policy applies to listing, upload, download, and siblings whose names
 start with a sensitive basename followed by a dot, including `.tmp`, `.bak`, and

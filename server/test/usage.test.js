@@ -3,7 +3,11 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { buildUsageReport, markExpiredQuotas } = require('../lib/usage');
+const {
+  buildUsageReport,
+  cursorUsageFromBodies,
+  markExpiredQuotas,
+} = require('../lib/usage');
 
 const NOW = Date.parse('2026-06-19T12:00:00Z');
 
@@ -37,6 +41,44 @@ test('markExpiredQuotas ignores buckets without a reset time', () => {
   const quotas = [{ key: 'five_hour', resetsAt: null, expired: false }];
   const out = markExpiredQuotas(quotas, true, NOW);
   assert.equal(out[0].expired, false);
+});
+
+test('cursorUsageFromBodies reads an xAI Premium weekly pool as remaining percent', () => {
+  const usage = cursorUsageFromBodies(
+    {
+      planInfo: {
+        planName: 'Premium',
+        includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY',
+        includedUsageResetsAt: '1793519407124',
+      },
+    },
+    {
+      billingCycleEnd: '1793519407124',
+      planUsage: { totalPercentUsed: 20, autoPercentUsed: 20, apiPercentUsed: 0 },
+    },
+  );
+  assert.equal(usage.plan, 'Premium');
+  assert.equal(usage.quotas.length, 1);
+  assert.equal(usage.quotas[0].key, 'seven_day');
+  assert.equal(usage.quotas[0].remainingPercent, 80);
+  assert.equal(usage.quotas[0].resetsAt, new Date(1793519407124).toISOString());
+});
+
+test('cursorUsageFromBodies keeps legacy Cursor and API pools apart', () => {
+  const usage = cursorUsageFromBodies(
+    { planInfo: { planName: 'Pro', includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_MONTHLY' } },
+    {
+      billingCycleEnd: '1789718953000',
+      planUsage: { autoPercentUsed: 3.5, apiPercentUsed: 1.25, totalPercentUsed: 4 },
+    },
+  );
+  assert.deepEqual(
+    usage.quotas.map((quota) => [quota.key, quota.remainingPercent]),
+    [
+      ['cursor_models', 96.5],
+      ['api_models', 98.75],
+    ],
+  );
 });
 
 test('buildUsageReport rejects an unknown source before querying anything', async () => {

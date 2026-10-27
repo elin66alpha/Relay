@@ -7,11 +7,9 @@ chat-sessions.json
 groups.json
 chat-history.json
 chat-history.*.json
-cards.json
 quota-state-*.json
 quota-schedules.json
 tokens.json
-cloudflared/
 cloudflared-config/
 credentials/*.relay
 credentials/*.relay.json
@@ -20,6 +18,8 @@ credentials/*.png
 credentials/*.passphrase.txt
 agent-settings.json
 context-windows.json
+reported-models.json
+cursor-config/
 models-extra.json
 
 # Backups of the state files above are just as sensitive as the originals.

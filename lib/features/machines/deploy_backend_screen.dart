@@ -245,7 +245,11 @@ class _DeployStep {
 }
 
 const List<_Command> _setupCommands = <_Command>[
-  _Command(label: 'Linux', code: './backends/linux/setup.sh'),
+  _Command(
+    label: 'Linux',
+    code:
+        'curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash',
+  ),
   _Command(label: 'macOS', code: './backends/macos/setup.sh'),
   _Command(
     label: 'Windows (PowerShell)',
@@ -266,13 +270,13 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '准备一台后端机器',
     body: '一台你自己的电脑或服务器都行：家里的 PC、Mac，或一台云服务器。'
-        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、OpenCode 或 Hermes），'
-        '并直接在主机上完成登录或 provider 配置；Relay 不代办 CLI 登录。\n先在主机终端确认选定的 CLI 可以使用。Linux 还需 PM2、Python 3、make 和 C++ 编译器；Unix 下载文件夹需要 zip。使用 Cloudflare 隧道前需安装 cloudflared。',
+        '先装好 Node.js 18+ 和至少一个 CLI 智能体（Claude Code、Codex、Cursor、OpenCode 或 Hermes），'
+        '并直接在主机上完成登录或 provider 配置；Relay 不代办 CLI 登录。\n先在主机终端确认选定的 CLI 可以使用。Linux 还需 PM2、Python 3、make 和 C++ 编译器；Unix 下载文件夹需要 zip。使用 Cloudflare 隧道前需安装 cloudflared。在 Debian/Ubuntu 上，缺少这些软件或 Node.js 时，Linux 安装脚本会在确认后用 sudo 替你安装；它还能安装你选的 CLI 智能体，装完在主机终端运行它打印的登录命令即可。',
   ),
   _DeployStep(
     title: '下载 Relay，运行安装脚本',
     body:
-        '把 Relay 仓库放到这台机器上，在仓库根目录按操作系统运行对应脚本。脚本会安装后端依赖、准备 server/.env，并配置对应的启动服务。安装过程中保持终端打开，按提示选择端口、网络方式和凭证密码。',
+        'Linux 只需运行下面一行命令：它会把最新版本下载到 ~/relay 并启动安装脚本，再次运行即升级。Windows 可从 GitHub Release 下载后端 ZIP，完整解压到固定目录后双击 Setup.exe；它包含 Node.js、依赖和 Web 前端，并提供安装、重装、卸载、状态及令牌管理。CLI 可按需安装，登录由你自行完成。macOS 或源码仓库用户在仓库根目录运行对应脚本。按提示选择端口、网络方式和凭证密码。',
     commands: _setupCommands,
   ),
   _DeployStep(
@@ -296,7 +300,7 @@ const List<_DeployStep> _zhSteps = <_DeployStep>[
   _DeployStep(
     title: '连接失败时按顺序检查',
     body:
-        '先区分错误：解密失败请核对密码和凭证文件；连接失败请检查后端服务、端口、防火墙和地址是否仍有效。HTTPS 网页客户端也应连接 HTTPS 后端。\n在仓库根目录运行对应的状态命令，查看服务是否启动；Windows 日志在 %LOCALAPPDATA%\\Relay\\logs，macOS 在 ~/Library/Logs/Relay，Linux 可用 pm2 logs relay-server 查看。若应用已连通但智能体不可用，请到主机检查 CLI 安装与认证，再在机器详情重新检查。',
+        '先区分错误：解密失败请核对密码和凭证文件；连接失败请检查后端服务、端口、防火墙和地址是否仍有效。HTTPS 网页客户端也应连接 HTTPS 后端。\n在安装目录（一行命令安装默认是 ~/relay）运行对应的状态命令，查看服务是否启动；Windows 日志在 %LOCALAPPDATA%\\Relay\\logs，macOS 在 ~/Library/Logs/Relay，Linux 可用 pm2 logs relay-server 查看。若应用已连通但智能体不可用，请到主机检查 CLI 安装与认证，再在机器详情重新检查。',
     commands: _statusCommands,
   ),
 ];
@@ -306,14 +310,19 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
     title: 'Prepare a backend machine',
     body: 'Any computer you own works: a home PC, a Mac, or a cloud server. '
         'Install Node.js 18+ and at least one CLI agent (Claude Code, Codex, '
-        'OpenCode, or Hermes), then complete its login or provider setup on '
-        'that host. Relay does not perform CLI login.\nFirst confirm the chosen CLI works in a host terminal. Linux also needs PM2, Python 3, make, and a C++ compiler; Unix folder downloads need zip. Install cloudflared before choosing either Cloudflare tunnel mode.',
+        'Cursor, OpenCode, or Hermes), then complete its login or provider setup on '
+        'that host. Relay does not perform CLI login.\nFirst confirm the chosen CLI works in a host terminal. Linux also needs PM2, Python 3, make, and a C++ compiler; Unix folder downloads need zip. Install cloudflared before choosing either Cloudflare tunnel mode. On Debian/Ubuntu, the Linux setup script installs any of these, and Node.js, with sudo after you confirm; it can also install the CLI agents you pick, after which you run the login command it prints in a host terminal.',
   ),
   _DeployStep(
     title: 'Download Relay and run the setup script',
-    body: 'Put the Relay repository on that machine and, from the repo root, '
-        'run the script for its operating system. It installs the '
-        'dependencies, prepares server/.env, and configures the startup service. Keep the terminal open and follow its prompts for the port, network mode, and credential passphrase.',
+    body: 'On Linux, run the one-line command below: it downloads the latest '
+        'release into ~/relay and starts setup, and running it again upgrades. '
+        'On Windows, download the backend ZIP from GitHub Releases, extract it '
+        'to a permanent folder and open Setup.exe. It includes Node.js, dependencies '
+        'and Web, with install, reinstall, uninstall, status and token management. '
+        'Agent CLI installation is optional; sign in yourself afterward. On macOS '
+        'or from source, run the script for your OS from the repo root. Follow '
+        'the prompts for the port, network mode and credential passphrase.',
     commands: _setupCommands,
   ),
   _DeployStep(
@@ -340,7 +349,7 @@ const List<_DeployStep> _enSteps = <_DeployStep>[
   _DeployStep(
     title: 'Troubleshoot the first connection',
     body:
-        'Separate decryption errors from connection errors: check the passphrase and credential file for the former; check the backend service, port, firewall, and current URL for the latter. An HTTPS Web client should also use an HTTPS backend.\nRun the status command for your OS from the repository root. Windows logs are in %LOCALAPPDATA%\\Relay\\logs, macOS logs in ~/Library/Logs/Relay, and Linux logs are available with pm2 logs relay-server. If Relay connects but an agent is unavailable, check CLI installation and authentication on the host, then recheck Machine details.',
+        'Separate decryption errors from connection errors: check the passphrase and credential file for the former; check the backend service, port, firewall, and current URL for the latter. An HTTPS Web client should also use an HTTPS backend.\nRun the status command for your OS from the install directory (~/relay for the one-line install). Windows logs are in %LOCALAPPDATA%\\Relay\\logs, macOS logs in ~/Library/Logs/Relay, and Linux logs are available with pm2 logs relay-server. If Relay connects but an agent is unavailable, check CLI installation and authentication on the host, then recheck Machine details.',
     commands: _statusCommands,
   ),
 ];

@@ -1,5 +1,97 @@
 # Changelog
 
+## 0.1.9 - 2026-10-26
+
+### Added
+
+- Cursor as a fifth agent, listed between Codex and OpenCode. It runs the host's
+  `agent` CLI over ACP, signed in with the CLI's own `agent login` (or
+  `CURSOR_API_KEY`). The model picker lists the account's Cursor models,
+  defaulting to Auto, with each model's own effort levels and the Fast switch;
+  permission tiers are Bypass (full auto), Plan only and Ask only. Each distinct
+  model choice runs in its own Cursor process, so conversations on different
+  models run at the same time. Relay's Cursor uses its own config directory,
+  `server/cursor-config/`, so choices made in Relay never change the host's
+  Cursor defaults. Quota Usage and the composer strip show Cursor's included
+  usage.
+- A hardware card on Machine details: CPU, memory and GPU names, used and total
+  space of every local disk, and live mainboard, SSD, CPU and GPU temperatures
+  where the host exposes them, refreshed every 10 seconds while the page is open.
+- The source backend setup package includes the compiled Web client, served at
+  the backend address. `RELAY_SERVE_WEB=0` in `server/.env` turns it off, and
+  Linux install asks (default on). `scripts/package_backend.sh` builds that
+  package. The Windows backend bundle also includes Web, served by Node with
+  the API, plus a native `Setup.exe` with Linux-equivalent install/reinstall,
+  uninstall, service status, optional agent CLI installation, Web selection,
+  three network modes and device token management. No extra Web server or
+  downloaded GUI runtime is needed. macOS serves bundled Web by default.
+- Linux `setup.sh` is a menu: install, reinstall, uninstall, service status
+  (address, tunnel hostnames, Web client, agent state, tokens), and create,
+  delete, list or re-show a device token. `npm run credential` gains `--delete
+  <id>` and `--show <id>`.
+- One-line Linux install: `curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`
+  downloads the latest release's setup bundle, checks it against `SHA256SUMS`,
+  unpacks it into `~/relay` (or the chosen directory, `RELAY_DIR`) and runs
+  setup. Running it again upgrades in place, keeps `server/.env`, tokens,
+  chats and settings, and restarts the backend. `install.sh` is a release asset.
+- Linux setup can install the agent CLIs: it shows which of Claude Code, Codex,
+  Cursor, OpenCode and Hermes are installed, installs the ones picked with each
+  CLI's official installer, and prints their login commands. Install runs this
+  step, and the menu has it as its own entry, so token entries move to 6-9.
+
+### Changed
+
+- Codex lists Full access once: its Bypass tier, which ran the same unsandboxed
+  mode, is gone, and conversations saved with it keep full access.
+- Linux setup opens each step and menu with a banner and marks every question,
+  so the choices stand out from installer output.
+- Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to
+  install missing prerequisites with `sudo apt-get`: Node.js 24 from
+  NodeSource, PM2, `zip`, the PTY build tools, and `cloudflared` for tunnel
+  modes. Before, it stopped at the first missing tool, and accepted any
+  Node.js version despite asking for 18 or newer. It refuses to run under
+  `sudo`, which would make the backend and its files belong to root.
+- ACP agents (OpenCode, Hermes, Cursor) start a new message after each tool
+  call, as Claude Code and Codex do, instead of running the text on either side
+  together.
+- Relay answers ACP approval requests with "allow once" instead of "allow
+  always", so Cursor no longer adds commands to the host user's own CLI
+  allowlist.
+- The model page lists main models first. Cursor models outside the plan's
+  included usage, and older Claude Code and Codex models, move to a second
+  page opened from the bottom of the screen. The Swarm form lists main models
+  only.
+- OpenCode's model list comes from the host's `opencode models`, so it stays
+  current as OpenCode's free models change and includes every API provider
+  configured in the host's OpenCode. Hermes gains a Model entry showing the
+  model configured on the host.
+- Linux `uninstall.sh` also removes the Web client, offers to delete the named
+  Cloudflare Tunnel, and asks before removing PM2, `cloudflared` or Node.js.
+
+### Fixed
+
+- Failed or oversized uploads remove their temporary files before reporting an
+  error, including when the upload fails before the temporary file opens.
+- Claude Code no longer shows a false "log in again within a day" warning on
+  Machine details. Relay reports no login deadline, because every supported CLI
+  refreshes its own tokens.
+- Deleting or clearing a Cursor conversation removes its session directory
+  under `server/cursor-config/acp-sessions/`.
+- The file API refuses Cursor's `auth.json`, like the Claude Code and Codex
+  credential files.
+- The backend finds Claude Code, Codex and every other agent CLI in
+  `~/.local/bin` when the service's PATH lacks it, as with a PM2 PATH saved
+  before the CLI was installed. CLI version, update, model discovery and the
+  diagnostics report use the same lookup.
+- Switching to another backend reloads that host's agent list, so agents no
+  longer stay marked unavailable from the previous one.
+- The app keeps its current work directory per backend. It used to send one
+  host's path to every backend, which then failed with `EACCES: permission
+  denied, mkdir` when that path was not writable there. After updating, each
+  backend opens at its default work directory until one is chosen there.
+- Machine details shrinks narrow labels and the agent buttons instead of
+  breaking words across two lines on portrait phones.
+
 ## 0.1.8 - 2026-10-17
 
 ### Added

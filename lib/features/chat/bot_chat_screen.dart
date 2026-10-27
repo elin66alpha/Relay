@@ -3,10 +3,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/models/agent_session.dart';
@@ -14,26 +12,22 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
-import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/wallpaper.dart';
-import '../../core/theme/app_theme.dart';
-import '../../core/util/error_text.dart';
-import '../../core/util/time_format.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../quota/quota_strip.dart';
-import '../settings/getting_started_screen.dart';
-import '../settings/whats_new_screen.dart';
-import 'agent_controls.dart';
 import 'bot_chat_controller.dart';
-import 'chat_content.dart';
+import 'bot_message_bubble.dart';
+import 'chat_input_bar.dart';
 import 'cli_agents_drawer.dart';
 import 'context_meter.dart';
+import 'history_search_dialog.dart';
+import 'home_navigation_page.dart';
 
 class BotChatScreen extends StatefulWidget {
   const BotChatScreen({
@@ -61,8 +55,10 @@ class _BotChatScreenState extends State<BotChatScreen>
 
   bool _autoScrollQueued = false;
   int _lastMessageCount = 0;
-  bool _agentsSynced = false;
-  bool _agentsRefreshing = false;
+  // The machine whose agent list is loaded, so switching backends fetches the
+  // new host's install/auth status instead of keeping the old one's.
+  String? _agentsMachineId;
+  String? _agentsRefreshingFor;
   late (AppLanguage, bool, bool) _lastNotificationSettings;
 
   (AppLanguage, bool, bool) get _notificationSettings => (
@@ -124,21 +120,25 @@ class _BotChatScreenState extends State<BotChatScreen>
     _syncContext();
   }
 
-  Future<void> _refreshAgents() async {
+  Future<void> _refreshAgents(String machineId) async {
     // Rapid context syncs can call this before the first fetch resolves; one
-    // in-flight request at a time is enough.
-    if (_agentsRefreshing) return;
-    _agentsRefreshing = true;
+    // in-flight request per machine is enough.
+    if (_agentsRefreshingFor == machineId) return;
+    _agentsRefreshingFor = machineId;
     try {
       final List<CliAgent> agents =
           await widget.chatController.backend.fetchAgents();
-      if (!mounted) return;
+      // A reply from a machine switched away from must not replace the list.
+      if (!mounted ||
+          widget.machinesController.activeMachine?.id != machineId) {
+        return;
+      }
       widget.agentsController.syncAgents(agents);
-      _agentsSynced = true;
+      _agentsMachineId = machineId;
     } catch (_) {
-      // Best-effort: keep the built-in list and retry on the next context sync.
+      // Best-effort: keep the current list and retry on the next context sync.
     } finally {
-      _agentsRefreshing = false;
+      if (_agentsRefreshingFor == machineId) _agentsRefreshingFor = null;
     }
   }
 
@@ -166,7 +166,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     if (machine == null) return;
     // Pull the host's live agent list and install/auth status. Retries until it
     // lands.
-    if (!_agentsSynced) unawaited(_refreshAgents());
+    if (_agentsMachineId != machine.id) unawaited(_refreshAgents(machine.id));
     if (!isCliAgentSelectable(active)) {
       if (widget.chatController.machine != null) {
         widget.chatController.goHome();
@@ -283,7 +283,7 @@ class _BotChatScreenState extends State<BotChatScreen>
         await showDialog<({ChatHistorySearchResult hit, String query})>(
       context: context,
       builder: (BuildContext dialogContext) =>
-          _HistorySearchDialog(chatController: widget.chatController),
+          HistorySearchDialog(chatController: widget.chatController),
     );
     if (picked == null || !mounted) return;
     final ChatHistorySearchResult result = picked.hit;
@@ -523,9 +523,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                         }
                         final CliAgent agent =
                             widget.agentsController.activeAgent;
-                        // Only OAuth agents (claude/codex) prompt to log in.
-                        // hermes/opencode manage their key on the host, so they
-                        // never show the "not logged in" banner.
+                        // OAuth agents prompt to log in. hermes/opencode manage
+                        // their key on the host, so they never show this banner.
                         if (agent.authKind != 'oauth' ||
                             widget.chatController.agentLoggedIn(agent.key) !=
                                 false) {
@@ -548,7 +547,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                         ]),
                         builder: (BuildContext context, Widget? _) {
                           if (widget.chatController.machine == null) {
-                            return _HomeNavigationPage(
+                            return HomeNavigationPage(
                               agentsController: widget.agentsController,
                               chatController: widget.chatController,
                               machinesController: widget.machinesController,
@@ -592,11 +591,11 @@ class _BotChatScreenState extends State<BotChatScreen>
                                 if (widget.chatController.isNoticeMessage(
                                   message,
                                 )) {
-                                  return _ChatNotice(text: message.content);
+                                  return ChatNotice(text: message.content);
                                 }
                                 final bool highlighted =
                                     message.id == _highlightMessageId;
-                                final Widget bubble = _MessageBubble(
+                                final Widget bubble = BotMessageBubble(
                                   message: message,
                                   agentKey: agent.key,
                                   agentLabel: agent.label,
@@ -645,7 +644,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                                 return RepaintBoundary(
                                   key: ValueKey<String>(message.id),
                                   child: highlighted
-                                      ? _SearchMatchFlash(
+                                      ? SearchMatchFlash(
                                           key: _highlightAnchor,
                                           child: bubble,
                                         )
@@ -674,7 +673,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                           widget.chatController.messages,
                           contextWindow: widget.chatController.contextWindow,
                         );
-                        return _InputBar(
+                        return ChatInputBar(
                           acrylic: acrylic,
                           controller: _input,
                           focusNode: _inputFocus,
@@ -690,7 +689,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                                       )
                                     : const SizedBox.shrink(),
                               ),
-                              ContextMeter(usage: contextUsage),
+                              if (contextMeterSupports(agentKey))
+                                ContextMeter(usage: contextUsage),
                             ],
                           ),
                           backend: widget.chatController.backend,
@@ -799,7 +799,7 @@ class _ChatTitle extends StatelessWidget {
                   ? context.l10n.home
                   : workdir == null
                       ? agentLabel
-                      : _workdirName(workdir),
+                      : workdirName(workdir),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -911,1322 +911,6 @@ class _EmptyChatPlaceholder extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _HomeNavigationPage extends StatefulWidget {
-  const _HomeNavigationPage({
-    required this.agentsController,
-    required this.chatController,
-    required this.machinesController,
-  });
-
-  final CliAgentsController agentsController;
-  final BotChatController chatController;
-  final MachineCredentialsController machinesController;
-
-  @override
-  State<_HomeNavigationPage> createState() => _HomeNavigationPageState();
-}
-
-class _HomeNavigationPageState extends State<_HomeNavigationPage> {
-  bool _loading = false;
-  List<String> _recentWorkdirs = const <String>[];
-  String? _lastMachineId;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.machinesController.addListener(_onMachineChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_refresh());
-    });
-  }
-
-  @override
-  void dispose() {
-    widget.machinesController.removeListener(_onMachineChanged);
-    super.dispose();
-  }
-
-  void _onMachineChanged() {
-    if (widget.machinesController.activeMachine?.id == _lastMachineId) {
-      setState(() {});
-      return;
-    }
-    unawaited(_refresh());
-  }
-
-  Future<void> _refresh() async {
-    _lastMachineId = widget.machinesController.activeMachine?.id;
-    if (_lastMachineId == null) {
-      setState(() {
-        _recentWorkdirs = const <String>[];
-        _loading = false;
-      });
-      return;
-    }
-
-    setState(() => _loading = true);
-    final Future<void> workdir = widget.chatController.refreshWorkdir();
-    List<String> recent = const <String>[];
-    try {
-      recent = await widget.chatController.backend.recentWorkdirs();
-    } catch (_) {
-      // An offline backend should not break the home page.
-    }
-    await workdir;
-    if (!mounted) return;
-    setState(() {
-      _recentWorkdirs = recent.take(3).toList(growable: false);
-      _loading = false;
-    });
-  }
-
-  void _openWhatsNew() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const WhatsNewScreen()),
-    );
-  }
-
-  void _openGettingStarted() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const GettingStartedScreen()),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final AppStrings strings = context.l10n;
-    final MachineCredential? machine = widget.machinesController.activeMachine;
-    final String? workdir = widget.chatController.activeWorkdir;
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-        children: <Widget>[
-          Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 840),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (_loading) ...<Widget>[
-                    const LinearProgressIndicator(minHeight: 2),
-                    const SizedBox(height: 12),
-                  ],
-                  _HomeSection(
-                    title: strings.currentMachine,
-                    children: <Widget>[
-                      if (machine == null)
-                        ListTile(
-                          leading: const Icon(Icons.link_off_rounded),
-                          title: Text(strings.notConnected),
-                          subtitle: Text(strings.importOrChooseMachine),
-                        )
-                      else
-                        ActiveMachineStatusTile(
-                          activeMachine: machine,
-                          chatController: widget.chatController,
-                          agentsController: widget.agentsController,
-                          framed: false,
-                        ),
-                    ],
-                  ),
-                  if (workdir != null) ...<Widget>[
-                    const SizedBox(height: 20),
-                    _HomeSection(
-                      title: strings.currentWorkspace,
-                      children: <Widget>[
-                        _WorkdirTile(dir: workdir, current: true),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  _HomeSection(
-                    title: strings.recentWorkspaces,
-                    emptyText: strings.noRecentWorkspaces,
-                    children: <Widget>[
-                      for (final String dir in _recentWorkdirs)
-                        _WorkdirTile(dir: dir),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _HomeSection(
-                    title: strings.whatsNew,
-                    children: <Widget>[
-                      ListTile(
-                        leading: const Icon(Icons.auto_awesome_outlined),
-                        title: Text(strings.whatsNewHomeTitle),
-                        subtitle: Text(whatsNewSummary(strings)),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: _openWhatsNew,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _HomeSection(
-                    title: strings.tutorial,
-                    children: <Widget>[
-                      ListTile(
-                        leading: const Icon(Icons.school_outlined),
-                        title: Text(strings.gettingStarted),
-                        subtitle: Text(strings.gettingStartedHomeHint),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: _openGettingStarted,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HomeSection extends StatelessWidget {
-  const _HomeSection({
-    required this.title,
-    this.emptyText = '',
-    required this.children,
-  });
-
-  final String title;
-  final String emptyText;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.only(left: 4),
-          child: Text(
-            title,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _HomeSectionCard(
-          child: children.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    emptyText,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                )
-              : Column(
-                  children: <Widget>[
-                    for (int index = 0; index < children.length; index += 1)
-                      Column(
-                        children: <Widget>[
-                          if (index > 0) const Divider(height: 1),
-                          children[index],
-                        ],
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HomeSectionCard extends StatelessWidget {
-  const _HomeSectionCard({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    if (WallpaperScope.enabledOf(context)) {
-      final ThemeData theme = Theme.of(context);
-      return ChatChromeSurface(
-        acrylic: true,
-        color: theme.cardTheme.color ?? theme.colorScheme.surfaceContainerLow,
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-        borderRadius: BorderRadius.circular(AppTheme.panelRadius),
-        child: child,
-      );
-    }
-    return Card(
-      margin: EdgeInsets.zero,
-      child: child,
-    );
-  }
-}
-
-class _WorkdirTile extends StatelessWidget {
-  const _WorkdirTile({required this.dir, this.current = false});
-
-  final String dir;
-
-  /// The device's active workdir, marked with an open, accented folder.
-  final bool current;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return ListTile(
-      leading: current
-          ? Icon(Icons.folder_open_rounded, color: colors.primary)
-          : const Icon(Icons.folder_outlined),
-      title: Text(
-        _workdirName(dir),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        dir,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: AppTheme.mono(colors.onSurfaceVariant).copyWith(fontSize: 12),
-      ),
-    );
-  }
-}
-
-/// The folder name of a work directory ("Relay" for "/home/me/Relay" or
-/// "C:\\code\\Relay"), or the whole path for a filesystem root.
-String _workdirName(String dir) {
-  final String name = dir
-      .split(RegExp(r'[\\/]'))
-      .lastWhere((String part) => part.isNotEmpty, orElse: () => '');
-  return name.isEmpty ? dir : name;
-}
-
-class _HistorySearchDialog extends StatefulWidget {
-  const _HistorySearchDialog({required this.chatController});
-
-  final BotChatController chatController;
-
-  @override
-  State<_HistorySearchDialog> createState() => _HistorySearchDialogState();
-}
-
-class _HistorySearchDialogState extends State<_HistorySearchDialog> {
-  final TextEditingController _query = TextEditingController();
-  Future<List<ChatHistorySearchResult>>? _future;
-  bool _currentAgentOnly = false;
-  // The term the shown results actually came from, which is not necessarily
-  // what the field holds now. The caller highlights this one.
-  String _searchedFor = '';
-
-  @override
-  void dispose() {
-    _query.dispose();
-    super.dispose();
-  }
-
-  void _search() {
-    final String query = _query.text.trim();
-    if (query.isEmpty) return;
-    setState(() {
-      _searchedFor = query;
-      _future = widget.chatController.searchHistory(
-        query,
-        currentAgentOnly: _currentAgentOnly,
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(context.l10n.searchChats),
-      content: SizedBox(
-        width: 560,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 560),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              TextField(
-                controller: _query,
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: context.l10n.searchHint,
-                  prefixIcon: const Icon(Icons.search_rounded),
-                ),
-                textInputAction: TextInputAction.search,
-                onSubmitted: (_) => _search(),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _currentAgentOnly,
-                title: Text(context.l10n.currentAgentOnly),
-                onChanged: (bool value) {
-                  setState(() {
-                    _currentAgentOnly = value;
-                  });
-                  if (_future != null) _search();
-                },
-              ),
-              SizedBox(
-                height: 320,
-                child: _HistorySearchResults(
-                  future: _future,
-                  onSelected: (ChatHistorySearchResult result) =>
-                      Navigator.of(context).pop(
-                    (hit: result, query: _searchedFor),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(onPressed: _search, child: Text(context.l10n.searchChats)),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(context.l10n.close),
-        ),
-      ],
-    );
-  }
-}
-
-class _HistorySearchResults extends StatelessWidget {
-  const _HistorySearchResults({required this.future, required this.onSelected});
-
-  final Future<List<ChatHistorySearchResult>>? future;
-  final ValueChanged<ChatHistorySearchResult> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    if (future == null) {
-      return const SizedBox.shrink();
-    }
-    return FutureBuilder<List<ChatHistorySearchResult>>(
-      future: future,
-      builder: (
-        BuildContext context,
-        AsyncSnapshot<List<ChatHistorySearchResult>> snapshot,
-      ) {
-        final ColorScheme colors = Theme.of(context).colorScheme;
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Text(
-            context.l10n.searchFailed(snapshot.error!),
-            style: TextStyle(color: colors.error),
-          );
-        }
-        final List<ChatHistorySearchResult> results =
-            snapshot.data ?? const <ChatHistorySearchResult>[];
-        if (results.isEmpty) {
-          return Align(
-            alignment: Alignment.topLeft,
-            child: Text(
-              context.l10n.noSearchResults,
-              style: TextStyle(color: colors.outline),
-            ),
-          );
-        }
-        return ListView.separated(
-          shrinkWrap: true,
-          itemCount: results.length,
-          separatorBuilder: (BuildContext context, int index) =>
-              const Divider(height: 1),
-          itemBuilder: (BuildContext context, int index) {
-            final ChatHistorySearchResult result = results[index];
-            final CliAgent agent = cliAgentByKey(result.agentKey);
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('${agent.label} - ${result.sessionName}'),
-              subtitle: Text(
-                result.snippet,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () => onSelected(result),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _InputBar extends StatefulWidget {
-  const _InputBar({
-    required this.controller,
-    required this.focusNode,
-    required this.backend,
-    required this.agentKey,
-    required this.sessionId,
-    required this.isThinking,
-    required this.isCancelling,
-    required this.onSend,
-    required this.onCancel,
-    required this.onClear,
-    required this.onCompress,
-    required this.onExportMarkdown,
-    this.header,
-    this.acrylic = false,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-
-  /// Pinned above the field: the active agent's quota.
-  final Widget? header;
-  final bool acrylic;
-  final BackendClient backend;
-  final String agentKey;
-  final String? sessionId;
-  final bool isThinking;
-  final bool isCancelling;
-  final VoidCallback onSend;
-  final VoidCallback onCancel;
-  final VoidCallback onClear;
-  final VoidCallback onCompress;
-  final VoidCallback onExportMarkdown;
-
-  @override
-  State<_InputBar> createState() => _InputBarState();
-}
-
-class _InputBarState extends State<_InputBar> {
-  static const int _maxUploadBytes = 100 * 1024 * 1024;
-
-  bool _actionsOpen = false;
-  bool _hasText = false;
-  bool _isUploading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _hasText = widget.controller.text.trim().isNotEmpty;
-    widget.controller.addListener(_onTextChanged);
-    widget.focusNode.addListener(_onFocusChanged);
-  }
-
-  @override
-  void didUpdateWidget(_InputBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onTextChanged);
-      _hasText = widget.controller.text.trim().isNotEmpty;
-      widget.controller.addListener(_onTextChanged);
-    }
-    // Hardware-keyboard targets should stay ready for the next prompt after a
-    // turn finishes. On mobile we leave focus alone so the soft keyboard does
-    // not reopen after every reply.
-    if (usesHardwareKeyboard && oldWidget.isThinking && !widget.isThinking) {
-      widget.focusNode.requestFocus();
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onTextChanged);
-    widget.focusNode.removeListener(_onFocusChanged);
-    super.dispose();
-  }
-
-  void _onTextChanged() {
-    final bool nextHasText = widget.controller.text.trim().isNotEmpty;
-    if (nextHasText == _hasText && !(nextHasText && _actionsOpen)) return;
-    setState(() {
-      _hasText = nextHasText;
-      if (nextHasText) _actionsOpen = false;
-    });
-  }
-
-  void _onFocusChanged() {
-    if (!widget.focusNode.hasFocus || !_actionsOpen) return;
-    setState(() => _actionsOpen = false);
-  }
-
-  void _toggleActions() {
-    widget.focusNode.unfocus();
-    setState(() => _actionsOpen = !_actionsOpen);
-  }
-
-  void _closeActions() {
-    if (!_actionsOpen) return;
-    setState(() => _actionsOpen = false);
-  }
-
-  void _sendText() {
-    // Sending is allowed even while a turn runs: the controller queues the text
-    // as a follow-up and auto-sends it when the conversation frees up.
-    if (!_hasText) return;
-    _closeActions();
-    widget.onSend();
-  }
-
-  void _runAction(VoidCallback action) {
-    _closeActions();
-    action();
-  }
-
-  Future<void> _attachFiles() async {
-    if (_isUploading) return;
-    _closeActions();
-    setState(() => _isUploading = true);
-    try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
-        allowMultiple: true,
-        withData: kIsWeb,
-        withReadStream: !kIsWeb,
-      );
-      if (result == null || !mounted) return;
-      for (final PlatformFile file in result.files) {
-        if (!mounted) return;
-        if (kIsWeb ? file.bytes == null : file.readStream == null) continue;
-        final int length = kIsWeb ? file.bytes!.length : file.size;
-        if (length > _maxUploadBytes) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.l10n.uploadTooLarge(file.name, '100 MB')),
-            ),
-          );
-          continue;
-        }
-        final String timestamp = DateTime.now()
-            .toIso8601String()
-            .split('.')
-            .first
-            .replaceAll(RegExp('[-:]'), '')
-            .replaceFirst('T', '-');
-        final String name = '$timestamp-${file.name}';
-        final FsEntry entry = kIsWeb
-            ? await widget.backend.uploadFile(
-                path: '.relay/uploads',
-                name: name,
-                bytes: file.bytes!,
-                createDirectory: true,
-              )
-            : await widget.backend.uploadFileStream(
-                path: '.relay/uploads',
-                name: name,
-                bytes: file.readStream!,
-                length: length,
-                createDirectory: true,
-              );
-        if (!mounted) return;
-        final String draft = widget.controller.text;
-        final String separator =
-            draft.isEmpty || draft.endsWith('\n') ? '' : '\n';
-        final String text = '$draft$separator${entry.path}';
-        widget.controller.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        );
-      }
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.l10n.uploadFailed(friendlyErrorText(context.l10n, err)),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
-    }
-  }
-
-  void _submitFromKeyboard() {
-    if (!usesHardwareKeyboard) return;
-    _sendText();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bool canCancel = widget.isThinking && !widget.isCancelling;
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final Widget input = _MessageTextField(
-      acrylic: widget.acrylic,
-      focusNode: widget.focusNode,
-      controller: widget.controller,
-      enabled: true,
-      hintText: widget.isThinking
-          ? context.l10n.inputHintFollowUp
-          : context.l10n.inputHint,
-      onTap: _closeActions,
-    );
-    return ChatChromeSurface(
-      acrylic: widget.acrylic,
-      color: colors.surfaceContainer,
-      border: Border(top: BorderSide(color: colors.outlineVariant)),
-      // The gesture bar's own inset is the bottom gap; 12 only where it has none.
-      child: SafeArea(
-        top: false,
-        minimum: const EdgeInsets.only(bottom: 12),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (widget.header != null) widget.header!,
-              if (_isUploading) const LinearProgressIndicator(minHeight: 2),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Expanded(
-                    child: usesHardwareKeyboard
-                        ? CallbackShortcuts(
-                            bindings: <ShortcutActivator, VoidCallback>{
-                              const SingleActivator(LogicalKeyboardKey.enter):
-                                  _submitFromKeyboard,
-                            },
-                            child: input,
-                          )
-                        : input,
-                  ),
-                  const SizedBox(width: 8),
-                  // Always available, even mid-turn: model and other controls
-                  // apply from the next turn.
-                  SizedBox.square(
-                    dimension: 44,
-                    child: IconButton.filledTonal(
-                      isSelected: _actionsOpen,
-                      onPressed: _toggleActions,
-                      icon: const Icon(Icons.add_rounded),
-                      selectedIcon: const Icon(Icons.close_rounded),
-                      tooltip: context.l10n.moreChatActions,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // With text it sends (queuing a follow-up while a turn runs);
-                  // with no text mid-turn it stops the turn.
-                  SizedBox.square(
-                    dimension: 44,
-                    child: IconButton.filled(
-                      onPressed: _hasText
-                          ? _sendText
-                          : canCancel
-                              ? widget.onCancel
-                              : null,
-                      icon: Icon(
-                        !_hasText && widget.isThinking
-                            ? Icons.stop_rounded
-                            : Icons.arrow_upward_rounded,
-                      ),
-                      tooltip: !_hasText && widget.isThinking
-                          ? context.l10n.stop
-                          : context.l10n.send,
-                    ),
-                  ),
-                ],
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                child: _actionsOpen
-                    ? _ComposerActionPanel(
-                        backend: widget.backend,
-                        agentKey: widget.agentKey,
-                        sessionId: widget.sessionId,
-                        busy: widget.isThinking,
-                        onAttachFile: _isUploading ? null : _attachFiles,
-                        onOpenSettingsPage: _closeActions,
-                        onClear: () => _runAction(widget.onClear),
-                        onCompress: () => _runAction(widget.onCompress),
-                        onExportMarkdown: () =>
-                            _runAction(widget.onExportMarkdown),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MessageTextField extends StatelessWidget {
-  const _MessageTextField({
-    required this.focusNode,
-    required this.controller,
-    required this.enabled,
-    required this.hintText,
-    required this.onTap,
-    this.acrylic = false,
-  });
-
-  final FocusNode focusNode;
-  final TextEditingController controller;
-  final bool enabled;
-  final String hintText;
-  final VoidCallback onTap;
-  final bool acrylic;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return TextField(
-      focusNode: focusNode,
-      controller: controller,
-      enabled: enabled,
-      onTap: onTap,
-      minLines: 1,
-      maxLines: 6,
-      textInputAction: TextInputAction.newline,
-      decoration: InputDecoration(
-        hintText: hintText,
-        filled: true,
-        fillColor:
-            acrylic ? colors.surface.withValues(alpha: 0.18) : colors.surface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: colors.outlineVariant),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-      ),
-    );
-  }
-}
-
-class _ComposerActionPanel extends StatelessWidget {
-  const _ComposerActionPanel({
-    required this.backend,
-    required this.agentKey,
-    required this.sessionId,
-    required this.busy,
-    required this.onAttachFile,
-    required this.onOpenSettingsPage,
-    required this.onClear,
-    required this.onCompress,
-    required this.onExportMarkdown,
-  });
-
-  final BackendClient backend;
-  final String agentKey;
-  final String? sessionId;
-
-  /// A turn is running: clearing and compacting need an idle session.
-  final bool busy;
-  final VoidCallback? onAttachFile;
-  final VoidCallback onOpenSettingsPage;
-  final VoidCallback onClear;
-  final VoidCallback onCompress;
-  final VoidCallback onExportMarkdown;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          AgentControlsButtons(
-            backend: backend,
-            agentKey: agentKey,
-            sessionId: sessionId,
-            onOpenPage: onOpenSettingsPage,
-          ),
-          const SizedBox(height: 14),
-          ComposerActionRow(
-            children: <Widget>[
-              ComposerActionButton(
-                icon: Icons.attach_file,
-                label: context.l10n.attachFile,
-                onPressed: onAttachFile,
-              ),
-              ComposerActionButton(
-                icon: Icons.refresh_rounded,
-                label: context.l10n.clearChat,
-                onPressed: busy ? null : onClear,
-              ),
-              ComposerActionButton(
-                icon: Icons.compress,
-                label: context.l10n.compress,
-                onPressed: busy ? null : onCompress,
-              ),
-              ComposerActionButton(
-                icon: Icons.download_outlined,
-                label: context.l10n.exportMarkdown,
-                onPressed: onExportMarkdown,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// A centered, muted one-line status note (e.g. "Conversation compacted")
-// rendered inline in the message list instead of as a chat bubble.
-class _ChatNotice extends StatelessWidget {
-  const _ChatNotice({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Center(
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
-        ),
-      ),
-    );
-  }
-}
-
-// The turn's persisted execution steps.
-List<String> _persistedSteps(ChatMessage message) {
-  final Object? raw = message.metadata['progressLines'];
-  if (raw is! List) return const <String>[];
-  return raw
-      .whereType<String>()
-      .where((String line) => line.trim().isNotEmpty)
-      .toList(growable: false);
-}
-
-/// Pulses a tint behind the message a "search chats" jump landed on, so the eye
-/// finds the row once the list stops scrolling. Only ever wraps that one row:
-/// the fade runs on mount and the wrapper is dropped when the highlight clears.
-class _SearchMatchFlash extends StatefulWidget {
-  const _SearchMatchFlash({required this.child, super.key});
-
-  final Widget child;
-
-  @override
-  State<_SearchMatchFlash> createState() => _SearchMatchFlashState();
-}
-
-class _SearchMatchFlashState extends State<_SearchMatchFlash>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _fade = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-    reverseDuration: const Duration(milliseconds: 520),
-  );
-  Timer? _hold;
-
-  @override
-  void initState() {
-    super.initState();
-    _fade.forward();
-    _hold = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) _fade.reverse();
-    });
-  }
-
-  @override
-  void dispose() {
-    _hold?.cancel();
-    _fade.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Color tint = Theme.of(context).colorScheme.tertiary;
-    return AnimatedBuilder(
-      animation: _fade,
-      builder: (BuildContext context, Widget? child) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: tint.withValues(alpha: 0.18 * _fade.value),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: child,
-      ),
-      child: widget.child,
-    );
-  }
-}
-
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({
-    required this.message,
-    required this.retryable,
-    required this.streaming,
-    required this.awaitingFirstToken,
-    required this.errorDetail,
-    required this.system,
-    required this.cancelled,
-    required this.queued,
-    required this.progressLines,
-    required this.onRetry,
-    required this.onEdit,
-    required this.onCancelQueued,
-    required this.onOptionSelected,
-    required this.agentKey,
-    required this.agentLabel,
-    this.highlightQuery,
-  });
-
-  final ChatMessage message;
-
-  /// The conversation's agent, named in each reply's header.
-  final String agentKey;
-  final String agentLabel;
-
-  /// Set only while this bubble is the revealed "search chats" hit; marks the
-  /// term inside the rendered text.
-  final String? highlightQuery;
-
-  final bool retryable;
-  final bool streaming;
-  final bool awaitingFirstToken;
-  final String? errorDetail;
-  final bool system;
-  final bool cancelled;
-  final bool queued;
-  final List<String> progressLines;
-  final VoidCallback onRetry;
-  final VoidCallback onEdit;
-  final VoidCallback onCancelQueued;
-  final void Function(String option) onOptionSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isUser = message.isUser;
-    final bool acrylic = WallpaperScope.enabledOf(context);
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final double maxBubbleWidth =
-        isDesktopTarget ? 760 : MediaQuery.sizeOf(context).width * 0.80;
-    final Color textColor = isUser && !system
-        ? (acrylic ? colors.onPrimaryContainer : colors.onPrimary)
-        : colors.onSurface;
-
-    // A turn can leave several assistant messages (mid-task follow-ups + a final
-    // answer); render them as separate, individually timestamped blocks. A single
-    // message keeps the simpler one-block layout with a single timestamp below.
-    final List<MessageSegment> segments = message.segments;
-    final bool segmented = !isUser && !system && segments.length > 1;
-    // Claude sometimes ends a finished answer with a "pick one" question + list;
-    // surface those choices as buttons that send the pick back as a new message.
-    final List<String>? optionPrompt = (!isUser && !system && !streaming)
-        ? parseOptionPrompt(
-            segments.isNotEmpty ? segments.last.text : message.content,
-          )
-        : null;
-    // Claude and Codex often open with an "I will …" plan; fold it away on the
-    // finished bubble.
-    final ({String plan, String body})? planSplit = (!isUser &&
-            !system &&
-            !streaming &&
-            !segmented &&
-            message.content.isNotEmpty)
-        ? splitLeadingPlan(message.content)
-        : null;
-    // Execution steps captured during the turn, surfaced collapsed once it ends
-    // (live progress still streams via `progressLines` below while running).
-    final List<String> finishedSteps = (!isUser && !system && !streaming)
-        ? _persistedSteps(message)
-        : const <String>[];
-    final DateTime stampTime =
-        (!isUser && segments.isNotEmpty && segments.first.createdAt != null)
-            ? segments.first.createdAt!
-            : message.createdAt;
-    final bool showStamp =
-        !segmented && !(awaitingFirstToken && message.content.isEmpty);
-    // An agent reply names its agent and time in a header line; the user's
-    // bubble and a system reply keep the time underneath.
-    final bool hasHeader = !isUser && !system;
-    final Widget? actions =
-        !streaming && !awaitingFirstToken && !queued && !system
-            ? _MessageActions(
-                text: isUser
-                    ? message.content
-                    : segmented
-                        // The same segment SegmentedContent shows last.
-                        ? segments
-                            .lastWhere(
-                              (MessageSegment s) => s.text.trim().isNotEmpty,
-                              orElse: () => segments.last,
-                            )
-                            .text
-                        : planSplit?.body ?? message.content,
-                onEdit: isUser ? onEdit : null,
-              )
-            : null;
-
-    final Widget content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (awaitingFirstToken && message.content.isEmpty)
-          TypingDots(color: textColor)
-        else if (segmented)
-          SegmentedContent(
-            segments: segments,
-            color: textColor,
-            formatInlineEmphasis: !streaming,
-            highlightQuery: highlightQuery,
-            trailing: actions,
-          )
-        else if (message.content.isNotEmpty)
-          if (planSplit != null)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                CollapsibleNote(
-                  title: context.l10n.agentThinking,
-                  color: textColor,
-                  child: MessageText(
-                    text: planSplit.plan,
-                    color: textColor,
-                    formatInlineEmphasis: true,
-                    highlightQuery: highlightQuery,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                MessageText(
-                  text: planSplit.body,
-                  color: textColor,
-                  formatInlineEmphasis: true,
-                  highlightQuery: highlightQuery,
-                ),
-              ],
-            )
-          else
-            MessageText(
-              text: message.content,
-              color: textColor,
-              formatInlineEmphasis: !isUser && !streaming,
-              highlightQuery: highlightQuery,
-            ),
-        if (optionPrompt != null)
-          OptionButtons(
-            options: optionPrompt,
-            color: textColor,
-            onSelected: onOptionSelected,
-          ),
-        if (progressLines.isNotEmpty) ...<Widget>[
-          if (message.content.isNotEmpty) const SizedBox(height: 8),
-          ProgressLines(
-            lines: progressLines,
-            color: textColor,
-            active: true,
-          ),
-        ] else if (finishedSteps.isNotEmpty) ...<Widget>[
-          if (message.content.isNotEmpty) const SizedBox(height: 6),
-          CollapsibleNote(
-            title: context.l10n.agentSteps(finishedSteps.length),
-            color: textColor,
-            child: ProgressLines(
-              lines: finishedSteps,
-              color: textColor,
-            ),
-          ),
-        ],
-        if (cancelled) ...<Widget>[
-          if (message.content.isNotEmpty || progressLines.isNotEmpty)
-            const SizedBox(height: 8),
-          MessageStatus(
-            icon: Icons.stop_circle_outlined,
-            text: context.l10n.cancelled,
-            color: textColor,
-          ),
-        ],
-      ],
-    );
-
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment:
-            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: <Widget>[
-          if (isUser)
-            Container(
-              constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-              margin: const EdgeInsets.symmetric(vertical: 5),
-              child: ChatChromeSurface(
-                acrylic: acrylic,
-                color: acrylic
-                    ? colors.primaryContainer
-                    : queued
-                        ? colors.primary.withValues(alpha: 0.55)
-                        : colors.primary,
-                border: acrylic
-                    ? Border.all(color: colors.outlineVariant)
-                    : const Border(),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-                  child: DefaultSelectionStyle.merge(
-                    selectionColor: textColor.withValues(alpha: 0.35),
-                    child: content,
-                  ),
-                ),
-              ),
-            )
-          else
-            // Replies span the full width: long answers and code read better
-            // without a ragged right gutter.
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: ReplyPanel(
-                color: system ? colors.tertiaryContainer : null,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (hasHeader)
-                      ReplyHeader(
-                        agentKey: agentKey,
-                        label: agentLabel,
-                        time: showStamp
-                            ? formatShortTime(
-                                context,
-                                stampTime.toIso8601String(),
-                              )
-                            : null,
-                        trailing: segmented ? null : actions,
-                      ),
-                    content,
-                  ],
-                ),
-              ),
-            ),
-          // A pending follow-up shows a "queued" affordance instead of a time:
-          // it has not been sent yet and can still be cancelled.
-          if (queued)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(Icons.schedule_rounded, size: 13, color: colors.outline),
-                  const SizedBox(width: 4),
-                  Text(
-                    context.l10n.queuedFollowUp,
-                    style: TextStyle(fontSize: 11, color: colors.outline),
-                  ),
-                  const SizedBox(width: 10),
-                  InkWell(
-                    onTap: onCancelQueued,
-                    child: Text(
-                      context.l10n.cancel,
-                      style: TextStyle(fontSize: 11, color: colors.primary),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          // Every message shows when it was sent/received. Segmented bubbles also
-          // carry an inline time per follow-up, so the trailing stamp is hidden
-          // for them to avoid duplicating the last segment's time.
-          else if (showStamp && !hasHeader)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    formatShortTime(context, stampTime.toIso8601String()),
-                    style: TextStyle(fontSize: 11, color: colors.outline),
-                  ),
-                  if (actions != null) actions,
-                ],
-              ),
-            ),
-          if (retryable) ...<Widget>[
-            if (errorDetail != null && errorDetail!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  errorDetail!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.only(top: 1, bottom: 4),
-              child: TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: Text(context.l10n.retry),
-                style: TextButton.styleFrom(
-                  minimumSize: const Size(0, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MessageActions extends StatelessWidget {
-  const _MessageActions({required this.text, this.onEdit});
-
-  final String text;
-  final VoidCallback? onEdit;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color = Theme.of(context).colorScheme.outline;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        IconButton(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: text));
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(context.l10n.copied)),
-            );
-          },
-          tooltip: context.l10n.copy,
-          icon: const Icon(Icons.content_copy_rounded),
-          iconSize: 14,
-          color: color,
-          visualDensity: VisualDensity.compact,
-        ),
-        if (onEdit != null)
-          IconButton(
-            onPressed: onEdit,
-            tooltip: context.l10n.edit,
-            icon: const Icon(Icons.edit_outlined),
-            iconSize: 14,
-            color: color,
-            visualDensity: VisualDensity.compact,
-          ),
-      ],
     );
   }
 }

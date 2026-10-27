@@ -8,6 +8,7 @@ const path = require('node:path');
 const { Readable } = require('node:stream');
 const express = require('express');
 const createFsRouter = require('../routes/fs');
+const { cursorAuthFile } = require('../lib/cli-paths');
 
 // The file API is the boundary SECURITY.md promises: a leaked device token must
 // not be able to read tokens/CLI credentials through it, and RELAY_FS_ROOTS must
@@ -15,6 +16,7 @@ const createFsRouter = require('../routes/fs');
 
 const modulePath = require.resolve('../lib/filesystem');
 const tokensModulePath = require.resolve('../lib/tokens');
+const fcmModulePath = require.resolve('../lib/fcm');
 // realpath so comparisons hold on hosts where the temp dir is itself a link
 // (macOS /var -> /private/var).
 const scratchRoot = fs.realpathSync(
@@ -25,8 +27,10 @@ after(() => fs.rmSync(scratchRoot, { recursive: true, force: true }));
 
 // filesystem.js reads RELAY_FS_ROOTS and the home directory once, at load time,
 // so each policy variant needs its own freshly loaded copy of the module.
-function loadFilesystem({ roots, home, tokensFile } = {}) {
+function loadFilesystem({ roots, home, tokensFile, fcmFile } = {}) {
   const prev = {
+    fcmFile: process.env.FCM_SERVICE_ACCOUNT_FILE,
+    fcmModule: require.cache[fcmModulePath],
     roots: process.env.RELAY_FS_ROOTS,
     home: process.env.HOME,
     userProfile: process.env.USERPROFILE,
@@ -44,6 +48,10 @@ function loadFilesystem({ roots, home, tokensFile } = {}) {
     process.env.USERPROFILE = home;
   }
   if (tokensFile !== undefined) process.env.RELAY_TOKENS_FILE = tokensFile;
+  if (fcmFile !== undefined) {
+    process.env.FCM_SERVICE_ACCOUNT_FILE = fcmFile;
+    delete require.cache[fcmModulePath];
+  }
   delete require.cache[modulePath];
   delete require.cache[tokensModulePath];
   try {
@@ -56,6 +64,11 @@ function loadFilesystem({ roots, home, tokensFile } = {}) {
     restore('HOME', prev.home);
     restore('USERPROFILE', prev.userProfile);
     restore('RELAY_TOKENS_FILE', prev.tokensFile);
+    if (fcmFile !== undefined) {
+      restore('FCM_SERVICE_ACCOUNT_FILE', prev.fcmFile);
+      delete require.cache[fcmModulePath];
+      if (prev.fcmModule) require.cache[fcmModulePath] = prev.fcmModule;
+    }
   }
 }
 
@@ -76,6 +89,8 @@ function fakeHome() {
   fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), '{}');
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(home, '.codex', 'auth.json'), '{}');
+  fs.mkdirSync(path.dirname(cursorAuthFile(home)), { recursive: true });
+  fs.writeFileSync(cursorAuthFile(home), '{}');
   return home;
 }
 
@@ -105,10 +120,26 @@ test('downloading a denied CLI credential file is refused', async () => {
   for (const denied of [
     path.join(home, '.claude', '.credentials.json'),
     path.join(home, '.codex', 'auth.json'),
+    cursorAuthFile(home),
     path.join(home, '.ssh', 'id_ed25519'),
   ]) {
     const err = await rejects(() => prepareDownloadAbsolute(denied));
     assert.equal(err.code, 'FS_PATH_RESTRICTED', denied);
+  }
+});
+
+test('the FCM service-account key is refused, configured or conventional', async (t) => {
+  // The fake key is not a valid credential, so fcm.js warns while loading it.
+  t.mock.method(console, 'warn', () => {});
+  const keyFile = path.join(scratchCase(), 'firebase-key.json');
+  fs.writeFileSync(keyFile, '{}');
+  const { prepareDownloadAbsolute } = loadFilesystem({ fcmFile: keyFile });
+  const err = await rejects(() => prepareDownloadAbsolute(keyFile));
+  assert.equal(err.code, 'FS_PATH_RESTRICTED');
+  const conventional = path.join(__dirname, '..', 'fcm-service-account.json');
+  if (fs.existsSync(conventional)) {
+    const denied = await rejects(() => prepareDownloadAbsolute(conventional));
+    assert.equal(denied.code, 'FS_PATH_RESTRICTED');
   }
 });
 
@@ -363,8 +394,6 @@ async function upload(t, filesystem, workdir, query) {
   const app = express();
   app.use(createFsRouter({
     ...filesystem,
-    fs,
-    path,
     MAX_UPLOAD_BYTES: 1024,
     requestWorkdir: (req) => req.get('x-workdir'),
   }));
@@ -542,16 +571,33 @@ test('an upload over the byte limit is cut off mid-stream and leaves no file', a
   const target = path.join(dir, 'big.bin');
   const { streamUploadToFile } = loadFilesystem();
 
-  await assert.rejects(
-    streamUploadToFile(Readable.from([Buffer.alloc(600), Buffer.alloc(600)]), target, 1024),
-    (err) => err.status === 413 && err.code === 'FS_UPLOAD_TOO_LARGE',
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(fs.readdirSync(dir), []);
+  for (const chunks of [[Buffer.alloc(1200)], [Buffer.alloc(600), Buffer.alloc(600)]]) {
+    await assert.rejects(
+      streamUploadToFile(Readable.from(chunks), target, 1024),
+      (err) => err.status === 413 && err.code === 'FS_UPLOAD_TOO_LARGE',
+    );
+    assert.deepEqual(fs.readdirSync(dir), []);
+  }
 
   const received = await streamUploadToFile(Readable.from([Buffer.from('ok')]), target, 1024);
   assert.equal(received, 2);
   assert.deepEqual(fs.readdirSync(dir), ['big.bin']);
+});
+
+test('a failed upload is cleaned up before rejection and preserves the destination', async () => {
+  const dir = scratchCase();
+  const target = path.join(dir, 'existing.txt');
+  fs.writeFileSync(target, 'original');
+  const { streamUploadToFile } = loadFilesystem();
+  const failure = new Error('upload stream failed');
+  const body = Readable.from((async function* () {
+    yield Buffer.from('replacement');
+    throw failure;
+  })());
+
+  await assert.rejects(streamUploadToFile(body, target, 1024), (err) => err === failure);
+  assert.deepEqual(fs.readdirSync(dir), ['existing.txt']);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'original');
 });
 
 test('a directory downloads as a zip and is aborted past the byte cap', { skip: process.platform === 'win32' }, async (t) => {

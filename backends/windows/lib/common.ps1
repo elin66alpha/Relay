@@ -11,6 +11,9 @@ $bundledNodeDir = Join-Path $Script:RootDir 'runtime\node'
 if (Test-Path -LiteralPath (Join-Path $bundledNodeDir 'node.exe')) {
   $env:PATH = "$bundledNodeDir;$env:PATH"
 }
+# Installers update the user PATH after this process has already started.
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+$env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$env:USERPROFILE\.local\bin;$env:USERPROFILE\.opencode\bin;$env:APPDATA\npm;$userPath;$env:PATH"
 
 $Script:AppDataDir = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA 'Relay'
@@ -21,7 +24,7 @@ $Script:LogDir = Join-Path $Script:AppDataDir 'logs'
 $Script:RuntimeDir = Join-Path $Script:AppDataDir 'runtime'
 $Script:BackendPidFile = Join-Path $Script:RuntimeDir 'backend.pid'
 $Script:TunnelPidFile = Join-Path $Script:RuntimeDir 'tunnel.pid'
-$Script:StartupTaskName = 'Relay Backend'
+$Script:StartupTaskName = if ($env:RELAY_WINDOWS_TASK_NAME) { $env:RELAY_WINDOWS_TASK_NAME } else { 'Relay Backend' }
 
 function Write-Info {
   param([string]$Message)
@@ -79,6 +82,9 @@ function Set-EnvValue {
     [string]$Key,
     [string]$Value
   )
+  if ($Key -notmatch '^[A-Z][A-Z0-9_]*$' -or $Value -match '[\r\n]') {
+    Write-Fail 'Invalid environment key or multiline value.'
+  }
   Ensure-EnvFile
   $lines = @()
   if (Test-Path -LiteralPath $Script:EnvFile) {
@@ -145,8 +151,10 @@ function Get-TunnelIdForName {
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
     return ''
   }
-  $items = @($json | ConvertFrom-Json)
-  $item = $items | Where-Object { $_.name -eq $Name -and -not $_.deletedAt } | Select-Object -First 1
+  $items = @(($json -join "`n") | ConvertFrom-Json)
+  $item = $items | Where-Object {
+    $_.name -eq $Name -and (-not $_.PSObject.Properties['deletedAt'] -or -not $_.deletedAt)
+  } | Select-Object -First 1
   if ($item) {
     return [string]$item.id
   }
@@ -158,13 +166,15 @@ function Ensure-NamedTunnel {
   $certFile = Join-Path $env:USERPROFILE '.cloudflared\cert.pem'
   if (-not (Test-Path -LiteralPath $certFile)) {
     Write-Info 'Cloudflare login is required before creating a named tunnel.'
-    & cloudflared tunnel login
+    & cloudflared tunnel login | Out-Host
+    if ($LASTEXITCODE -ne 0) { Write-Fail 'Cloudflare login failed.' }
   }
 
   $tunnelId = Get-TunnelIdForName -Name $Name
   if ([string]::IsNullOrWhiteSpace($tunnelId)) {
     Write-Info "Creating Cloudflare Tunnel: $Name"
-    & cloudflared tunnel create $Name
+    & cloudflared tunnel create $Name | Out-Host
+    if ($LASTEXITCODE -ne 0) { Write-Fail 'Cloudflare tunnel creation failed.' }
     $tunnelId = Get-TunnelIdForName -Name $Name
   } else {
     Write-Info "Using existing Cloudflare Tunnel: $Name ($tunnelId)"
@@ -238,12 +248,13 @@ function Require-Node {
 }
 
 function Install-ServerDeps {
+  param([switch]$Force)
   Push-Location $Script:ServerDir
   try {
     $nodeModules = Join-Path $Script:ServerDir 'node_modules'
     & node -e "try { require('node-pty'); } catch (_) { process.exit(1); }"
     $ptyReady = $LASTEXITCODE -eq 0
-    if ((-not (Test-Path -LiteralPath $nodeModules)) -or
+    if ($Force -or (-not (Test-Path -LiteralPath $nodeModules)) -or
         (-not $ptyReady) -or
         (-not (Test-Path -LiteralPath (Join-Path $nodeModules 'ws')))) {
       Write-Info 'Installing backend dependencies...'
@@ -351,6 +362,7 @@ function Start-RelayTunnel {
     Write-Info 'Tunnel mode is none; not starting cloudflared.'
     return
   }
+  if (Test-PidFile $Script:TunnelPidFile) { Write-Info 'Tunnel is already running.'; return }
   if (-not (Test-Command 'cloudflared')) {
     Write-Fail 'cloudflared is required for Cloudflare Tunnel mode.'
   }
@@ -363,10 +375,13 @@ function Start-RelayTunnel {
     $port = Get-BackendPort
     $argsText = "tunnel --url http://127.0.0.1:$port"
   }
-  $args = Split-CommandLine -CommandLine $argsText
+  # Start-Process joins its arguments; preserve quotes around config paths.
+  foreach ($log in @('tunnel.out.log', 'tunnel.err.log')) {
+    [IO.File]::WriteAllText((Join-Path $Script:LogDir $log), '')
+  }
   Start-RelayProcess -Name 'tunnel' `
     -FilePath $cloudflaredBin `
-    -ArgumentList $args `
+    -ArgumentList @($argsText) `
     -WorkingDirectory $Script:ServerDir `
     -PidFile $Script:TunnelPidFile `
     -OutLog (Join-Path $Script:LogDir 'tunnel.out.log') `
@@ -388,7 +403,10 @@ function Register-RelayStartup {
   $powershell = (Get-Command 'powershell.exe').Source
   $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`""
   $trigger = New-ScheduledTaskTrigger -AtLogOn
-  Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Description 'Start Relay backend for the current user.' -Force | Out-Null
+  $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start Relay backend for the current user.' -Force | Out-Null
   Write-Info "Startup task registered: $Script:StartupTaskName"
 }
 

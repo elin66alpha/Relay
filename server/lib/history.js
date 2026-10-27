@@ -12,7 +12,7 @@ const HISTORY_FILE = process.env.RELAY_HISTORY_FILE
   : path.join(__dirname, '..', 'chat-history.json');
 const MAX_PER_SCOPE = 200; // Cap per conversation so the file can't grow forever.
 const SCOPE_SEPARATOR = '\u0000';
-const LEGACY_SESSION_ID = 'default';
+const MAIN_SESSION_ID = 'default';
 const FLUSH_IDLE_MS = 300;
 const FLUSH_MAX_MS = 2000;
 
@@ -216,7 +216,7 @@ function scopeInfo(scopeKey) {
   return {
     workdir: parts[0],
     agentKey: parts[1],
-    sessionId: parts[2] || LEGACY_SESSION_ID,
+    sessionId: parts[2] || MAIN_SESSION_ID,
   };
 }
 

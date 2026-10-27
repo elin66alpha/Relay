@@ -5,8 +5,29 @@ const { test, beforeEach } = require('node:test');
 
 process.env.RELAY_MODEL_DISCOVERY = '0';
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const sessions = {};
-const pools = { claude: {}, codex: {}, opencode: {}, hermes: {} };
+const pools = { claude: {}, codex: {}, opencode: {}, hermes: {}, cursor: {} };
+// Every Cursor process pool agents.js creates, with the options it passed and
+// the scope keys it was asked to forget.
+const cursorCreated = [];
+const cursorSentVia = [];
+const cursorConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-cursor-config-'));
+process.env.RELAY_CURSOR_CONFIG_DIR = cursorConfigDir;
+// The catalog agents.js composes Cursor's config options from.
+const cursorCatalog = [
+  { id: 'default', label: 'Auto' },
+  {
+    id: 'big',
+    label: 'Big',
+    effortOption: 'effort',
+    efforts: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }],
+    defaultEffort: 'high',
+  },
+];
 // Replace factories before agents.js captures them. The session store is in
 // memory because its production filename has no environment override.
 const replacements = {
@@ -18,8 +39,26 @@ const replacements = {
   },
   '../lib/claude-session-pool': { createClaudeSessionPool: () => pools.claude },
   '../lib/codex-session-pool': { createCodexSessionPool: () => pools.codex },
+  '../lib/model-discovery': {
+    discoverModels: (agentKey) => (agentKey === 'cursor' ? cursorCatalog : null),
+    recordCursorCatalog: () => {},
+  },
   '../lib/acp-session-pool': {
-    createAcpSessionPool: ({ agentKey }) => pools[agentKey],
+    createAcpSessionPool: (options) => {
+      if (options.agentKey !== 'cursor') return pools[options.agentKey];
+      const created = { options, forgotten: [] };
+      cursorCreated.push(created);
+      return {
+        send: (call) => {
+          cursorSentVia.push(created);
+          return pools.cursor.send(call);
+        },
+        forget: async (key) => {
+          created.forgotten.push(key);
+        },
+        shutdown: async () => {},
+      };
+    },
   },
 };
 const savedModules = new Map();
@@ -99,6 +138,23 @@ const cases = [
     ],
     reply: 'Checking filesDone',
   },
+  {
+    // Cursor sends no message ids, so the tool call is what splits the reply.
+    agent: 'cursor',
+    settings: { model: 'big', effort: 'low', permission: 'bypass' },
+    options: {
+      modelId: null,
+      modeId: 'agent',
+      configOptions: [['model', 'big'], ['effort', 'low']],
+    },
+    messages: [
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Checking' } },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' files' } },
+      { sessionUpdate: 'tool_call', title: 'ls' },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done' } },
+    ],
+    reply: 'Checking filesDone',
+  },
 ];
 
 for (const { agent, settings, options, messages, reply } of cases) {
@@ -168,6 +224,53 @@ for (const { agent, settings, options, messages, reply } of cases) {
     assert.equal(sessions[options.sessionKey], undefined);
   });
 }
+
+test('lists cursor between codex and opencode', () => {
+  assert.deepEqual(
+    agents.listAgents().map((agent) => agent.key),
+    ['claude', 'codex', 'cursor', 'opencode', 'hermes'],
+  );
+});
+
+test('each Cursor model choice runs in a process of its own', async () => {
+  pools.cursor.send = async (call) => {
+    call.onMessage({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } });
+    return { result: { stopReason: 'end_turn' }, sessionId: 'next', stderr: '' };
+  };
+  const run = (key, settings) =>
+    runAgent('cursor', 'hi', () => {}, { workdir: '/tmp/w', settings, sessionKey: key });
+  const sentFrom = cursorSentVia.length;
+  await run('choice-a', { model: 'default' });
+  await run('choice-b', { model: 'big', effort: 'low' });
+  await run('choice-c', { model: 'default' });
+  // A scope whose choice changes leaves its old process before the new one runs.
+  await run('choice-a', { model: 'big', effort: 'low' });
+  const [auto, big, autoAgain, moved] = cursorSentVia.slice(sentFrom);
+  assert.notEqual(auto, big);
+  assert.equal(autoAgain, auto, 'scopes that share a choice share a process');
+  assert.equal(moved, big);
+  assert.ok(auto.forgotten.includes('choice-a'));
+  assert.equal(big.forgotten.includes('choice-a'), false);
+  for (const { options } of [auto, big]) {
+    assert.equal(options.authMethod, 'cursor_login');
+    assert.deepEqual(options.clientMeta, { parameterizedModelPicker: true });
+  }
+});
+
+test('purging a cursor chat removes its session directory and nothing else', async () => {
+  const sessionsDir = path.join(cursorConfigDir, 'acp-sessions');
+  const id = '91986459-234b-4cb9-b192-9a89ee9ea780';
+  fs.mkdirSync(path.join(sessionsDir, id), { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, id, 'meta.json'), '{}');
+  fs.mkdirSync(path.join(sessionsDir, 'keep'), { recursive: true });
+  sessions.purged = { id };
+  sessions.traversal = { id: '../keep' };
+  await agents.purgeSession('purged', { agentKey: 'cursor', workdir: '/tmp/w' });
+  await agents.purgeSession('traversal', { agentKey: 'cursor', workdir: '/tmp/w' });
+  assert.equal(fs.existsSync(path.join(sessionsDir, id)), false);
+  assert.equal(fs.existsSync(path.join(sessionsDir, 'keep')), true);
+  assert.equal(sessions.purged, undefined);
+});
 
 test('an unknown agent is refused before using a pool', async () => {
   await assert.rejects(runAgent('missing', 'hello', () => {}, {

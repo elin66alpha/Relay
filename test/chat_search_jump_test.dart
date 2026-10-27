@@ -72,30 +72,71 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  testWidgets('switching machines loads the new host\'s agent list', (
+    WidgetTester tester,
+  ) async {
+    final MachineCredentialsController machines = MachineCredentialsController(
+      store: _MemoryMachineCredentialsStore(<MachineCredential>[
+        _machine('machine-1'),
+        _machine('machine-2'),
+      ]),
+    );
+    final _SearchBackendClient backend = _SearchBackendClient('claude');
+    final CliAgentsController agents = await _openChat(
+      tester,
+      machinesController: machines,
+      backendClient: backend,
+    );
+    expect(agents.agents.every(isCliAgentSelectable), isTrue);
+
+    // The other host has only Claude Code installed.
+    backend.agents = <CliAgent>[
+      for (final CliAgent agent in defaultCliAgents)
+        CliAgent(
+          key: agent.key,
+          label: agent.label,
+          description: agent.description,
+          installed: agent.key == 'claude',
+        ),
+    ];
+    await machines.setActive('machine-2');
+    await tester.pumpAndSettle();
+    expect(agents.agents.where(isCliAgentSelectable).length, 1);
+
+    backend.agents = defaultCliAgents;
+    await machines.setActive('machine-1');
+    await tester.pumpAndSettle();
+    expect(agents.agents.every(isCliAgentSelectable), isTrue);
+  });
 }
+
+MachineCredential _machine(String id) => MachineCredential(
+      id: id,
+      name: 'Local test',
+      baseUrl: 'http://127.0.0.1:8787',
+      token: 'token',
+      createdAt: DateTime.utc(2026).toIso8601String(),
+    );
 
 /// Builds the chat screen over a fake backend holding one long conversation.
 Future<CliAgentsController> _openChat(
   WidgetTester tester, {
   String hitAgentKey = 'claude',
+  MachineCredentialsController? machinesController,
+  _SearchBackendClient? backendClient,
 }) async {
   SharedPreferences.setMockInitialValues(<String, Object>{});
   MachineCredentialsStore.resetCacheForTest();
 
-  final MachineCredential machine = MachineCredential(
-    id: 'machine-1',
-    name: 'Local test',
-    baseUrl: 'http://127.0.0.1:8787',
-    token: 'token',
-    createdAt: DateTime.utc(2026).toIso8601String(),
-  );
   final CliAgentsController agentsController = CliAgentsController();
-  final MachineCredentialsController machinesController =
-      MachineCredentialsController(
-    store: _MemoryMachineCredentialsStore(machine),
+  machinesController ??= MachineCredentialsController(
+    store: _MemoryMachineCredentialsStore(<MachineCredential>[
+      _machine('machine-1'),
+    ]),
   );
   final AppSettingsController settingsController = AppSettingsController();
-  final _SearchBackendClient backendClient = _SearchBackendClient(hitAgentKey);
+  backendClient ??= _SearchBackendClient(hitAgentKey);
   final BotChatController chatController = BotChatController(
     backendClient: backendClient,
     quotaController: QuotaController(backendClient: backendClient),
@@ -104,7 +145,10 @@ Future<CliAgentsController> _openChat(
 
   await agentsController.load();
   await machinesController.load();
-  await chatController.loadFor(defaultCliAgents.first, machine);
+  await chatController.loadFor(
+    defaultCliAgents.first,
+    machinesController.activeMachine!,
+  );
 
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -170,20 +214,20 @@ List<String> _markedTextIn(WidgetTester tester, Finder finder) {
 }
 
 class _MemoryMachineCredentialsStore extends MachineCredentialsStore {
-  _MemoryMachineCredentialsStore(this.machine);
+  _MemoryMachineCredentialsStore(this.machines);
 
-  final MachineCredential machine;
+  final List<MachineCredential> machines;
   String? _activeId;
 
   @override
   Future<List<MachineCredential>> readAll() async {
-    _activeId ??= machine.id;
-    return <MachineCredential>[machine];
+    _activeId ??= machines.first.id;
+    return machines;
   }
 
   @override
   Future<String?> readActiveId() async {
-    _activeId ??= machine.id;
+    _activeId ??= machines.first.id;
     return _activeId;
   }
 
@@ -273,9 +317,12 @@ class _SearchBackendClient extends BackendClient {
     return const <String, bool?>{};
   }
 
+  /// What `/api/agents` reports for the active machine.
+  List<CliAgent> agents = defaultCliAgents;
+
   @override
   Future<List<CliAgent>> fetchAgents({bool verifyCredentials = false}) async =>
-      defaultCliAgents;
+      agents;
 
   // A stream that stays open: an empty one completes at once and the controller
   // then schedules a reconnect timer that outlives the test.

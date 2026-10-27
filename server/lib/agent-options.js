@@ -57,21 +57,18 @@ const BASE_MODELS = {
       description: 'Faster, lower-cost option for lighter coding tasks.',
     },
   ],
-  // opencode models are `provider/model`; these free entries work without
-  // credentials. Live discovery isn't wired for opencode, so this static list
-  // (plus models-extra.json) is the catalog. Run `opencode models` for the full
-  // set, or add paid ids via models-extra.json.
+  // OpenCode's live list comes from `opencode models` (see model-discovery):
+  // its free models, which change server-side, plus every provider configured
+  // on the host. This one stands in until that first answer.
   opencode: [
-    { id: 'opencode/big-pickle', label: 'Big Pickle (free)' },
-    { id: 'opencode/deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (free)' },
-    { id: 'opencode/north-mini-code-free', label: 'North Mini Code (free)' },
-    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (free)' },
-    { id: 'opencode/mimo-v2.5-free', label: 'MiMo v2.5 (free)' },
+    { id: 'opencode/big-pickle', label: 'big-pickle', description: 'opencode' },
   ],
-  // Hermes' model is `provider/model` and is normally set via `hermes setup` /
-  // config.yaml. Left empty so the configured default is used; pin specific ids
-  // via models-extra.json to expose a picker.
+  // Hermes' picker shows the one model configured on the host (`hermes
+  // model`), reported as `default`; models-extra.json pins add real ids.
   hermes: [],
+  // Cursor's live catalog is the one its ACP server lists (see
+  // model-discovery). Auto is the only id known before that.
+  cursor: [{ id: 'default', label: 'Auto' }],
 };
 
 const EFFORTS = {
@@ -104,22 +101,21 @@ const EFFORTS = {
   hermes: [],
 };
 
-// Fast mode is deliberately limited to the two CLIs with a real speed tier.
-// Both values are explicit so Relay overrides (rather than mutates or inherits)
-// the host user's global CLI preference on every invocation.
+// Fast mode is limited to the CLIs with a real speed tier. Both values are
+// explicit so Relay overrides (rather than mutates or inherits) the host user's
+// global CLI preference on every invocation. Cursor applies it only to models
+// that have a fast option.
+const FAST_CHOICES = [
+  { id: 'off', label: 'Off' },
+  { id: 'on', label: 'On' },
+];
 const FAST_MODES = {
-  claude: [
-    { id: 'off', label: 'Off' },
-    { id: 'on', label: 'On' },
-  ],
-  codex: [
-    { id: 'off', label: 'Off' },
-    { id: 'on', label: 'On' },
-  ],
+  claude: FAST_CHOICES,
+  codex: FAST_CHOICES,
+  cursor: FAST_CHOICES,
 };
 
-// Permission tiers. The bypass tier is listed first but is no longer the
-// default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. Codex
+// Permission tiers. AGENT_DEFAULTS below picks the initial tier per agent. Codex
 // keeps approvals off on every tier, so the sandbox is the whole boundary:
 // Relay has no approval UI, so a prompt has no one to answer it.
 const PERMISSIONS = {
@@ -141,11 +137,6 @@ const PERMISSIONS = {
     },
   ],
   codex: [
-    {
-      id: 'bypass',
-      label: 'Bypass (full auto)',
-      description: 'No sandbox, no approvals.',
-    },
     {
       id: 'workspace-write',
       label: 'Workspace write',
@@ -190,6 +181,24 @@ const PERMISSIONS = {
       description: 'Refuse anything that needs approval; edits are blocked.',
     },
   ],
+  // Cursor's ACP modes.
+  cursor: [
+    {
+      id: 'bypass',
+      label: 'Bypass (full auto)',
+      description: 'Auto-approve every tool, including edits and commands.',
+    },
+    {
+      id: 'plan',
+      label: 'Plan only (read-only)',
+      description: 'Read and plan, but make no changes.',
+    },
+    {
+      id: 'ask',
+      label: 'Ask only (read-only)',
+      description: 'Answer questions without edits or commands.',
+    },
+  ],
 };
 
 // CLI invocation + how to query/update each binary.
@@ -199,6 +208,7 @@ const CLI = {
   // TODO(opencode/hermes): confirm version/update subcommands once installed.
   opencode: { bin: 'opencode', versionArgs: ['--version'], updateArgs: ['upgrade'] },
   hermes: { bin: 'hermes', versionArgs: ['--version'], updateArgs: ['update'] },
+  cursor: { bin: 'agent', versionArgs: ['--version'], updateArgs: ['update'] },
 };
 
 // The initial effort / permission for a never-configured scope. Every value is
@@ -215,11 +225,14 @@ const AGENT_DEFAULTS = {
   // (model-specific) and opencode's model default comes from the catalog.
   opencode: { permission: 'bypass' },
   hermes: { permission: 'yolo' },
+  // Auto, not the newest catalog entry: other models may need a paid plan.
+  // Effort defaults per model from the catalog.
+  cursor: { model: 'default', permission: 'bypass', fast: 'off' },
 };
 
 // Agents whose model group gets an automatic default (the newest catalog entry
 // or the CLI's configured default when available).
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode']);
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode', 'hermes']);
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
@@ -315,6 +328,68 @@ function fallbackModelsFor(agentKey) {
   }));
 }
 
+// Cursor's plan includes Auto and Cursor's own models (Grok, Composer); every
+// other model bills prepaid usage from the first request.
+const CURSOR_INCLUDED_RE = /^(?:default$|grok-|composer-)/;
+
+// Family and [major, minor] of an id, or null when the id has no known shape.
+const MODEL_VERSION_PARSERS = {
+  claude(id) {
+    const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(id);
+    return m && { family: m[1], version: [Number(m[2]), Number(m[3] || 0)] };
+  },
+  codex(id) {
+    const m = /^gpt-(\d+)(?:\.(\d+))?-([a-z]+)$/.exec(id);
+    return m && { family: m[3], version: [Number(m[1]), Number(m[2] || 0)] };
+  },
+};
+
+function compareVersions(a, b) {
+  return a[0] - b[0] || a[1] - b[1];
+}
+
+// Legacy: not the newest of its family, or a family with nothing in the newest
+// major generation. Ids of unknown shape stay current.
+function legacyModelIds(models, parse) {
+  const parsed = [];
+  for (const model of models) {
+    const info = parse(model.id);
+    if (info) parsed.push({ id: model.id, ...info });
+  }
+  if (!parsed.length) return new Set();
+  const newestMajor = Math.max(...parsed.map((p) => p.version[0]));
+  const newest = new Map();
+  for (const p of parsed) {
+    const seen = newest.get(p.family);
+    if (!seen || compareVersions(p.version, seen) > 0) newest.set(p.family, p.version);
+  }
+  return new Set(
+    parsed
+      .filter(
+        (p) =>
+          p.version[0] < newestMajor ||
+          compareVersions(p.version, newest.get(p.family)) < 0,
+      )
+      .map((p) => p.id),
+  );
+}
+
+// The picker lists grouped models on a second page: `paid` for Cursor models
+// outside the plan, `legacy` for Claude/Codex models a newer one replaced.
+function withModelGroups(agentKey, models) {
+  if (agentKey === 'cursor') {
+    return models.map((model) =>
+      CURSOR_INCLUDED_RE.test(model.id) ? model : { ...model, group: 'paid' },
+    );
+  }
+  const parse = MODEL_VERSION_PARSERS[agentKey];
+  if (!parse) return models;
+  const legacy = legacyModelIds(models, parse);
+  return models.map((model) =>
+    legacy.has(model.id) ? { ...model, group: 'legacy' } : model,
+  );
+}
+
 function modelsFor(agentKey) {
   // Prefer the live list the installed CLI ships (so the picker tracks the
   // binary, including brand-new models); fall back to the static catalog when
@@ -322,7 +397,7 @@ function modelsFor(agentKey) {
   const discovered = discoverModels(agentKey);
   const base =
     discovered && discovered.length ? discovered : fallbackModelsFor(agentKey);
-  return mergeExtraModels(agentKey, base);
+  return withModelGroups(agentKey, mergeExtraModels(agentKey, base));
 }
 
 function effortOptionsFor(agentKey, model) {
@@ -397,7 +472,12 @@ function describeAgent(agentKey) {
       permission: groups.permission.length > 0,
       fast: groups.fast.length > 0,
     },
-    model: strip(groups.model),
+    model: groups.model.map(({ id, label, description, group }) => ({
+      id,
+      label,
+      description,
+      group,
+    })),
     effort: strip(groups.effort),
     effortByModel,
     defaultEffortByModel,
@@ -428,7 +508,8 @@ function normalizeSettings(agentKey, settings) {
   if (effort) out.effort = effort.id;
   const permission = pick(
     groups.permission,
-    s.permission,
+    // Older clients and stored Codex settings used bypass for full access.
+    agentKey === 'codex' && s.permission === 'bypass' ? 'full-access' : s.permission,
     groups.defaults.permission,
   );
   if (permission) out.permission = permission.id;
@@ -465,7 +546,7 @@ function claudeSdkOptions(settings) {
   return options;
 }
 
-// ACP agents (opencode, hermes) hold a persistent session too, but their
+// ACP agents (opencode, hermes, cursor) hold a persistent session too, but their
 // settings are applied over the protocol rather than as argv: the model with
 // session/set_model, the permission tier as a session mode where the agent has
 // one that matches, and in every case by deciding how Relay answers the agent's
@@ -476,25 +557,45 @@ function claudeSdkOptions(settings) {
 // entirely, which is not what "Ask" means — so it relies on the answers alone.
 const ACP_PERMISSION_MODES = {
   hermes: { yolo: 'dont_ask', cautious: 'default' },
+  cursor: { bypass: 'agent', plan: 'plan', ask: 'ask' },
 };
 
 // The tier that means "approve whatever the agent asks for". Every other tier
 // refuses, because Relay has no approval UI to route the request to.
-const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo' };
+const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo', cursor: 'bypass' };
+
+// Cursor applies a model and its parameters to its whole process, as config
+// options: the model first, since choosing it resets the rest.
+function cursorConfigOptions(chosen) {
+  const model = modelsFor('cursor').find((item) => item.id === chosen.model);
+  if (!model) return [];
+  const list = [['model', model.id]];
+  if (model.effortOption && chosen.effort) list.push([model.effortOption, chosen.effort]);
+  if (model.fast) list.push(['fast', chosen.fast === 'on' ? 'true' : 'false']);
+  return list;
+}
 
 function acpSessionOptions(agentKey, settings) {
   const chosen = normalizeSettings(agentKey, settings);
-  let modelId = chosen.model || null;
-  // Hermes names models `provider:model` over ACP, while its config and
-  // models-extra.json use the CLI's `provider/model` form. Translate so a
-  // pinned id keeps selecting the same model.
-  if (agentKey === 'hermes' && modelId) modelId = modelId.replace('/', ':');
   const modes = ACP_PERMISSION_MODES[agentKey] || {};
-  return {
-    modelId,
+  const options = {
+    modelId: chosen.model || null,
     modeId: modes[chosen.permission] || null,
     approve: chosen.permission === ACP_AUTO_APPROVE[agentKey],
   };
+  // Hermes names models `provider:model` over ACP, while its config and
+  // models-extra.json use the CLI's `provider/model` form. Translate so a
+  // pinned id keeps selecting the same model. `default` is the host's own
+  // configured model, which Hermes already runs.
+  if (agentKey === 'hermes' && options.modelId) {
+    options.modelId =
+      options.modelId === 'default' ? null : options.modelId.replace('/', ':');
+  }
+  if (agentKey === 'cursor') {
+    options.modelId = null;
+    options.configOptions = cursorConfigOptions(chosen);
+  }
+  return options;
 }
 
 // Codex runs as a persistent app-server thread, so its settings resolve to
@@ -502,7 +603,6 @@ function acpSessionOptions(agentKey, settings) {
 // the sandbox is the boundary, and Relay has no approval UI to answer prompts
 // with.
 const CODEX_SANDBOXES = {
-  bypass: 'danger-full-access',
   'workspace-write': 'workspace-write',
   'read-only': 'read-only',
   'full-access': 'danger-full-access',
@@ -517,7 +617,7 @@ function codexSessionOptions(settings) {
     approvalPolicy: 'never',
     serviceTier: chosen.fast === 'on' ? 'fast' : 'default',
     // Only reachable if codex asks anyway; the unsandboxed tiers say yes.
-    approve: chosen.permission === 'bypass' || chosen.permission === 'full-access',
+    approve: chosen.permission === 'full-access',
   };
 }
 

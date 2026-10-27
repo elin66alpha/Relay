@@ -26,6 +26,7 @@ class QuotaUsageScreen extends StatefulWidget {
 const Map<String, String> _usageSources = <String, String>{
   'claude': 'Claude Code',
   'codex': 'Codex',
+  'cursor': 'Cursor',
 };
 
 class _QuotaUsageScreenState extends State<QuotaUsageScreen> {
@@ -292,6 +293,8 @@ class _UsageQuotaRow extends StatelessWidget {
     final String label = switch (quota.key) {
       'five_hour' => strings.fiveHourQuota,
       'seven_day' => strings.weeklyQuota,
+      'cursor_models' => strings.cursorModelsQuota,
+      'api_models' => strings.apiModelsQuota,
       _ => quota.label,
     };
     // An expired bucket's cached percentage is meaningless (its window already

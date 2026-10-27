@@ -1,12 +1,11 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const os = require('os');
 const express = require('express');
 
-const { clearModelDiscoveryCache } = require('../lib/model-discovery');
 const {
   codexAccountCredential,
-  getAgentStatuses: defaultGetAgentStatuses,
   isCodexReauthError,
 } = require('../lib/agent-status');
 
@@ -34,19 +33,22 @@ module.exports = function createMetaRouter(ctx) {
     agentRequiredError,
     bearerToken,
     buildDiagnostics,
+    clearModelDiscoveryCache,
     describeAgent,
     deleteRevokedTokenById,
     eventClients,
     eventWorkdir,
     getAgent,
-    getAgentStatuses = defaultGetAgentStatuses,
+    getAgentStatuses,
     getDefaultWorkdir,
     getSettings,
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
+    locateBin = (bin) => bin,
+    machineInfo,
     normalizeDeviceId,
-    os,
+    refreshAgentModels = () => Promise.resolve(),
     revokeTokenById,
     resolveAgentScope,
     runningScopes,
@@ -103,12 +105,6 @@ module.exports = function createMetaRouter(ctx) {
         installed,
         authed,
         authKind: status.authKind || 'unknown',
-        // Claude stores an access-token expiry. Codex managed auth refreshes its
-        // short-lived tokens and has no client-readable login deadline.
-        credentialExpiresAt:
-          agent.key !== 'codex' && Number.isFinite(status.credentialExpiresAt)
-            ? status.credentialExpiresAt
-            : null,
         // hermes/opencode remain host-managed and do not gate on a key Relay
         // cannot reliably validate. Codex is gated on its detected auth mode.
         usable:
@@ -142,7 +138,7 @@ module.exports = function createMetaRouter(ctx) {
   function runCliCommand(bin, args, timeoutMs) {
     return new Promise((resolve) => {
       execFile(
-        bin,
+        locateBin(bin) || bin,
         args,
         { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
         (err, stdout, stderr) => {
@@ -188,6 +184,8 @@ module.exports = function createMetaRouter(ctx) {
     if (!agent) {
       return res.status(400).json({ error: 'agent is required' });
     }
+    // Answers with the catalog it has; a refresh lands by the next open.
+    refreshAgentModels(agent.key);
     return res.json({ ok: true, ...describeAgent(agent.key) });
   });
 
@@ -264,6 +262,7 @@ module.exports = function createMetaRouter(ctx) {
     const before = await cliVersion(agent.key);
     const result = await runCliCommand(cli.bin, cli.updateArgs, 180000);
     clearModelDiscoveryCache(agent.key);
+    await refreshAgentModels(agent.key, { force: true });
     versionCache.delete(agent.key);
     const after = await cliVersion(agent.key);
     return res.json({
@@ -350,6 +349,11 @@ module.exports = function createMetaRouter(ctx) {
       quotaWatch: ENABLE_QUOTA_WATCH,
       publicBaseUrl: PUBLIC_BASE_URL,
     });
+  });
+
+  // Hardware and live temperatures; the machine page polls this while open.
+  router.get('/api/machine', async (req, res) => {
+    res.json(await machineInfo());
   });
 
   router.get('/api/diagnostics', (req, res) => {

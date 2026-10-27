@@ -4,7 +4,7 @@ const express = require('express');
 
 module.exports = function createSessionsRouter(ctx) {
   const {
-    LEGACY_SESSION_ID,
+    MAIN_SESSION_ID,
     MAX_SESSIONS,
     agentPayload,
     agentRequiredOrUnknownError,
@@ -117,7 +117,7 @@ module.exports = function createSessionsRouter(ctx) {
           res.status(400).json({ error: 'sessionId is required' });
           return false;
         }
-        if (sessionId === LEGACY_SESSION_ID) {
+        if (sessionId === MAIN_SESSION_ID) {
           res.status(400).json({
             error: 'the default session cannot be renamed',
             code: 'SESSION_PROTECTED',
@@ -160,7 +160,7 @@ module.exports = function createSessionsRouter(ctx) {
           res.status(400).json({ error: 'sessionId is required' });
           return false;
         }
-        if (sessionId === LEGACY_SESSION_ID) {
+        if (sessionId === MAIN_SESSION_ID) {
           res.status(400).json({
             error: 'the default session cannot be deleted',
             code: 'SESSION_PROTECTED',

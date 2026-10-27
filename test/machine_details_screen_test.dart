@@ -45,16 +45,25 @@ Future<void> _pumpDetails(
 }
 
 void main() {
-  testWidgets('sections run SSH, agents, tokens, status; SSH reuses a terminal', (
+  testWidgets('sections run hardware to status; SSH reuses a terminal', (
     WidgetTester tester,
   ) async {
     await _pumpDetails(tester, CliAgentsController());
 
     final double ssh = tester.getTopLeft(find.text('Enter SSH')).dy;
+    final double machine = tester.getTopLeft(find.text('Test machine')).dy;
     final double agents = tester.getTopLeft(find.text('CLI agents')).dy;
     final double tokens = tester.getTopLeft(find.text('Device tokens')).dy;
-    final double status = tester.getTopLeft(find.text('Test machine')).dy;
-    expect(ssh < agents && agents < tokens && tokens < status, isTrue);
+    final double status = tester.getTopLeft(find.text('Status')).dy;
+    expect(
+      ssh < machine && machine < agents && agents < tokens && tokens < status,
+      isTrue,
+    );
+    expect(find.text('Intel Core i7 · 8 threads'), findsOneWidget);
+    expect(find.text('NVIDIA GeForce GTX 1060'), findsOneWidget);
+    expect(find.text('/  1.0 GB used / 4.0 GB total'), findsOneWidget);
+    expect(find.text('Mainboard'), findsOneWidget);
+    expect(find.text('49°C'), findsOneWidget);
     expect(
       tester.getSize(find.widgetWithText(FilledButton, 'Enter SSH')).width,
       lessThan(360),
@@ -75,33 +84,28 @@ void main() {
     expect(identical(firstTerminal, secondTerminal), isTrue);
   });
 
-  testWidgets('agent credentials report only real login deadlines', (
+  testWidgets('authenticated agents show Ready', (
     WidgetTester tester,
   ) async {
-    final DateTime now = DateTime.now();
     final CliAgentsController agentsController = CliAgentsController()
       ..syncAgents(<CliAgent>[
-        CliAgent(
+        const CliAgent(
           key: 'claude',
           label: 'Claude Code',
           description: 'Anthropic Claude Code CLI',
           authKind: 'oauth',
-          credentialExpiresAt: now.add(const Duration(days: 12, hours: 1)),
         ),
-        CliAgent(
+        const CliAgent(
           key: 'codex',
           label: 'Codex',
           description: 'OpenAI Codex CLI',
           authKind: 'oauth',
-          credentialExpiresAt: now.subtract(const Duration(days: 2, hours: 1)),
         ),
       ]);
 
     await _pumpDetails(tester, agentsController);
 
-    expect(find.text('Log in again in 12 days'), findsOneWidget);
-    expect(find.text('Ready'), findsOneWidget);
-    expect(find.textContaining('Expired 2 days ago'), findsNothing);
+    expect(find.text('Ready'), findsNWidgets(2));
     expect(find.widgetWithText(FilledButton, 'Log in'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Log in again'), findsNothing);
   });
@@ -119,6 +123,25 @@ class _OfflineBackendClient extends BackendClient {
   }) {
     throw BackendException('offline');
   }
+
+  @override
+  Future<MachineInfo> machineInfo() async =>
+      MachineInfo.fromJson(const <String, Object?>{
+        'cpu': <String, Object?>{'model': 'Intel Core i7', 'cores': 8},
+        'memoryBytes': 17179869184,
+        'gpus': <String>['NVIDIA GeForce GTX 1060'],
+        'disks': <Map<String, Object?>>[
+          <String, Object?>{
+            'mount': '/',
+            'usedBytes': 1073741824,
+            'totalBytes': 4294967296,
+          },
+        ],
+        'temperatures': <Map<String, Object?>>[
+          <String, Object?>{'key': 'mainboard', 'celsius': 29},
+          <String, Object?>{'key': 'cpu', 'celsius': 49},
+        ],
+      });
 
   @override
   Future<List<DeviceToken>> deviceTokens() async => const <DeviceToken>[];

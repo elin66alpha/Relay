@@ -4,7 +4,7 @@
 
 **让 AI 编程智能体留在你的机器上，在任何屏幕上继续控制它们。**
 
-一个连接 Claude Code、Codex、OpenCode 与 Hermes 的私有、自托管远程工作台。
+一个连接 Claude Code、Codex、Cursor、OpenCode 与 Hermes 的私有、自托管远程工作台。
 
 ![Flutter 客户端](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
 ![Node.js 后端](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
@@ -16,8 +16,8 @@
 
 </div>
 
-<a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
+<a href="assets/screenshots/relay-overview-web-zh.png">
+  <img src="assets/screenshots/relay-overview-web-zh.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
 </a>
 
 Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上。手机、Web 与桌面共用
@@ -45,17 +45,17 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 聊天面板、消息气泡和其他页面使用同一种亚克力材质；滑块下方的两个输入框设置其模糊度
 （0-30，默认 6）和底色（0-100%，默认 55%），亮色与暗色共用。
 
-<a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
+<a href="assets/screenshots/relay-chat-web-zh.png">
+  <img src="assets/screenshots/relay-chat-web-zh.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
 </a>
 
 ### 在手机上聊天、协作和管理文件
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile-zh.png"><img src="assets/screenshots/relay-chat-mobile-zh.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile-zh.png"><img src="assets/screenshots/relay-swarm-mobile-zh.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
+    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile-zh.png"><img src="assets/screenshots/relay-files-mobile-zh.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
   </tr>
   <tr>
     <td align="center"><strong>持久会话</strong><br>从任意地点继续长时间运行的 agent 任务。</td>
@@ -72,7 +72,7 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 flowchart LR
     C["Flutter 客户端<br/>手机 · Web · 桌面"]
     R["Relay 后端<br/>运行在你的机器上的 Node.js"]
-    A["持久 agent 会话<br/>Claude · Codex · OpenCode · Hermes"]
+    A["持久 agent 会话<br/>Claude · Codex · Cursor · OpenCode · Hermes"]
     F["项目与文件"]
     T["可恢复 PTY shell"]
 
@@ -94,28 +94,41 @@ flowchart LR
 | 💬 | **实时、持久会话** | 流式回复、取消任务、命名会话（除 Main 外均可重命名）、跨设备历史、搜索与 Markdown 导出。可复制消息，或编辑自己的消息，将原文放回草稿。Claude 自行发起的回复（例如后台任务完成时）会作为单独的消息显示。 |
 | 📎 | **聊天附件与上下文** | 添加附件会将文件上传到工作区，并把路径加入草稿。单聊输入框上方以 `<已用> / <窗口>` 显示上下文词元数；`?` 表示未知。 |
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
-| 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据、Claude 凭据到期时间，以及 Claude/Codex 快速模式。 |
+| 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据，以及 Claude/Codex/Cursor 快速模式。模型页先列主力模型；Claude/Codex 的旧版模型和 Cursor 套餐外的模型放在第二页。OpenCode 列出主机上 OpenCode 提供的模型，包括在那里配置的服务商；Hermes 显示它配置好的模型。 |
 | 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
-| 📊 | **额度工作流** | 查看 Claude/Codex 用量，并预约一条消息在下一个检测到的 5 小时额度重置后发送。 |
+| 📊 | **额度工作流** | 查看 Claude/Codex/Cursor 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
 | 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
 
-Claude Code 与 Codex 是主要集成；OpenCode 与 Hermes 目前是由主机管理的实验性集成。
-四种 agent 的凭据都保留在后端主机上，Relay 不会代替你登录。
+Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenCode 与 Hermes
+目前是由主机管理的实验性集成。凭据都留在后端主机上，Relay 不会代替你登录。
 
 ## 快速开始
 
 ### 1. 准备后端主机
 
-在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude 与
-Codex 需要事先在这台主机登录；OpenCode 与 Hermes 使用主机上管理的 provider 配置。
+在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude、
+Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
+Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
 
-Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8)
-下载 `relay-backend-windows-x64-v0.1.8.zip`，解压后运行 `.\setup.cmd`。这个后端包
-已包含 Node.js 和生产依赖；agent CLI 仍需自行安装并认证。
-`relay-windows-x64-v0.1.8.zip` 是桌面客户端。
+Windows x64 用户可从 [0.1.9 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.9)
+下载 `relay-backend-windows-x64-v0.1.9.zip`，解压后双击 `Setup.exe`，或运行
+`.\setup.cmd` 打开命令行菜单。包内包含 Node.js、生产依赖和编译后的 Web 前端，
+Web 与 API 共用同一个 Node.js 服务。安装向导支持选装 agent CLI、开关 Web、配置网络和
+管理设备令牌；CLI 登录仍由你在主机上完成。
+`relay-windows-x64-v0.1.9.zip` 是桌面客户端。
 
-在仓库根目录执行对应系统的安装命令：
+在 Linux 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的校验和
+核对后运行安装脚本：
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+安装脚本还能替你安装缺少的 agent CLI（五个里任选），装完会打印各自的登录命令。再次运行
+这条命令就是原地升级，令牌、聊天和设置都会保留。
+
+使用仓库副本时，在仓库根目录执行对应系统的安装命令：
 
 | 后端系统 | 安装命令 |
 |---|---|
@@ -126,7 +139,8 @@ Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/re
 安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
 [后端前置要求](backends/README.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
-时需要 `zip`。
+时需要 `zip`。在 Debian 和 Ubuntu 上，缺少这些工具或 Node.js 时，Linux 安装脚本会提出
+替你安装。
 
 ### 2. 导入加密设备凭证
 
@@ -150,8 +164,8 @@ Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/re
 - 凭证导出使用 PBKDF2-HMAC-SHA256 与 AES-256-GCM。
 - 终端先用 bearer token 换取短时、一次性的 WebSocket 票据，长期 token 不会进入
   socket 地址。
-- 文件 API 会拒绝已知的 Relay、SSH、Claude 与 Codex 敏感路径，还可用
-  `RELAY_FS_ROOTS` 进一步收紧。
+- 文件 API 会拒绝已知的 Relay、SSH、Claude、Codex 与 Cursor 敏感路径，以及 FCM
+  服务账号密钥，还可用 `RELAY_FS_ROOTS` 进一步收紧。
 - 额度查询可能读取并刷新主机 OAuth 文件，但 token 值绝不会进入 Relay API 或客户端。
 
 > [!IMPORTANT]

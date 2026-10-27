@@ -10,6 +10,27 @@ require.cache[discoveryPath] = {
   loaded: true,
   exports: {
     discoverModels(agentKey) {
+      // The shape parseCursorCatalog produces.
+      if (agentKey === 'cursor') {
+        return [
+          { id: 'default', label: 'Auto' },
+          {
+            id: 'grok-4.7',
+            label: 'Grok 4.7',
+            effortOption: 'reasoning_effort',
+            efforts: [
+              { id: 'low', label: 'Low' },
+              { id: 'high', label: 'High' },
+            ],
+            defaultEffort: 'high',
+            fast: true,
+          },
+          { id: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+        ];
+      }
+      if (agentKey === 'hermes') {
+        return [{ id: 'default', label: 'deepseek-v4-flash', description: 'deepseek' }];
+      }
       if (agentKey !== 'codex') return null;
       return [
         {
@@ -62,10 +83,37 @@ require.cache[discoveryPath] = {
 };
 
 const {
+  acpSessionOptions,
   codexSessionOptions,
   describeAgent,
   normalizeSettings,
 } = require('../lib/agent-options');
+
+test('Cursor composes model, effort and fast into ordered config options', () => {
+  const catalog = describeAgent('cursor');
+  assert.deepEqual(catalog.defaults, { model: 'default', permission: 'bypass', fast: 'off' });
+  assert.deepEqual(catalog.effortByModel['grok-4.7'].map((effort) => effort.id), ['low', 'high']);
+  assert.equal(catalog.defaultEffortByModel['grok-4.7'], 'high');
+  assert.equal(catalog.supports.effort, true);
+  assert.equal(catalog.supports.fast, true);
+  assert.equal(catalog.model.some((model) => 'effortOption' in model), false, 'kept server-side');
+  assert.deepEqual(acpSessionOptions('cursor', {}).configOptions, [['model', 'default']]);
+  assert.deepEqual(
+    acpSessionOptions('cursor', { model: 'grok-4.7', effort: 'low', fast: 'on' }).configOptions,
+    [['model', 'grok-4.7'], ['reasoning_effort', 'low'], ['fast', 'true']],
+  );
+  // The model's own default effort, and fast stays explicitly off.
+  assert.deepEqual(acpSessionOptions('cursor', { model: 'grok-4.7' }).configOptions, [
+    ['model', 'grok-4.7'],
+    ['reasoning_effort', 'high'],
+    ['fast', 'false'],
+  ]);
+  // A model without parameters gets only the model, whatever was chosen.
+  assert.deepEqual(
+    acpSessionOptions('cursor', { model: 'claude-opus-4-5', effort: 'low', fast: 'on' }).configOptions,
+    [['model', 'claude-opus-4-5']],
+  );
+});
 
 test('Codex defaults come from the discovered model catalog', () => {
   assert.deepEqual(describeAgent('codex').defaults, {
@@ -142,4 +190,34 @@ test('Codex does not add an effort for a model that explicitly has none', () => 
     permission: 'workspace-write',
     fast: 'off',
   });
+});
+
+test('the model list groups Cursor models outside the plan and replaced models', () => {
+  const groupOf = (agentKey) =>
+    Object.fromEntries(describeAgent(agentKey).model.map((m) => [m.id, m.group]));
+
+  assert.deepEqual(groupOf('cursor'), {
+    default: undefined,
+    'grok-4.7': undefined,
+    'claude-opus-4-5': 'paid',
+  });
+  // Claude falls back to its static list here: only the newest of each family
+  // in the newest generation stays on the first page.
+  assert.deepEqual(groupOf('claude'), {
+    'claude-opus-4-8': undefined,
+    'claude-opus-4-7': 'legacy',
+    'claude-opus-4-6': 'legacy',
+    'claude-sonnet-4-6': undefined,
+    'claude-haiku-4-5': undefined,
+  });
+  // Ids without a version shape are never called legacy.
+  assert.ok(describeAgent('codex').model.every((m) => m.group === undefined));
+});
+
+test('Hermes shows its configured model and never sends it as a switch', () => {
+  const hermes = describeAgent('hermes');
+  assert.equal(hermes.supports.model, true);
+  assert.equal(hermes.defaults.model, 'default');
+  assert.equal(acpSessionOptions('hermes', {}).modelId, null);
+  assert.equal(acpSessionOptions('hermes', { model: 'default' }).modelId, null);
 });

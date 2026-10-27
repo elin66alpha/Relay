@@ -31,29 +31,31 @@ void main() {
       ),
     );
 
-    // Both sources are queried separately, and the cards are up before either
+    // Every source is queried separately, and the cards are up before any
     // answers instead of a full-screen spinner.
     expect(
       backendClient.pending.keys,
-      unorderedEquals(<String>['claude', 'codex']),
+      unorderedEquals(<String>['claude', 'codex', 'cursor']),
     );
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.text('Claude Code'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsNWidgets(2));
+    expect(find.text('Cursor'), findsOneWidget);
+    expect(find.text('Loading quota...'), findsNWidgets(3));
 
     backendClient.answer('claude');
     await tester.pump();
     expect(find.text('58% remaining'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsOneWidget);
+    expect(find.text('Loading quota...'), findsNWidgets(2));
 
     backendClient.answer('codex');
+    backendClient.answer('cursor');
     await tester.pump();
-    expect(find.text('58% remaining'), findsNWidgets(2));
+    expect(find.text('58% remaining'), findsNWidgets(3));
     expect(find.text('Loading quota...'), findsNothing);
     expect(
       quotaController.lastUsageReport?.agents.map((UsageAgent a) => a.key),
-      <String>['claude', 'codex'],
+      <String>['claude', 'codex', 'cursor'],
     );
   });
 
@@ -157,18 +159,22 @@ void main() {
     await tester.tap(find.text('Usage'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    // Opening usage shows the strip's cached report before either refresh lands.
+    // Opening usage shows the strip's cached report before any refresh lands.
     expect(find.text('58% remaining'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsOneWidget);
-    // The usage screen always refreshes both sources; only the strip throttles.
-    expect(backendClient.requests, <String?>['claude', 'claude', 'codex']);
+    expect(find.text('Loading quota...'), findsNWidgets(2));
+    // The usage screen always refreshes every source; only the strip throttles.
+    expect(
+      backendClient.requests,
+      <String?>['claude', 'claude', 'codex', 'cursor'],
+    );
 
     backendClient.answer('codex');
+    backendClient.answer('cursor');
     await tester.pump();
-    expect(find.text('58% remaining'), findsNWidgets(2));
+    expect(find.text('58% remaining'), findsNWidgets(3));
     expect(
       quotaController.lastUsageReport?.agents.map((UsageAgent a) => a.key),
-      <String>['claude', 'codex'],
+      <String>['claude', 'codex', 'cursor'],
     );
     backendClient.pending['claude']!.complete(
       UsageReport.fromJson(<String, Object?>{
@@ -191,7 +197,10 @@ void main() {
     rebuild(() => busy = true);
     await tester.pump();
     expect(find.text('42%'), findsOneWidget);
-    expect(backendClient.requests, <String?>['claude', 'claude', 'codex']);
+    expect(
+      backendClient.requests,
+      <String?>['claude', 'claude', 'codex', 'cursor'],
+    );
   });
 }
 
@@ -234,6 +243,7 @@ class _UsageBackendClient extends BackendClient {
   static const Map<String, String> _labels = <String, String>{
     'claude': 'Claude Code',
     'codex': 'Codex',
+    'cursor': 'Cursor',
   };
 
   @override

@@ -400,6 +400,49 @@ test('shutdown closes every session and kills the process', async () => {
   await done();
 });
 
+test('an auth method is sent once, before the session opens', async () => {
+  const { pool, state, done } = makePool({ authMethod: 'cursor_login' });
+  await send(pool, 'a', 'one');
+  const lines = state();
+  const authAt = lines.findIndex((line) => line === 'auth cursor_login');
+  const newAt = lines.findIndex((line) => line.startsWith('new '));
+  assert.ok(authAt >= 0 && authAt < newAt);
+  await send(pool, 'a', 'two');
+  assert.equal(state().filter((line) => line.startsWith('auth ')).length, 1);
+  await done();
+});
+
+test('a cursor question is skipped instead of answered', async () => {
+  const { pool, state, done } = makePool({ skipQuestions: true });
+  const result = await send(pool, 'a', 'ask');
+  assert.ok(state().includes('question skipped'));
+  assert.equal(result.result.stopReason, 'end_turn');
+  await done();
+});
+
+test('config options are applied in order, once per session', async () => {
+  const { pool, state, done } = makePool({ clientMeta: { picker: true } });
+  const configOptions = [['model', 'big'], ['effort', 'low']];
+  const first = await send(pool, 'a', 'one', { configOptions });
+  await send(pool, 'a', 'two', { configOptions });
+  const config = state().filter((line) => line.startsWith('config '));
+  assert.deepEqual(config, [
+    `config ${first.sessionId} model=big`,
+    `config ${first.sessionId} effort=low`,
+  ]);
+  assert.ok(state().includes('meta {"picker":true}'));
+  await done();
+});
+
+test('listModels asks for the catalog without opening a session', async () => {
+  const { pool, state, done } = makePool({ modelsMethod: 'cursor/list_available_models' });
+  const models = await pool.callDriver('listModels');
+  assert.deepEqual(models.map((model) => model.value), ['default', 'big']);
+  assert.ok(state().includes('list models'));
+  assert.equal(state().some((line) => line.startsWith('new ')), false);
+  await done();
+});
+
 test('a missing binary fails the turn instead of the server', async () => {
   const pool = createAcpSessionPool({
     agentKey: 'fake',

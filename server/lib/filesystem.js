@@ -8,6 +8,8 @@ const { randomUUID } = require('crypto');
 
 const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
 const { TOKENS_FILE } = require('./tokens');
+const { SERVICE_ACCOUNT_FILE } = require('./fcm');
+const { CURSOR_CONFIG_DIR, cursorAuthFile } = require('./cli-paths');
 
 class FilesystemError extends Error {
   constructor(message, { status = 400, code = 'FS_ERROR' } = {}) {
@@ -42,9 +44,16 @@ const SENSITIVE_PATHS = [
   path.join(SERVER_DIR, 'credentials'),
   path.join(SERVER_DIR, 'push-subscriptions.json'),
   path.join(SERVER_DIR, 'fcm-tokens.json'),
+  // A Google service-account key: whoever holds it can send as the project.
+  // The configured path, plus the conventional one in case FCM is off.
+  ...(SERVICE_ACCOUNT_FILE ? [SERVICE_ACCOUNT_FILE] : []),
+  path.join(SERVER_DIR, 'fcm-service-account.json'),
   path.join(os.homedir(), '.ssh'),
   path.join(os.homedir(), '.claude', '.credentials.json'),
   path.join(os.homedir(), '.codex', 'auth.json'),
+  cursorAuthFile(),
+  // Relay's own Cursor config: model choices, settings and session transcripts.
+  CURSOR_CONFIG_DIR,
 ];
 
 const FS_ROOTS = String(process.env.RELAY_FS_ROOTS || '')
@@ -518,9 +527,12 @@ function streamUploadToFile(req, targetPath, maxBytes) {
       if (failed) return;
       failed = true;
       req.unpipe(out);
+      // Opening the file is asynchronous. Wait until even an in-flight open
+      // has closed before unlinking, or cleanup can run before the file exists.
+      const cleanup = () => fs.unlink(tmpPath, () => reject(err));
+      if (out.closed) cleanup();
+      else out.once('close', cleanup);
       out.destroy();
-      fs.unlink(tmpPath, () => {});
-      reject(err);
     };
     req.on('error', fail);
     req.on('aborted', () => fail(new Error('upload aborted')));
@@ -669,7 +681,6 @@ function sendDirectoryZip(download, res, maxBytes) {
 }
 
 module.exports = {
-  FilesystemError,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,

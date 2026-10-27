@@ -17,6 +17,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { createJsonStore } = require('./json-store');
+const { locateBin, resolveBin } = require('./cli-paths');
 
 const DISABLED =
   process.env.RELAY_MODEL_DISCOVERY === '0' ||
@@ -26,31 +28,12 @@ const DISABLED =
 // both are cached so a missing/empty result never re-spawns on every turn.
 const cache = new Map();
 
-// Locating a CLI costs a subprocess (`command -v <bin>`), and the option pickers
-// ask for the catalog on every open, so re-checking the binary per call put a
-// synchronous spawn on a hot path and blocked the event loop for everything
-// else. Look for a new binary at most this often; `clearModelDiscoveryCache`
-// still busts the entry immediately after a CLI update.
+// Locating and stamping a CLI scans the file system, and the option pickers ask
+// for the catalog on every open, so checking the binary per call would put that
+// on a hot path. Look for a new binary at most this often;
+// `clearModelDiscoveryCache` still busts the entry immediately after a CLI
+// update.
 const RECHECK_MS = 60_000;
-
-// Resolve a command name to its real (symlink-followed) absolute path, or null.
-function resolveBinary(command) {
-  try {
-    const win = process.platform === 'win32';
-    const result = spawnSync(win ? 'where' : 'command', win ? [command] : ['-v', command], {
-      encoding: 'utf8',
-      shell: !win,
-      timeout: 3000,
-    });
-    const line = String(result.stdout || '')
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean)[0];
-    return line ? fs.realpathSync(line) : null;
-  } catch (_err) {
-    return null;
-  }
-}
 
 function fileStamp(filePath) {
   try {
@@ -245,7 +228,9 @@ function readCodexCache({ maxAgeMs } = {}) {
     );
     const cacheVersion = String(parsed.client_version || '').trim();
     if (!cacheVersion) return [];
-    const versionResult = spawnSync('codex', ['--version'], {
+    const bin = locateBin('codex');
+    if (!bin) return [];
+    const versionResult = spawnSync(bin, ['--version'], {
       encoding: 'utf8',
       timeout: 3000,
     });
@@ -268,7 +253,9 @@ function readCodexCache({ maxAgeMs } = {}) {
 }
 
 function runCodexCatalog(args, timeout = 5000) {
-  const result = spawnSync('codex', args, {
+  const bin = locateBin('codex');
+  if (!bin) return [];
+  const result = spawnSync(bin, args, {
     encoding: 'utf8',
     timeout,
     maxBuffer: 16 * 1024 * 1024,
@@ -293,7 +280,7 @@ function sortByFamilyThenVersionDesc(list) {
 // binary inside the package so an npm update invalidates discovery even when the
 // launcher's path remains unchanged.
 function locateCodexBinary() {
-  const launcher = resolveBinary('codex');
+  const launcher = resolveBin('codex');
   if (!launcher) return null;
   const pkgRoot = path.dirname(path.dirname(launcher));
   const vendorParent = path.join(pkgRoot, 'node_modules', '@openai');
@@ -324,7 +311,7 @@ function locateCodexBinary() {
 
 const STRATEGIES = {
   claude: {
-    locate: () => resolveBinary('claude'),
+    locate: () => resolveBin('claude'),
     discover: (bin) => {
       const list = parseClaudeModels(scanFile(bin, CLAUDE_ID_RE));
       return list.length ? list : null;
@@ -348,6 +335,102 @@ const STRATEGIES = {
   },
 };
 
+// Catalogs that come from asking the CLI rather than reading its files, fetched
+// asynchronously by refreshAgentModels in agents.js: Cursor over ACP
+// (`cursor/list_available_models`; no CLI command prints the ids its ACP server
+// accepts), OpenCode from `opencode models` (its free list changes server-side),
+// Hermes from its configured model. The last list is kept on disk so the picker
+// survives a restart without a subprocess.
+const REPORTED_MODELS_FILE = process.env.RELAY_REPORTED_MODELS_FILE
+  ? path.resolve(process.env.RELAY_REPORTED_MODELS_FILE)
+  : path.join(__dirname, '..', 'reported-models.json');
+const reportedStore = createJsonStore(REPORTED_MODELS_FILE, { defaultValue: {} });
+const REPORTED_ID_RE = /^[\x21-\x7e]{1,200}$/;
+
+function reportedText(value, fallback) {
+  const text = typeof value === 'string' ? value.trim().slice(0, 120) : '';
+  return text || fallback;
+}
+
+// One picker entry per Cursor model: `[{ value, name, configOptions }]`. The
+// effort control is the model's thought-level select that is not an on/off
+// switch (its id varies: effort, reasoning_effort, reasoning), and `fast` is
+// the speed switch. Context size and thinking stay at the model's default.
+function parseCursorCatalog(raw) {
+  if (!Array.isArray(raw)) return [];
+  const models = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = item && item.value;
+    if (typeof id !== 'string' || !REPORTED_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const model = { id, label: reportedText(item.name, id) };
+    for (const option of Array.isArray(item.configOptions) ? item.configOptions : []) {
+      if (!option || typeof option.id !== 'string' || !REPORTED_ID_RE.test(option.id)) continue;
+      const values = (Array.isArray(option.options) ? option.options : []).filter(
+        (choice) => choice && typeof choice.value === 'string' && REPORTED_ID_RE.test(choice.value),
+      );
+      const onOff = values.length === 2 && values.every((v) => v.value === 'true' || v.value === 'false');
+      if (option.id === 'fast' && onOff) {
+        model.fast = true;
+      } else if (option.category === 'thought_level' && !onOff && values.length && !model.effortOption) {
+        model.effortOption = option.id;
+        model.efforts = values.map((v) => ({ id: v.value, label: reportedText(v.name, v.value) }));
+        const current = values.find((v) => v.value === option.currentValue);
+        model.defaultEffort = (current || values[0]).value;
+      }
+    }
+    models.push(model);
+  }
+  return models;
+}
+
+// `opencode models` prints one `provider/model` per line: the free models plus
+// every provider configured on the host. A model id may itself contain `/`
+// (openrouter/anthropic/...), so only the first segment is the provider.
+function parseOpenCodeModels(stdout) {
+  const models = [];
+  const seen = new Set();
+  for (const line of String(stdout || '').split('\n')) {
+    const id = line.trim();
+    const slash = id.indexOf('/');
+    if (slash < 1 || !REPORTED_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    models.push({
+      id,
+      label: reportedText(id.slice(slash + 1), id),
+      description: id.slice(0, slash),
+    });
+  }
+  return models;
+}
+
+// Hermes runs the model configured on the host (`hermes model`), so its picker
+// shows that one name under the id `default`, which Relay never sends.
+function hermesModelOptions(model, provider) {
+  const label = reportedText(model, '');
+  if (!label) return [];
+  return [{ id: 'default', label, description: reportedText(provider, '') || undefined }];
+}
+
+// Keeps the last non-empty list, so a failed query never empties a picker.
+function recordReportedModels(agentKey, models) {
+  if (!models.length) return;
+  const all = reportedStore.load();
+  if (JSON.stringify(all[agentKey]) === JSON.stringify(models)) return;
+  all[agentKey] = models;
+  reportedStore.save(all);
+}
+
+function recordCursorCatalog(raw) {
+  recordReportedModels('cursor', parseCursorCatalog(raw));
+}
+
+function reportedModelsFor(agentKey) {
+  const list = reportedStore.load()[agentKey];
+  return Array.isArray(list) && list.length ? list : null;
+}
+
 // Identity of everything a discovered catalog depends on: the CLI binary, plus
 // the CLI's own model cache for codex.
 function stampFor(agentKey, bin) {
@@ -363,7 +446,7 @@ function stampFor(agentKey, bin) {
 function discoverModels(agentKey) {
   if (DISABLED) return null;
   const strategy = STRATEGIES[agentKey];
-  if (!strategy) return null;
+  if (!strategy) return reportedModelsFor(agentKey);
   const now = Date.now();
   const cached = cache.get(agentKey);
   if (cached && now - cached.checkedAt < RECHECK_MS) return cached.models;
@@ -408,5 +491,10 @@ function clearModelDiscoveryCache(agentKey) {
 module.exports = {
   clearModelDiscoveryCache,
   discoverModels,
+  hermesModelOptions,
   parseCodexCatalog,
+  parseCursorCatalog,
+  parseOpenCodeModels,
+  recordCursorCatalog,
+  recordReportedModels,
 };

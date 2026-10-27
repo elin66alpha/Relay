@@ -35,6 +35,26 @@ test('Codex static fallback keeps effort choices valid for its pinned models', (
   assert.equal(codex.effortByModel['gpt-5.4'].some((option) => option.id === 'minimal'), false);
 });
 
+test('Codex permissions list full access once', () => {
+  assert.deepEqual(describeAgent('codex').permission.map((option) => option.id), [
+    'workspace-write',
+    'read-only',
+    'full-access',
+  ]);
+});
+
+test('Codex legacy bypass settings retain full access without changing other agents', () => {
+  assert.equal(normalizeSettings('codex', { permission: 'bypass' }).permission, 'full-access');
+  const fullAccess = codexSessionOptions({ permission: 'full-access' });
+  assert.deepEqual(codexSessionOptions({ permission: 'bypass' }), fullAccess);
+  assert.equal(fullAccess.sandbox, 'danger-full-access');
+  assert.equal(fullAccess.approvalPolicy, 'never');
+  assert.equal(fullAccess.approve, true);
+  for (const agent of ['claude', 'cursor', 'opencode']) {
+    assert.equal(normalizeSettings(agent, { permission: 'bypass' }).permission, 'bypass');
+  }
+});
+
 // --- acpSessionOptions ------------------------------------------------------
 // opencode and hermes run as persistent ACP sessions, so their settings are
 // resolved into protocol values.
@@ -47,8 +67,9 @@ test('acpSessionOptions resolves opencode defaults to a model and auto-approval'
     approve: true,
   });
   assert.deepEqual(
-    acpSessionOptions('opencode', { model: 'opencode/mimo-v2.5-free', permission: 'ask' }),
-    { modelId: 'opencode/mimo-v2.5-free', modeId: null, approve: false },
+    acpSessionOptions('opencode', { model: 'opencode/gone-free', permission: 'ask' }),
+    { modelId: 'opencode/big-pickle', modeId: null, approve: false },
+    'a model the catalog no longer lists falls back to the default',
   );
 });
 
@@ -64,6 +85,22 @@ test('acpSessionOptions maps hermes tiers to session modes', () => {
     modeId: 'default',
     approve: false,
   });
+});
+
+test('cursor defaults to Auto and full auto, and maps tiers to its ACP modes', () => {
+  assert.deepEqual(acpSessionOptions('cursor', {}), {
+    modelId: null,
+    modeId: 'agent',
+    approve: true,
+    configOptions: [['model', 'default']],
+  });
+  assert.equal(acpSessionOptions('cursor', { permission: 'plan' }).modeId, 'plan');
+  assert.equal(acpSessionOptions('cursor', { permission: 'plan' }).approve, false);
+  // An id the catalog does not list (here, an id from an older build) falls back.
+  assert.deepEqual(
+    normalizeSettings('cursor', { model: 'default[]', permission: 'ask' }),
+    { model: 'default', permission: 'ask', fast: 'off' },
+  );
 });
 
 test('acpSessionOptions translates a pinned hermes model id to ACP form', () => {

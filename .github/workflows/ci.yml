@@ -13,6 +13,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-setup:
+    name: Windows setup adapter
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify setup operations without host changes
+        shell: powershell
+        run: ./scripts/test_windows_setup.ps1
+      - name: Compile native setup UI
+        shell: powershell
+        run: ./scripts/build_windows_setup.ps1 -OutputPath ./build/setup/Setup.exe
+
   flutter:
     name: Flutter client
     runs-on: ubuntu-latest

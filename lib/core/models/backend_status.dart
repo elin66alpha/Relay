@@ -6,8 +6,6 @@ class BackendStatus {
     required this.workdir,
     required this.systemUptime,
     required this.processUptime,
-    required this.agentTimeoutMs,
-    required this.quotaWatch,
     required this.publicBaseUrl,
   });
 
@@ -16,8 +14,6 @@ class BackendStatus {
       workdir: json['workdir'] as String? ?? '',
       systemUptime: json['systemUptime'] as String? ?? '',
       processUptime: json['processUptime'] as String? ?? '',
-      agentTimeoutMs: json['agentTimeoutMs'] as int? ?? 0,
-      quotaWatch: json['quotaWatch'] as bool? ?? false,
       publicBaseUrl: json['publicBaseUrl'] as String? ?? '',
     );
   }
@@ -25,20 +21,14 @@ class BackendStatus {
   final String workdir;
   final String systemUptime;
   final String processUptime;
-  final int agentTimeoutMs;
-  final bool quotaWatch;
   final String publicBaseUrl;
 
   String toDisplayText(AppStrings strings) {
-    final int timeoutMinutes = (agentTimeoutMs / 60000).round();
     final List<String> lines = <String>[
-      strings.backendOnline,
       strings.workDirectoryLine(workdir),
       strings.systemUptimeLine(systemUptime),
       strings.processUptimeLine(processUptime),
       if (publicBaseUrl.isNotEmpty) strings.publicBaseUrlLine(publicBaseUrl),
-      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
-      strings.quotaWatchLine(quotaWatch),
     ];
     return lines.join('\n');
   }
@@ -121,14 +111,9 @@ class BackendDiagnostics {
 
   String toDisplayText(AppStrings strings) {
     final Map<String, Object?> server = _map('server');
-    final Map<String, Object?> runtime = _map('runtime');
-    final Map<String, Object?> auth = _map('auth');
     final Map<String, Object?> workdir = _map('workdir');
     final Map<String, Object?> currentWorkdir =
         (workdir['current'] as Map?)?.cast<String, Object?>() ??
-            const <String, Object?>{};
-    final Map<String, Object?> defaultWorkdir =
-        (workdir['default'] as Map?)?.cast<String, Object?>() ??
             const <String, Object?>{};
     final List<Object?> agents =
         json['agents'] is List ? (json['agents'] as List).cast<Object?>() : [];
@@ -136,9 +121,7 @@ class BackendDiagnostics {
         ? (json['storage'] as List).cast<Object?>()
         : [];
 
-    final int timeoutMinutes = (_int(server, 'agentTimeoutMs') / 60000).round();
     final List<String> lines = <String>[
-      strings.backendOnline,
       strings.diagnosticsGeneratedLine(json['createdAt']?.toString() ?? ''),
       strings.diagnosticsRuntimeLine(
         _string(server, 'platform'),
@@ -155,29 +138,6 @@ class BackendDiagnostics {
       strings.diagnosticsWorkdirLine(
         exists: _bool(currentWorkdir, 'exists'),
         writable: _bool(currentWorkdir, 'writable'),
-      ),
-      strings.diagnosticsDefaultWorkdirLine(_string(defaultWorkdir, 'dir')),
-      if (timeoutMinutes > 0) strings.taskTimeoutLine(timeoutMinutes),
-      strings.quotaWatchLine(_bool(server, 'quotaWatch')),
-      strings.diagnosticsTransferLimitLine(
-        formatBytes(_int(server, 'maxUploadBytes')),
-        formatBytes(_int(server, 'maxDownloadBytes')),
-      ),
-      strings.diagnosticsTokenLine(
-        configured: _bool(auth, 'configured'),
-        active: _int(auth, 'active'),
-        total: _int(auth, 'total'),
-      ),
-      strings.diagnosticsRequestLine(
-        active: _int(runtime, 'activeRequests'),
-        running: _int(runtime, 'runningScopes'),
-        queued: _int(runtime, 'queuedScopes'),
-        sse: _int(runtime, 'sseClients'),
-      ),
-      strings.diagnosticsWebBuildLine(
-        ((server['webBuild'] as Map?)?.cast<String, Object?>() ??
-                const <String, Object?>{})['indexExists'] ==
-            true,
       ),
       '',
       strings.diagnosticsAgentsHeader,
@@ -213,6 +173,83 @@ class BackendDiagnostics {
       size: formatBytes((file['sizeBytes'] as num?)?.toInt() ?? 0),
     );
   }
+}
+
+class TemperatureReading {
+  const TemperatureReading({
+    required this.key,
+    required this.label,
+    required this.celsius,
+  });
+
+  /// mainboard, ssd, cpu or gpu.
+  final String key;
+  final String label;
+  final double celsius;
+}
+
+class StorageDisk {
+  const StorageDisk({
+    required this.mount,
+    required this.usedBytes,
+    required this.totalBytes,
+  });
+
+  final String mount;
+  final int usedBytes;
+  final int totalBytes;
+}
+
+class MachineInfo {
+  const MachineInfo({
+    required this.cpuModel,
+    required this.cpuThreads,
+    required this.memoryBytes,
+    required this.gpus,
+    required this.disks,
+    required this.temperatures,
+  });
+
+  factory MachineInfo.fromJson(Map<String, Object?> json) {
+    final Map<String, Object?> cpu =
+        (json['cpu'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    return MachineInfo(
+      cpuModel: cpu['model']?.toString() ?? '',
+      cpuThreads: (cpu['cores'] as num?)?.toInt() ?? 0,
+      memoryBytes: (json['memoryBytes'] as num?)?.toInt() ?? 0,
+      gpus: <String>[
+        for (final Object? gpu in json['gpus'] as List? ?? const <Object?>[])
+          if (gpu is String && gpu.isNotEmpty) gpu,
+      ],
+      disks: <StorageDisk>[
+        for (final Object? item in json['disks'] as List? ?? const <Object?>[])
+          if (item is Map)
+            StorageDisk(
+              mount: item['mount']?.toString() ?? '',
+              usedBytes: (item['usedBytes'] as num?)?.toInt() ?? 0,
+              totalBytes: (item['totalBytes'] as num?)?.toInt() ?? 0,
+            ),
+      ],
+      temperatures: <TemperatureReading>[
+        for (final Object? item
+            in json['temperatures'] as List? ?? const <Object?>[])
+          if (item is Map && item['celsius'] is num)
+            TemperatureReading(
+              key: item['key']?.toString() ?? '',
+              label: item['label']?.toString() ?? '',
+              celsius: (item['celsius'] as num).toDouble(),
+            ),
+      ],
+    );
+  }
+
+  final String cpuModel;
+  final int cpuThreads;
+  final int memoryBytes;
+  final List<String> gpus;
+  final List<StorageDisk> disks;
+  final List<TemperatureReading> temperatures;
 }
 
 class PushConfig {

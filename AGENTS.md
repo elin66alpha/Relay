@@ -3,7 +3,7 @@
 Read ENGINEERING.md before any change. It is the engineering contract for this repository.
 
 Relay is a Flutter client plus a self-hosted Node.js backend for controlling
-Claude Code, Codex, OpenCode, and Hermes on the backend machine. Keep public usage guidance in the root READMEs, operational detail in
+Claude Code, Codex, Cursor, OpenCode, and Hermes on the backend machine. Keep public usage guidance in the root READMEs, operational detail in
 `docs/handbook.md`, and security guarantees in `SECURITY.md`.
 
 ## Working safely
@@ -48,8 +48,9 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Scope and concurrency
 
-- A device stores its active workdir locally and sends it as `X-Workdir` on
-  every request. There is no global backend workdir.
+- A device stores its active workdir locally, one per machine, and sends it as
+  `X-Workdir` on every request to that machine. There is no global backend
+  workdir, and a path never goes to a backend it was not chosen on.
 - A conversation is scoped by `workdir + agent + sessionId`. Each agent context
   supports at most eight named sessions; `Main` cannot be deleted or renamed
   because it preserves the legacy scope key and the original conversation from
@@ -70,7 +71,7 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 - `server/lib/agent-options.js` owns option validation and the SDK or
   protocol representation of each setting. `server/lib/agent-settings.js`
   persists normalized solo-chat settings.
-- No agent runs one process per turn. All four keep a live session that turns
+- No agent runs one process per turn. All five keep a live session that turns
   are fed into. Every pool is a *cache*: the stored session id stays
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
@@ -93,7 +94,7 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
     protocol. One process per agent hosts *all* of that agent's scopes, since
     each session carries its own `cwd`, so a large startup cost is paid once
     instead of once per chat.
-    - `acp-session-pool.js` — the ACP driver (opencode, hermes). Settings apply
+    - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor). Settings apply
       over the protocol (`acpSessionOptions`) with no restart. Capabilities from
       `initialize` gate optional calls: hermes has no `session/close`, so an
       evicted session is simply dropped.
@@ -106,18 +107,52 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
   - Relay answers the agents' approval requests from the configured tier,
     because there is no approval UI to route them to. The runner's policy
     answers yes or no; translating that into each protocol's vocabulary is the
-    driver's job (`allow_once` vs `accept` vs `approved`).
-  - `runAcpAgent` in `agents.js` is the shared runner for opencode and hermes,
-    which differ only by their pool and their entries in the option tables.
+    driver's job (`allow_once` vs `accept` vs `approved`). ACP approvals pick
+    `allow_once` over `allow_always`, because Cursor persists an "always" into
+    the host user's own CLI allowlist.
+  - `runAcpAgent` in `agents.js` is the shared runner for opencode, hermes, and
+    cursor, which differ only by their pool and their entries in the option
+    tables. Cursor's binary is `agent`; its pool passes `authMethod:
+    cursor_login` because the CLI rejects a session until that call.
+    - Cursor applies a model and its parameters to the whole process and
+      persists each choice into its config as the CLI's default. Relay's
+      Cursor therefore runs with its own `CURSOR_CONFIG_DIR`
+      (`server/cursor-config/`, override `RELAY_CURSOR_CONFIG_DIR`) so it never
+      changes the host user's `~/.cursor`, and every distinct
+      model + effort + fast choice gets its own process (`cursorPoolFor`);
+      scopes with the same choice share one. A scope whose choice changes is
+      forgotten in its old process and resumes in the new one.
+    - Settings are ACP config options in the parameterized model picker
+      (`clientMeta: { parameterizedModelPicker: true }`): the model first,
+      since choosing it resets its parameters, then its thought-level option
+      as effort and `fast`. `agent --list-models` ids are not accepted over
+      ACP. The catalog comes from `cursor/list_available_models` (no session
+      needed), recorded through `recordCursorCatalog` in `model-discovery.js`
+      at startup, after a CLI update, and on picker opens at most every ten
+      minutes. Cursor emits no context usage, so the app hides the meter.
+  - `refreshAgentModels` uses the same schedule for OpenCode, whose list is
+    `opencode models` (free models change on OpenCode's side, and it includes
+    every provider configured on the host), and for Hermes, whose picker
+    shows only the host's configured model as `default`. `acpSessionOptions`
+    never sends `default` to Hermes, so it keeps running that model.
+- `agent-options.js` marks each model with an optional `group` the picker lists
+  on a second page: Cursor models other than Auto, Grok and Composer are `paid`
+  (the Cursor plan covers only those; the rest bill prepaid usage), and a
+  Claude or Codex model is `legacy` when a newer version of its family exists or
+  its family has no model in the newest major generation. Ids of unknown shape
+  stay on the first page. A grouped model stays valid everywhere; Swarms list
+  only first-page models.
 - Deleting or clearing a conversation goes through `purgeSession`, not
   `clearSession`: for a pooled agent it also requests CLI-side transcript
-  deletion on a best-effort basis. Use `clearSession` only for the internal
+  deletion on a best-effort basis. Cursor has no delete command, so Relay
+  removes `<CURSOR_CONFIG_DIR>/acp-sessions/<id>` itself. Use `clearSession` only for the internal
   stale-session retry.
 - Test files are `test/*.test.js`. Helper processes live in `test/fixtures/`,
   which the runner would otherwise try to execute as tests.
-- Fast mode is supported only by Claude Code and Codex and defaults off. Claude
-  receives a `fastMode` settings override; Codex receives an explicit
-  `serviceTier` of `fast` or `default` on every turn.
+- Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
+  Claude receives a `fastMode` settings override; Codex receives an explicit
+  `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
+  `true` or `false` for every model that has the option.
 - Codex models and model-specific reasoning levels come from structured CLI
   metadata, with bundled/cache/static fallbacks. Do not reintroduce binary
   string scanning for Codex model ids, because it can mistake a model-name
@@ -128,15 +163,16 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
   result (including "not installed"); `agent-options.js` caches
   `models-extra.json` by mtime. A CLI update calls `clearModelDiscoveryCache`,
   which is what makes new models appear at once.
-- `GET /api/agents` returns all four known agents with install/auth/usability
-  state. Claude requires OAuth. Codex reports its active app-server auth mode,
+- `GET /api/agents` returns all five known agents with install/auth/usability
+  state, in the order Claude Code, Codex, Cursor, OpenCode, Hermes. Claude and
+  Cursor require their CLI login (Cursor also accepts `CURSOR_API_KEY`). Codex reports its active app-server auth mode,
   including managed ChatGPT, API-key, external-token, and host-managed provider
   modes; OpenCode and Hermes credentials are managed on the host and become
   selectable when installed.
 - Every credential is created on the backend host by the CLI itself. Relay does
-  not log an agent in. `server/lib/agent-status.js` reads stored auth state and
-  Claude's `credentialExpiresAt`; Codex has no login-expiry timestamp because
-  its managed short-lived tokens auto-refresh. An explicit credential recheck
+  not log an agent in. `server/lib/agent-status.js` reads stored auth state.
+  Relay reports no login deadline because every supported CLI refreshes its
+  tokens. An explicit credential recheck
   uses `account/read` with `refreshToken: true` on the shared Codex app-server.
   `server/lib/usage.js` separately reads and may refresh OAuth credentials for
   quota reporting and keepalive. A token or account identity value must never
@@ -145,7 +181,11 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Backend modules and persistence
 
-- Each route factory receives dependencies through `routeContext`. When a route
+- Each route factory receives through `routeContext` everything that holds state
+  or does I/O: server state, persistence, processes, caches, and the helpers
+  `server.js` builds. Tests replace those. A route requires directly only Node
+  built-ins, npm packages, and `lib/*` helpers that compute from their arguments
+  (SSE writers, Swarm prompt building, settings validation). When a route
   destructures a new helper, add it to the context in `server/server.js`.
 - Use `server/lib/json-store.js` for JSON state: cached reads, atomic replace,
   and owner-only file permissions. Do not create ad hoc read/modify/write stores.
@@ -202,8 +242,8 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 ## Local state and secrets
 
 Generated files under `server/` include `.env`, `tokens.json`, credentials,
-agent/chat sessions, history, settings, context windows, groups, quota
-state/schedules, usage cache, and push/FCM stores. They are deployment state,
+agent/chat sessions, history, settings, context windows, reported models,
+Relay's Cursor config (`cursor-config/`), groups, quota state/schedules, usage cache, and push/FCM stores. They are deployment state,
 not fixtures. Keep them, along with any referenced FCM service-account JSON,
 out of patches and release archives. `server/models-extra.json` is also a local
 override, not a shared catalog. The Android release keystore and

@@ -36,9 +36,8 @@ class ApiTransport {
   final WorkdirStore _workdirStore;
   final http.Client httpClient;
 
-  Future<String?> currentWorkdir() => _workdirStore.read();
-
-  Future<void> writeWorkdir(String dir) => _workdirStore.write(dir);
+  Future<void> writeWorkdir(MachineCredential credential, String dir) =>
+      _workdirStore.write(credential.id, dir);
 
   void close() {
     httpClient.close();
@@ -133,7 +132,7 @@ class ApiTransport {
   }) async {
     final String deviceId = await _deviceIdStore.readOrCreate();
     final String deviceName = clientDeviceName();
-    final String? workdir = await _workdirStore.read();
+    final String? workdir = await _workdirStore.read(credential.id);
     return <String, String>{
       'Accept': accept,
       'Content-Type': contentType,

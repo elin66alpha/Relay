@@ -68,6 +68,17 @@ String _groupTitle(AppStrings l10n, String group) {
   }
 }
 
+String _modelGroupTitle(AppStrings l10n, String group) {
+  switch (group) {
+    case 'paid':
+      return l10n.agentModelsPaid;
+    case 'legacy':
+      return l10n.agentModelsLegacy;
+    default:
+      return group;
+  }
+}
+
 String _optionLabel(AppStrings l10n, String group, AgentOption option) {
   if (group != 'effort') return option.label;
   switch (option.id) {
@@ -80,9 +91,12 @@ String _optionLabel(AppStrings l10n, String group, AgentOption option) {
     case 'high':
       return l10n.agentEffortHigh;
     case 'xhigh':
+    case 'extra-high':
       return l10n.agentEffortExtraHigh;
     case 'max':
       return l10n.agentEffortMax;
+    case 'none':
+      return l10n.agentEffortNone;
     case 'ultra':
       return l10n.agentEffortUltra;
     default:
@@ -482,6 +496,7 @@ class _AgentOptionPage extends StatefulWidget {
     required this.current,
     required this.modelId,
     required this.fastEnabled,
+    this.modelGroup,
   });
 
   final BackendClient backend;
@@ -492,6 +507,10 @@ class _AgentOptionPage extends StatefulWidget {
   final String current;
   final String? modelId;
   final bool fastEnabled;
+
+  /// The model group this page lists; null is the first page, which lists
+  /// ungrouped models and links to each group at the bottom.
+  final String? modelGroup;
 
   @override
   State<_AgentOptionPage> createState() => _AgentOptionPageState();
@@ -506,6 +525,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
   late bool _fastEnabled;
 
   bool get _isModel => widget.group == 'model';
+  bool get _isFirstModelPage => _isModel && widget.modelGroup == null;
 
   @override
   void initState() {
@@ -567,27 +587,102 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
     }
   }
 
+  Future<void> _openModelGroup(String modelGroup) async {
+    final AgentSettings? result = await Navigator.of(context).push(
+      MaterialPageRoute<AgentSettings>(
+        builder: (BuildContext ctx) => _AgentOptionPage(
+          backend: widget.backend,
+          agentKey: widget.agentKey,
+          sessionId: widget.sessionId,
+          group: widget.group,
+          catalog: _catalog,
+          current: _current,
+          modelId: _modelId,
+          fastEnabled: _fastEnabled,
+          modelGroup: modelGroup,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    Navigator.of(context).pop(result);
+  }
+
+  Widget? _modelGroupLinks(AppStrings l10n, List<AgentOption> all) {
+    if (!_isFirstModelPage) return null;
+    final Set<String> groups = <String>{
+      for (final AgentOption option in all)
+        if (option.group != null) option.group!,
+    };
+    if (groups.isEmpty) return null;
+    return SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Divider(height: 1),
+          for (final String group in groups)
+            _modelGroupLink(l10n, group, <AgentOption>[
+              for (final AgentOption option in all)
+                if (option.group == group) option,
+            ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _modelGroupLink(
+    AppStrings l10n,
+    String group,
+    List<AgentOption> members,
+  ) {
+    final AgentOption? selected = members
+        .where((AgentOption option) => option.id == _current)
+        .firstOrNull;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      leading: Icon(
+        group == 'paid' ? Icons.credit_card_outlined : Icons.history_rounded,
+      ),
+      title: Text('${_modelGroupTitle(l10n, group)} (${members.length})'),
+      subtitle: selected == null
+          ? null
+          : Text(l10n.agentModelsCurrent(selected.label)),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: _saving ? null : () => _openModelGroup(group),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppStrings l10n = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final List<AgentOption> options = _catalog.optionsFor(
+    final List<AgentOption> all = _catalog.optionsFor(
       widget.group,
       modelId: _modelId,
     );
+    final List<AgentOption> options = _isModel
+        ? all
+            .where((AgentOption option) => option.group == widget.modelGroup)
+            .toList()
+        : all;
+    final bool showFast = _isFirstModelPage && _catalog.supportsGroup('fast');
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_groupTitle(l10n, widget.group)),
+        title: Text(
+          widget.modelGroup == null
+              ? _groupTitle(l10n, widget.group)
+              : _modelGroupTitle(l10n, widget.modelGroup!),
+        ),
       ),
+      bottomNavigationBar: _modelGroupLinks(l10n, all),
       body: SafeArea(
         child: ListView.separated(
-          itemCount: options.length +
-              (_isModel && _catalog.supportsGroup('fast') ? 1 : 0),
+          itemCount: options.length + (showFast ? 1 : 0),
           separatorBuilder: (BuildContext context, int index) =>
               Divider(height: 1, color: colors.outlineVariant),
           itemBuilder: (BuildContext ctx, int index) {
-            if (_isModel && _catalog.supportsGroup('fast') && index == 0) {
+            if (showFast && index == 0) {
               return SwitchListTile(
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -600,8 +695,7 @@ class _AgentOptionPageState extends State<_AgentOptionPage> {
                 onChanged: _savingFast || _saving ? null : _toggleFast,
               );
             }
-            final int optionIndex =
-                index - (_isModel && _catalog.supportsGroup('fast') ? 1 : 0);
+            final int optionIndex = index - (showFast ? 1 : 0);
             final AgentOption option = options[optionIndex];
             final bool selected = option.id == _current;
             return ListTile(

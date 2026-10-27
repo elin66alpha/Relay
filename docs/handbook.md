@@ -23,7 +23,8 @@ the backend OS user. A stable deployment should have all of the following:
 - Generate one credential per device. Revoke and delete old device tokens rather
   than sharing one token.
 - Keep `.env`, tokens, credential exports, CLI login state, push keys, history,
-  sessions, settings, `server/context-windows.json`, groups, quota state, and FCM
+  sessions, settings, `server/context-windows.json`, `server/reported-models.json`,
+  `server/cursor-config/`, groups, quota state, and FCM
   service-account files out of git and release archives.
 
 ### Reverse proxy requirements
@@ -49,8 +50,10 @@ but still require authentication. Failed bearer-token attempts have a separate
 ### File API boundary
 
 The built-in denylist currently covers Relay's token file, `.env`, generated
-credential directory, Web Push/FCM token stores, `~/.ssh`, Claude Code OAuth
-credentials, and Codex auth. It also covers siblings whose names start with a
+credential directory, Web Push/FCM token stores, the FCM service-account key,
+`~/.ssh`, Claude Code OAuth
+credentials, Codex auth, Cursor's `auth.json`, and Relay's own Cursor config
+directory `server/cursor-config/`. It also covers siblings whose names start with a
 sensitive basename followed by a dot, such as `.env.bak-x`, `tokens.json.bak`,
 and `auth.json.old`, including atomic `.tmp` files. It is not a general secret
 scanner and does not cover every third-party CLI configuration. Use
@@ -145,19 +148,16 @@ deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
 tokens that were already issued.
 
-Relay reports separate installed, authenticated, and usable state for all four
-known agents. Claude Code and Codex are the primary integrations; OpenCode and
-Hermes are experimental. Every agent's credential or provider configuration is
-created on the backend host with that CLI's own flow. Relay never logs a CLI in
-remotely.
+Relay reports separate installed, authenticated, and usable state for every
+known agent. Claude Code, Codex, and Cursor are signed in on the host with
+each CLI's own login (`agent login` for Cursor). OpenCode and Hermes are
+experimental. Every credential is created on the backend host. Relay never
+logs a CLI in remotely.
 
-Claude's `claudeAiOauth.expiresAt` in `~/.claude/.credentials.json` is reported
-as `credentialExpiresAt` (epoch ms) on `/api/agents`, and the app turns it into
-the days left or the days since expiry on **Machine details**. Codex is
-different: managed ChatGPT auth automatically rotates its short-lived ID and
-access tokens, while the refresh token has no client-readable deadline. Relay
-therefore always reports a null Codex `credentialExpiresAt` and shows no login
-countdown for it.
+Relay reports no login deadline because every supported CLI refreshes its
+tokens. Short-lived access-token expiry is not a login deadline. Machine
+details shows ready state for authenticated agents. Cursor's CLI binary is
+`agent`, not `cursor`.
 
 Stored Codex state distinguishes managed ChatGPT, API-key, external-token, and
 host-managed provider modes. An explicit **Recheck** calls `account/read` with
@@ -167,8 +167,9 @@ probe failure is reported as a check error and leaves the app's displayed state
 in place.
 Only normalized auth/status fields leave the backend: account identity and
 credential values are discarded. Separately, `server/lib/usage.js` reads the
-Claude/Codex OAuth tokens for quota reporting and can refresh an expired access
-token atomically in the CLI's credential file.
+Claude Code, Codex, and Cursor tokens for quota reporting and can refresh an
+expired Claude Code or Codex access token atomically in the CLI's credential
+file.
 
 ## SSH terminal
 
@@ -243,11 +244,13 @@ stays invisible. Swarm members and the other agents do not surface these turns.
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
 last step is best effort because the external CLI can reject or fail deletion;
-inspect the host's CLI state if guaranteed erasure is required.
+inspect the host's CLI state if guaranteed erasure is required. Cursor has no
+delete command, so Relay removes that session's directory under
+`server/cursor-config/acp-sessions/` itself.
 
 ### Workdirs, conversations, and settings
 
-Each device stores its current workdir and sends it in `X-Workdir`. Backend state
+Each device stores its current workdir per backend and sends it in `X-Workdir`. Backend state
 then uses two related scopes:
 
 | State | Scope |
@@ -281,6 +284,7 @@ with replies but no recorded usage shows `? / <window>`. An unknown window is
 shown as `?` until that agent and model has reported one. The backend remembers
 the last reported window per agent and model in the generated state file
 `server/context-windows.json`, so an empty conversation can show the known limit.
+Cursor reports no context usage, so the line is hidden while Cursor is active.
 
 Agent controls are capability-aware:
 
@@ -288,26 +292,54 @@ Agent controls are capability-aware:
 |---|---:|---:|---:|---:|---|
 | Claude Code | yes | yes | yes | yes | OAuth |
 | Codex | yes | model-specific | yes | yes | active app-server mode: managed ChatGPT, API key, external token, or host-managed provider |
+| Cursor | yes | model-specific | yes | yes, models with a fast option | host auth file or `CURSOR_API_KEY` |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
-| Hermes | host config/pins | no | yes | no | host-managed key |
+| Hermes | shows the host's configured model; pins | no | yes | no | host-managed key |
 
 Fast mode defaults off, may use more quota or cost more, and is visible only in
-the solo-chat composer. Relay sends an explicit Claude `fastMode` setting or
-Codex `serviceTier` on every turn. Availability still depends on
+the solo-chat composer. Relay sends an explicit Claude `fastMode` setting,
+Codex `serviceTier`, or Cursor `fast` option on every turn. Availability still depends on
 the selected model, CLI version, account, and provider. Swarm storage can retain
 the field, but the current Swarm form exposes only model, effort, and permission.
 
 Claude settings are fixed for the life of its per-conversation SDK process, so
-a change restarts that process and resumes the same conversation. OpenCode and
-Hermes settings apply over ACP without restarting their shared process. Codex
+a change restarts that process and resumes the same conversation. OpenCode
+and Hermes settings apply over ACP without restarting their shared process.
+Cursor applies a model, effort and speed to a whole process, so each distinct
+choice runs in a Cursor process of its own (conversations with the same choice
+share one), and changing it resumes the conversation in the matching process.
+These processes use Relay's own Cursor config directory, `server/cursor-config/`,
+so model choices made in Relay never change the host user's `~/.cursor`
+defaults; login is still the host's `agent login`. Codex
 applies model, effort, and service tier per turn; changing its sandbox reopens
 the thread while resuming the same conversation, without respawning the shared
 app-server process.
 
 Codex model and reasoning choices come from the installed CLI's structured
 catalog and keep each model's advertised order/default. Updating Codex clears
-the discovery cache. Other agents use their supported live or fallback catalogs;
-local pins may be added in the gitignored `server/models-extra.json`.
+the discovery cache. Cursor's catalog comes from its ACP server
+(`cursor/list_available_models`) at backend startup, after a CLI update, and
+when the picker opens (at most every ten minutes). Each model offers its own
+effort levels and, where it has one, the fast switch; context size and thinking
+stay at the model's default. Relay keeps the last list in the generated state
+file `server/reported-models.json`; before the first answer, and when Cursor is
+not signed in, the picker offers only Auto, which is also the default.
+OpenCode's list comes from `opencode models` on the same schedule: its free
+models, which change on OpenCode's side, plus every provider configured in the
+host's OpenCode (`~/.config/opencode/opencode.json` or `opencode auth login`),
+each labelled with its model name over its provider. Before the first answer it
+offers `big-pickle`. Hermes' picker shows the one model configured on the host
+(`hermes model`), read with `hermes config get model.default` on the same
+schedule; it is a label, so Hermes keeps running its configured model. Both are
+kept in `server/reported-models.json` too. Local pins may be added in the
+gitignored `server/models-extra.json`.
+
+The model page lists main models first and links to the rest from the bottom
+of the screen. For Cursor that second page holds every model outside the Cursor
+plan's included usage (anything but Auto, Grok and Composer), which bills
+prepaid usage from the first request. For Claude Code and Codex it holds legacy
+models: older versions of a family, and families with no model in the newest
+generation. They stay selectable. The Swarm form offers only main models.
 
 ### History, search, and export
 
@@ -356,12 +388,16 @@ machine-specific workdir, id, and transcript.
 
 ### Quota and notifications
 
-The usage screen reports Claude Code and Codex. It queries each source on its
-own (`GET /api/usage?source=claude|codex`; an unknown source is a 400), so one
+The usage screen reports Claude Code, Codex, and Cursor. It queries each source on its
+own (`GET /api/usage?source=claude|codex|cursor`; an unknown source is a 400), so one
 card fills in as soon as its source answers. The solo-chat composer also pins
-the active agent's remaining quota above the input for Claude Code and Codex; it
+the active agent's remaining quota above the input for Claude Code, Codex, and Cursor; it
 reads the same per-source endpoint when the agent changes and after each turn,
 at most once a minute per agent, matching the backend's one-minute usage cache.
+Cursor reads the host auth file (or exchanges `CURSOR_API_KEY`) and asks Cursor's
+dashboard for included usage. An X plan such as Premium is one weekly pool; an
+older Cursor plan is two pools, Cursor models and API models. The query does not
+spend usage. Cursor's reset does not queue a scheduled message.
 Reset detection and
 scheduled messages support Claude Code and Codex only. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
@@ -421,7 +457,8 @@ npm start
 
 On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
-Debian/Ubuntu). macOS and Windows use the package's supported prebuilt binaries
+Debian/Ubuntu; `./backends/linux/setup.sh` installs them there when
+missing). macOS and Windows use the package's supported prebuilt binaries
 when available. Unix hosts also need `zip` for directory downloads.
 
 `server/package.json` allows node-pty's install scripts through npm 12's
@@ -439,7 +476,7 @@ flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
 npm --prefix server start
 ```
 
-The server serves `build/web` when present. CanvasKit is bundled locally and the
+The server serves `build/web` when present, unless `RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the
 service worker is disabled to keep the self-hosted client current.
 
 `scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
@@ -450,12 +487,15 @@ rebuilds Web and an APK.
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution
-(including npm and its license), Git, and access to the npm registry:
+(including npm and its license), Git, Flutter, the system .NET Framework 4.x
+C# compiler and access to the npm registry:
 
 ```powershell
 .\scripts\package_windows_backend.ps1
 # Optional: select a different installed runtime or output directory.
 .\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+# Reuse a Web build made from the same source instead of rebuilding it.
+.\scripts\package_windows_backend.ps1 -SkipWebBuild
 ```
 
 The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
@@ -473,8 +513,19 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
-client is included. Keep the extracted directory fixed, and follow the bundled
+installation. `Setup.exe` is a Windows Forms UI built with the system .NET
+Framework compiler, without a downloaded GUI runtime. It and the console menu
+share `backends/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+agent installation and token create/delete/list/re-show. Passwords reach the
+worker through stdin and the existing credential generator through its
+environment, never command arguments or temporary request files. The bundle
+includes `build/web`; Node serves it alongside the API, without another Web
+server. Setup enables it by default and can turn it off. Tunnel modes download
+missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows
+installers and require the user to sign in afterward. Uninstall can remove Web
+and the bundle-owned tunnel tool and optionally delete a named Cloudflare
+tunnel, while retaining backend state and other host software. Keep the
+extracted directory fixed, and follow the bundled
 README when migrating a deployment to a new directory.
 
 ### Desktop clients
@@ -526,16 +577,15 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 A GitHub release `v<VERSION>` carries:
 
 - `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
+- `install.sh` — `scripts/install.sh`, the Linux one-line installer
+  (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
+  It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
+  them;
 - `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
-  service adapters, without tests, dependencies, or deployment state:
-
-  ```bash
-  V=<VERSION>
-  git archive --format=tar.gz --prefix=relay-backend-setup-v$V/ \
-    -o relay-backend-setup-v$V.tar.gz HEAD $(git ls-tree -r --name-only HEAD |
-    grep -E '^(CHANGELOG\.md|LICENSE|README(\.zh-CN)?\.md|SECURITY\.md|docs/handbook\.md|scripts/setup\.sh|backends/README(\.zh-CN)?\.md|backends/(linux|macos)/(lib/)?[^/]+\.sh|backends/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
-  ```
-
+  service adapters, without tests, dependencies, or deployment state, plus the
+  compiled Web client in `build/web`. `./scripts/package_backend.sh` builds the
+  Web client and writes it with a `.sha256` to `build/release/`; it refuses a
+  tree with uncommitted tracked changes.
 - `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
   (`build/windows/x64/runner/Release/`);
 - `relay-backend-windows-x64-v<VERSION>.zip` — see

@@ -1,10 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relay/core/i18n/app_strings.dart';
-import 'package:relay/core/settings/app_settings_controller.dart';
 import 'package:relay/core/models/cli_agent.dart';
-import 'package:relay/features/cli_agents/agent_status_lights.dart';
 
 void main() {
+  test('known agents list Cursor between Codex and OpenCode', () {
+    expect(
+      knownCliAgents.map((CliAgent agent) => agent.key).toList(),
+      <String>['claude', 'codex', 'cursor', 'opencode', 'hermes'],
+    );
+    expect(defaultAuthKindForAgent('cursor'), 'oauth');
+  });
+
   test('parses agent status fields from backend payload', () {
     final CliAgent agent = CliAgent.fromJson(<String, Object?>{
       'key': 'hermes',
@@ -85,97 +90,19 @@ void main() {
     expect(isCliAgentSelectable(ready), true);
   });
 
-  test('reads the credential expiry from the backend payload', () {
-    final CliAgent agent = CliAgent.fromJson(<String, Object?>{
+  test('ignores a legacy credentialExpiresAt from older backends', () {
+    final Map<String, Object?> payload = <String, Object?>{
       'key': 'claude',
       'label': 'Claude Code',
       'description': 'Anthropic Claude Code CLI',
-      'credentialExpiresAt': 1893456000000,
-    });
-    final CliAgent legacy = CliAgent.fromJson(<String, Object?>{
-      'key': 'codex',
-      'label': 'Codex',
-      'description': 'OpenAI Codex CLI',
+    };
+    final CliAgent agent = CliAgent.fromJson(<String, Object?>{
+      ...payload,
       'credentialExpiresAt': 1893456000000,
     });
 
-    expect(
-      agent.credentialExpiresAt,
-      DateTime.fromMillisecondsSinceEpoch(1893456000000),
-    );
-    expect(legacy.credentialExpiresAt, isNull);
-  });
-
-  test('counts whole days on both sides of the credential expiry', () {
-    final DateTime now = DateTime(2026, 8, 16, 12);
-    CredentialExpiry expiryAfter(Duration offset) =>
-        CredentialExpiry.at(now.add(offset), now: now);
-
-    expect(expiryAfter(const Duration(days: 7)).days, 7);
-    expect(expiryAfter(const Duration(days: 7)).expired, false);
-    // Truncates, so a day and a half of runway still reads as one full day.
-    expect(expiryAfter(const Duration(days: 1, hours: 12)).days, 1);
-    expect(expiryAfter(const Duration(hours: 3)).days, 0);
-    expect(expiryAfter(const Duration(hours: 3)).expired, false);
-    expect(expiryAfter(const Duration(hours: -3)).expired, true);
-    expect(expiryAfter(const Duration(hours: -3)).days, 0);
-    expect(expiryAfter(const Duration(days: -3, hours: -1)).days, 3);
-    expect(expiryAfter(const Duration(days: -3, hours: -1)).expired, true);
-  });
-
-  test('describes real expiry fields but never Codex token rotation', () {
-    const AppStrings strings = AppStrings(AppLanguage.en);
-    final DateTime now = DateTime(2026, 8, 16, 12);
-    CliAgent claudeExpiring(Duration offset) => CliAgent(
-          key: 'claude',
-          label: 'Claude Code',
-          description: 'Anthropic Claude Code CLI',
-          authKind: 'oauth',
-          credentialExpiresAt: now.add(offset),
-        );
-
-    expect(
-      agentCredentialExpiryMessage(
-        strings,
-        claudeExpiring(const Duration(days: 12)),
-        now: now,
-      ),
-      'Log in again in 12 days',
-    );
-    expect(
-      agentCredentialExpiryMessage(
-        strings,
-        claudeExpiring(const Duration(days: -2)),
-        now: now,
-      ),
-      'Expired 2 days ago. Log in again on the backend host.',
-    );
-    expect(
-      agentCredentialExpiryMessage(
-        strings,
-        const CliAgent(
-          key: 'opencode',
-          label: 'OpenCode',
-          description: 'OpenCode CLI',
-          authKind: 'apiKeyOptional',
-        ),
-        now: now,
-      ),
-      isNull,
-    );
-    expect(
-      agentCredentialExpiryMessage(
-        strings,
-        CliAgent(
-          key: 'codex',
-          label: 'Codex',
-          description: 'OpenAI Codex CLI',
-          authKind: 'oauth',
-          credentialExpiresAt: now.subtract(const Duration(days: 2)),
-        ),
-        now: now,
-      ),
-      isNull,
-    );
+    expect(agent, CliAgent.fromJson(payload));
+    expect(agent.toJson().containsKey('credentialExpiresAt'), isFalse);
+    expect(agent.authed, isTrue);
   });
 }

@@ -5,11 +5,20 @@
 /// One selectable value within a control group (a model, an effort level, or a
 /// permission tier).
 class AgentOption {
-  const AgentOption({required this.id, required this.label, this.description});
+  const AgentOption({
+    required this.id,
+    required this.label,
+    this.description,
+    this.group,
+  });
 
   final String id;
   final String label;
   final String? description;
+
+  /// A model listed on a second page instead of the first: `paid` (Cursor
+  /// models outside the plan) or `legacy` (replaced Claude/Codex models).
+  final String? group;
 
   factory AgentOption.fromJson(Map<String, Object?> json) {
     return AgentOption(
@@ -17,6 +26,9 @@ class AgentOption {
       label: (json['label'] as String?)?.trim() ?? '',
       description: (json['description'] as String?)?.trim().isNotEmpty == true
           ? (json['description'] as String).trim()
+          : null,
+      group: (json['group'] as String?)?.trim().isNotEmpty == true
+          ? (json['group'] as String).trim()
           : null,
     );
   }

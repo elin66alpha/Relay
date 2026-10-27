@@ -9,7 +9,7 @@ import 'quota_controller.dart';
 
 /// The agents whose quota the backend reports.
 bool quotaStripSupports(String agentKey) =>
-    agentKey == 'claude' || agentKey == 'codex';
+    agentKey == 'claude' || agentKey == 'codex' || agentKey == 'cursor';
 
 /// The active agent's remaining quota, pinned above the composer. Display
 /// only: the full quota screen opens from the agents drawer.
@@ -162,6 +162,8 @@ class _QuotaMeter extends StatelessWidget {
     final String label = switch (quota.key) {
       'five_hour' => strings.fiveHourQuotaShort,
       'seven_day' => strings.weeklyQuotaShort,
+      'cursor_models' => strings.cursorModelsQuotaShort,
+      'api_models' => strings.apiModelsQuotaShort,
       _ => quota.label,
     };
     final TextStyle labelStyle = TextStyle(fontSize: 12, color: colors.outline);

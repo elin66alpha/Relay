@@ -93,6 +93,10 @@ class AppStrings {
       isZh ? '配额窗口已重置，等待最新数据' : 'Window reset — awaiting fresh data';
   String get fiveHourQuotaShort => isZh ? '5小时' : '5h';
   String get weeklyQuotaShort => isZh ? '本周' : 'Week';
+  String get cursorModelsQuota => isZh ? 'Cursor 模型' : 'Cursor models';
+  String get apiModelsQuota => isZh ? '其他模型' : 'API models';
+  String get cursorModelsQuotaShort => isZh ? '模型' : 'Models';
+  String get apiModelsQuotaShort => 'API';
   String get quotaResetShort => isZh ? '已重置' : 'Reset';
   String get contextUsage => isZh ? '上下文' : 'Context';
   String resetsIn(Duration left) =>
@@ -130,7 +134,6 @@ class AppStrings {
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
-  String get backendOnline => isZh ? '后端在线' : 'Backend online';
   String workDirectoryLine(String path) =>
       isZh ? '工作目录：$path' : 'Work directory: $path';
   String systemUptimeLine(String value) =>
@@ -139,11 +142,6 @@ class AppStrings {
       isZh ? '进程运行：$value' : 'Process uptime: $value';
   String publicBaseUrlLine(String value) =>
       isZh ? '公网地址：$value' : 'Public URL: $value';
-  String taskTimeoutLine(int minutes) =>
-      isZh ? '任务超时：$minutes 分钟' : 'Task timeout: $minutes minutes';
-  String quotaWatchLine(bool enabled) => isZh
-      ? '额度监听：${enabled ? '开启' : '关闭'}'
-      : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
   String diagnosticsGeneratedLine(String value) =>
       isZh ? '诊断时间：$value' : 'Diagnostics time: $value';
   String diagnosticsRuntimeLine(String platform, String arch, String node) =>
@@ -157,31 +155,6 @@ class AppStrings {
       isZh
           ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
           : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
-  String diagnosticsDefaultWorkdirLine(String value) =>
-      isZh ? '默认工作目录：$value' : 'Default workdir: $value';
-  String diagnosticsTransferLimitLine(String upload, String download) => isZh
-      ? '传输上限：上传 $upload，下载 $download'
-      : 'Transfer limits: upload $upload, download $download';
-  String diagnosticsTokenLine({
-    required bool configured,
-    required int active,
-    required int total,
-  }) =>
-      isZh
-          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
-          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
-  String diagnosticsRequestLine({
-    required int active,
-    required int running,
-    required int queued,
-    required int sse,
-  }) =>
-      isZh
-          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
-          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
-  String diagnosticsWebBuildLine(bool exists) => isZh
-      ? 'Web 构建：${exists ? '存在' : '缺失'}'
-      : 'Web build: ${exists ? 'present' : 'missing'}';
   String get diagnosticsAgentsHeader => isZh ? 'CLI 检查：' : 'CLI checks:';
   String diagnosticsAgentLine(
     String label, {
@@ -331,18 +304,6 @@ class AppStrings {
   String get copy => isZh ? '复制' : 'Copy';
   String get edit => isZh ? '编辑' : 'Edit';
   String get copied => isZh ? '已复制。' : 'Copied.';
-  String credentialExpiresInDays(int days) => isZh
-      ? '还有 $days 天需要重新登录'
-      : 'Log in again in $days ${days == 1 ? 'day' : 'days'}';
-  String get credentialExpiresToday =>
-      isZh ? '今天之内需要重新登录' : 'Log in again within a day';
-  String credentialExpiredDays(int days) => isZh
-      ? '已过期 $days 天，请立即在后端主机重新登录'
-      : 'Expired $days ${days == 1 ? 'day' : 'days'} ago. '
-          'Log in again on the backend host.';
-  String get credentialExpiredToday => isZh
-      ? '凭据已过期，请立即在后端主机重新登录'
-      : 'Credential expired. Log in again on the backend host.';
   String agentStatusRefreshFailed(Object err) =>
       isZh ? '刷新智能体状态失败：$err' : 'Agent status refresh failed: $err';
   String get importCredential => isZh ? '导入凭证' : 'Import credential';
@@ -391,6 +352,11 @@ class AppStrings {
 
   // Per-agent Model / Effort / Permission controls (composer "+" drawer).
   String get agentModel => isZh ? '模型' : 'Model';
+  String get agentModelsPaid =>
+      isZh ? '需要支付方式的模型' : 'Models that need a payment method';
+  String get agentModelsLegacy => isZh ? '旧版模型' : 'Legacy models';
+  String agentModelsCurrent(String label) =>
+      isZh ? '当前：$label' : 'Current: $label';
   String get agentEffort => isZh ? '思考' : 'Effort';
   String get agentPermission => isZh ? '权限' : 'Permission';
   String get agentFastMode => isZh ? '快速模式' : 'Fast mode';
@@ -405,6 +371,7 @@ class AppStrings {
   String get agentEffortHigh => isZh ? '高' : 'High';
   String get agentEffortExtraHigh => isZh ? '极高' : 'Extra high';
   String get agentEffortMax => isZh ? '最高' : 'Max';
+  String get agentEffortNone => isZh ? '无' : 'None';
   String get agentEffortUltra => isZh ? '极限' : 'Ultra';
   String get agentControlsLoadFailed =>
       isZh ? '加载失败,点按重试' : 'Failed to load — tap to retry';
@@ -452,6 +419,18 @@ class AppStrings {
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get machineDetails => isZh ? '机器详情' : 'Machine details';
+  String get cpuLabel => 'CPU';
+  String cpuThreads(int count) => isZh ? '$count 线程' : '$count threads';
+  String get memoryLabel => isZh ? '内存' : 'Memory';
+  String get gpuLabel => isZh ? '显卡' : 'GPU';
+  String get storageLabel => isZh ? '存储' : 'Storage';
+  String storageUsage(String mount, String used, String total) => isZh
+      ? '$mount  已用 $used / 总容量 $total'
+      : '$mount  $used used / $total total';
+  String get temperatures => isZh ? '温度' : 'Temperatures';
+  String get mainboardLabel => isZh ? '主板' : 'Mainboard';
+  String get noTemperatureSensors =>
+      isZh ? '这台机器没有可读取的温度传感器' : 'No readable temperature sensors';
   String get enterSsh => isZh ? '进入SSH' : 'Enter SSH';
   String get sshTerminal => isZh ? 'SSH 终端' : 'SSH terminal';
   String get backToMachineDetails =>
@@ -511,8 +490,8 @@ class AppStrings {
   String get licenseText => isZh ? '私有本地工具。' : 'Private local tool.';
   String get copyright => isZh ? '© 2026 Relay' : '© 2026 Relay';
   String get aboutDescription => isZh
-      ? '用于连接本机 Claude Code、Codex、OpenCode 和 Hermes CLI 智能体的私有控制台。'
-      : 'Private control surface for local Claude Code, Codex, OpenCode, and Hermes CLI agents.';
+      ? '用于连接本机 Claude Code、Codex、Cursor、OpenCode 和 Hermes CLI 智能体的私有控制台。'
+      : 'Private control surface for local Claude Code, Codex, Cursor, OpenCode, and Hermes CLI agents.';
   String get language => isZh ? '语言' : 'Language';
   String get appearance => isZh ? '外观' : 'Appearance';
   String get wallpaper => isZh ? '壁纸' : 'Wallpaper';

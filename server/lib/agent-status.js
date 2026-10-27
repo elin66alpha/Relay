@@ -4,7 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { AGENTS, commandExists } = require('./agents');
+const { AGENTS } = require('./agents');
+const { commandExists, cursorAuthFile } = require('./cli-paths');
 
 const STATUS_TTL_MS = 60 * 1000;
 const statusCache = new Map();
@@ -14,6 +15,7 @@ const AUTH_KIND = {
   codex: 'oauth',
   hermes: 'apiKey',
   opencode: 'apiKeyOptional',
+  cursor: 'oauth',
 };
 
 function readJson(fsModule, filePath) {
@@ -28,10 +30,6 @@ function nonEmpty(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function expiryOrNull(value) {
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
 function claudeCredential(fsModule, homeDir) {
   const creds = readJson(
     fsModule,
@@ -40,7 +38,6 @@ function claudeCredential(fsModule, homeDir) {
   const oauth = (creds && creds.claudeAiOauth) || {};
   return {
     authed: nonEmpty(oauth.accessToken) && nonEmpty(oauth.refreshToken),
-    expiresAt: expiryOrNull(oauth.expiresAt),
   };
 }
 
@@ -64,11 +61,10 @@ function codexCredential(fsModule, homeDir, environment) {
     return {
       authed: hasApiKey,
       authKind: 'apiKey',
-      expiresAt: null,
     };
   }
   if (mode.includes('bedrock')) {
-    return { authed: true, authKind: 'hostManaged', expiresAt: null };
+    return { authed: true, authKind: 'hostManaged' };
   }
   const managedChatGpt = mode === 'chatgpt';
   return {
@@ -76,10 +72,6 @@ function codexCredential(fsModule, homeDir, environment) {
       ? nonEmpty(tokens.access_token) && nonEmpty(tokens.refresh_token)
       : nonEmpty(tokens.access_token),
     authKind: 'oauth',
-    // Codex rotates its short-lived ID/access tokens automatically. Its opaque
-    // refresh token has no client-readable expiry, so there is no honest login
-    // countdown to report here.
-    expiresAt: null,
   };
 }
 
@@ -98,7 +90,6 @@ function codexAccountCredential(result, fallback = {}) {
         result && result.requiresOpenaiAuth === false
           ? 'hostManaged'
           : fallback.authKind || 'oauth',
-      credentialExpiresAt: null,
     };
   }
 
@@ -111,7 +102,6 @@ function codexAccountCredential(result, fallback = {}) {
     ...fallback,
     authed: true,
     authKind,
-    credentialExpiresAt: null,
   };
 }
 
@@ -163,24 +153,40 @@ function hermesAuthed(fsModule, homeDir) {
   return hasApiKeyLikeValue(auth) || hermesConfigAuthed(fsModule, homeDir);
 }
 
-// Login state plus a real stored deadline when one exists. `expiresAt` is null
-// for Codex's rotating managed tokens and every host-managed API key.
-function agentCredential(agentKey, installed, fsModule, homeDir, environment) {
+// The Cursor auth file (cli-paths.js) has no expiry field. A host
+// CURSOR_API_KEY counts as logged in and is not returned.
+function cursorCredential(fsModule, homeDir, environment, platform) {
+  const auth =
+    readJson(fsModule, cursorAuthFile(homeDir, environment, platform)) || {};
+  if (nonEmpty(auth.accessToken) && nonEmpty(auth.refreshToken)) {
+    return { authed: true, authKind: 'oauth' };
+  }
+  if (nonEmpty(environment.CURSOR_API_KEY)) {
+    return { authed: true, authKind: 'apiKey' };
+  }
+  return { authed: false, authKind: 'oauth' };
+}
+
+// Login state only: supported CLIs refresh tokens, so token expiry is not a
+// login deadline.
+function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform) {
   switch (agentKey) {
     case 'claude':
       return claudeCredential(fsModule, homeDir);
     case 'codex':
       return codexCredential(fsModule, homeDir, environment);
     case 'hermes':
-      return { authed: hermesAuthed(fsModule, homeDir), expiresAt: null };
+      return { authed: hermesAuthed(fsModule, homeDir) };
     case 'opencode':
-      return { authed: installed, expiresAt: null };
+      return { authed: installed };
+    case 'cursor':
+      return cursorCredential(fsModule, homeDir, environment, platform);
     default:
-      return { authed: false, expiresAt: null };
+      return { authed: false };
   }
 }
 
-function buildStatuses({ fsModule, homeDir, commandExistsFn, environment }) {
+function buildStatuses({ fsModule, homeDir, commandExistsFn, environment, platform }) {
   const statuses = {};
   for (const agent of Object.values(AGENTS)) {
     const installed = commandExistsFn(agent.bin || agent.key);
@@ -190,12 +196,12 @@ function buildStatuses({ fsModule, homeDir, commandExistsFn, environment }) {
       fsModule,
       homeDir,
       environment,
+      platform,
     );
     statuses[agent.key] = {
       installed,
       authed: credential.authed,
       authKind: credential.authKind || AUTH_KIND[agent.key] || 'unknown',
-      credentialExpiresAt: credential.expiresAt,
     };
   }
   return statuses;
@@ -205,6 +211,7 @@ function getAgentStatuses(options = {}) {
   const fsModule = options.fs || fs;
   const homeDir = options.homeDir || os.homedir();
   const environment = options.env || process.env;
+  const platform = options.platform || process.platform;
   const commandExistsFn = options.commandExists || commandExists;
   const now = typeof options.now === 'function' ? options.now() : Date.now();
   const useCache = options.cache !== false;
@@ -220,6 +227,7 @@ function getAgentStatuses(options = {}) {
     homeDir,
     commandExistsFn,
     environment,
+    platform,
   });
   if (useCache) statusCache.set(cacheKey, { value, at: now });
   return value;
