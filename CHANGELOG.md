@@ -38,6 +38,8 @@
 
 ### Changed
 
+- Codex lists Full access once: its Bypass tier, which ran the same unsandboxed
+  mode, is gone, and conversations saved with it keep full access.
 - Linux setup opens each step and menu with a banner and marks every question,
   so the choices stand out from installer output.
 - Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to

@@ -35,6 +35,26 @@ test('Codex static fallback keeps effort choices valid for its pinned models', (
   assert.equal(codex.effortByModel['gpt-5.4'].some((option) => option.id === 'minimal'), false);
 });
 
+test('Codex permissions list full access once', () => {
+  assert.deepEqual(describeAgent('codex').permission.map((option) => option.id), [
+    'workspace-write',
+    'read-only',
+    'full-access',
+  ]);
+});
+
+test('Codex legacy bypass settings retain full access without changing other agents', () => {
+  assert.equal(normalizeSettings('codex', { permission: 'bypass' }).permission, 'full-access');
+  const fullAccess = codexSessionOptions({ permission: 'full-access' });
+  assert.deepEqual(codexSessionOptions({ permission: 'bypass' }), fullAccess);
+  assert.equal(fullAccess.sandbox, 'danger-full-access');
+  assert.equal(fullAccess.approvalPolicy, 'never');
+  assert.equal(fullAccess.approve, true);
+  for (const agent of ['claude', 'cursor', 'opencode']) {
+    assert.equal(normalizeSettings(agent, { permission: 'bypass' }).permission, 'bypass');
+  }
+});
+
 // --- acpSessionOptions ------------------------------------------------------
 // opencode and hermes run as persistent ACP sessions, so their settings are
 // resolved into protocol values.

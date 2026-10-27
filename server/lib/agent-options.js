@@ -115,8 +115,7 @@ const FAST_MODES = {
   cursor: FAST_CHOICES,
 };
 
-// Permission tiers. The bypass tier is listed first but is no longer the
-// default — AGENT_DEFAULTS below picks a safer "auto" tier per agent. Codex
+// Permission tiers. AGENT_DEFAULTS below picks the initial tier per agent. Codex
 // keeps approvals off on every tier, so the sandbox is the whole boundary:
 // Relay has no approval UI, so a prompt has no one to answer it.
 const PERMISSIONS = {
@@ -138,11 +137,6 @@ const PERMISSIONS = {
     },
   ],
   codex: [
-    {
-      id: 'bypass',
-      label: 'Bypass (full auto)',
-      description: 'No sandbox, no approvals.',
-    },
     {
       id: 'workspace-write',
       label: 'Workspace write',
@@ -514,7 +508,8 @@ function normalizeSettings(agentKey, settings) {
   if (effort) out.effort = effort.id;
   const permission = pick(
     groups.permission,
-    s.permission,
+    // Older clients and stored Codex settings used bypass for full access.
+    agentKey === 'codex' && s.permission === 'bypass' ? 'full-access' : s.permission,
     groups.defaults.permission,
   );
   if (permission) out.permission = permission.id;
@@ -608,7 +603,6 @@ function acpSessionOptions(agentKey, settings) {
 // the sandbox is the boundary, and Relay has no approval UI to answer prompts
 // with.
 const CODEX_SANDBOXES = {
-  bypass: 'danger-full-access',
   'workspace-write': 'workspace-write',
   'read-only': 'read-only',
   'full-access': 'danger-full-access',
@@ -623,7 +617,7 @@ function codexSessionOptions(settings) {
     approvalPolicy: 'never',
     serviceTier: chosen.fast === 'on' ? 'fast' : 'default',
     // Only reachable if codex asks anyway; the unsandboxed tiers say yes.
-    approve: chosen.permission === 'bypass' || chosen.permission === 'full-access',
+    approve: chosen.permission === 'full-access',
   };
 }
 
