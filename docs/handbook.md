@@ -510,9 +510,9 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. CLIs and `cloudflared` are host prerequisites. The script copies
-the compiled Web client from `build/web`, so run `flutter build web` first; no
-native Flutter client is included. Keep the extracted directory fixed, and follow the bundled
+installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
+client is included, not even the Web client, so a host installed from this
+bundle serves only the API. Keep the extracted directory fixed, and follow the bundled
 README when migrating a deployment to a new directory.
 
 ### Desktop clients

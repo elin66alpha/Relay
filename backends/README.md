@@ -46,10 +46,19 @@ device token. Re-showing reuses the token and asks for a new QR password, since
 the old one is not stored. Install and reinstall ask whether to serve the Web
 client at the backend address (default yes).
 
-Release setup packages include the compiled Web client in `build/web`; the
-backend serves it at `/` unless `server/.env` sets `RELAY_SERVE_WEB=0`. A source
-checkout has it only after `flutter build web`. The API under `/api` always
-requires a device token.
+Only the source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
+the compiled Web client, in `build/web`; the backend serves it at `/` unless
+`server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
+device token. Web client support is otherwise limited:
+
+- The Windows backend bundle (`relay-backend-windows-x64-v<VERSION>.zip`) does
+  not include the Web client, so a Windows host installed from it serves only
+  the API.
+- Only Linux setup asks whether to serve it, and only Linux uninstall removes
+  it. macOS and Windows setup do not mention it: installed from the source
+  package, they serve it, and turning it off means setting `RELAY_SERVE_WEB=0`
+  in `server/.env` by hand and restarting the backend.
+- A source checkout has it only after `flutter build web`.
 
 ### Network modes
 

@@ -37,9 +37,16 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 删除、列出或重新展示设备令牌。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
 不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
 
-发布的安装包在 `build/web` 中自带编译好的 Web 前端；除非 `server/.env` 设置了
-`RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。源码仓库需要先运行 `flutter build web`
-才有。`/api` 下的接口始终需要设备令牌。
+只有源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `build/web` 中自带编译好的
+Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
+下的接口始终需要设备令牌。其他情况下 Web 前端的支持有限：
+
+- Windows 后端包（`relay-backend-windows-x64-v<版本>.zip`）不含 Web 前端，用它安装的
+  Windows 主机只提供 API。
+- 只有 Linux 安装会询问是否提供 Web 前端，也只有 Linux 卸载会删除它。macOS 和 Windows
+  的安装脚本不涉及它：用源码安装包安装时会直接提供；要关闭，需要手动在 `server/.env`
+  中设置 `RELAY_SERVE_WEB=0` 并重启后端。
+- 源码仓库需要先运行 `flutter build web` 才有。
 
 ### 网络模式
 

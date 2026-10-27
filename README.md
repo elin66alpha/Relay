@@ -121,7 +121,8 @@ and Relay lists the models that configuration provides.
 Windows x64 users can download `relay-backend-windows-x64-v0.1.8.zip` from
 [release 0.1.8](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8), extract
 it, and run `.\setup.cmd`. This backend bundle includes Node.js and production
-dependencies; install and authenticate your agent CLIs separately. The asset
+dependencies but not the Web client, so it serves only the API; install and
+authenticate your agent CLIs separately. The asset
 `relay-windows-x64-v0.1.8.zip` is the desktop client.
 
 Run the setup command for your backend OS from the repository root:

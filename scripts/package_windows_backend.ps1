@@ -64,12 +64,6 @@ foreach ($relative in @('LICENSE', 'SECURITY.md', 'CHANGELOG.md',
   Copy-Item -LiteralPath (Join-Path $root $relative) -Destination $destination
 }
 Copy-Item -LiteralPath (Join-Path $root 'backends\windows\PACKAGE.md') -Destination (Join-Path $bundle 'README.md')
-$web = Join-Path $root 'build\web'
-if (-not (Test-Path -LiteralPath (Join-Path $web 'index.html') -PathType Leaf)) {
-  throw 'Build the Web client first: flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn'
-}
-New-Item -ItemType Directory -Path (Join-Path $bundle 'build') -Force | Out-Null
-Copy-Item -LiteralPath $web -Destination (Join-Path $bundle 'build') -Recurse
 $runtime = Join-Path $bundle 'runtime\node'
 New-Item -ItemType Directory -Path (Join-Path $runtime 'node_modules') -Force | Out-Null
 foreach ($file in @('node.exe', 'LICENSE', 'npm.cmd', 'npm.ps1', 'npx.cmd', 'npx.ps1')) {
@@ -119,8 +113,7 @@ $allowed = @($sources) + @('LICENSE', 'SECURITY.md', 'CHANGELOG.md', 'README.md'
   'credential.cmd', 'bundle-info.json')
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')
-  if ($relative.StartsWith('runtime/node/') -or $relative.StartsWith('server/node_modules/') -or
-      $relative.StartsWith('build/web/')) { continue }
+  if ($relative.StartsWith('runtime/node/') -or $relative.StartsWith('server/node_modules/')) { continue }
   if ($relative -notin $allowed) { throw "Unexpected file in the release: $relative" }
 }
 # ZipFile includes .env.example, unlike Compress-Archive's hidden-file filtering.

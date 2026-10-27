@@ -113,7 +113,7 @@ Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提
 
 Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.8)
 下载 `relay-backend-windows-x64-v0.1.8.zip`，解压后运行 `.\setup.cmd`。这个后端包
-已包含 Node.js 和生产依赖；agent CLI 仍需自行安装并认证。
+已包含 Node.js 和生产依赖，但不含 Web 前端，只提供 API；agent CLI 仍需自行安装并认证。
 `relay-windows-x64-v0.1.8.zip` 是桌面客户端。
 
 在仓库根目录执行对应系统的安装命令：
