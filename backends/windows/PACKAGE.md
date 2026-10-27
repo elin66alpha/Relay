@@ -14,8 +14,9 @@ Flutter Web client is not included.
 1. Extract the whole ZIP to a permanent, writable directory. Keep `server/`,
    `backends/`, and `runtime/` together. Do not run from inside the ZIP.
 2. Install and authenticate/configure at least one agent CLI on this host:
-   Claude Code, Codex, OpenCode, or Hermes. Restart the terminal after changing
-   PATH. The bundle does not install or log in these CLIs.
+   Claude Code, Codex, Cursor, OpenCode, or Hermes. Cursor uses the `agent`
+   executable and signs in with `agent login`. Restart the terminal after
+   changing PATH. The bundle does not install or log in these CLIs.
 3. Open PowerShell in the extracted directory and run `.\setup.cmd` (or
    `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\backends\windows\setup.ps1`).
 4. Choose the port, network mode, and credential passphrase. For a local trial,
@@ -29,8 +30,9 @@ Flutter Web client is not included.
 
 1. 将整个 ZIP 解压到固定、可写的目录，保持 `server/`、`backends/`、`runtime/`
    相对位置不变，不要直接在压缩包中运行。
-2. 在这台主机安装并登录或配置至少一个 CLI：Claude Code、Codex、OpenCode 或
-   Hermes。修改 PATH 后重新打开终端；本包不会安装或登录这些 CLI。
+2. 在这台主机安装并登录或配置至少一个 CLI：Claude Code、Codex、Cursor、OpenCode
+   或 Hermes。Cursor 使用 `agent` 程序，通过 `agent login` 登录。修改 PATH 后重新
+   打开终端；本包不会安装或登录这些 CLI。
 3. 在解压目录打开 PowerShell，运行 `.\setup.cmd`，也可以执行上面的 PowerShell
    安装命令；无需另外安装 Node.js 或手动运行 npm install。
 4. 按提示选择端口、网络模式和凭证密码。本机试用可选直连并填
