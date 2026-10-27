@@ -1,16 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Changed
-
-- Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to
-  install missing prerequisites with `sudo apt-get`: Node.js 24 from
-  NodeSource, PM2, `zip`, the PTY build tools, and `cloudflared` for tunnel
-  modes. Before, it stopped at the first missing tool, and accepted any
-  Node.js version despite asking for 18 or newer. It refuses to run under
-  `sudo`, which would make the backend and its files belong to root.
-
 ## 0.1.9 - 2026-10-26
 
 ### Added
@@ -25,9 +14,18 @@
   `server/cursor-config/`, so choices made in Relay never change the host's
   Cursor defaults. Quota Usage and the composer strip show Cursor's included
   usage.
+- A hardware card on Machine details: CPU, memory and GPU names, used and total
+  space of every local disk, and live mainboard, SSD, CPU and GPU temperatures
+  where the host exposes them, refreshed every 10 seconds while the page is open.
 
 ### Changed
 
+- Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to
+  install missing prerequisites with `sudo apt-get`: Node.js 24 from
+  NodeSource, PM2, `zip`, the PTY build tools, and `cloudflared` for tunnel
+  modes. Before, it stopped at the first missing tool, and accepted any
+  Node.js version despite asking for 18 or newer. It refuses to run under
+  `sudo`, which would make the backend and its files belong to root.
 - ACP agents (OpenCode, Hermes, Cursor) start a new message after each tool
   call, as Claude Code and Codex do, instead of running the text on either side
   together.
