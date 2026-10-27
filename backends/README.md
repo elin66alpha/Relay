@@ -133,7 +133,7 @@ service PATH includes common Homebrew and per-user binary locations.
 
 ### Windows
 
-For release 0.1.8, `relay-backend-windows-x64-v0.1.8.zip` includes the Node.js
+For release 0.1.9, `relay-backend-windows-x64-v0.1.9.zip` includes the Node.js
 runtime, npm, and locked production dependencies. Extract the whole ZIP to a
 permanent writable directory and run `.\setup.cmd` from PowerShell there.
 Agent CLIs and optional `cloudflared` must still be installed on the host.
