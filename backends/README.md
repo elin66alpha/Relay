@@ -39,6 +39,18 @@ configures the selected network mode, starts the service, and runs the
 credential generator. Import the generated `.relay.png` or `.relay.json` in the
 app and enter the passphrase you chose.
 
+On Linux, `setup.sh` opens a menu: install, reinstall (keeps tokens, chats and
+settings), uninstall, service status (address, tunnel hostnames, Web client,
+agent install and sign-in state, tokens), and create, delete, list or re-show a
+device token. Re-showing reuses the token and asks for a new QR password, since
+the old one is not stored. Install and reinstall ask whether to serve the Web
+client at the backend address (default yes).
+
+Release setup packages include the compiled Web client in `build/web`; the
+backend serves it at `/` unless `server/.env` sets `RELAY_SERVE_WEB=0`. A source
+checkout has it only after `flutter build web`. The API under `/api` always
+requires a device token.
+
 ### Network modes
 
 1. **Direct:** use your own reachable address. The server binds to `0.0.0.0`;
@@ -74,7 +86,9 @@ pm2 logs relay-tunnel
 Linux setup requires PM2 (`npm install -g pm2`). It creates `relay-server` and,
 for tunnel modes, `relay-tunnel`. Logs are under `~/.pm2/logs/` as
 `relay-server-*.log` and `relay-tunnel-*.log`. `uninstall.sh` removes the PM2
-processes and leaves backend data, tokens, and credentials in place. The
+processes and the Web client, offers to delete the named Cloudflare Tunnel, and
+asks before removing PM2, `cloudflared` or Node.js. It leaves backend data,
+tokens, and credentials in place. The
 interactive terminal's PTY dependency is
 compiled on Linux, so first-time setup also needs Python 3, `make`, and a C++
 compiler (for example the Debian/Ubuntu `build-essential` package). Install

@@ -32,6 +32,15 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 安装脚本会按需创建 `server/.env`、安装服务端依赖、配置网络模式、启动服务并生成加密
 凭证。然后在 app 中导入生成的 `.relay.png` 或 `.relay.json`，输入生成时设置的密码。
 
+在 Linux 上，`setup.sh` 会打开一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
+查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌），以及新建、
+删除、列出或重新展示设备令牌。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
+不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
+
+发布的安装包在 `build/web` 中自带编译好的 Web 前端；除非 `server/.env` 设置了
+`RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。源码仓库需要先运行 `flutter build web`
+才有。`/api` 下的接口始终需要设备令牌。
+
 ### 网络模式
 
 1. **直连：** 使用自己可访问的地址。服务会绑定 `0.0.0.0`；公开暴露前必须在前面
@@ -64,7 +73,9 @@ pm2 logs relay-tunnel
 
 Linux 安装需要 PM2（`npm install -g pm2`）。进程名为 `relay-server`；隧道模式还会创建
 `relay-tunnel`。日志位于 `~/.pm2/logs/`，文件名为 `relay-server-*.log` 和
-`relay-tunnel-*.log`。`uninstall.sh` 只删除 PM2 进程，保留后端数据、令牌和凭证。
+`relay-tunnel-*.log`。`uninstall.sh` 会删除 PM2 进程和 Web 前端，询问是否删除正式
+Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js；后端数据、令牌和
+凭证保留不动。
 交互终端的 PTY 依赖会在 Linux 上本地编译，因此首次安装还需要 Python 3、
 `make` 和 C++ 编译器（Debian/Ubuntu 可安装 `build-essential`）。如果客户端需要下载
 文件夹，还要安装 `zip`。

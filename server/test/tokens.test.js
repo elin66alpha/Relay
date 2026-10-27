@@ -15,6 +15,7 @@ process.env.RELAY_TOKENS_FILE = tokensFile;
 
 const {
   TOKENS_FILE,
+  activeTokenRecordById,
   createToken,
   deleteRevokedTokenById,
   hasConfiguredToken,
@@ -117,6 +118,17 @@ test('token ids are accepted only while the token is active', () => {
 
   revokeTokenById(record.id);
   assert.equal(isTokenIdAllowed(record.id), false);
+});
+
+// The credential script re-shows an existing token's QR from this record.
+test('activeTokenRecordById returns the full record only while it is active', () => {
+  const record = createToken({ label: 'Phone' });
+  assert.equal(activeTokenRecordById(record.id).token, record.token);
+  assert.equal(activeTokenRecordById('not-an-id'), null);
+  assert.equal(activeTokenRecordById(''), null);
+
+  revokeTokenById(record.id);
+  assert.equal(activeTokenRecordById(record.id), null);
 });
 
 test('a record with an empty token value is never active', () => {

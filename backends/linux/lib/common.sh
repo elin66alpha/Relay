@@ -17,6 +17,7 @@ c_warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
 c_err()  { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; }
 
 need() { command -v "$1" >/dev/null 2>&1; }
+as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
 
 require_pm2() {
   need pm2 || {
@@ -54,3 +55,14 @@ tunnel_enabled() {
 }
 
 pm2_has() { pm2 describe "$1" >/dev/null 2>&1; }
+
+# Matches server.js: build/web is served unless RELAY_SERVE_WEB=0.
+web_state() {
+  if [ ! -f "$ROOT_DIR/build/web/index.html" ]; then
+    printf 'not installed'
+  elif [ "$(get_env RELAY_SERVE_WEB)" = "0" ]; then
+    printf 'installed, disabled (RELAY_SERVE_WEB=0)'
+  else
+    printf 'served at /'
+  fi
+}

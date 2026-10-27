@@ -2,9 +2,10 @@
 #
 # Relay one-command setup.
 #
-# Starts the backend with PM2, optionally opens a Cloudflare tunnel, then
-# generates the credential QR that the Relay app scans. Run from the repo
-# root:
+# A menu that installs, reinstalls or uninstalls the backend, shows its status,
+# and manages device tokens. Installing starts the backend with PM2, optionally
+# opens a Cloudflare tunnel, then generates the credential QR that the Relay app
+# scans. Run from the repo root:
 #
 #   ./backends/linux/setup.sh
 #
@@ -16,19 +17,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVER_DIR="$ROOT_DIR/server"
-ENV_FILE="$SERVER_DIR/.env"
+LINUX_ADAPTER_DIR="$ROOT_DIR/backends/linux"
+# shellcheck source=../backends/linux/lib/common.sh
+source "$LINUX_ADAPTER_DIR/lib/common.sh"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 TUNNEL_CONFIG_DIR="$SERVER_DIR/cloudflared-config"
 
-SERVER_PROC="relay-server"
-TUNNEL_PROC="relay-tunnel"
-
-c_info() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
-c_warn() { printf '\033[1;33m%s\033[0m\n' "$*"; }
-c_err()  { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; }
-
-need() { command -v "$1" >/dev/null 2>&1; }
+credential() { (cd "$SERVER_DIR" && node scripts/create-credential.js "$@"); }
 
 # Upsert KEY=VALUE into server/.env (pure bash; safe for URLs with / and :).
 set_env() {
@@ -157,8 +152,6 @@ NODE_MIN_MAJOR=18
 NODE_INSTALL_MAJOR=24 # the Node.js line the Windows backend bundle ships
 APT_APPROVED=0
 
-as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
-
 confirm_system_install() {
   if [ "$(id -u)" -ne 0 ] && ! need sudo; then
     c_err "Missing: $*. Installing it needs root or sudo."
@@ -185,6 +178,7 @@ apt_install() {
 
 node_major() { node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0; }
 
+install_prerequisites() {
 if ! need node || [ "$(node_major)" -lt "$NODE_MIN_MAJOR" ]; then
   if need node; then
     c_warn "Node.js $(node -v) is older than $NODE_MIN_MAJOR; installing Node.js $NODE_INSTALL_MAJOR."
@@ -216,6 +210,7 @@ if ! need pm2; then
   need pm2 || { c_err "pm2 was installed but $(npm prefix -g)/bin is not on PATH."; exit 1; }
 fi
 need zip || apt_install zip
+}
 
 # cloudflared is not in the distribution repositories; Cloudflare publishes a
 # .deb per architecture with each release.
@@ -237,6 +232,7 @@ ensure_cloudflared() {
   }
 }
 
+install_server_deps() {
 cd "$SERVER_DIR"
 if [ ! -f "$ENV_FILE" ]; then
   cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -260,6 +256,26 @@ if [ ! -d node_modules ] ||
   fi
   node -e "require('node-pty')"
 fi
+}
+
+# Release packages ship build/web; RELAY_SERVE_WEB=0 keeps it unserved.
+choose_web() {
+  local answer
+  if [ ! -f "$ROOT_DIR/build/web/index.html" ]; then
+    c_warn "This copy has no Web client (build/web); the backend serves the API only."
+    return
+  fi
+  read -rp "Serve the Web client at the backend address? [Y/n]: " answer
+  case "${answer:-y}" in
+    [Yy]*) set_env RELAY_SERVE_WEB 1 ;;
+    *) set_env RELAY_SERVE_WEB 0 ;;
+  esac
+}
+
+install_backend() {
+install_prerequisites
+install_server_deps
+choose_web
 
 PORT_NUM="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || true)"
 PORT_NUM="${PORT_NUM:-8787}"
@@ -302,7 +318,7 @@ case "$NETWORK_MODE" in
     c_warn "For HTTPS, terminate TLS at a reverse proxy (nginx/Caddy) in front of port ${PORT_NUM}."
 
     c_info "Generating credential QR..."
-    npm run credential -- --url "$PUBLIC_URL"
+    credential --url "$PUBLIC_URL"
     ;;
   2)
     # ---------- Cloudflare named tunnel ----------
@@ -336,7 +352,7 @@ case "$NETWORK_MODE" in
     pm2 save >/dev/null 2>&1 || true
 
     c_info "Generating credential QR..."
-    npm run credential -- --url "$PUBLIC_URL"
+    credential --url "$PUBLIC_URL"
     ;;
   3)
     # ---------- Cloudflare quick tunnel ----------
@@ -374,7 +390,7 @@ case "$NETWORK_MODE" in
     fi
 
     c_info "Generating credential QR..."
-    npm run credential
+    credential
     ;;
   *)
     c_err "Invalid network mode: $NETWORK_MODE"
@@ -384,3 +400,74 @@ esac
 
 c_info "Done. In the app, tap \"Scan QR\", scan the QR above, and enter the password you just set."
 c_info "Backend is managed by PM2 (pm2 list / pm2 logs / pm2 restart ${SERVER_PROC})."
+c_info "Run ./backends/linux/setup.sh again for status, tokens, reinstall or uninstall."
+}
+
+# ---- menu ----
+installed() { need pm2 && pm2_has "$SERVER_PROC"; }
+
+read_token_id() {
+  credential --list-tokens
+  read -rp "Token id: " TOKEN_ID
+  [ -n "$TOKEN_ID" ]
+}
+
+while true; do
+  c_info "Relay backend"
+  cat <<'MENU'
+  1) Install
+  2) Reinstall (keeps tokens, chats and settings)
+  3) Uninstall all services
+  4) Service status (address, agents, tokens)
+  5) Create a new token
+  6) Delete a token
+  7) List tokens
+  8) Show a token's credential QR again
+  0) Exit
+MENU
+  read -rp "Choose [0-8]: " CHOICE || exit 0
+  case "$CHOICE" in
+    1)
+      if installed; then
+        c_warn "Relay is already installed here. Choose 2 to reinstall."
+        continue
+      fi
+      install_backend
+      exit 0
+      ;;
+    2)
+      read -rp "Stop Relay, reinstall its dependencies and set up the network again? [y/N]: " answer
+      case "$answer" in [Yy]*) ;; *) continue ;; esac
+      if need pm2; then pm2 delete "$SERVER_PROC" "$TUNNEL_PROC" >/dev/null 2>&1 || true; fi
+      rm -rf "$SERVER_DIR/node_modules"
+      install_backend
+      exit 0
+      ;;
+    3)
+      read -rp "Stop and remove every Relay service, including the Web client? [y/N]: " answer
+      case "$answer" in [Yy]*) exec "$LINUX_ADAPTER_DIR/uninstall.sh" ;; esac
+      ;;
+    4) "$LINUX_ADAPTER_DIR/status.sh" || true ;;
+    5 | 6 | 7 | 8)
+      if [ ! -f "$ENV_FILE" ] || [ ! -d "$SERVER_DIR/node_modules" ]; then
+        c_warn "Relay is not installed here yet. Choose 1 first."
+        continue
+      fi
+      case "$CHOICE" in
+        5)
+          read -rp "Label for the device that will use it [$(hostname)]: " LABEL
+          credential --label "${LABEL:-$(hostname)}" || true
+          ;;
+        6)
+          read_token_id || continue
+          read -rp "Delete token $TOKEN_ID? Devices using it lose access. [y/N]: " answer
+          case "$answer" in [Yy]*) credential --delete "$TOKEN_ID" || true ;; esac
+          ;;
+        7) credential --list-tokens ;;
+        8) if read_token_id; then credential --show "$TOKEN_ID" || true; fi ;;
+      esac
+      ;;
+    0) exit 0 ;;
+    *) c_warn "Invalid choice: $CHOICE" ;;
+  esac
+done

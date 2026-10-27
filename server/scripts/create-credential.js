@@ -13,9 +13,12 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { encryptCredential } = require('../lib/credential-file');
 const {
+  activeTokenRecordById,
   createToken,
+  deleteRevokedTokenById,
   listTokenSummaries,
   revokeToken,
+  revokeTokenById,
 } = require('../lib/tokens');
 
 const SERVER_DIR = path.resolve(__dirname, '..');
@@ -53,6 +56,8 @@ Options:
   --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: relay-tunnel, then bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
+  --delete <id>        Revoke a token and remove it from server/tokens.json
+  --show <id>          Print the credential QR again for an active token
 
 Generating a new QR deletes old QR image files from server/credentials, but it
 does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
@@ -213,7 +218,12 @@ function printTokens() {
   }
   for (const record of records) {
     const state = record.revoked ? 'revoked' : 'active';
-    console.log(`${record.id}\t${state}\t${record.label || '-'}`);
+    const lastUsed = record.lastUsedAt
+      ? `${record.lastUsedAt} ${record.lastDeviceName || ''}`.trim()
+      : 'never used';
+    console.log(
+      `${record.id}\t${state}\t${record.label || '-'}\tcreated ${record.createdAt || '-'}\t${lastUsed}`,
+    );
   }
 }
 
@@ -244,6 +254,19 @@ async function main() {
     console.log(`Revoked token: ${revoked.id} (${revoked.label || '-'})`);
     return;
   }
+  if (args.delete) {
+    const id = String(args.delete).trim();
+    if (!revokeTokenById(id)) throw new Error('token not found in server/tokens.json');
+    const deleted = deleteRevokedTokenById(id);
+    console.log(`Deleted token: ${deleted.id} (${deleted.label || '-'})`);
+    return;
+  }
+  // Tokens are stored in tokens.json, so an existing one can be re-encrypted
+  // into a fresh QR; the old QR's password is not stored and is set again.
+  const existing = args.show ? activeTokenRecordById(args.show) : null;
+  if (args.show && !existing) {
+    throw new Error('no active token with that id in server/tokens.json');
+  }
 
   const resolved = resolvePublicBaseUrl(args);
   const baseUrl = resolved.url.replace(/\/+$/, '');
@@ -262,7 +285,7 @@ async function main() {
   const label = String(args.label || machineName).trim() || machineName;
   const credentialsDir = path.join(SERVER_DIR, 'credentials');
   cleanOldCredentialFiles(credentialsDir);
-  const tokenRecord = createToken({
+  const tokenRecord = existing || createToken({
     label,
   });
   const now = new Date().toISOString();
@@ -313,7 +336,11 @@ async function main() {
   console.log('\nIn the app, tap "Scan QR", point it at the QR below, then enter the password you just set:\n');
   qrcodeTerminal.generate(qrPayload, { small: true });
   console.log('\nFor paste import, open the credential JSON file above, copy the whole file content, then paste it in the app.');
-  console.log('Token appended to server/tokens.json; machine id and public URL written to server/.env.');
+  console.log(
+    existing
+      ? 'Existing token reused; machine id and public URL written to server/.env.'
+      : 'Token appended to server/tokens.json; machine id and public URL written to server/.env.',
+  );
 }
 
 main().catch((err) => {

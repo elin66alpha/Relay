@@ -72,6 +72,12 @@ function tokenRecordForToken(token) {
   return readTokenRecords().find((record) => clean === String(record.token)) || null;
 }
 
+function activeTokenRecordById(id) {
+  const target = String(id || '').trim();
+  if (!target) return null;
+  return activeTokenRecords().find((record) => record.id === target) || null;
+}
+
 function createToken({ label }) {
   const token = crypto.randomBytes(32).toString('base64url');
   const record = {
@@ -200,6 +206,7 @@ function deleteRevokedTokenById(id) {
 
 module.exports = {
   TOKENS_FILE,
+  activeTokenRecordById,
   createToken,
   deleteRevokedTokenById,
   hasConfiguredToken,

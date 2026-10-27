@@ -17,6 +17,14 @@
 - A hardware card on Machine details: CPU, memory and GPU names, used and total
   space of every local disk, and live mainboard, SSD, CPU and GPU temperatures
   where the host exposes them, refreshed every 10 seconds while the page is open.
+- The source backend setup package includes the compiled Web client, served at
+  the backend address. `RELAY_SERVE_WEB=0` in `server/.env` turns it off, and
+  Linux install asks (default on). `scripts/package_backend.sh` builds that
+  package; the Windows backend bundle script copies the Web client too.
+- Linux `setup.sh` is a menu: install, reinstall, uninstall, service status
+  (address, tunnel hostnames, Web client, agent state, tokens), and create,
+  delete, list or re-show a device token. `npm run credential` gains `--delete
+  <id>` and `--show <id>`.
 
 ### Changed
 
@@ -40,6 +48,8 @@
   current as OpenCode's free models change and includes every API provider
   configured in the host's OpenCode. Hermes gains a Model entry showing the
   model configured on the host.
+- Linux `uninstall.sh` also removes the Web client, offers to delete the named
+  Cloudflare Tunnel, and asks before removing PM2, `cloudflared` or Node.js.
 
 ### Fixed
 

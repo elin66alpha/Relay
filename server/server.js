@@ -125,6 +125,9 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
 const ENABLE_CLAUDE_KEEPALIVE = process.env.ENABLE_CLAUDE_KEEPALIVE !== 'false';
 const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
+// Setup writes RELAY_SERVE_WEB=0 when the host is installed without the Web client.
+const SERVE_WEB =
+  process.env.RELAY_SERVE_WEB !== '0' && fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'));
 // Hard cap on a single download (file, or the uncompressed total behind a zip).
 // Public tunnels can relay slowly or enforce throughput limits, so we refuse
 // oversized downloads up front instead of letting the user wait on a transfer
@@ -639,7 +642,7 @@ app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 app.use(createTerminalRouter(routeContext));
 
-if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
+if (SERVE_WEB) {
   app.use(express.static(WEB_BUILD_DIR, {
     etag: true,
     lastModified: true,
@@ -718,7 +721,7 @@ const server = app.listen(PORT, HOST, () => {
     flushHistory();
     console.log(`finalized ${staleHistoryCount} stale streaming history item(s)`);
   }
-  if (fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'))) {
+  if (SERVE_WEB) {
     console.log(`serving Flutter web from ${WEB_BUILD_DIR}`);
   }
   if (!hasConfiguredToken()) {

@@ -476,7 +476,7 @@ flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
 npm --prefix server start
 ```
 
-The server serves `build/web` when present. CanvasKit is bundled locally and the
+The server serves `build/web` when present, unless `RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the
 service worker is disabled to keep the self-hosted client current.
 
 `scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
@@ -510,8 +510,9 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. CLIs and `cloudflared` are host prerequisites. No compiled Flutter
-client is included. Keep the extracted directory fixed, and follow the bundled
+installation. CLIs and `cloudflared` are host prerequisites. The script copies
+the compiled Web client from `build/web`, so run `flutter build web` first; no
+native Flutter client is included. Keep the extracted directory fixed, and follow the bundled
 README when migrating a deployment to a new directory.
 
 ### Desktop clients
@@ -564,15 +565,10 @@ A GitHub release `v<VERSION>` carries:
 
 - `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
 - `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
-  service adapters, without tests, dependencies, or deployment state:
-
-  ```bash
-  V=<VERSION>
-  git archive --format=tar.gz --prefix=relay-backend-setup-v$V/ \
-    -o relay-backend-setup-v$V.tar.gz HEAD $(git ls-tree -r --name-only HEAD |
-    grep -E '^(CHANGELOG\.md|LICENSE|README(\.zh-CN)?\.md|SECURITY\.md|docs/handbook\.md|scripts/setup\.sh|backends/README(\.zh-CN)?\.md|backends/(linux|macos)/(lib/)?[^/]+\.sh|backends/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
-  ```
-
+  service adapters, without tests, dependencies, or deployment state, plus the
+  compiled Web client in `build/web`. `./scripts/package_backend.sh` builds the
+  Web client and writes it with a `.sha256` to `build/release/`; it refuses a
+  tree with uncommitted tracked changes.
 - `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
   (`build/windows/x64/runner/Release/`);
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
