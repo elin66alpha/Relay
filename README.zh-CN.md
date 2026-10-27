@@ -127,7 +127,8 @@ Windows x64 用户可从 [0.1.8 release](https://github.com/elin66alpha/Relay/re
 安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
 [后端前置要求](backends/README.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
-时需要 `zip`。
+时需要 `zip`。在 Debian 和 Ubuntu 上，缺少这些工具或 Node.js 时，Linux 安装脚本会提出
+替你安装。
 
 ### 2. 导入加密设备凭证
 

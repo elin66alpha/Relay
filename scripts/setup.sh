@@ -144,9 +144,98 @@ EOF
 }
 
 # ---- prerequisites ----
-need node || { c_err "Node.js >= 18 is required."; exit 1; }
-need npm  || { c_err "npm is required."; exit 1; }
-need pm2  || { c_err "pm2 is required. Install it with: npm install -g pm2"; exit 1; }
+# Under sudo, PM2, the backend, its state files and agent CLI logins would all
+# belong to root instead of the user who runs Relay.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+  c_err "Do not run setup with sudo. Run it as $SUDO_USER: ./backends/linux/setup.sh"
+  c_err "Setup asks for sudo itself when it installs system software."
+  exit 1
+fi
+# Missing system tools are installed with apt-get (Debian/Ubuntu) after one
+# confirmation; other distributions get the list to install by hand.
+NODE_MIN_MAJOR=18
+NODE_INSTALL_MAJOR=24 # the Node.js line the Windows backend bundle ships
+APT_APPROVED=0
+
+as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
+
+confirm_system_install() {
+  if [ "$(id -u)" -ne 0 ] && ! need sudo; then
+    c_err "Missing: $*. Installing it needs root or sudo."
+    exit 1
+  fi
+  [ "$APT_APPROVED" -eq 1 ] && return
+  read -rp "Install missing system software ($*) with sudo? [Y/n]: " answer
+  case "${answer:-y}" in
+    [Yy]*) APT_APPROVED=1 ;;
+    *) c_err "Missing: $*. Install it, then rerun setup."; exit 1 ;;
+  esac
+}
+
+apt_install() {
+  need apt-get || {
+    c_err "Missing: $*. Install it with your package manager, then rerun setup."
+    exit 1
+  }
+  confirm_system_install "$@"
+  c_info "Installing $*..."
+  as_root apt-get update
+  as_root apt-get install -y "$@"
+}
+
+node_major() { node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0; }
+
+if ! need node || [ "$(node_major)" -lt "$NODE_MIN_MAJOR" ]; then
+  if need node; then
+    c_warn "Node.js $(node -v) is older than $NODE_MIN_MAJOR; installing Node.js $NODE_INSTALL_MAJOR."
+  fi
+  apt_install ca-certificates curl
+  nodesource="$(mktemp)"
+  curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" -o "$nodesource"
+  as_root bash "$nodesource"
+  rm -f "$nodesource"
+  apt_install nodejs
+  hash -r
+  if [ "$(node_major)" -lt "$NODE_MIN_MAJOR" ]; then
+    c_err "Node.js >= $NODE_MIN_MAJOR is still not first on PATH ($(command -v node || echo 'node not found'))."
+    c_err "Remove or update that older Node.js, then rerun setup."
+    exit 1
+  fi
+fi
+need npm || apt_install npm
+if ! need pm2; then
+  c_info "Installing pm2..."
+  # A user-owned prefix (nvm) installs without sudo; a system one needs it.
+  if [ -w "$(npm prefix -g)" ]; then
+    npm install -g pm2
+  else
+    confirm_system_install pm2
+    as_root npm install -g pm2
+  fi
+  hash -r
+  need pm2 || { c_err "pm2 was installed but $(npm prefix -g)/bin is not on PATH."; exit 1; }
+fi
+need zip || apt_install zip
+
+# cloudflared is not in the distribution repositories; Cloudflare publishes a
+# .deb per architecture with each release.
+ensure_cloudflared() {
+  need cloudflared && return
+  local arch deb
+  if need dpkg && arch="$(dpkg --print-architecture)"; then
+    apt_install ca-certificates curl
+    deb="$(mktemp --suffix=.deb)"
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}.deb" -o "$deb"
+    as_root dpkg -i "$deb"
+    rm -f "$deb"
+    hash -r
+  fi
+  need cloudflared || {
+    c_err "cloudflared is required for Cloudflare tunnel modes."
+    c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    exit 1
+  }
+}
 
 cd "$SERVER_DIR"
 if [ ! -f "$ENV_FILE" ]; then
@@ -157,18 +246,12 @@ if [ ! -d node_modules ] ||
    ! node -e "require('node-pty')" >/dev/null 2>&1 ||
    [ ! -d node_modules/ws ]; then
   if ! node -e "require('node-pty')" >/dev/null 2>&1; then
-    need python3 || {
-      c_err "python3 is required to build the Linux PTY dependency."
-      exit 1
-    }
-    need make || {
-      c_err "make is required to build the Linux PTY dependency."
-      exit 1
-    }
-    if ! need c++ && ! need g++; then
-      c_err "A C++ compiler is required to build the Linux PTY dependency."
-      exit 1
-    fi
+    # Build tools for the Linux PTY addon.
+    build_pkgs=()
+    need python3 || build_pkgs+=(python3)
+    need make || build_pkgs+=(make)
+    need c++ || need g++ || build_pkgs+=(g++)
+    [ "${#build_pkgs[@]}" -eq 0 ] || apt_install "${build_pkgs[@]}"
   fi
   c_info "Installing server dependencies..."
   npm install
@@ -223,11 +306,7 @@ case "$NETWORK_MODE" in
     ;;
   2)
     # ---------- Cloudflare named tunnel ----------
-    need cloudflared || {
-      c_err "cloudflared is required for Cloudflare Tunnel mode."
-      c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
-      exit 1
-    }
+    ensure_cloudflared
     c_info "Cloudflare Tunnel mode: stable hostname through a named tunnel."
     read -rp "Public hostname for this backend (e.g. agent.example.com): " PUBLIC_HOSTNAME
     PUBLIC_HOSTNAME="$(url_hostname "$PUBLIC_HOSTNAME")"
@@ -261,11 +340,7 @@ case "$NETWORK_MODE" in
     ;;
   3)
     # ---------- Cloudflare quick tunnel ----------
-    need cloudflared || {
-      c_err "cloudflared is required for Quick Tunnel mode."
-      c_err "Install: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
-      exit 1
-    }
+    ensure_cloudflared
     c_info "Quick Tunnel mode: exposing localhost:${PORT_NUM} via a temporary trycloudflare.com URL."
 
     # Tunnel reaches the server over localhost; keep it bound locally.

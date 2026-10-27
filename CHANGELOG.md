@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Linux setup checks the Node.js version and, on Debian and Ubuntu, offers to
+  install missing prerequisites with `sudo apt-get`: Node.js 24 from
+  NodeSource, PM2, `zip`, the PTY build tools, and `cloudflared` for tunnel
+  modes. Before, it stopped at the first missing tool, and accepted any
+  Node.js version despite asking for 18 or newer. It refuses to run under
+  `sudo`, which would make the backend and its files belong to root.
+
 ## 0.1.9 - 2026-10-26
 
 ### Added

@@ -164,6 +164,18 @@ class BackendClient {
     return BackendDiagnostics.fromJson(decoded.cast<String, Object?>());
   }
 
+  Future<MachineInfo> machineInfo() async {
+    final Object? decoded = await _requestJson(
+      'GET',
+      '/api/machine',
+      timeout: const Duration(seconds: 8),
+    );
+    if (decoded is! Map) {
+      throw BackendException('Invalid machine info response.');
+    }
+    return MachineInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
   Future<List<DeviceToken>> deviceTokens() async {
     final Object? decoded = await _requestJson(
       'GET',

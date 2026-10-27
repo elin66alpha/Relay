@@ -14,6 +14,10 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 - Unix 主机下载文件夹时需要 `zip`。Linux 安装还需要 PM2、Python 3、`make` 和
   C++ 编译器，以编译终端的 PTY 依赖。
 - 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
+- 在 Debian 和 Ubuntu 上，Linux 安装脚本会检查上面除 agent CLI 以外的所有项，包括
+  Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 18
+  时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
+  安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
 
 ## 安装
 

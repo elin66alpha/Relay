@@ -6,14 +6,16 @@ import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
+import '../../core/util/format_bytes.dart';
 import '../../core/util/time_format.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../ssh/ssh_terminal_controller.dart';
 import '../ssh/ssh_terminal_screen.dart';
 
-/// One machine on a single page: the SSH terminal entry, CLI agent status, the
-/// device tokens issued by its backend, then the backend's status report.
+/// One machine on a single page: the SSH terminal entry, its hardware and live
+/// temperatures, CLI agent status, the device tokens issued by its backend,
+/// then the backend's status report.
 class MachineDetailsScreen extends StatefulWidget {
   const MachineDetailsScreen({
     required this.machine,
@@ -116,6 +118,11 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
+                    _MachineInfoPanel(
+                      backend: widget.backend,
+                      title: widget.machine.displayName,
+                    ),
+                    const SizedBox(height: 20),
                     _AgentCredentialStatusSection(
                       agentsController: widget.agentsController,
                       onRefresh: _refreshAgents,
@@ -127,8 +134,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            widget.machine.displayName,
-                            overflow: TextOverflow.ellipsis,
+                            strings.status,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
@@ -171,6 +177,214 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MachineInfoPanel extends StatefulWidget {
+  const _MachineInfoPanel({required this.backend, required this.title});
+
+  final BackendClient backend;
+  final String title;
+
+  @override
+  State<_MachineInfoPanel> createState() => _MachineInfoPanelState();
+}
+
+class _MachineInfoPanelState extends State<_MachineInfoPanel> {
+  Timer? _timer;
+  MachineInfo? _info;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+    // Temperatures change slowly; one sample every 10 seconds is enough.
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final MachineInfo info = await widget.backend.machineInfo();
+      if (!mounted) return;
+      setState(() {
+        _info = info;
+        _error = null;
+      });
+    } catch (err) {
+      // A backend older than /api/machine never will answer; stop asking.
+      if (err is BackendException && err.status == 404) _timer?.cancel();
+      if (!mounted) return;
+      setState(() => _error = err);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final MachineInfo? info = _info;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              widget.title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            if (info == null && _error == null)
+              const Center(child: CircularProgressIndicator())
+            else if (info == null)
+              Text(
+                strings.statusLoadFailed(_error!),
+                style: TextStyle(color: colors.error),
+              )
+            else ...<Widget>[
+              _HardwareRow(
+                icon: Icons.memory_rounded,
+                label: strings.cpuLabel,
+                value: info.cpuThreads > 0
+                    ? '${info.cpuModel} · ${strings.cpuThreads(info.cpuThreads)}'
+                    : info.cpuModel,
+              ),
+              _HardwareRow(
+                icon: Icons.developer_board_rounded,
+                label: strings.memoryLabel,
+                value: formatBytes(info.memoryBytes),
+              ),
+              for (final String gpu in info.gpus)
+                _HardwareRow(
+                  icon: Icons.videogame_asset_rounded,
+                  label: strings.gpuLabel,
+                  value: gpu,
+                ),
+              for (final StorageDisk disk in info.disks)
+                _HardwareRow(
+                  icon: Icons.storage_rounded,
+                  label: strings.storageLabel,
+                  value: strings.storageUsage(
+                    disk.mount,
+                    formatBytes(disk.usedBytes),
+                    formatBytes(disk.totalBytes),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Text(
+                strings.temperatures,
+                style: TextStyle(
+                  color: colors.outline,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (info.temperatures.isEmpty)
+                Text(
+                  strings.noTemperatureSensors,
+                  style: TextStyle(color: colors.outline),
+                )
+              else
+                Row(
+                  children: <Widget>[
+                    for (final TemperatureReading reading in info.temperatures)
+                      Expanded(child: _TemperatureTile(reading: reading)),
+                  ],
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HardwareRow extends StatelessWidget {
+  const _HardwareRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, size: 20, color: colors.primary),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 64,
+            child: Text(label, style: TextStyle(color: colors.outline)),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+}
+
+class _TemperatureTile extends StatelessWidget {
+  const _TemperatureTile({required this.reading});
+
+  final TemperatureReading reading;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool hot = reading.celsius >= 80;
+    final String label = switch (reading.key) {
+      'mainboard' => context.l10n.mainboardLabel,
+      'ssd' => 'SSD',
+      'cpu' => 'CPU',
+      'gpu' => 'GPU',
+      _ => reading.label,
+    };
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: hot ? colors.errorContainer : colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: <Widget>[
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: hot ? colors.onErrorContainer : colors.outline,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${reading.celsius.round()}°C',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: hot ? colors.onErrorContainer : colors.onSurface,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -136,7 +136,8 @@ The installer walks through direct access, a named Cloudflare Tunnel, or a
 temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
 Linux also needs PM2 and the native tools listed in the
 [backend requirements](backends/README.md#requirements); Unix hosts need `zip`
-for folder downloads.
+for folder downloads. On Debian and Ubuntu, the Linux installer offers to
+install any of these, and Node.js itself, when they are missing.
 
 ### 2. Import an encrypted device credential
 

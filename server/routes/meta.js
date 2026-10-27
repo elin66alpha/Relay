@@ -45,6 +45,7 @@ module.exports = function createMetaRouter(ctx) {
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
+    machineInfo,
     normalizeDeviceId,
     refreshAgentModels = () => Promise.resolve(),
     revokeTokenById,
@@ -347,6 +348,11 @@ module.exports = function createMetaRouter(ctx) {
       quotaWatch: ENABLE_QUOTA_WATCH,
       publicBaseUrl: PUBLIC_BASE_URL,
     });
+  });
+
+  // Hardware and live temperatures; the machine page polls this while open.
+  router.get('/api/machine', async (req, res) => {
+    res.json(await machineInfo());
   });
 
   router.get('/api/diagnostics', (req, res) => {

@@ -457,7 +457,8 @@ npm start
 
 On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
-Debian/Ubuntu). macOS and Windows use the package's supported prebuilt binaries
+Debian/Ubuntu; `./backends/linux/setup.sh` installs them there when
+missing). macOS and Windows use the package's supported prebuilt binaries
 when available. Unix hosts also need `zip` for directory downloads.
 
 `server/package.json` allows node-pty's install scripts through npm 12's

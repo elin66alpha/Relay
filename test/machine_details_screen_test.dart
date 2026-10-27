@@ -45,16 +45,25 @@ Future<void> _pumpDetails(
 }
 
 void main() {
-  testWidgets('sections run SSH, agents, tokens, status; SSH reuses a terminal', (
+  testWidgets('sections run hardware to status; SSH reuses a terminal', (
     WidgetTester tester,
   ) async {
     await _pumpDetails(tester, CliAgentsController());
 
     final double ssh = tester.getTopLeft(find.text('Enter SSH')).dy;
+    final double machine = tester.getTopLeft(find.text('Test machine')).dy;
     final double agents = tester.getTopLeft(find.text('CLI agents')).dy;
     final double tokens = tester.getTopLeft(find.text('Device tokens')).dy;
-    final double status = tester.getTopLeft(find.text('Test machine')).dy;
-    expect(ssh < agents && agents < tokens && tokens < status, isTrue);
+    final double status = tester.getTopLeft(find.text('Status')).dy;
+    expect(
+      ssh < machine && machine < agents && agents < tokens && tokens < status,
+      isTrue,
+    );
+    expect(find.text('Intel Core i7 · 8 threads'), findsOneWidget);
+    expect(find.text('NVIDIA GeForce GTX 1060'), findsOneWidget);
+    expect(find.text('/  1.0 GB used / 4.0 GB total'), findsOneWidget);
+    expect(find.text('Mainboard'), findsOneWidget);
+    expect(find.text('49°C'), findsOneWidget);
     expect(
       tester.getSize(find.widgetWithText(FilledButton, 'Enter SSH')).width,
       lessThan(360),
@@ -114,6 +123,25 @@ class _OfflineBackendClient extends BackendClient {
   }) {
     throw BackendException('offline');
   }
+
+  @override
+  Future<MachineInfo> machineInfo() async =>
+      MachineInfo.fromJson(const <String, Object?>{
+        'cpu': <String, Object?>{'model': 'Intel Core i7', 'cores': 8},
+        'memoryBytes': 17179869184,
+        'gpus': <String>['NVIDIA GeForce GTX 1060'],
+        'disks': <Map<String, Object?>>[
+          <String, Object?>{
+            'mount': '/',
+            'usedBytes': 1073741824,
+            'totalBytes': 4294967296,
+          },
+        ],
+        'temperatures': <Map<String, Object?>>[
+          <String, Object?>{'key': 'mainboard', 'celsius': 29},
+          <String, Object?>{'key': 'cpu', 'celsius': 49},
+        ],
+      });
 
   @override
   Future<List<DeviceToken>> deviceTokens() async => const <DeviceToken>[];

@@ -59,6 +59,7 @@ const { notifyAll } = require('./lib/notify');
 const { startQuotaWatch } = require('./lib/quota-watch');
 const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { buildDiagnostics } = require('./lib/diagnostics');
+const { machineInfo } = require('./lib/machine-info');
 const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
 const {
@@ -582,6 +583,7 @@ const routeContext = {
   listGroups,
   listQuotaSchedules,
   listTokenSummaries,
+  machineInfo,
   markdownForConversation,
   inspectCodexAccount,
   refreshAgentModels,

@@ -17,6 +17,12 @@ Cloudflare Tunnel startup to each operating system.
 - Unix hosts need `zip` for directory downloads. Linux setup also needs PM2,
   Python 3, `make`, and a C++ compiler for the terminal PTY dependency.
 - `cloudflared` is required only for named or Quick Tunnel mode.
+- On Debian and Ubuntu, Linux setup checks all of the above except the agent
+  CLIs, including the Node.js version, and after one confirmation installs
+  what is missing with `sudo apt-get`: Node.js 24 from NodeSource when Node.js
+  is missing or older than 18, and `cloudflared` from Cloudflare's release
+  `.deb` when a tunnel mode needs it. Run it as the user who will run Relay,
+  not with `sudo`.
 
 ## Install
 

@@ -134,7 +134,6 @@ class AppStrings {
   String get unavailable => isZh ? '暂未开放' : 'Not available yet';
   String get unknown => isZh ? '未知' : 'Unknown';
   String get status => isZh ? '状态' : 'Status';
-  String get backendOnline => isZh ? '后端在线' : 'Backend online';
   String workDirectoryLine(String path) =>
       isZh ? '工作目录：$path' : 'Work directory: $path';
   String systemUptimeLine(String value) =>
@@ -143,11 +142,6 @@ class AppStrings {
       isZh ? '进程运行：$value' : 'Process uptime: $value';
   String publicBaseUrlLine(String value) =>
       isZh ? '公网地址：$value' : 'Public URL: $value';
-  String taskTimeoutLine(int minutes) =>
-      isZh ? '任务超时：$minutes 分钟' : 'Task timeout: $minutes minutes';
-  String quotaWatchLine(bool enabled) => isZh
-      ? '额度监听：${enabled ? '开启' : '关闭'}'
-      : 'Quota watch: ${enabled ? 'enabled' : 'disabled'}';
   String diagnosticsGeneratedLine(String value) =>
       isZh ? '诊断时间：$value' : 'Diagnostics time: $value';
   String diagnosticsRuntimeLine(String platform, String arch, String node) =>
@@ -161,31 +155,6 @@ class AppStrings {
       isZh
           ? '工作目录状态：${exists ? '存在' : '不存在'}，${writable ? '可写' : '不可写'}'
           : 'Workdir state: ${exists ? 'exists' : 'missing'}, ${writable ? 'writable' : 'not writable'}';
-  String diagnosticsDefaultWorkdirLine(String value) =>
-      isZh ? '默认工作目录：$value' : 'Default workdir: $value';
-  String diagnosticsTransferLimitLine(String upload, String download) => isZh
-      ? '传输上限：上传 $upload，下载 $download'
-      : 'Transfer limits: upload $upload, download $download';
-  String diagnosticsTokenLine({
-    required bool configured,
-    required int active,
-    required int total,
-  }) =>
-      isZh
-          ? 'Token：${configured ? '已配置' : '未配置'}，活跃 $active / 总计 $total'
-          : 'Tokens: ${configured ? 'configured' : 'not configured'}, active $active / total $total';
-  String diagnosticsRequestLine({
-    required int active,
-    required int running,
-    required int queued,
-    required int sse,
-  }) =>
-      isZh
-          ? '运行中：请求 $active，scope $running，队列 $queued，SSE $sse'
-          : 'Runtime: requests $active, scopes $running, queued $queued, SSE $sse';
-  String diagnosticsWebBuildLine(bool exists) => isZh
-      ? 'Web 构建：${exists ? '存在' : '缺失'}'
-      : 'Web build: ${exists ? 'present' : 'missing'}';
   String get diagnosticsAgentsHeader => isZh ? 'CLI 检查：' : 'CLI checks:';
   String diagnosticsAgentLine(
     String label, {
@@ -450,6 +419,18 @@ class AppStrings {
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get machineDetails => isZh ? '机器详情' : 'Machine details';
+  String get cpuLabel => 'CPU';
+  String cpuThreads(int count) => isZh ? '$count 线程' : '$count threads';
+  String get memoryLabel => isZh ? '内存' : 'Memory';
+  String get gpuLabel => isZh ? '显卡' : 'GPU';
+  String get storageLabel => isZh ? '存储' : 'Storage';
+  String storageUsage(String mount, String used, String total) => isZh
+      ? '$mount  已用 $used / 总容量 $total'
+      : '$mount  $used used / $total total';
+  String get temperatures => isZh ? '温度' : 'Temperatures';
+  String get mainboardLabel => isZh ? '主板' : 'Mainboard';
+  String get noTemperatureSensors =>
+      isZh ? '这台机器没有可读取的温度传感器' : 'No readable temperature sensors';
   String get enterSsh => isZh ? '进入SSH' : 'Enter SSH';
   String get sshTerminal => isZh ? 'SSH 终端' : 'SSH terminal';
   String get backToMachineDetails =>
