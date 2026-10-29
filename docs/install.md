@@ -1,6 +1,6 @@
 # Backend setup
 
-[中文](README.zh-CN.md) · [Deployment handbook](../docs/handbook.md#production-deployment)
+[中文](install.zh-CN.md) · [Deployment handbook](handbook.md#production-deployment)
 
 Relay uses the same Node.js server and HTTP/SSE API on every backend host. The
 files here only adapt dependency setup, process management, logs, and optional

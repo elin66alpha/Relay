@@ -11,8 +11,8 @@
 ![自托管](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
-[English](README.md) · [安装后端](backends/README.zh-CN.md) ·
-[安全模型](SECURITY.md) · [技术手册](docs/handbook.md)
+[English](README.md) · [安装后端](docs/install.zh-CN.md) ·
+[安全模型](docs/SECURITY.md) · [技术手册](docs/handbook.md)
 
 </div>
 
@@ -138,7 +138,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
-[后端前置要求](backends/README.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
+[后端前置要求](docs/install.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
 时需要 `zip`。在 Debian 和 Ubuntu 上，缺少这些工具或 Node.js 时，Linux 安装脚本会提出
 替你安装。
 
@@ -156,7 +156,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 在 Android 与 iOS App 中，在聊天页任意位置右滑即可打开侧栏。
 发送任务前，通过“文件系统 → 设为工作路径”选择项目。首页“教程”提供命名会话、
 智能体设置、蜂群、文件操作和手机终端快捷键的详细说明。服务命令、网络配置与各平台说明
-见[后端安装指南](backends/README.zh-CN.md)。
+见[后端安装指南](docs/install.zh-CN.md)。
 
 ## 安全边界
 
@@ -170,7 +170,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 > [!IMPORTANT]
 > Relay 不是沙箱。Agent 和终端进程拥有后端系统用户的权限。请使用受限的非 root 用户
-> 运行，公网部署时终止 TLS，并先阅读 [SECURITY.md](SECURITY.md) 和
+> 运行，公网部署时终止 TLS，并先阅读 [SECURITY.md](docs/SECURITY.md) 和
 > [生产部署清单](docs/handbook.md#production-deployment)。
 
 ## 开发
@@ -206,4 +206,4 @@ Relay/
 ```
 
 贡献者和编程 agent 请先阅读 [AGENTS.md](AGENTS.md)，版本记录见
-[CHANGELOG.md](CHANGELOG.md)。Relay 使用 [MIT License](LICENSE) 发布。
+[CHANGELOG.md](docs/CHANGELOG.md)。Relay 使用 [MIT License](LICENSE) 发布。

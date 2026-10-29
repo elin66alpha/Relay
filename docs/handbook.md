@@ -1,8 +1,8 @@
 # Relay handbook
 
 This is the durable operating and architecture reference for Relay. Start with
-the [README](../README.md), use the [backend setup guide](../backends/README.md)
-for installation, and read [SECURITY.md](../SECURITY.md) before exposing a
+the [README](../README.md), use the [backend setup guide](install.md)
+for installation, and read [SECURITY.md](SECURITY.md) before exposing a
 backend outside a trusted network.
 
 ## Production deployment

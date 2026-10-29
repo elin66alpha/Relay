@@ -11,8 +11,8 @@ A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, 
 ![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
-[中文](README.zh-CN.md) · [Install a backend](backends/README.md) ·
-[Security](SECURITY.md) · [Handbook](docs/handbook.md)
+[中文](README.zh-CN.md) · [Install a backend](docs/install.md) ·
+[Security](docs/SECURITY.md) · [Handbook](docs/handbook.md)
 
 </div>
 
@@ -150,7 +150,7 @@ its root:
 The installer walks through direct access, a named Cloudflare Tunnel, or a
 temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
 Linux also needs PM2 and the native tools listed in the
-[backend requirements](backends/README.md#requirements); Unix hosts need `zip`
+[backend requirements](docs/install.md#requirements); Unix hosts need `zip`
 for folder downloads. On Debian and Ubuntu, the Linux installer offers to
 install any of these, and Node.js itself, when they are missing.
 
@@ -172,7 +172,7 @@ Use File system → Set as work path to select the project before sending a task
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the
-[backend guide](backends/README.md).
+[backend guide](docs/install.md).
 
 ## Security boundary
 
@@ -190,7 +190,7 @@ For service commands, networking details, and platform notes, continue with the
 > [!IMPORTANT]
 > Relay is not a sandbox. Agent and terminal processes have the permissions of
 > the backend OS user. Run it as a restricted non-root user, terminate TLS for
-> public deployments, and read [SECURITY.md](SECURITY.md) plus the
+> public deployments, and read [SECURITY.md](docs/SECURITY.md) plus the
 > [production checklist](docs/handbook.md#production-deployment) first.
 
 ## Development
@@ -228,5 +228,5 @@ Relay/
 ```
 
 Contributors and coding agents should read [AGENTS.md](AGENTS.md). Release
-history is in [CHANGELOG.md](CHANGELOG.md), and Relay is released under the
+history is in [CHANGELOG.md](docs/CHANGELOG.md), and Relay is released under the
 [MIT License](LICENSE).

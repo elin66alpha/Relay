@@ -1,6 +1,6 @@
 # 后端安装
 
-[English](README.md) · [生产部署手册](../docs/handbook.md#production-deployment)
+[English](install.md) · [生产部署手册](handbook.md#production-deployment)
 
 Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 HTTP/SSE API。本目录的
 脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。

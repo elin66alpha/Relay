@@ -171,7 +171,7 @@ For a backend reachable beyond localhost:
 - protect backend backups, because history and session files contain raw
   unredacted conversation content.
 
-See the [production checklist](docs/handbook.md#production-deployment).
+See the [production checklist](handbook.md#production-deployment).
 
 ## What Relay does not do
 
