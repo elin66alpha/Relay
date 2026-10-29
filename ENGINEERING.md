@@ -27,6 +27,20 @@ Out:
 
 ## Architecture
 
+Top-level layout. The client is `app/` and the backend is `server/`; every
+script is under `scripts/` except the Node tools in `server/scripts/`.
+
+| Directory | Holds |
+|---|---|
+| app/core | the `relay_core` Dart package: every screen, controller, test and asset (`lib/`, `test/`, `assets/`) |
+| app/shell | the runnable Flutter app `relay`: `main.dart`, the app version, and the android, ios, linux, macos, windows and web platform projects |
+| server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
+| scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
+| scripts/release | release bundle builders and the Windows setup checks CI runs |
+| scripts/dev | local development helpers (build flow, backend restart, icon export) |
+| docs | handbook, install guides, security model, changelog, release notes, README screenshots |
+| .github/workflows | CI, which runs the Verification commands on pull requests |
+
 | Module | Responsibility | Interface | Depends on |
 |---|---|---|---|
 | server/server.js | config, middleware, auth, scope queue, SSE fan-out, workdir presence, route context wiring, static Web; holds no feature logic | HTTP on PORT | lib/*, routes/* |
@@ -51,14 +65,15 @@ Out:
 | server/lib/usage.js, quota-*.js | quota reporting, schedules and sending them at a reset, keepalive | buildUsageReport, schedule API, createQuotaScheduleRunner | json-store, cli-paths |
 | server/lib/notify.js, push.js, fcm.js | notifications | notifyAll | subscription-store |
 | server/lib/terminal-manager.js | resumable PTY per token | createTerminalManager | node-pty, bounded-integer |
-| lib/core/backend | authenticated transport, SSE codec, API client | ApiTransport, BackendClient | http |
-| lib/core/{models,storage,credentials,notifications,platform,widgets,i18n,theme,util,settings,download} | data models, cached stores, credential decode, platform adapters, shared widgets (agent icon, code block, wallpaper and acrylic surfaces), strings, theme and status colours, helpers, app settings and one device-local wallpaper (original file on native, bounded inline copy on Web), download progress | classes; AppSettingsController wallpaper/saveWallpaper; platform prepareWallpaper/storeWallpaperImage/loadWallpaperImage | core only |
-| lib/features/chat | app shell: solo chat, Swarm, and the drawer that opens every other screen | BotChatController, GroupChatController, screens | other lib/features, lib/core |
-| lib/features/quota | quota state (QuotaController, one instance created in main.dart and shared by the strip, usage and scheduler screens) and its screens | QuotaController, screens | lib/core |
-| lib/features/{cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
-| backends/{linux,macos,windows} | install/service adapters | setup/start/stop/status/uninstall | scripts/setup.sh, PM2/launchd/Windows |
+| app/core/lib/core/backend | authenticated transport, SSE codec, API client | ApiTransport, BackendClient | http |
+| app/core/lib/core/{models,storage,credentials,notifications,platform,widgets,i18n,theme,util,settings,download} | data models, cached stores, credential decode, platform adapters, shared widgets (agent icon, code block, wallpaper and acrylic surfaces), strings, theme and status colours, helpers, app settings and one device-local wallpaper (original file on native, bounded inline copy on Web), download progress | classes; AppSettingsController wallpaper/saveWallpaper; platform prepareWallpaper/storeWallpaperImage/loadWallpaperImage | core only |
+| app/core/lib/features/chat | the main screen: solo chat, Swarm, and the drawer that opens every other screen | BotChatController, GroupChatController, screens | other lib/features, lib/core |
+| app/core/lib/features/quota | quota state (QuotaController, one instance created in app/shell's main.dart and shared by the strip, usage and scheduler screens) and its screens | QuotaController, screens | lib/core |
+| app/core/lib/features/{cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
+| app/shell/lib/main.dart | creates the shared controllers and starts the app | main() | app/core |
+| scripts/install/{linux,macos,windows} | install/service adapters | setup/start/stop/status/uninstall | server/scripts, PM2/launchd/Windows |
 
-Dependency direction: server routes -> lib -> json-store; lib/features/chat -> other lib/features -> lib/core. Nothing outside lib/features/chat imports it, the other features import each other without cycles, and lib/core imports no feature.
+Dependency direction: server routes -> lib -> json-store; app/shell -> app/core; within app/core/lib, features/chat -> other features -> core. Nothing outside features/chat imports it, the other features import each other without cycles, and core imports no feature.
 
 ## Features
 
@@ -83,7 +98,7 @@ Dependency direction: server routes -> lib -> json-store; lib/features/chat -> o
 | Device-local shared wallpaper (explicit Save, one live opacity slider for the current theme, blur and tint number fields shared by both themes, centered cover; first-level pages (chat, home, Swarm) make every surface on the wallpaper acrylic; other pushed pages show it behind a full-page acrylic layer with solid content) | core/settings, core/widgets, features/settings, features/chat | active |
 | What's new (Home entry above Tutorial; per release 1-3 plain-language highlights plus other changes in small text) | features/settings/whats_new_screen, features/chat home | active |
 | Machine details hardware card (CPU, memory, GPU, temperatures refreshed every 10 s while the page is open) | machine-info, routes/meta, features/machines | active |
-| Credential onboarding | scripts/create-credential, core/credentials, features/machines | active |
+| Credential onboarding | server/scripts/create-credential, core/credentials, features/machines | active |
 | Update check (Settings → Check for updates compares with the latest GitHub release and only reports it; no download) | features/settings | active |
 
 Deprecated features stay listed until their code is deleted, then the row is
@@ -93,8 +108,8 @@ removed.
 
 Command lines are automated. The rest are manual checks in the app or on the host; a precondition in parentheses must hold first.
 
-- `flutter analyze --no-pub` -> "No issues found!"
-- `flutter test --no-pub` -> "All tests passed!"
+- `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
+- `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.
@@ -111,12 +126,12 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
-- On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_setup.ps1` -> setup contract passed, without host service changes.
-- On Windows, `scripts/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
+- On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes.
+- On Windows, `scripts/release/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
-- `flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn` -> exit 0, `build/web/index.html` exists
-- `flutter build apk --release --no-pub` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows SHA-256 `3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`
+- `(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)` -> exit 0, `app/shell/build/web/index.html` exists; `app/shell/build/web/assets/FontManifest.json` lists `packages/relay_core/RelayTerminalMono`
+- `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows SHA-256 `3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
@@ -126,8 +141,8 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Linux setup → 5 (Install agent CLIs): lists Claude Code, Codex, Cursor, OpenCode and Hermes with ✔ installed / ✘ not installed matching `GET /api/agents` `installed`; Enter installs nothing; each installed pick prints its login command.
 - Machine details: Enter SSH comes first; the card below it shows the machine name, CPU model with thread count, memory, one row per GPU, one row per disk as `<mount>  <used> used / <total> total` matching `df` on the host, and at most four temperature tiles in the order Mainboard, SSD, CPU, GPU, each the average of that part's sensors (Linux; others show only GPU via nvidia-smi or "No readable temperature sensors"); the tile values change within 10 s of a temperature change, and the status text below has no Backend online, timeout, quota watch, transfer limit, token, runtime counter or Web build lines.
 - Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher it shows "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later."
-- `grep -rn "import '\.\./chat/\|features/chat/" lib/features --include=*.dart | grep -v '^lib/features/chat/'` -> no output
-- `grep -rn "features/" lib/core --include=*.dart` -> no output
+- `grep -rn "import '\.\./chat/\|features/chat/" app/core/lib/features --include=*.dart | grep -v '^app/core/lib/features/chat/'` -> no output
+- `grep -rn "features/" app/core/lib/core --include=*.dart` -> no output
 - After a reply in solo chat with Claude Code, Codex, OpenCode, or Hermes, the line above the composer shows `<used> / <window>` (e.g. `42k / 200k`) at its right end. A new or cleared conversation shows `0 / <window>`; a conversation whose replies predate the feature shows `? / <window>`; `<window>` reads `?` until that agent + model has replied once. With Cursor active, that line is absent.
 - (Cursor signed in on a Premium plan) Quota Usage lists Cursor after Codex. The Cursor card shows plan `Premium` and one weekly remaining percent with a reset time. While Cursor is the active agent, the composer strip shows that same percent. Scheduled messages stay Claude Code and Codex only.
 - (Cursor signed in on the host with `agent login`) Within a minute of backend start, `server/reported-models.json` holds a `cursor` list with plain ids (`default`, `grok-4.7`, ...), and Cursor's model picker shows those names with Auto selected by default; a model with effort levels (e.g. Grok 4.7) shows its effort choices, and the model page has the Fast switch.
@@ -143,17 +158,17 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 
 | Milestone | Completion criteria | Status |
 |---|---|---|
-| 0.1.7 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.7; `CHANGELOG.md` has a 0.1.7 entry | done |
-| 0.1.8 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.8; `CHANGELOG.md` and `lib/features/settings/whats_new_screen.dart` have 0.1.8 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new) | done |
-| 0.1.9 | At release: `pubspec.yaml`, `server/package.json` and `_applicationVersion` in `lib/features/settings/app_settings_screen.dart` read 0.1.9; `CHANGELOG.md` and `lib/features/settings/whats_new_screen.dart` have 0.1.9 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new) | in progress |
+| 0.1.7 | Released with app, server and changelog versions at 0.1.7 | done |
+| 0.1.8 | Released with app, server, changelog and What's new versions at 0.1.8 | done |
+| 0.1.9 | Released with app, server, changelog and What's new versions at 0.1.9 | done |
+| 0.1.10 | At release: `app/shell/pubspec.yaml`, `server/package.json` and `_applicationVersion` in `app/core/lib/features/settings/app_settings_screen.dart` read 0.1.10; `docs/CHANGELOG.md` and `app/core/lib/features/settings/whats_new_screen.dart` have 0.1.10 entries (English and Chinese, 1-3 highlights plus short other-change lines in What's new); no document describes the pre-0.1.10 layout (`backends/`, root `lib/`, `test/`, `assets/` or platform folders) | in progress |
 
 ## Changes
 
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Before 2026-10: server routes split out of server.js into server/routes (2026-06-10).
-- 2026-10-02: agent controls persisted per workdir + agent + session. Reason: sessions need independent settings.
+- Before 2026-10-17: server routes split out of server.js into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02).
 - 2026-10-17: feature dependencies made acyclic: the drawer moved into features/chat, quota state moved from BotChatController to features/quota QuotaController, non-chat features take BackendClient and callbacks. Reason: features/* imported BotChatController and formed three cycles.
 - 2026-10-17: code_block.dart moved from features/chat to core/widgets. Reason: the file preview reuses it, and features must not import each other.
 - 2026-10-17: added server/lib/context-windows.js (state file context-windows.json). Reason: no CLI exposes a model's context window before a reply, so the last reported size per agent + model is remembered.
@@ -163,6 +178,7 @@ one summary line.
 - 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
 - 2026-10-26: added server/lib/cli-paths.js; agents.js and model-discovery.js share its CLI lookup, and filesystem.js takes Cursor's paths from it. Reason: the two lookups could disagree on whether a CLI is installed, and the path policy loaded the whole process runner for one constant.
 - 2026-10-26: chat screens split by responsibility (home page, history search, input bar, message bubble, Swarm form, work-tree picker, push registration), and routes take everything with state or I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
+- 2026-10-29: repository regrouped by role: the Flutter client into app/core (package relay_core: screens, logic, tests, assets) and app/shell (main.dart and the platform projects), every install, release and dev script into scripts/{install,release,dev}, and documentation into docs/. Reason: front end and back end were indistinguishable at the root, backends/ and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 
 ## Review
 

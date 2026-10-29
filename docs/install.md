@@ -3,7 +3,7 @@
 [中文](install.zh-CN.md) · [Deployment handbook](handbook.md#production-deployment)
 
 Relay uses the same Node.js server and HTTP/SSE API on every backend host. The
-files here only adapt dependency setup, process management, logs, and optional
+scripts in `scripts/install/` only adapt dependency setup, process management, logs, and optional
 Cloudflare Tunnel startup to each operating system.
 
 ## Requirements
@@ -40,9 +40,9 @@ From a copy of the repository, run one command from its root:
 
 | Backend OS | Command | Service manager |
 |---|---|---|
-| Linux | `./backends/linux/setup.sh` | PM2 |
-| macOS | `./backends/macos/setup.sh` | per-user LaunchAgents |
-| Windows | `.\backends\windows\setup.ps1` | per-user Scheduled Task |
+| Linux | `./scripts/install/linux/setup.sh` | PM2 |
+| macOS | `./scripts/install/macos/setup.sh` | per-user LaunchAgents |
+| Windows | `.\scripts\install\windows\setup.ps1` | per-user Scheduled Task |
 
 The setup script creates `server/.env` when needed, installs server packages,
 configures the selected network mode, starts the service, and runs the
@@ -62,8 +62,8 @@ the old one is not stored. Install and reinstall ask whether to serve the Web
 client at the backend address (default yes).
 
 The source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
-the compiled Web client, in `build/web`; the backend serves it at `/` unless
-`server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
+the compiled Web client, in `app/shell/build/web`; the backend serves it at `/`
+unless `server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
 device token. The Windows backend ZIP includes the same compiled Web client:
 
 - Linux and Windows setup ask whether to serve it; uninstall removes it while
@@ -90,10 +90,10 @@ device token. The Windows backend ZIP includes the same compiled Web client:
 ### Linux
 
 ```bash
-./backends/linux/status.sh
-./backends/linux/start.sh
-./backends/linux/stop.sh
-./backends/linux/uninstall.sh
+./scripts/install/linux/status.sh
+./scripts/install/linux/start.sh
+./scripts/install/linux/stop.sh
+./scripts/install/linux/uninstall.sh
 ```
 
 These wrap PM2, which remains available directly:
@@ -119,10 +119,10 @@ compiler (for example the Debian/Ubuntu `build-essential` package). Install
 ### macOS
 
 ```bash
-./backends/macos/status.sh
-./backends/macos/start.sh
-./backends/macos/stop.sh
-./backends/macos/uninstall.sh
+./scripts/install/macos/status.sh
+./scripts/install/macos/start.sh
+./scripts/install/macos/stop.sh
+./scripts/install/macos/uninstall.sh
 ```
 
 LaunchAgents are installed under `~/Library/LaunchAgents`. Logs are under
@@ -144,10 +144,10 @@ The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 same service adapters below. The Scheduled Task starts at this user's login.
 
 ```powershell
-.\backends\windows\status.ps1
-.\backends\windows\start.ps1
-.\backends\windows\stop.ps1
-.\backends\windows\uninstall.ps1
+.\scripts\install\windows\status.ps1
+.\scripts\install\windows\start.ps1
+.\scripts\install\windows\stop.ps1
+.\scripts\install\windows\uninstall.ps1
 ```
 
 Logs and PID files live under `%LOCALAPPDATA%\Relay\logs\` and

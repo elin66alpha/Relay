@@ -39,8 +39,10 @@ void main() {
       AppTheme.light().scaffoldBackgroundColor,
     );
     expect(terminalView.theme.foreground, const Color(0xFF101923));
-    expect(terminalView.textStyle.fontFamily,
-        'packages/relay_core/RelayTerminalMono');
+    expect(
+      terminalView.textStyle.fontFamily,
+      'packages/relay_core/RelayTerminalMono',
+    );
     expect(
       terminalView.textStyle.fontFamilyFallback,
       containsAll(<String>['Cascadia Mono', 'Consolas', 'Menlo', 'monospace']),
@@ -68,8 +70,10 @@ void main() {
       AppTheme.dark().scaffoldBackgroundColor,
     );
     expect(terminalView.theme.foreground, const Color(0xFFEAF6FF));
-    expect(terminalView.textStyle.fontFamily,
-        'packages/relay_core/RelayTerminalMono');
+    expect(
+      terminalView.textStyle.fontFamily,
+      'packages/relay_core/RelayTerminalMono',
+    );
   });
 
   testWidgets(

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.10 - 2026-10-29
+
+### Changed
+
+- The repository is grouped by role. The Flutter client is `app/`:
+  `app/core` is the `relay_core` package with every screen, controller, test
+  and asset, and `app/shell` is the runnable app with `main.dart` and the
+  Android, iOS, Linux, macOS, Windows and Web projects. Every script is under
+  `scripts/`: `scripts/install/{linux,macos,windows}` (formerly `backends/`,
+  `scripts/setup.sh` and `scripts/install.sh`), `scripts/release/` and
+  `scripts/dev/`. `SECURITY.md`, `CHANGELOG.md`, the backend install guides
+  and the Windows bundle README moved to `docs/`, and README screenshots to
+  `docs/screenshots/`. `ENGINEERING.md` and `AGENTS.md` stay at the root.
+- From a copy of the repository, setup is now `./scripts/install/linux/setup.sh`,
+  `./scripts/install/macos/setup.sh` or `.\scripts\install\windows\setup.ps1`.
+  The one-line Linux install command is unchanged.
+- The backend serves the Web client from `app/shell/build/web`, and both
+  backend release bundles carry it there. Upgrading with the one-line Linux
+  installer removes the old `backends/` and `build/web` directories.
+- Windows updates work as before: extract the new bundle into its own folder
+  and run Reinstall there, which points the login task at the new scripts.
+
 ## 0.1.9 - 2026-10-26
 
 ### Added

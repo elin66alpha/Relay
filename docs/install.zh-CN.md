@@ -2,8 +2,8 @@
 
 [English](install.md) · [生产部署手册](handbook.md#production-deployment)
 
-Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 HTTP/SSE API。本目录的
-脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。
+Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 HTTP/SSE API。`scripts/install/`
+下的脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。
 
 ## 前置要求
 
@@ -33,9 +33,9 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 | 后端系统 | 命令 | 服务管理 |
 |---|---|---|
-| Linux | `./backends/linux/setup.sh` | PM2 |
-| macOS | `./backends/macos/setup.sh` | 当前用户 LaunchAgent |
-| Windows | `.\backends\windows\setup.ps1` | 当前用户计划任务 |
+| Linux | `./scripts/install/linux/setup.sh` | PM2 |
+| macOS | `./scripts/install/macos/setup.sh` | 当前用户 LaunchAgent |
+| Windows | `.\scripts\install\windows\setup.ps1` | 当前用户计划任务 |
 
 安装脚本会按需创建 `server/.env`、安装服务端依赖、配置网络模式、启动服务并生成加密
 凭证。然后在 app 中导入生成的 `.relay.png` 或 `.relay.json`，输入生成时设置的密码。
@@ -49,7 +49,7 @@ Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PAT
 有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
 不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
 
-源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `build/web` 中自带编译好的
+源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `app/shell/build/web` 中自带编译好的
 Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
 下的接口始终需要设备令牌。Windows 后端 ZIP 也包含相同的 Web 前端：
 
@@ -74,10 +74,10 @@ Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `
 ### Linux
 
 ```bash
-./backends/linux/status.sh
-./backends/linux/start.sh
-./backends/linux/stop.sh
-./backends/linux/uninstall.sh
+./scripts/install/linux/status.sh
+./scripts/install/linux/start.sh
+./scripts/install/linux/stop.sh
+./scripts/install/linux/uninstall.sh
 ```
 
 这些脚本封装 PM2，也可以继续直接使用 PM2 命令：
@@ -101,10 +101,10 @@ Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js�
 ### macOS
 
 ```bash
-./backends/macos/status.sh
-./backends/macos/start.sh
-./backends/macos/stop.sh
-./backends/macos/uninstall.sh
+./scripts/install/macos/status.sh
+./scripts/install/macos/start.sh
+./scripts/install/macos/stop.sh
+./scripts/install/macos/uninstall.sh
 ```
 
 LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 下，文件名为
@@ -121,10 +121,10 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 `.\uninstall.cmd` 是下面相同服务脚本的入口。计划任务在当前用户登录时启动。
 
 ```powershell
-.\backends\windows\status.ps1
-.\backends\windows\start.ps1
-.\backends\windows\stop.ps1
-.\backends\windows\uninstall.ps1
+.\scripts\install\windows\status.ps1
+.\scripts\install\windows\start.ps1
+.\scripts\install\windows\stop.ps1
+.\scripts\install\windows\uninstall.ps1
 ```
 
 日志和 PID 文件位于 `%LOCALAPPDATA%\Relay\logs\` 与

@@ -4,7 +4,7 @@ Read ENGINEERING.md before any change. It is the engineering contract for this r
 
 Relay is a Flutter client plus a self-hosted Node.js backend for controlling
 Claude Code, Codex, Cursor, OpenCode, and Hermes on the backend machine. Keep public usage guidance in the root READMEs, operational detail in
-`docs/handbook.md`, and security guarantees in `SECURITY.md`.
+`docs/handbook.md`, and security guarantees in `docs/SECURITY.md`.
 
 ## Working safely
 
@@ -15,26 +15,26 @@ Claude Code, Codex, Cursor, OpenCode, and Hermes on the backend machine. Keep pu
   agents are actively running against it.
 - Treat mobile, Web, desktop, and all backend operating systems as clients of
   the same HTTP/SSE, credential, session, and workdir model.
-- Prefer focused tests while iterating. `scripts/build_flow.sh` also rebuilds
-  Web, restarts PM2, and builds an APK. ADB installation is opt-in with
+- Prefer focused tests while iterating. `scripts/dev/build_flow.sh` also
+  rebuilds Web, restarts PM2, and builds an APK. ADB installation is opt-in with
   `INSTALL_APK=1`, so run the script only when that full local deployment flow
   is intended.
 
 ## Useful commands
 
 ```bash
-flutter pub get
-flutter analyze --no-pub
-flutter test --no-pub
-flutter test --no-pub test/agent_controls_test.dart
+# Client: screens, logic and tests live in app/core; app/shell is the runnable app.
+(cd app/core && flutter pub get && flutter analyze --no-pub && flutter test --no-pub)
+(cd app/core && flutter test --no-pub test/agent_controls_test.dart)
+(cd app/shell && flutter pub get && flutter analyze --no-pub)
 
 (cd server && git ls-files '*.js' | xargs -r -n1 node --check)
 npm --prefix server run lint
 npm --prefix server test
 npm --prefix server start
 
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
-./scripts/build_flow.sh
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
+./scripts/dev/build_flow.sh
 ```
 
 The Web flags are intentional: Relay disables the service worker to avoid stale
@@ -147,8 +147,9 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
   deletion on a best-effort basis. Cursor has no delete command, so Relay
   removes `<CURSOR_CONFIG_DIR>/acp-sessions/<id>` itself. Use `clearSession` only for the internal
   stale-session retry.
-- Test files are `test/*.test.js`. Helper processes live in `test/fixtures/`,
-  which the runner would otherwise try to execute as tests.
+- Test files are `server/test/*.test.js`. Helper processes live in
+  `server/test/fixtures/`, which the runner would otherwise try to execute as
+  tests.
 - Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
   Claude receives a `fastMode` settings override; Codex receives an explicit
   `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
@@ -200,7 +201,8 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Client boundaries
 
-- `lib/core/backend/api_transport.dart` is the shared authenticated transport.
+- `app/core/lib/core/backend/api_transport.dart` is the shared authenticated
+  transport.
   Reuse it instead of duplicating base URL, bearer token, device headers, or
   error handling.
 - Credential decryption and large history decoding stay off the UI isolate.
@@ -234,8 +236,14 @@ See [ENGINEERING.md's Architecture section](ENGINEERING.md#architecture) for the
 
 ### Development tooling
 
-- `scripts/` holds development and deployment helpers.
-- `test/` and `server/test/` hold the Flutter and Node test suites.
+- `scripts/install/<os>/` is what users run to install and manage a backend,
+  `scripts/release/` builds and checks release bundles, and `scripts/dev/`
+  holds local development helpers. Every script lives under `scripts/`, except
+  the Node tools in `server/scripts/`, which load the server's own `lib/`.
+- `app/core/test/` and `server/test/` hold the Flutter and Node test suites.
+- `app/core` is the `relay_core` package, so its assets and its bundled font
+  are addressed with `package: 'relay_core'` or a `packages/relay_core/`
+  prefix. `app/shell` adds only the platform projects and `main.dart`.
 - `.github/workflows/ci.yml` runs the verification commands on pull requests.
   Update it when those commands change so CI checks the same contract.
 
@@ -247,8 +255,8 @@ Relay's Cursor config (`cursor-config/`), groups, quota state/schedules, usage c
 not fixtures. Keep them, along with any referenced FCM service-account JSON,
 out of patches and release archives. `server/models-extra.json` is also a local
 override, not a shared catalog. The Android release keystore and
-`android/key.properties` are signing secrets: never commit or upload them;
-`android/key.properties.example` is the template.
+`app/shell/android/key.properties` are signing secrets: never commit or upload
+them; `app/shell/android/key.properties.example` is the template.
 
 ## Verification expectations
 
@@ -263,7 +271,8 @@ override, not a shared catalog. The Android release keystore and
   `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
   rather than old docs.
 - Release bumps update these files together:
-  `pubspec.yaml`, `server/package.json`, `_applicationVersion` in
-  `lib/features/settings/app_settings_screen.dart`, a `CHANGELOG.md` entry, and
-  a plain-language English and Chinese entry (1-3 highlights, other changes as
-  short lines) at the top of `lib/features/settings/whats_new_screen.dart`.
+  `app/shell/pubspec.yaml`, `server/package.json`, `_applicationVersion` in
+  `app/core/lib/features/settings/app_settings_screen.dart`, a
+  `docs/CHANGELOG.md` entry, and a plain-language English and Chinese entry
+  (1-3 highlights, other changes as short lines) at the top of
+  `app/core/lib/features/settings/whats_new_screen.dart`.

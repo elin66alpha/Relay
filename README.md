@@ -143,9 +143,9 @@ its root:
 
 | Backend OS | Setup command |
 |---|---|
-| Linux | `./backends/linux/setup.sh` |
-| macOS | `./backends/macos/setup.sh` |
-| Windows PowerShell | `.\backends\windows\setup.ps1` |
+| Linux | `./scripts/install/linux/setup.sh` |
+| macOS | `./scripts/install/macos/setup.sh` |
+| Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
 The installer walks through direct access, a named Cloudflare Tunnel, or a
 temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
@@ -196,17 +196,17 @@ For service commands, networking details, and platform notes, continue with the
 ## Development
 
 ```bash
-flutter pub get
-flutter analyze --no-pub
-flutter test --no-pub
+(cd app/core && flutter pub get && flutter analyze --no-pub && flutter test --no-pub)
+(cd app/shell && flutter pub get && flutter analyze --no-pub)
 npm --prefix server install
 npm --prefix server test
 ```
 
-Run the client with `flutter run`. To serve a self-hosted Web build:
+Run the client with `flutter run` in `app/shell`. To serve a self-hosted Web
+build:
 
 ```bash
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
@@ -219,12 +219,16 @@ need a signing key; see
 
 ```text
 Relay/
-├── lib/          shared Flutter client
-├── server/       Node.js backend and tests
-├── backends/     OS-specific install/service adapters
-├── docs/         operations and architecture handbook
-├── scripts/      development and deployment helpers
-└── test/         Flutter tests
+├── app/              the client (front end)
+│   ├── core/         every screen, its logic, tests and assets (Dart package relay_core)
+│   └── shell/        the runnable app per platform: android, ios, linux, macos, windows, web
+├── server/           the backend: Node.js server and its tests
+├── scripts/
+│   ├── install/      install and manage a backend: linux, macos, windows
+│   ├── release/      build and check release bundles
+│   └── dev/          local development helpers
+├── docs/             handbook, install guides, security, changelog, release notes
+└── .github/workflows CI checks GitHub runs on every pull request
 ```
 
 Contributors and coding agents should read [AGENTS.md](AGENTS.md). Release

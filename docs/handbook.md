@@ -457,7 +457,7 @@ npm start
 
 On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
-Debian/Ubuntu; `./backends/linux/setup.sh` installs them there when
+Debian/Ubuntu; `./scripts/install/linux/setup.sh` installs them there when
 missing). macOS and Windows use the package's supported prebuilt binaries
 when available. Unix hosts also need `zip` for directory downloads.
 
@@ -471,18 +471,19 @@ an incomplete installation.
 To let the backend serve the Flutter Web client:
 
 ```bash
-flutter pub get
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter pub get && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
-The server serves `build/web` when present, unless `RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the
-service worker is disabled to keep the self-hosted client current.
+The server serves `app/shell/build/web` when present, unless
+`RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the service worker is
+disabled to keep the self-hosted client current.
 
-`scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
-backend JavaScript (`SKIP_CHECK=1` skips this), restarts or recreates
-`relay-server`, and waits until the port answers. `scripts/build_flow.sh` also
-rebuilds Web and an APK.
+`scripts/dev/restart_backend.sh` restarts only the PM2 backend: it
+syntax-checks the backend JavaScript (`SKIP_CHECK=1` skips this), restarts or
+recreates `relay-server`, and waits until the port answers.
+`scripts/dev/build_flow.sh` also analyzes and tests the client, rebuilds Web
+and builds a debug APK.
 
 ### Windows backend release bundle
 
@@ -491,11 +492,11 @@ Build the backend bundle on Windows x64 using a complete Node.js distribution
 C# compiler and access to the npm registry:
 
 ```powershell
-.\scripts\package_windows_backend.ps1
+.\scripts\release\package_windows_backend.ps1
 # Optional: select a different installed runtime or output directory.
-.\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+.\scripts\release\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
 # Reuse a Web build made from the same source instead of rebuilding it.
-.\scripts\package_windows_backend.ps1 -SkipWebBuild
+.\scripts\release\package_windows_backend.ps1 -SkipWebBuild
 ```
 
 The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
@@ -515,11 +516,11 @@ The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
 installation. `Setup.exe` is a Windows Forms UI built with the system .NET
 Framework compiler, without a downloaded GUI runtime. It and the console menu
-share `backends/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+share `scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
 agent installation and token create/delete/list/re-show. Passwords reach the
 worker through stdin and the existing credential generator through its
 environment, never command arguments or temporary request files. The bundle
-includes `build/web`; Node serves it alongside the API, without another Web
+includes `app/shell/build/web`; Node serves it alongside the API, without another Web
 server. Setup enables it by default and can turn it off. Tunnel modes download
 missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows
 installers and require the user to sign in afterward. Uninstall can remove Web
@@ -536,6 +537,7 @@ exercised in this repository; macOS and Linux runners still need broader
 release/secure-storage validation before being advertised as packaged releases.
 
 ```bash
+cd app/shell
 flutter run -d windows       # or macos / linux
 flutter build windows --release
 ```
@@ -549,7 +551,7 @@ Build prerequisites:
 - Linux: clang, CMake, Ninja, pkg-config, GTK development packages,
   `libsecret-1-dev`, and a keyring such as GNOME Keyring.
 
-Typical artifacts are `build/windows/x64/runner/Release/`,
+Typical artifacts, under `app/shell/`, are `build/windows/x64/runner/Release/`,
 `build/macos/Build/Products/Release/Relay.app`, and
 `build/linux/x64/release/bundle/`. Packaging, store signing, macOS notarization,
 are not configured.
@@ -557,7 +559,7 @@ are not configured.
 ### Android release signing
 
 Android release builds are signed with a keystore described by the gitignored
-`android/key.properties`; without that file a release build fails rather than
+`app/shell/android/key.properties`; without that file a release build fails rather than
 falling back to debug signing. Debug builds need no key. Create the keystore
 once, outside the repository, and back it up: every later release must use the
 same key, or installed apps cannot be updated in place.
@@ -567,27 +569,27 @@ keytool -genkeypair -v -keystore ~/relay-release.jks -storetype PKCS12 \
   -keyalg RSA -keysize 2048 -validity 10000 -alias relay
 ```
 
-Copy `android/key.properties.example` to `android/key.properties`, set
+In `app/shell/android/`, copy `key.properties.example` to `key.properties`, set
 `storeFile` to the keystore's absolute path, and fill in both passwords; with a
 PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
-`flutter build apk --release` produces a release-signed APK.
+`flutter build apk --release` in `app/shell` produces a release-signed APK.
 
 ### Release assets
 
 A GitHub release `v<VERSION>` carries:
 
-- `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
-- `install.sh` — `scripts/install.sh`, the Linux one-line installer
+- `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
+- `install.sh` — `scripts/install/linux/install.sh`, the Linux one-line installer
   (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
   It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
   them;
 - `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
   service adapters, without tests, dependencies, or deployment state, plus the
-  compiled Web client in `build/web`. `./scripts/package_backend.sh` builds the
+  compiled Web client in `app/shell/build/web`. `./scripts/release/package_backend.sh` builds the
   Web client and writes it with a `.sha256` to `build/release/`; it refuses a
   tree with uncommitted tracked changes.
 - `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
-  (`build/windows/x64/runner/Release/`);
+  (`app/shell/build/windows/x64/runner/Release/`);
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
 - `SHA256SUMS` — `sha256sum` of every asset above.
@@ -596,9 +598,10 @@ A GitHub release `v<VERSION>` carries:
 
 ### Refreshing application icons
 
-`assets/icon.png` is the transparent master. After replacing it, run
-`dart run scripts/generate_icons.dart` from the repository root to export the
-Android, iOS, macOS, Web, and Windows assets. The Windows ICO includes 16, 24,
+`app/core/assets/icon.png` is the transparent master. After replacing it, run
+`dart --packages=.dart_tool/package_config.json ../../scripts/dev/generate_icons.dart`
+from `app/shell` (after `flutter pub get`) to export the
+Android, iOS, macOS, Web, and Windows assets into the shell. The Windows ICO includes 16, 24,
 32, 48, 64, 128, and 256 pixel images. iOS and maskable Web exports use an opaque
 navy background; other exports retain the master's transparency. Rebuild each
 client to embed its new assets.

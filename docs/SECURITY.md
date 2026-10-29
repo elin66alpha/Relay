@@ -151,8 +151,8 @@ certificate SHA-256
 `3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`. Check a
 downloaded APK with `apksigner verify --print-certs`; one signed by another
 certificate is not an official build. Releases up to 0.1.7 were signed with a
-debug certificate. The keystore and `android/key.properties` stay outside
-version control.
+debug certificate. The keystore and `app/shell/android/key.properties` stay
+outside version control.
 
 ## Production requirements
 

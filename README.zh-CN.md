@@ -132,9 +132,9 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 | 后端系统 | 安装命令 |
 |---|---|
-| Linux | `./backends/linux/setup.sh` |
-| macOS | `./backends/macos/setup.sh` |
-| Windows PowerShell | `.\backends\windows\setup.ps1` |
+| Linux | `./scripts/install/linux/setup.sh` |
+| macOS | `./scripts/install/macos/setup.sh` |
+| Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
 安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
@@ -176,17 +176,16 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 ## 开发
 
 ```bash
-flutter pub get
-flutter analyze --no-pub
-flutter test --no-pub
+(cd app/core && flutter pub get && flutter analyze --no-pub && flutter test --no-pub)
+(cd app/shell && flutter pub get && flutter analyze --no-pub)
 npm --prefix server install
 npm --prefix server test
 ```
 
-使用 `flutter run` 启动客户端。自托管 Web 构建：
+在 `app/shell` 里用 `flutter run` 启动客户端。自托管 Web 构建：
 
 ```bash
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
@@ -197,12 +196,16 @@ Web 参数会有意禁用 service worker，并在本地打包 CanvasKit。Window
 
 ```text
 Relay/
-├── lib/          共享 Flutter 客户端
-├── server/       Node.js 后端与测试
-├── backends/     各系统安装和服务管理适配
-├── docs/         运维与架构手册
-├── scripts/      开发与部署工具
-└── test/         Flutter 测试
+├── app/              客户端（前端）
+│   ├── core/         所有界面、逻辑、测试和资源（Dart 包 relay_core）
+│   └── shell/        各平台的可运行外壳：android、ios、linux、macos、windows、web
+├── server/           后端：Node.js 服务及其测试
+├── scripts/
+│   ├── install/      安装和管理后端：linux、macos、windows
+│   ├── release/      构建和检查发布包
+│   └── dev/          本地开发工具
+├── docs/             手册、安装指南、安全模型、更新日志、发布说明
+└── .github/workflows 每个 PR 上 GitHub 自动运行的 CI 检查
 ```
 
 贡献者和编程 agent 请先阅读 [AGENTS.md](AGENTS.md)，版本记录见

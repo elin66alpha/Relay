@@ -7,7 +7,7 @@ import 'update_check.dart';
 import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.9';
+const String _applicationVersion = '0.1.10';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {

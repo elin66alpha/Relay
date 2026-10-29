@@ -12,7 +12,7 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 ## First run / 首次使用
 
 1. Extract the entire ZIP to a permanent writable directory. Keep Setup.exe,
-   server/, build/web/, backends/ and runtime/ together. Do not run inside the ZIP.
+   server/, app/ (the Web client), scripts/ and runtime/ together. Do not run inside the ZIP.
 2. Double-click **Setup.exe**. Windows 10/11's .NET Framework and PowerShell run
    the installer; no extra GUI runtime is downloaded.
 3. Follow the five steps: included runtime/dependencies, optional agent CLIs,
@@ -29,8 +29,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 6. When Web is enabled, open the backend address in a browser and import the
    same encrypted credential. The API still requires authentication.
 
-1. 将整个 ZIP 解压到固定、可写的目录，保持 Setup.exe、server/、build/web/、
-   backends/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行。
+1. 将整个 ZIP 解压到固定、可写的目录，保持 Setup.exe、server/、app/（Web 前端）、
+   scripts/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行。
 2. 双击 **Setup.exe**，使用 Windows 10/11 自带的 .NET Framework 和 PowerShell，
    无需另外下载界面运行时。
 3. 按五步完成：运行时和依赖、可选 CLI、Web 开关（默认开启）、网络、设备凭证。
@@ -99,11 +99,11 @@ Relay 实例。日志和 PID 位于 %LOCALAPPDATA%\Relay\logs 和
 Stop the old installation and back up server/. Extract the new ZIP separately,
 copy your deployment configuration and generated state into its server/
 (excluding node_modules), then run Reinstall in the new directory to update
-the task path. Keep the included fresh build/web/ and runtime/ from the new
-bundle. Read SECURITY.md before public deployment. Node's license is at
+the task path. Keep the included fresh app/ and runtime/ from the new bundle.
+Read docs/SECURITY.md before public deployment. Node's license is at
 runtime/node/LICENSE; package licenses remain in server/node_modules/.
 
 先停止旧实例并备份 server/；把新 ZIP 解压到另一目录，将部署配置和生成的状态复制到
 新目录的 server/（不复制 node_modules），然后在新目录选择重装以更新计划任务路径。
-保留新包自带的 build/web/ 和 runtime/。公网部署前阅读 SECURITY.md。Node 许可证在
+保留新包自带的 app/ 和 runtime/。公网部署前阅读 docs/SECURITY.md。Node 许可证在
 runtime/node/LICENSE，依赖许可证在 server/node_modules/ 各包目录中。

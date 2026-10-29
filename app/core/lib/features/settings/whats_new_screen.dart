@@ -154,6 +154,20 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.1.10',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.drive_file_move_outline,
+        title: '安装脚本换了位置',
+        body:
+            '后端的安装和管理脚本从 backends/ 移到了 scripts/install/。用仓库副本安装时，Linux 运行 ./scripts/install/linux/setup.sh，macOS 运行 ./scripts/install/macos/setup.sh，Windows 运行 .\\scripts\\install\\windows\\setup.ps1。Linux 一键安装命令不变，升级时会自动删掉旧目录。Windows 照常把新包解压到新文件夹，再在里面选择重装。',
+      ),
+    ],
+    changes: <String>[
+      '项目文件按用途重新整理：客户端在 app/，后端在 server/，所有脚本在 scripts/，所有文档在 docs/。',
+    ],
+  ),
+  _Release(
     version: '0.1.9',
     highlights: <_Highlight>[
       _Highlight(
@@ -221,6 +235,20 @@ const List<_Release> _zhReleases = <_Release>[
 ];
 
 const List<_Release> _enReleases = <_Release>[
+  _Release(
+    version: '0.1.10',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.drive_file_move_outline,
+        title: 'Install scripts moved',
+        body:
+            'The backend install and management scripts moved from backends/ to scripts/install/. From a copy of the repository, run ./scripts/install/linux/setup.sh on Linux, ./scripts/install/macos/setup.sh on macOS, or .\\scripts\\install\\windows\\setup.ps1 on Windows. The one-line Linux install command is unchanged and removes the old folder when it upgrades. On Windows, extract the new bundle into its own folder and choose Reinstall there, as before.',
+      ),
+    ],
+    changes: <String>[
+      'The project files are grouped by purpose: the app in app/, the backend in server/, every script in scripts/ and every document in docs/.',
+    ],
+  ),
   _Release(
     version: '0.1.9',
     highlights: <_Highlight>[
