@@ -91,8 +91,9 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Installing locked production dependencies failed.' }
   Push-Location (Join-Path $bundle 'server')
   try {
-    & (Join-Path $runtime 'node.exe') -e 'require("node-pty"); require("ws"); require("firebase-admin"); console.log("Runtime dependencies load successfully")'
+    & (Join-Path $runtime 'node.exe') -e "require('node-pty');require('ws');require('firebase-admin')"
     if ($LASTEXITCODE -ne 0) { throw 'Packaged runtime dependency check failed.' }
+    Write-Host 'Runtime dependencies load successfully.'
   } finally { Pop-Location }
 } finally { $env:PATH = $oldPath }
 
