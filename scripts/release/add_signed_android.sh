@@ -18,6 +18,7 @@ repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 }
 tag_commit="$(gh api "repos/$repo/git/ref/tags/$tag" --jq 'select(.object.type == "commit") | .object.sha')"
 [ "$tag_commit" = "$(git rev-parse HEAD)" ] || { echo 'Check out the exact release commit before signing.' >&2; exit 1; }
+[ -f app/shell/android/key.properties ] || { echo 'Android release signing is not configured.' >&2; exit 1; }
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 [ -n "$sdk" ] && [ -d "$sdk/build-tools" ] || { echo 'Set ANDROID_HOME to the Android SDK.' >&2; exit 1; }
@@ -26,14 +27,24 @@ aapt="$(find "$sdk/build-tools" -name aapt -type f | sort -V | tail -n 1)"
 [ -n "$signer" ] && [ -n "$aapt" ] || { echo 'Android build-tools (apksigner and aapt) are required.' >&2; exit 1; }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+cleanup() {
+  rm -f "$tmp/source/app/shell/android/key.properties"
+  if [ -e "$tmp/source/.git" ]; then
+    git worktree remove --force "$tmp/source" >/dev/null 2>&1 || echo 'Could not remove the temporary Git worktree.' >&2
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 gh release download "$tag" --repo "$repo" --dir "$tmp" \
   --pattern SHA256SUMS --pattern install.sh --pattern "relay-backend-setup-$tag.tar.gz" \
   --pattern "relay-windows-x64-$tag.zip" --pattern "relay-backend-windows-x64-$tag.zip"
 (cd "$tmp" && sha256sum --check SHA256SUMS)
 
-(cd app/shell && flutter build apk --release --no-pub)
-apk="app/shell/build/app/outputs/flutter-apk/app-release.apk"
+# The checkout must exclude local Firebase config and other ignored state.
+git worktree add --detach "$tmp/source" HEAD >/dev/null
+ln -s "$root/app/shell/android/key.properties" "$tmp/source/app/shell/android/key.properties"
+(cd "$tmp/source/app/shell" && flutter pub get --enforce-lockfile && flutter build apk --release --no-pub)
+apk="$tmp/source/app/shell/build/app/outputs/flutter-apk/app-release.apk"
 expected_cert=3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
 certificate="$("$signer" verify --print-certs "$apk")"
 grep -Fqi "Signer #1 certificate SHA-256 digest: $expected_cert" <<< "$certificate" || {

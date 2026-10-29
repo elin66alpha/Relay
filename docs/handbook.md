@@ -596,11 +596,15 @@ From a terminal, the same workflow starts with
 `gh workflow run release.yml --ref main`.
 
 On the machine holding the Relay Android release key, check out the draft's
-commit, run `flutter pub get` in `app/shell`, set `ANDROID_HOME` and authenticate
-the GitHub CLI, then run `./scripts/release/add_signed_android.sh`. It verifies
-the draft and source commit, builds and checks the APK's version and release
-certificate, verifies the other downloads, uploads the APK and replaces
-`SHA256SUMS`. Review the completed draft on GitHub before publishing it.
+commit, set `ANDROID_HOME` and authenticate the GitHub CLI, then run
+`./scripts/release/add_signed_android.sh`. It verifies
+the draft and source commit, signs in a clean temporary checkout, checks the
+APK's version and release certificate, verifies the other downloads, uploads
+the APK and replaces `SHA256SUMS`. The signing configuration must use an
+absolute keystore path. The clean checkout excludes local
+`google-services.json`, so the public APK has no Firebase configuration;
+deployments using Android FCM must build their own configured client. Review
+the completed draft on GitHub before publishing it.
 For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the
 downloaded artifact must be signed before installation. It can also be started
 with `gh workflow run ios.yml --ref main`.

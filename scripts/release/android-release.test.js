@@ -23,6 +23,8 @@ test('Android release signs the matching draft and rejects the wrong certificate
   write('server/package.json', '{"version":"1.2.3"}');
   write('server/package-lock.json', '{"version":"1.2.3","packages":{"":{"version":"1.2.3"}}}');
   write('app/shell/pubspec.yaml', 'version: 1.2.3+5\n');
+  write('app/shell/android/key.properties', 'fixture signing configuration');
+  write('app/shell/android/app/google-services.json', 'fixture private Firebase configuration');
   write('app/core/lib/features/settings/app_settings_screen.dart', "const _applicationVersion = '1.2.3';");
   write('app/core/lib/features/settings/whats_new_screen.dart', "const List<_Release> _zhReleases = [version: '1.2.3'];\nconst List<_Release> _enReleases = [version: '1.2.3'];");
   write('docs/CHANGELOG.md', '## 1.2.3 - today\n');
@@ -33,8 +35,8 @@ test('Android release signs the matching draft and rejects the wrong certificate
     sums += `${createHash('sha256').update(`fixture ${asset}`).digest('hex')}  ${asset}\n`;
   }
   write('fixtures/SHA256SUMS', sums);
-  write('bin/git', '#!/bin/sh\n[ "$1" != rev-parse ] || echo abc123\n', 0o755);
-  write('bin/flutter', '#!/bin/sh\nmkdir -p build/app/outputs/flutter-apk\nprintf signed-apk > build/app/outputs/flutter-apk/app-release.apk\n', 0o755);
+  write('bin/git', '#!/bin/sh\ncase "$1 $2" in\n  "rev-parse HEAD") echo abc123 ;;\n  "worktree add") mkdir -p "$4/app/shell/android"; touch "$4/.git" ;;\nesac\n', 0o755);
+  write('bin/flutter', '#!/bin/sh\n[ ! -e android/app/google-services.json ] || exit 1\nmkdir -p build/app/outputs/flutter-apk\nprintf signed-apk > build/app/outputs/flutter-apk/app-release.apk\n', 0o755);
   write('bin/gh', `#!/bin/bash
 set -eu
 case "$1 $2" in
