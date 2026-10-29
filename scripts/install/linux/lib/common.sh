@@ -63,9 +63,9 @@ tunnel_enabled() {
 
 pm2_has() { pm2 describe "$1" >/dev/null 2>&1; }
 
-# Matches server.js: build/web is served unless RELAY_SERVE_WEB=0.
+# Matches server.js: app/shell/build/web is served unless RELAY_SERVE_WEB=0.
 web_state() {
-  if [ ! -f "$ROOT_DIR/build/web/index.html" ]; then
+  if [ ! -f "$ROOT_DIR/app/shell/build/web/index.html" ]; then
     printf 'not installed'
   elif [ "$(get_env RELAY_SERVE_WEB)" = "0" ]; then
     printf 'installed, disabled (RELAY_SERVE_WEB=0)'

@@ -125,7 +125,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const ENABLE_QUOTA_WATCH = process.env.ENABLE_QUOTA_WATCH !== 'false';
 const ENABLE_CLAUDE_KEEPALIVE = process.env.ENABLE_CLAUDE_KEEPALIVE !== 'false';
-const WEB_BUILD_DIR = path.join(__dirname, '..', 'build', 'web');
+const WEB_BUILD_DIR = path.join(__dirname, '..', 'app', 'shell', 'build', 'web');
 // Setup writes RELAY_SERVE_WEB=0 when the host is installed without the Web client.
 const SERVE_WEB =
   process.env.RELAY_SERVE_WEB !== '0' && fs.existsSync(path.join(WEB_BUILD_DIR, 'index.html'));

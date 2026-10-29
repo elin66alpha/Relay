@@ -2,7 +2,7 @@
 #
 # Builds build/release/relay-backend-setup-v<VERSION>.tar.gz: the committed
 # backend sources and service adapters, without tests, dependencies or
-# deployment state, plus the compiled Web client in build/web.
+# deployment state, plus the compiled Web client in app/shell/build/web.
 #
 #   ./scripts/release/package_backend.sh [output-dir]
 #
@@ -21,7 +21,7 @@ ARCHIVE="$OUT_DIR/$NAME.tar.gz"
 # edits would make the two disagree.
 git diff --quiet HEAD || { echo "Commit or stash tracked changes first." >&2; exit 1; }
 
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 
 mkdir -p "$OUT_DIR"
 TAR="$(mktemp)"
@@ -29,7 +29,7 @@ trap 'rm -f "$TAR"' EXIT
 # shellcheck disable=SC2046 # one argument per tracked path
 git archive --format=tar --prefix="$NAME/" -o "$TAR" HEAD $(git ls-tree -r --name-only HEAD |
   grep -E '^(LICENSE|README(\.zh-CN)?\.md|docs/(CHANGELOG|SECURITY|handbook|install(\.zh-CN)?)\.md|scripts/install/(linux|macos)/(lib/)?[^/]+\.sh|scripts/install/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
-tar --append -f "$TAR" --transform "s,^build/,$NAME/build/," build/web
+tar --append -f "$TAR" --transform "s,^app/,$NAME/app/," app/shell/build/web
 gzip -9 -c "$TAR" >"$ARCHIVE"
 (cd "$OUT_DIR" && sha256sum "$NAME.tar.gz" >"$NAME.tar.gz.sha256")
 

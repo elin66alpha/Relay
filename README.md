@@ -16,8 +16,8 @@ A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, 
 
 </div>
 
-<a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="Relay home screen in the dark theme with a wallpaper, showing the current machine and workspace beside the agent and Swarm drawer" width="100%">
+<a href="docs/screenshots/relay-overview-web.png">
+  <img src="docs/screenshots/relay-overview-web.png" alt="Relay home screen in the dark theme with a wallpaper, showing the current machine and workspace beside the agent and Swarm drawer" width="100%">
 </a>
 
 Relay leaves your source code, shell access, and CLI credentials on the computer
@@ -50,17 +50,17 @@ every other page share one acrylic surface over the centered, filling image;
 two fields below the slider set its blur (0-30, default 6) and tint (0-100%,
 default 55%) for both themes.
 
-<a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">
+<a href="docs/screenshots/relay-chat-web.png">
+  <img src="docs/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">
 </a>
 
 ### Chat, coordinate, and manage files from mobile
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay agent chat on mobile" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay multi-agent Swarm on mobile" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay remote file browser on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-chat-mobile.png"><img src="docs/screenshots/relay-chat-mobile.png" alt="Relay agent chat on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-swarm-mobile.png"><img src="docs/screenshots/relay-swarm-mobile.png" alt="Relay multi-agent Swarm on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-files-mobile.png"><img src="docs/screenshots/relay-files-mobile.png" alt="Relay remote file browser on mobile" width="100%"></a></td>
   </tr>
   <tr>
     <td align="center"><strong>Persistent chat</strong><br>Follow a long-running agent session from anywhere.</td>

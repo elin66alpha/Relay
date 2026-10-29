@@ -9,9 +9,9 @@ $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 $Script:BackendPidFile = Join-Path $scratch 'backend.pid'
 $Script:LogDir = Join-Path $scratch 'logs'
-New-Item -ItemType Directory -Path $Script:ServerDir, (Join-Path $Script:RootDir 'build\web') -Force | Out-Null
+New-Item -ItemType Directory -Path $Script:ServerDir, (Join-Path $Script:RootDir 'app\shell\build\web') -Force | Out-Null
 [IO.File]::WriteAllText($Script:EnvExample, "PORT=8787`nKEEP_ME=original`n")
-[IO.File]::WriteAllText((Join-Path $Script:RootDir 'build\web\index.html'), 'fixture')
+[IO.File]::WriteAllText((Join-Path $Script:RootDir 'app\shell\build\web\index.html'), 'fixture')
 $script:started = 0; $script:stopped = 0; $script:registered = 0; $script:forceDeps = $false
 $script:dnsArgs = @(); $script:credentialArgs = @()
 function Require-Node { }
@@ -50,7 +50,7 @@ try {
   Expect-Failure { Set-EnvValue 'PORT' "123`nBAD=1" }
   Assert-That ((Get-Content -LiteralPath $Script:EnvFile -Raw) -eq $before) 'Invalid input must not change configuration.'
   Uninstall-RelayBackend
-  Assert-That (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'build\web'))) 'Uninstall removes Web.'
+  Assert-That (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web'))) 'Uninstall removes Web.'
   Assert-That ((Get-Content -LiteralPath (Join-Path $Script:ServerDir 'tokens.json') -Raw) -eq 'retained fixture') 'Uninstall must keep device tokens.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Uninstall must keep custom configuration.'
   Write-Host 'Windows setup contract passed: direct / quick / named tunnel, reinstall, input validation, uninstall and retained state.'

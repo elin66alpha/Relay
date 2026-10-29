@@ -13,7 +13,7 @@ function Get-RelayDetails {
     port = (Get-BackendPort)
     networkMode = (Get-EnvValue 'RELAY_TUNNEL_MODE')
     tunnelName = (Get-EnvValue 'RELAY_TUNNEL_NAME')
-    webAvailable = (Test-Path -LiteralPath (Join-Path $Script:RootDir 'build\web\index.html'))
+    webAvailable = (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web\index.html'))
     serveWeb = ((Get-EnvValue 'RELAY_SERVE_WEB') -ne '0')
     logs = $Script:LogDir
     agents = @($details.agents)
@@ -129,7 +129,7 @@ function Install-RelayBackend {
   Write-Info 'Step 2/5 - Agent CLIs'
   Install-RelayAgentClis -Agents $Agents
   Write-Info 'Step 3/5 - Web client'
-  $available = Test-Path -LiteralPath (Join-Path $Script:RootDir 'build\web\index.html')
+  $available = Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web\index.html')
   if ($ServeWeb -and -not $available) { Write-Fail 'Web client missing. Extract a complete release bundle or build Web first.' }
   Set-EnvValue 'RELAY_SERVE_WEB' $(if ($ServeWeb) { '1' } else { '0' })
   Write-Info 'Step 4/5 - Network mode'
@@ -178,8 +178,8 @@ function Install-RelayBackend {
 }
 
 function Remove-RelayWeb {
-  $web = [IO.Path]::GetFullPath((Join-Path $Script:RootDir 'build\web'))
-  $expected = [IO.Path]::GetFullPath($Script:RootDir).TrimEnd('\') + '\build\web'
+  $web = [IO.Path]::GetFullPath((Join-Path $Script:RootDir 'app\shell\build\web'))
+  $expected = [IO.Path]::GetFullPath($Script:RootDir).TrimEnd('\') + '\app\shell\build\web'
   if ($web -ne $expected) { Write-Fail 'Invalid Web removal path.' }
   if (Test-Path -LiteralPath $web) { Remove-Item -LiteralPath $web -Recurse -Force }
   Set-EnvValue 'RELAY_SERVE_WEB' '0'

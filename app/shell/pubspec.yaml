@@ -1,0 +1,20 @@
+name: relay
+description: "A private Flutter control surface for local CLI coding agents."
+publish_to: "none"
+
+version: 0.1.9+19
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  relay_core:
+    path: ../core
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

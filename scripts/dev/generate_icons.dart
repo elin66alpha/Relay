@@ -1,11 +1,13 @@
-// Run from the repository root: dart run scripts/generate_icons.dart
-// assets/icon.png is the transparent master; this only exports platform sizes.
+// Run from app/shell, after flutter pub get:
+//   dart --packages=.dart_tool/package_config.json ../../scripts/dev/generate_icons.dart
+// app/core/assets/icon.png is the transparent master; this only exports
+// platform sizes into the shell.
 import 'dart:io';
 
 import 'package:image/image.dart' as img;
 
 void main() {
-  final master = img.decodePng(File('assets/icon.png').readAsBytesSync())!;
+  final master = img.decodePng(File('../core/assets/icon.png').readAsBytesSync())!;
   if (master.numChannels != 4 || master.getPixel(0, 0).a != 0) {
     throw StateError('The master icon must have transparent corners.');
   }

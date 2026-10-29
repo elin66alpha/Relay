@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 PM2_APP_NAME="${PM2_APP_NAME:-relay-server}"
 PM2_ECOSYSTEM="${PM2_ECOSYSTEM:-server/ecosystem.config.js}"
 WEB_URL="${WEB_URL:-http://127.0.0.1:8787/}"
-APK_PATH="${APK_PATH:-build/app/outputs/flutter-apk/app-debug.apk}"
+APK_PATH="${APK_PATH:-app/shell/build/app/outputs/flutter-apk/app-debug.apk}"
 
 run() {
   printf '\n==> %s\n' "$*"
@@ -40,9 +40,10 @@ restart_pm2_app() {
   pm2 start "$PM2_ECOSYSTEM" --only "$PM2_APP_NAME" --update-env
 }
 
-run flutter pub get
-run flutter analyze --no-pub
-run flutter test --no-pub
+run flutter pub get -C app/core
+run flutter pub get -C app/shell
+(cd app/core && run flutter analyze --no-pub && run flutter test --no-pub)
+(cd app/shell && run flutter analyze --no-pub)
 run npm --prefix server install
 
 # Syntax-check every backend JS file (not a hand-maintained subset that silently
@@ -57,11 +58,11 @@ run npm --prefix server test
 # gstatic.com. The CDN is unreachable on some networks (e.g. mainland China),
 # which leaves the app loaded-but-blank. Serving it from our own backend over
 # the tunnel keeps the web app fully self-hosted with zero external deps.
-run flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && run flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 restart_pm2_app
 wait_for_web
 
-run flutter build apk --debug --no-pub
+(cd app/shell && run flutter build apk --debug --no-pub)
 if [[ "${INSTALL_APK:-0}" == "1" ]]; then
   run adb install -r "$APK_PATH"
 else

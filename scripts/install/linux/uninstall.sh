@@ -24,9 +24,9 @@ if need pm2; then
   pm2 save >/dev/null 2>&1 || true
 fi
 
-if [ -d "$ROOT_DIR/build/web" ]; then
-  rm -rf "$ROOT_DIR/build/web"
-  c_info "Removed the Web client ($ROOT_DIR/build/web)."
+if [ -d "$ROOT_DIR/app/shell/build/web" ]; then
+  rm -rf "$ROOT_DIR/app/shell/build/web"
+  c_info "Removed the Web client ($ROOT_DIR/app/shell/build/web)."
 fi
 
 if [ "$(tunnel_mode)" = "cloudflare" ] && need cloudflared; then

@@ -38,15 +38,27 @@ jobs:
           channel: stable
           cache: true
 
+      # core holds the screens, logic and tests; shell is the runnable app
+      # around it for each platform.
       - run: flutter pub get
+        working-directory: app/core
+
+      - run: flutter pub get
+        working-directory: app/shell
 
       - run: flutter analyze --no-pub
+        working-directory: app/core
+
+      - run: flutter analyze --no-pub
+        working-directory: app/shell
 
       - run: flutter test --no-pub
+        working-directory: app/core
 
       - run: |
           flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
           test -f build/web/index.html
+        working-directory: app/shell
 
   server:
     name: Node backend

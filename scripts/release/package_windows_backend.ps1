@@ -37,13 +37,13 @@ if ($LASTEXITCODE -ne 0 -or $package.version -ne $lockVersion) {
 }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root 'build\release' }
 if (-not $SkipWebBuild) {
-  Push-Location $root
+  Push-Location (Join-Path $root 'app\shell')
   try {
     & flutter build web --release --no-pub --pwa-strategy=none --no-web-resources-cdn
     if ($LASTEXITCODE -ne 0) { throw 'Building the bundled Web client failed.' }
   } finally { Pop-Location }
 }
-$webSource = Join-Path $root 'build\web'
+$webSource = Join-Path $root 'app\shell\build\web'
 if (-not (Test-Path -LiteralPath (Join-Path $webSource 'index.html'))) { throw 'A compiled Web client is required.' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
@@ -75,8 +75,8 @@ foreach ($relative in @('LICENSE', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
   Copy-Item -LiteralPath (Join-Path $root $relative) -Destination $destination
 }
 Copy-Item -LiteralPath (Join-Path $root 'docs\windows-package.md') -Destination (Join-Path $bundle 'README.md')
-New-Item -ItemType Directory -Path (Join-Path $bundle 'build') -Force | Out-Null
-Copy-Item -LiteralPath $webSource -Destination (Join-Path $bundle 'build\web') -Recurse
+New-Item -ItemType Directory -Path (Join-Path $bundle 'app\shell\build') -Force | Out-Null
+Copy-Item -LiteralPath $webSource -Destination (Join-Path $bundle 'app\shell\build\web') -Recurse
 & (Join-Path $PSScriptRoot 'build_windows_setup.ps1') -OutputPath (Join-Path $bundle 'Setup.exe')
 $runtime = Join-Path $bundle 'runtime\node'
 New-Item -ItemType Directory -Path (Join-Path $runtime 'node_modules') -Force | Out-Null
@@ -130,7 +130,7 @@ $allowed = @($sources) + @('LICENSE', 'README.md', 'docs/SECURITY.md', 'docs/CHA
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')
   if ($relative.StartsWith('runtime/node/') -or $relative.StartsWith('server/node_modules/')) { continue }
-  if ($relative.StartsWith('build/web/')) { continue }
+  if ($relative.StartsWith('app/shell/build/web/')) { continue }
   if ($relative -notin $allowed) { throw "Unexpected file in the release: $relative" }
 }
 # ZipFile includes .env.example, unlike Compress-Archive's hidden-file filtering.

@@ -8,7 +8,7 @@ if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework 4.x C# comp
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent ([IO.Path]::GetFullPath($OutputPath))) | Out-Null
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ "/out:$OutputPath" `
   /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll `
-  "/win32icon:$(Join-Path $root 'windows\runner\resources\app_icon.ico')" `
+  "/win32icon:$(Join-Path $root 'app\shell\windows\runner\resources\app_icon.ico')" `
   (Join-Path $root 'scripts\install\windows\Setup.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Building Setup.exe failed.' }
 Write-Host "Setup: $OutputPath"

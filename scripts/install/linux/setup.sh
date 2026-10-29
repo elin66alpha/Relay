@@ -342,11 +342,11 @@ install_agent_clis() {
   printf '  Relay picks them up within a minute; no restart needed.\n'
 }
 
-# Release packages ship build/web; RELAY_SERVE_WEB=0 keeps it unserved.
+# Release packages ship app/shell/build/web; RELAY_SERVE_WEB=0 keeps it unserved.
 choose_web() {
   local answer
-  if [ ! -f "$ROOT_DIR/build/web/index.html" ]; then
-    c_warn "This copy has no Web client (build/web); the backend serves the API only."
+  if [ ! -f "$ROOT_DIR/app/shell/build/web/index.html" ]; then
+    c_warn "This copy has no Web client (app/shell/build/web); the backend serves the API only."
     return
   fi
   read -rp "${ASK}Serve the Web client at the backend address? [Y/n]: " answer

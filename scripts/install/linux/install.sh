@@ -71,9 +71,10 @@ curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS"
 
 mkdir -p "$dir"
 # The Web client's files change names between builds; replace it whole.
-rm -rf "$dir/build/web"
-# Releases before 0.1.10 kept these scripts in backends/.
-rm -rf "$dir/backends"
+rm -rf "$dir/app/shell/build/web"
+# Releases before 0.1.10 kept the Web client in build/web and these scripts in
+# backends/.
+rm -rf "$dir/build/web" "$dir/backends"
 tar -xzf "$tmp/$name" -C "$dir" --strip-components=1
 c_info "Relay $version unpacked in $dir"
 
