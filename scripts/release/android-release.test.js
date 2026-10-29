@@ -79,4 +79,8 @@ esac
   assert.ok(fs.existsSync(path.join(root, 'uploads', 'edited')));
   const updated = fs.readFileSync(path.join(root, 'uploads', 'SHA256SUMS'), 'utf8');
   assert.match(updated, new RegExp(`${createHash('sha256').update('signed-apk').digest('hex')}  relay-android-v1.2.3\\.apk`));
+
+  fs.copyFileSync(path.join(root, 'uploads', 'SHA256SUMS'), path.join(root, 'fixtures', 'SHA256SUMS'));
+  const retry = run(cert);
+  assert.equal(retry.status, 0, retry.stderr);
 });

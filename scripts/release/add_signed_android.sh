@@ -38,7 +38,15 @@ trap cleanup EXIT
 gh release download "$tag" --repo "$repo" --dir "$tmp" \
   --pattern SHA256SUMS --pattern install.sh --pattern "relay-backend-setup-$tag.tar.gz" \
   --pattern "relay-windows-x64-$tag.zip" --pattern "relay-backend-windows-x64-$tag.zip"
-(cd "$tmp" && sha256sum --check SHA256SUMS)
+(
+  cd "$tmp"
+  : > base-checksums
+  for asset in install.sh "relay-backend-setup-$tag.tar.gz" \
+    "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip"; do
+    awk -v name="$asset" '$2 == name { print; found++ } END { if (found != 1) exit 1 }' SHA256SUMS >> base-checksums
+  done
+  sha256sum --check base-checksums
+)
 
 # The checkout must exclude local Firebase config and other ignored state.
 git worktree add --detach "$tmp/source" HEAD >/dev/null
