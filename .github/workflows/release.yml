@@ -48,12 +48,12 @@ jobs:
           node-version: 24
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
       - run: node scripts/release/check_versions.js
       - run: node scripts/release/check_docs.js
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: ./scripts/release/package_backend.sh
       - run: cp scripts/install/linux/install.sh build/release/install.sh
@@ -76,11 +76,11 @@ jobs:
           node-version: 24
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
       - run: node scripts/release/check_versions.js
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: flutter build windows --release --no-pub
         working-directory: app/shell

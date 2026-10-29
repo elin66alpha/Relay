@@ -592,6 +592,8 @@ To prepare a release after the changes merge and `CI complete` passes on
 contents and checksums, and creates a draft for that exact commit. It refuses
 an existing version tag. The draft is marked incomplete until the Android APK
 is signed locally; signing keys must not be uploaded to GitHub.
+From a terminal, the same workflow starts with
+`gh workflow run release.yml --ref main`.
 
 On the machine holding the Relay Android release key, check out the draft's
 commit, run `flutter pub get` in `app/shell`, set `ANDROID_HOME` and authenticate
@@ -600,7 +602,8 @@ the draft and source commit, builds and checks the APK's version and release
 certificate, verifies the other downloads, uploads the APK and replaces
 `SHA256SUMS`. Review the completed draft on GitHub before publishing it.
 For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the
-downloaded artifact must be signed before installation.
+downloaded artifact must be signed before installation. It can also be started
+with `gh workflow run ios.yml --ref main`.
 
 A GitHub release `v<VERSION>` carries:
 

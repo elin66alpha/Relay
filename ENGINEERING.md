@@ -109,6 +109,7 @@ removed.
 Command lines are automated. The rest are manual checks in the app or on the host; a precondition in parentheses must hold first.
 
 - `dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib` with Flutter's pinned Dart SDK -> no files changed
+- `flutter pub get --enforce-lockfile` in both `app/core` and `app/shell` with Flutter 3.44.8 -> exit 0 without changing the lock files
 - `node scripts/release/check_versions.js`, `node scripts/release/check_docs.js` and `node --test scripts/release/*.test.js` -> exit 0
 - `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"

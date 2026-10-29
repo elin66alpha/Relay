@@ -17,11 +17,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           # Same pin as ci.yml.
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
 
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
 
       # Flutter generates the Podfile and runs pod install itself.

@@ -39,12 +39,12 @@ jobs:
           node-version: 24
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/core
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib
       - run: node scripts/release/check_versions.js
@@ -106,10 +106,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: flutter build windows --release --no-pub
         working-directory: app/shell
@@ -121,10 +121,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.9
+          flutter-version: 3.44.8
           channel: stable
           cache: true
-      - run: flutter pub get
+      - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: flutter build ios --release --no-pub --no-codesign
         working-directory: app/shell
