@@ -28,8 +28,7 @@ Future<QrPixels?> decodeImageToRgba(List<int> bytes) async {
     final int sourceHeight = image.naturalHeight;
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
 
-    final int longest =
-        sourceWidth > sourceHeight ? sourceWidth : sourceHeight;
+    final int longest = sourceWidth > sourceHeight ? sourceWidth : sourceHeight;
     final double scale =
         longest > qrScanMaxSide ? qrScanMaxSide / longest : 1.0;
     final int width = (sourceWidth * scale).round().clamp(1, sourceWidth);

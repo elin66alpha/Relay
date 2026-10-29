@@ -300,9 +300,8 @@ class _UsageQuotaRow extends StatelessWidget {
     // An expired bucket's cached percentage is meaningless (its window already
     // reset while the source was unreachable), so drop the number and let the
     // bar fall to its indeterminate "awaiting fresh data" state.
-    final double? percent = quota.expired
-        ? null
-        : quota.remainingPercent?.clamp(0, 100).toDouble();
+    final double? percent =
+        quota.expired ? null : quota.remainingPercent?.clamp(0, 100).toDouble();
     final Color tone =
         percent == null ? colors.outline : quotaTone(colors, percent);
     final DateTime? reset = DateTime.tryParse(quota.resetsAt ?? '');

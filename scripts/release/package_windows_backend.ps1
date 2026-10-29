@@ -27,8 +27,8 @@ $runtimeInfo = & $node -p 'JSON.stringify({version:process.versions.node,arch:pr
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Node.js runtime.' }
 $runtimeInfo = $runtimeInfo | ConvertFrom-Json
 if ($runtimeInfo.platform -ne 'win32' -or $runtimeInfo.arch -ne 'x64' -or
-    [int]($runtimeInfo.version.Split('.')[0]) -lt 18) {
-  throw 'The bundle requires a Windows x64 Node.js 18+ distribution.'
+    [int]($runtimeInfo.version.Split('.')[0]) -lt 22) {
+  throw 'The bundle requires a Windows x64 Node.js 22+ distribution.'
 }
 $package = Get-Content -LiteralPath (Join-Path $root 'server\package.json') -Raw | ConvertFrom-Json
 $lockVersion = & $node -p 'require(process.argv[1]).version' (Join-Path $root 'server\package-lock.json')

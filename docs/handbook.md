@@ -576,6 +576,29 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 
 ### Release assets
 
+The `CI` workflow checks pull requests on Linux, Windows and macOS. It analyzes
+and tests the Flutter client, builds Web, an Android debug APK, a Windows
+desktop client and an unsigned iOS client, tests the backend on Node 22 and 24,
+and checks the versions and local documentation links. The `CI complete` check
+must pass before a pull request can be merged into `main`. Dependabot reports
+vulnerabilities and proposes grouped weekly dependency updates.
+
+To prepare a release after the changes merge and `CI complete` passes on
+`main`, run **Prepare release draft** from the repository's Actions tab, choosing
+`main`. It builds the source backend and Windows bundles, verifies their
+contents and checksums, and creates a draft for that exact commit. It refuses
+an existing version tag. The draft is marked incomplete until the Android APK
+is signed locally; signing keys must not be uploaded to GitHub.
+
+On the machine holding the Relay Android release key, check out the draft's
+commit, run `flutter pub get` in `app/shell`, set `ANDROID_HOME` and authenticate
+the GitHub CLI, then run `./scripts/release/add_signed_android.sh`. It verifies
+the draft and source commit, builds and checks the APK's version and release
+certificate, verifies the other downloads, uploads the APK and replaces
+`SHA256SUMS`. Review the completed draft on GitHub before publishing it.
+For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the
+downloaded artifact must be signed before installation.
+
 A GitHub release `v<VERSION>` carries:
 
 - `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;

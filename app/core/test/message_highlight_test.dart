@@ -15,7 +15,8 @@ List<TextSpan> _spans(WidgetTester tester) {
     }
   }
 
-  for (final RichText text in tester.widgetList<RichText>(find.byType(RichText))) {
+  for (final RichText text
+      in tester.widgetList<RichText>(find.byType(RichText))) {
     walk(text.text);
   }
   return found;

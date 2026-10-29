@@ -7,7 +7,7 @@ import '../models/machine_credential.dart';
 
 class MachineCredentialsStore {
   MachineCredentialsStore({FlutterSecureStorage? secureStorage})
-    : _secureStorage = secureStorage ?? const FlutterSecureStorage();
+      : _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   static const String _credentialsKey = 'relay.machine_credentials.v1';
   static const String _activeMachineKey = 'relay.active_machine_id.v1';

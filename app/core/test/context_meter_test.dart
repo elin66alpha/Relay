@@ -64,7 +64,8 @@ void main() {
     );
   });
 
-  test('an unreported window stays unknown for empty and old conversations', () {
+  test('an unreported window stays unknown for empty and old conversations',
+      () {
     expect(contextMeterUsage(<ChatMessage>[]), (used: 0, size: null));
     expect(
       contextMeterUsage(<ChatMessage>[_reply(null)]),
@@ -89,7 +90,8 @@ void main() {
     }
   });
 
-  test('the latest reported size wins; a streaming reply keeps the previous one',
+  test(
+      'the latest reported size wins; a streaming reply keeps the previous one',
       () {
     final List<ChatMessage> messages = <ChatMessage>[
       _reply(<String, Object?>{'used': 1000, 'size': 200000}),
@@ -102,7 +104,10 @@ void main() {
   });
 
   test('a malformed size is treated as unreported', () {
-    expect(_reply(<String, Object?>{'used': 5, 'size': 0}).contextUsage, isNull);
+    expect(
+      _reply(<String, Object?>{'used': 5, 'size': 0}).contextUsage,
+      isNull,
+    );
     expect(
       _reply(<String, Object?>{'used': '5', 'size': 10}).contextUsage,
       isNull,

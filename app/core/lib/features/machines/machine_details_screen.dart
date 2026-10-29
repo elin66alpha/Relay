@@ -76,8 +76,8 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
 
   Future<void> _refreshAgents() async {
     try {
-      final List<CliAgent> agents = await widget.backend
-          .fetchAgents(verifyCredentials: true);
+      final List<CliAgent> agents =
+          await widget.backend.fetchAgents(verifyCredentials: true);
       if (!mounted) return;
       widget.agentsController.syncAgents(agents);
     } catch (err) {
@@ -730,8 +730,7 @@ class _DeviceTokensPanelState extends State<_DeviceTokensPanel> {
               for (final DeviceToken token in tokens)
                 _DeviceTokenRow(
                   token: token,
-                  busy:
-                      _revoking.contains(token.id) ||
+                  busy: _revoking.contains(token.id) ||
                       _deleting.contains(token.id),
                   onRevoke: () => _revoke(token),
                   onDelete: () => _delete(token),
@@ -861,9 +860,8 @@ class _DeviceTokenRow extends StatelessWidget {
 
 String _tokenDeviceInfo(DeviceToken token) {
   final String deviceId = token.lastDeviceId;
-  final String shortId = deviceId.length <= 8
-      ? deviceId
-      : '${deviceId.substring(0, 8)}...';
+  final String shortId =
+      deviceId.length <= 8 ? deviceId : '${deviceId.substring(0, 8)}...';
   if (token.lastDeviceName.isNotEmpty && shortId.isNotEmpty) {
     return '${token.lastDeviceName} ($shortId)';
   }

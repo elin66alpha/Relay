@@ -236,14 +236,14 @@ function Write-NamedTunnelConfig {
 
 function Require-Node {
   if (-not (Test-Command 'node')) {
-    Write-Fail 'Node.js 18+ is required. Install it from https://nodejs.org/.'
+    Write-Fail 'Node.js 22+ is required. Install it from https://nodejs.org/.'
   }
   if (-not (Test-Command 'npm')) {
     Write-Fail 'npm is required.'
   }
   $major = [int]((& node -p "Number(process.versions.node.split('.')[0])").Trim())
-  if ($major -lt 18) {
-    Write-Fail "Node.js 18+ is required. Current version: $(& node -v)"
+  if ($major -lt 22) {
+    Write-Fail "Node.js 22+ is required. Current version: $(& node -v)"
   }
 }
 

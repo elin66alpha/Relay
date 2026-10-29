@@ -25,7 +25,8 @@ bool contextMeterSupports(String agentKey) => agentKey != 'cursor';
   final ({int used, int size})? latest = latestContextUsage(messages);
   if (latest != null) return latest;
   final bool hasReply = messages.any(
-    (ChatMessage message) => message.role == ChatRole.assistant &&
+    (ChatMessage message) =>
+        message.role == ChatRole.assistant &&
         message.metadata['streaming'] != true,
   );
   return (used: hasReply ? null : 0, size: contextWindow);
@@ -53,9 +54,8 @@ class ContextMeter extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final int? used = usage.used;
     final int? size = usage.size;
-    final double? remaining = used != null && size != null
-        ? 100 - used * 100 / size
-        : null;
+    final double? remaining =
+        used != null && size != null ? 100 - used * 100 / size : null;
     return Padding(
       // Matches QuotaStrip's padding so both sit on one baseline.
       padding: const EdgeInsets.only(bottom: 8),

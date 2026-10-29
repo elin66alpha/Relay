@@ -1,5 +1,5 @@
-import 'web_push_stub.dart'
-    if (dart.library.html) 'web_push_web.dart' as platform;
+import 'web_push_stub.dart' if (dart.library.html) 'web_push_web.dart'
+    as platform;
 
 /// Whether this platform can register for Web Push (true only on supported web
 /// browsers). Non-web platforms use [NotificationService] instead.

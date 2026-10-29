@@ -148,7 +148,7 @@ if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; 
 fi
 # Missing system tools are installed with apt-get (Debian/Ubuntu) after one
 # confirmation; other distributions get the list to install by hand.
-NODE_MIN_MAJOR=18
+NODE_MIN_MAJOR=22
 NODE_INSTALL_MAJOR=24 # the Node.js line the Windows backend bundle ships
 APT_APPROVED=0
 

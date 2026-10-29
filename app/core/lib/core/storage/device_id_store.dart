@@ -5,8 +5,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class DeviceIdStore {
   DeviceIdStore({FlutterSecureStorage? secureStorage, Random? random})
-    : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
-      _random = random ?? Random.secure();
+      : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+        _random = random ?? Random.secure();
 
   static const String _deviceIdKey = 'relay.device_id.v1';
   static String? _cachedId;

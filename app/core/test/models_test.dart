@@ -24,8 +24,14 @@ void main() {
       expect(g.name, 'Reviewers');
       expect(g.members, <String>['claude', 'codex']);
       expect(g.workdir, '/work/tree');
-      expect(g.memberConfigs['claude'],
-          <String, String>{'model': 'opus', 'nickname': 'Lead', 'prompt': 'be terse'},);
+      expect(
+        g.memberConfigs['claude'],
+        <String, String>{
+          'model': 'opus',
+          'nickname': 'Lead',
+          'prompt': 'be terse',
+        },
+      );
     });
 
     test('applies defaults and drops empty members', () {
@@ -89,8 +95,10 @@ void main() {
       expect(m.role, ChatRole.user);
       expect(m.isUser, isTrue);
       expect(m.content, 'hello');
-      expect(m.createdAt.toUtc(),
-          DateTime.utc(2026, 1, 2, 3, 4, 5),);
+      expect(
+        m.createdAt.toUtc(),
+        DateTime.utc(2026, 1, 2, 3, 4, 5),
+      );
     });
 
     test('fromJson defaults an unknown role to assistant', () {
@@ -101,15 +109,23 @@ void main() {
     });
 
     test('segments parse from metadata and are empty when absent', () {
-      final ChatMessage withSegments =
-          ChatMessage.assistant('full', metadata: <String, Object?>{
-        'segments': <Object?>[
-          <String, Object?>{'text': 'step 1', 'ts': '2026-01-02T03:04:05.000Z'},
-          <String, Object?>{'text': 'final'},
-        ],
-      },);
+      final ChatMessage withSegments = ChatMessage.assistant(
+        'full',
+        metadata: <String, Object?>{
+          'segments': <Object?>[
+            <String, Object?>{
+              'text': 'step 1',
+              'ts': '2026-01-02T03:04:05.000Z',
+            },
+            <String, Object?>{'text': 'final'},
+          ],
+        },
+      );
       final List<MessageSegment> segs = withSegments.segments;
-      expect(segs.map((MessageSegment s) => s.text), <String>['step 1', 'final']);
+      expect(
+        segs.map((MessageSegment s) => s.text),
+        <String>['step 1', 'final'],
+      );
       expect(segs[0].createdAt, isNotNull);
       expect(segs[1].createdAt, isNull);
 
@@ -139,7 +155,11 @@ void main() {
       'agent': 'claude',
       'supports': <String, Object?>{'model': true, 'effort': false},
       'model': <Object?>[
-        <String, Object?>{'id': ' opus ', 'label': ' Opus ', 'description': ' big '},
+        <String, Object?>{
+          'id': ' opus ',
+          'label': ' Opus ',
+          'description': ' big ',
+        },
         <String, Object?>{'id': '', 'label': 'dropped'},
         'not-a-map',
       ],
@@ -287,7 +307,8 @@ void main() {
     });
 
     test('copyWith returns a new map without mutating the original', () {
-      const AgentSettings base = AgentSettings(<String, String>{'model': 'opus'});
+      const AgentSettings base =
+          AgentSettings(<String, String>{'model': 'opus'});
       final AgentSettings next = base.copyWith('effort', 'high');
       expect(next['model'], 'opus');
       expect(next['effort'], 'high');

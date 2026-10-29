@@ -7,7 +7,7 @@
 A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, and Hermes.
 
 ![Flutter client](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
-![Node.js backend](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
+![Node.js backend](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
 ![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
@@ -113,7 +113,7 @@ integrations. Relay never logs an agent in for you.
 
 ### 1. Prepare the backend machine
 
-Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
+Install Node.js 22+ and at least one supported CLI on Linux, macOS, or Windows.
 Claude, Codex, and Cursor must already be logged in on that host (`agent login`
 for Cursor); OpenCode and Hermes use the provider configuration managed there,
 and Relay lists the models that configuration provides.

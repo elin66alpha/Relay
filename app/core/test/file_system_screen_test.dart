@@ -11,7 +11,8 @@ import 'package:relay_core/features/filesystem/file_system_screen.dart';
 import 'package:relay_core/features/quota/quota_controller.dart';
 
 void main() {
-  testWidgets('set as work path is primary and swiping right goes up a folder', (
+  testWidgets('set as work path is primary and swiping right goes up a folder',
+      (
     WidgetTester tester,
   ) async {
     final _FsBackendClient backend = _FsBackendClient();

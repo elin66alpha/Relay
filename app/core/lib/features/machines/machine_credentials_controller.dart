@@ -17,8 +17,8 @@ class MachineCredentialsController extends ChangeNotifier {
   MachineCredentialsController({
     MachineCredentialsStore? store,
     CredentialFileCodec? codec,
-  }) : _store = store ?? MachineCredentialsStore(),
-       _codec = codec ?? CredentialFileCodec();
+  })  : _store = store ?? MachineCredentialsStore(),
+        _codec = codec ?? CredentialFileCodec();
 
   final MachineCredentialsStore _store;
   final CredentialFileCodec _codec;

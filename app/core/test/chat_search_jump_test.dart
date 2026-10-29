@@ -191,7 +191,8 @@ Future<void> _pickTheOnlyHit(WidgetTester tester) async {
 Finder _hitParagraph() {
   return find.byWidgetPredicate(
     (Widget widget) =>
-        widget is RichText && widget.text.toPlainText().contains('#$_hitIndex '),
+        widget is RichText &&
+        widget.text.toPlainText().contains('#$_hitIndex '),
   );
 }
 

@@ -22,8 +22,10 @@ Stream<List<int>> _chunked(String raw, List<int> cuts) async* {
 void main() {
   group('decodeSseData', () {
     test('parses a JSON object', () {
-      expect(decodeSseData('{"a":1,"b":"x"}'),
-          <String, Object?>{'a': 1, 'b': 'x'},);
+      expect(
+        decodeSseData('{"a":1,"b":"x"}'),
+        <String, Object?>{'a': 1, 'b': 'x'},
+      );
     });
 
     test('wraps non-JSON payloads as text', () {
@@ -58,7 +60,10 @@ void main() {
         _wireBytes('data: line one\ndata: line two\n\n'),
       ).toList();
       // Not valid JSON, so it falls back to the text envelope with both lines.
-      expect(events.single.data, <String, Object?>{'text': 'line one\nline two'});
+      expect(
+        events.single.data,
+        <String, Object?>{'text': 'line one\nline two'},
+      );
     });
 
     test('splits multiple frames on the blank line', () async {
@@ -68,8 +73,10 @@ void main() {
           'event: agent_done\ndata: {"ok":true}\n\n',
         ),
       ).toList();
-      expect(events.map((BackendEvent e) => e.type),
-          <String>['delta', 'agent_done'],);
+      expect(
+        events.map((BackendEvent e) => e.type),
+        <String>['delta', 'agent_done'],
+      );
       expect(events[0].data, <String, Object?>{'text': 'a'});
       expect(events[1].data, <String, Object?>{'ok': true});
     });

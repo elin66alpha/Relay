@@ -1,12 +1,12 @@
 name: CI
 
-# Runs the commands from ENGINEERING.md's Verification section. Keep the two
-# jobs in sync with that section when the expected commands change.
-
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -30,62 +30,109 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: subosito/flutter-action@v2
         with:
-          # Pinned so analyzer output stays reproducible; bump deliberately.
           flutter-version: 3.41.9
           channel: stable
           cache: true
-
-      # core holds the screens, logic and tests; shell is the runnable app
-      # around it for each platform.
       - run: flutter pub get
         working-directory: app/core
-
       - run: flutter pub get
         working-directory: app/shell
-
+      - run: dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib
+      - run: node scripts/release/check_versions.js
+      - run: node scripts/release/check_docs.js
+      - run: node --test scripts/release/checks.test.js
       - run: flutter analyze --no-pub
         working-directory: app/core
-
       - run: flutter analyze --no-pub
         working-directory: app/shell
-
       - run: flutter test --no-pub
         working-directory: app/core
-
       - run: |
           flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
           test -f build/web/index.html
         working-directory: app/shell
+      - run: flutter build apk --debug --no-pub
+        working-directory: app/shell
 
   server:
-    name: Node backend
-    runs-on: ubuntu-latest
+    name: Node backend (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: windows-latest
+            node: 24
+          - os: macos-latest
+            node: 24
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: server/package-lock.json
-
-      # node-pty builds a native addon; ubuntu-latest already ships Python 3,
-      # make, and a C++ compiler.
       - run: npm ci
-        working-directory: server
-
       - run: node -e "require('node-pty')"
-        working-directory: server
-
       - name: Syntax-check every backend source file
+        if: runner.os == 'Linux'
         run: git ls-files '*.js' | xargs -r -n1 node --check
-        working-directory: server
-
       - run: npm run lint
-        working-directory: server
-
       - run: npm test
-        working-directory: server
+
+  windows-client:
+    name: Windows desktop client
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+        working-directory: app/shell
+      - run: flutter build windows --release --no-pub
+        working-directory: app/shell
+
+  ios:
+    name: iOS client
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+        working-directory: app/shell
+      - run: flutter build ios --release --no-pub --no-codesign
+        working-directory: app/shell
+
+  required:
+    name: CI complete
+    if: always()
+    needs: [windows-setup, flutter, server, windows-client, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all jobs to pass
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - run: echo 'All CI jobs passed.'

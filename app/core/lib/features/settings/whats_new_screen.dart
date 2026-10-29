@@ -165,6 +165,7 @@ const List<_Release> _zhReleases = <_Release>[
     ],
     changes: <String>[
       '项目文件按用途重新整理：客户端在 app/，后端在 server/，所有脚本在 scripts/，所有文档在 docs/。',
+      '后端现在需要 Node.js 22 或更新版本；Linux 安装脚本会在需要时提示升级。',
     ],
   ),
   _Release(
@@ -247,6 +248,7 @@ const List<_Release> _enReleases = <_Release>[
     ],
     changes: <String>[
       'The project files are grouped by purpose: the app in app/, the backend in server/, every script in scripts/ and every document in docs/.',
+      'The backend now needs Node.js 22 or newer; Linux setup offers an upgrade when needed.',
     ],
   ),
   _Release(

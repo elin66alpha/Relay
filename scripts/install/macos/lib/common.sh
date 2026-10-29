@@ -170,12 +170,12 @@ EOF
 }
 
 require_node() {
-  need node || { c_err "Node.js 18+ is required. Install it with Homebrew: brew install node"; exit 1; }
+  need node || { c_err "Node.js 22+ is required. Install it with Homebrew: brew install node"; exit 1; }
   need npm || { c_err "npm is required."; exit 1; }
   local major
   major="$(node -p "Number(process.versions.node.split('.')[0])")"
-  if [ "$major" -lt 18 ]; then
-    c_err "Node.js 18+ is required. Current version: $(node -v)"
+  if [ "$major" -lt 22 ]; then
+    c_err "Node.js 22+ is required. Current version: $(node -v)"
     exit 1
   fi
 }

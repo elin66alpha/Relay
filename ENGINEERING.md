@@ -36,10 +36,10 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/shell | the runnable Flutter app `relay`: `main.dart`, the app version, and the android, ios, linux, macos, windows and web platform projects |
 | server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
-| scripts/release | release bundle builders and the Windows setup checks CI runs |
+| scripts/release | release bundle builders, version/documentation checks, Windows setup checks and local Android signing for a release draft |
 | scripts/dev | local development helpers (build flow, backend restart, icon export) |
 | docs | handbook, install guides, security model, changelog, release notes, README screenshots |
-| .github/workflows | CI, which runs the Verification commands on pull requests |
+| .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft |
 
 | Module | Responsibility | Interface | Depends on |
 |---|---|---|---|
@@ -108,6 +108,8 @@ removed.
 
 Command lines are automated. The rest are manual checks in the app or on the host; a precondition in parentheses must hold first.
 
+- `dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib` with Flutter's pinned Dart SDK -> no files changed
+- `node scripts/release/check_versions.js`, `node scripts/release/check_docs.js` and `node --test scripts/release/checks.test.js` -> exit 0
 - `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
@@ -131,6 +133,8 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
 - `(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)` -> exit 0, `app/shell/build/web/index.html` exists; `app/shell/build/web/assets/FontManifest.json` lists `packages/relay_core/RelayTerminalMono`
+- `(cd app/shell && flutter build apk --debug --no-pub)` -> exit 0 without a release signing key
+- CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Windows desktop client and an unsigned iOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows SHA-256 `3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f`
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.

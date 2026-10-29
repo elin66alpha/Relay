@@ -241,8 +241,8 @@ class CliAgentsDrawer extends StatelessWidget {
     final String? activeSessionId = selectedAgent
         ? chatController.activeSessionId
         : sessions.isNotEmpty
-        ? sessions.first.id
-        : null;
+            ? sessions.first.id
+            : null;
     final bool usable = isCliAgentSelectable(agent);
     final Color disabledColor = Theme.of(context).colorScheme.outline;
     void showUnavailable() => showAgentUnavailableSnack(context, agent);
@@ -581,8 +581,8 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
 
   Future<void> _load() async {
     try {
-      final List<ChatGroup> swarms = await widget.chatController.backend
-          .fetchGroups();
+      final List<ChatGroup> swarms =
+          await widget.chatController.backend.fetchGroups();
       if (mounted) setState(() => _swarms = swarms);
     } on BackendException {
       // Best-effort: a failed fetch just leaves the last-known list in place.

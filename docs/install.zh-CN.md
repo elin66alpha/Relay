@@ -7,15 +7,15 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 
 ## 前置要求
 
-- Node.js 18 或更新版本。
-- 后端至少安装一个支持的 CLI：Claude Code、Codex、OpenCode 或 Hermes。
+- Node.js 22 或更新版本。
+- 后端至少安装一个支持的 CLI：Claude Code、Codex、Cursor、OpenCode 或 Hermes。
 - 每个 CLI 都必须直接在后端主机上完成认证或 provider 配置。Relay 只报告状态，
   不执行 OAuth 登录，也不收集 provider 密钥。
 - Unix 主机下载文件夹时需要 `zip`。Linux 安装还需要 PM2、Python 3、`make` 和
   C++ 编译器，以编译终端的 PTY 依赖。
 - 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
 - 在 Debian 和 Ubuntu 上，Linux 安装脚本会检查上面除 agent CLI 以外的所有项，包括
-  Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 18
+  Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 22
   时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
   安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
 

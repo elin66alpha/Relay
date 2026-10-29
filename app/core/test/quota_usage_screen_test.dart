@@ -59,7 +59,8 @@ void main() {
     );
   });
 
-  testWidgets('the composer strip holds its place with a spinner and is not a link', (
+  testWidgets(
+      'the composer strip holds its place with a spinner and is not a link', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});

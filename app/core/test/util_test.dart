@@ -47,7 +47,9 @@ void main() {
     test('returns a credential exception message verbatim', () {
       expect(
         friendlyErrorText(
-            strings, const MachineCredentialException('bad passphrase'),),
+          strings,
+          const MachineCredentialException('bad passphrase'),
+        ),
         'bad passphrase',
       );
     });
@@ -55,22 +57,29 @@ void main() {
     test('maps NETWORK_* backend codes to the localized network message', () {
       final BackendException err =
           BackendException('raw', code: 'NETWORK_TIMEOUT');
-      expect(friendlyErrorText(strings, err), strings.networkError('NETWORK_TIMEOUT'));
+      expect(
+        friendlyErrorText(strings, err),
+        strings.networkError('NETWORK_TIMEOUT'),
+      );
       expect(friendlyErrorText(strings, err), isNot('raw'));
     });
 
     test('returns the message for non-network backend exceptions', () {
       expect(
-        friendlyErrorText(strings,
-            BackendException('token missing', code: 'TOKEN_NOT_CONFIGURED'),),
+        friendlyErrorText(
+          strings,
+          BackendException('token missing', code: 'TOKEN_NOT_CONFIGURED'),
+        ),
         'token missing',
       );
       expect(friendlyErrorText(strings, BackendException('plain')), 'plain');
     });
 
     test('falls back to toString for arbitrary errors', () {
-      expect(friendlyErrorText(strings, StateError('boom')),
-          'Bad state: boom',);
+      expect(
+        friendlyErrorText(strings, StateError('boom')),
+        'Bad state: boom',
+      );
     });
   });
 }

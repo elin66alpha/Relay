@@ -42,8 +42,7 @@ String decodeQrFromRgba(int width, int height, Uint8List rgba) {
 Int32List _argbPixels(int count, Uint8List rgba) {
   final Int32List pixels = Int32List(count);
   for (int i = 0, offset = 0; i < count; i++, offset += 4) {
-    pixels[i] =
-        (rgba[offset + 3] << 24) |
+    pixels[i] = (rgba[offset + 3] << 24) |
         (rgba[offset] << 16) |
         (rgba[offset + 1] << 8) |
         rgba[offset + 2];
