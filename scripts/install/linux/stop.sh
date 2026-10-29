@@ -18,4 +18,4 @@ for proc in "$TUNNEL_PROC" "$SERVER_PROC"; do
 done
 
 pm2 save >/dev/null 2>&1 || true
-c_info "Stopped. The processes stay registered, so ./backends/linux/start.sh resumes them."
+c_info "Stopped. The processes stay registered, so ./scripts/install/linux/start.sh resumes them."

@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $Script:WindowsDir = Split-Path -Parent $PSScriptRoot
-$Script:RootDir = Split-Path -Parent (Split-Path -Parent $Script:WindowsDir)
+$Script:RootDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $Script:WindowsDir))
 $Script:ServerDir = Join-Path $Script:RootDir 'server'
 $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'

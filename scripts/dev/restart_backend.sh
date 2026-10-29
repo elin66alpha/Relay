@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SERVER_DIR="$ROOT_DIR/server"
 PM2_APP_NAME="${PM2_APP_NAME:-relay-server}"
 PM2_ECOSYSTEM="${PM2_ECOSYSTEM:-ecosystem.config.js}"

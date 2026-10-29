@@ -4,11 +4,11 @@
 # backend sources and service adapters, without tests, dependencies or
 # deployment state, plus the compiled Web client in build/web.
 #
-#   ./scripts/package_backend.sh [output-dir]
+#   ./scripts/release/package_backend.sh [output-dir]
 #
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 VERSION="$(node -p "require('./server/package.json').version")"
@@ -28,7 +28,7 @@ TAR="$(mktemp)"
 trap 'rm -f "$TAR"' EXIT
 # shellcheck disable=SC2046 # one argument per tracked path
 git archive --format=tar --prefix="$NAME/" -o "$TAR" HEAD $(git ls-tree -r --name-only HEAD |
-  grep -E '^(CHANGELOG\.md|LICENSE|README(\.zh-CN)?\.md|SECURITY\.md|docs/handbook\.md|scripts/setup\.sh|backends/README(\.zh-CN)?\.md|backends/(linux|macos)/(lib/)?[^/]+\.sh|backends/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
+  grep -E '^(LICENSE|README(\.zh-CN)?\.md|docs/(CHANGELOG|SECURITY|handbook|install(\.zh-CN)?)\.md|scripts/install/(linux|macos)/(lib/)?[^/]+\.sh|scripts/install/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
 tar --append -f "$TAR" --transform "s,^build/,$NAME/build/," build/web
 gzip -9 -c "$TAR" >"$ARCHIVE"
 (cd "$OUT_DIR" && sha256sum "$NAME.tar.gz" >"$NAME.tar.gz.sha256")

@@ -1,7 +1,7 @@
 # Platform adapter contract; runs without administrator rights, network or tasks.
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-. "$PSScriptRoot\..\backends\windows\lib\setup.ps1"
+. "$PSScriptRoot\..\install\windows\lib\setup.ps1"
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('relay-setup-test-' + [guid]::NewGuid().ToString('N'))
 $Script:RootDir = Join-Path $scratch 'bundle with spaces'
 $Script:ServerDir = Join-Path $Script:RootDir 'server'

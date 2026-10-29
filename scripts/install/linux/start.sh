@@ -20,4 +20,4 @@ fi
 pm2 start ecosystem.config.js --update-env
 pm2 save >/dev/null 2>&1 || true
 
-c_info "Started. Check it with ./backends/linux/status.sh"
+c_info "Started. Check it with ./scripts/install/linux/status.sh"

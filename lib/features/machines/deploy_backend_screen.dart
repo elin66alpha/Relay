@@ -250,19 +250,19 @@ const List<_Command> _setupCommands = <_Command>[
     code:
         'curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash',
   ),
-  _Command(label: 'macOS', code: './backends/macos/setup.sh'),
+  _Command(label: 'macOS', code: './scripts/install/macos/setup.sh'),
   _Command(
     label: 'Windows (PowerShell)',
-    code: r'.\backends\windows\setup.ps1',
+    code: r'.\scripts\install\windows\setup.ps1',
   ),
 ];
 
 const List<_Command> _statusCommands = <_Command>[
-  _Command(label: 'Linux', code: './backends/linux/status.sh'),
-  _Command(label: 'macOS', code: './backends/macos/status.sh'),
+  _Command(label: 'Linux', code: './scripts/install/linux/status.sh'),
+  _Command(label: 'macOS', code: './scripts/install/macos/status.sh'),
   _Command(
     label: 'Windows (PowerShell)',
-    code: r'.\backends\windows\status.ps1',
+    code: r'.\scripts\install\windows\status.ps1',
   ),
 ];
 

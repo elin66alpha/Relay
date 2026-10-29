@@ -241,7 +241,7 @@ internal sealed class RelaySetup : Form
         state.Text = "Running: " + action; request["action"] = action;
         string result = null;
         try {
-            var worker = Path.Combine(root, "backends", "windows", "setup-action.ps1");
+            var worker = Path.Combine(root, "scripts", "install", "windows", "setup-action.ps1");
             if (!File.Exists(worker)) throw new FileNotFoundException("Keep Setup.exe with the complete extracted backend bundle.", worker);
             var start = new ProcessStartInfo {
                 FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),

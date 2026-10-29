@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 MACOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-ROOT_DIR="$(cd "$MACOS_DIR/../.." && pwd -P)"
+ROOT_DIR="$(cd "$MACOS_DIR/../../.." && pwd -P)"
 SERVER_DIR="$ROOT_DIR/server"
 ENV_FILE="$SERVER_DIR/.env"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"

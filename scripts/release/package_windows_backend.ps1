@@ -7,7 +7,7 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
   throw 'Build this bundle on Windows so native dependencies match the target.'
 }
@@ -55,26 +55,26 @@ if (Test-Path -LiteralPath $archive) { throw "Archive already exists: $archive" 
 $stage = Join-Path $OutputDirectory ("stage-" + [guid]::NewGuid().ToString('N'))
 $bundle = Join-Path $stage $name
 New-Item -ItemType Directory -Path $bundle -Force | Out-Null
-$tracked = & git -C $root ls-files -- server backends/windows
+$tracked = & git -C $root ls-files -- server scripts/install/windows
 if ($LASTEXITCODE -ne 0) { throw 'Could not list tracked backend source files.' }
 $sources = @($tracked | Where-Object {
   $_ -match '^server/(server\.js|package(-lock)?\.json|\.env\.example|\.gitignore)$' -or
   $_ -match '^server/(lib|routes|scripts|test)/.*\.js$' -or
-  $_ -match '^backends/windows/(lib/)?[^/]+\.ps1$' -or
-  $_ -eq 'backends/windows/Setup.cs'
+  $_ -match '^scripts/install/windows/(lib/)?[^/]+\.ps1$' -or
+  $_ -eq 'scripts/install/windows/Setup.cs'
 })
 foreach ($relative in $sources) {
   $destination = Join-Path $bundle $relative
   New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $root $relative) -Destination $destination
 }
-foreach ($relative in @('LICENSE', 'SECURITY.md', 'CHANGELOG.md',
-    'backends/README.md', 'backends/README.zh-CN.md', 'docs/handbook.md')) {
+foreach ($relative in @('LICENSE', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
+    'docs/install.md', 'docs/install.zh-CN.md', 'docs/handbook.md')) {
   $destination = Join-Path $bundle $relative
   New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $root $relative) -Destination $destination
 }
-Copy-Item -LiteralPath (Join-Path $root 'backends\windows\PACKAGE.md') -Destination (Join-Path $bundle 'README.md')
+Copy-Item -LiteralPath (Join-Path $root 'docs\windows-package.md') -Destination (Join-Path $bundle 'README.md')
 New-Item -ItemType Directory -Path (Join-Path $bundle 'build') -Force | Out-Null
 Copy-Item -LiteralPath $webSource -Destination (Join-Path $bundle 'build\web') -Recurse
 & (Join-Path $PSScriptRoot 'build_windows_setup.ps1') -OutputPath (Join-Path $bundle 'Setup.exe')
@@ -98,7 +98,7 @@ try {
 
 $ascii = New-Object Text.ASCIIEncoding
 foreach ($command in @('setup', 'start', 'stop', 'status', 'uninstall')) {
-  $commandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0backends\windows\' + $command + '.ps1" %*'
+  $commandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install\windows\' + $command + '.ps1" %*'
   $lines = @('@echo off', $commandLine, 'exit /b %errorlevel%')
   [IO.File]::WriteAllLines((Join-Path $bundle "$command.cmd"), $lines, $ascii)
 }
@@ -123,8 +123,8 @@ $manifest = [ordered]@{
 
 # Audit Relay's own tree separately: dependency packages legitimately ship JSON
 # files with names that resemble application state. No local config is copied.
-$allowed = @($sources) + @('LICENSE', 'SECURITY.md', 'CHANGELOG.md', 'README.md',
-  'backends/README.md', 'backends/README.zh-CN.md', 'docs/handbook.md',
+$allowed = @($sources) + @('LICENSE', 'README.md', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
+  'docs/install.md', 'docs/install.zh-CN.md', 'docs/handbook.md',
   'setup.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'uninstall.cmd',
   'credential.cmd', 'bundle-info.json', 'Setup.exe')
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {

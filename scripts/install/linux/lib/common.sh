@@ -3,11 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 LINUX_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-ROOT_DIR="$(cd "$LINUX_DIR/../.." && pwd -P)"
+ROOT_DIR="$(cd "$LINUX_DIR/../../.." && pwd -P)"
 SERVER_DIR="$ROOT_DIR/server"
 ENV_FILE="$SERVER_DIR/.env"
 
-# Process names created by scripts/setup.sh via server/ecosystem.config.js.
+# Process names created by setup.sh via server/ecosystem.config.js.
 SERVER_PROC="relay-server"
 TUNNEL_PROC="relay-tunnel"
 PM2_LOG_DIR="$HOME/.pm2/logs"
@@ -35,11 +35,11 @@ require_pm2() {
 
 require_setup() {
   [ -f "$ENV_FILE" ] || {
-    c_err "server/.env is missing. Run ./backends/linux/setup.sh first."
+    c_err "server/.env is missing. Run ./scripts/install/linux/setup.sh first."
     exit 1
   }
   [ -d "$SERVER_DIR/node_modules" ] || {
-    c_err "Backend dependencies are missing. Run ./backends/linux/setup.sh first."
+    c_err "Backend dependencies are missing. Run ./scripts/install/linux/setup.sh first."
     exit 1
   }
 }

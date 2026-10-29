@@ -19,7 +19,7 @@ c_err() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1; }
 
 [ "$(uname -s)" = Linux ] || {
-  c_err "This installer is for Linux. On macOS and Windows, see https://github.com/$REPO/tree/main/backends"
+  c_err "This installer is for Linux. On macOS and Windows, see https://github.com/$REPO/blob/main/docs/install.md"
   exit 1
 }
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
@@ -72,6 +72,8 @@ curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS"
 mkdir -p "$dir"
 # The Web client's files change names between builds; replace it whole.
 rm -rf "$dir/build/web"
+# Releases before 0.1.10 kept these scripts in backends/.
+rm -rf "$dir/backends"
 tar -xzf "$tmp/$name" -C "$dir" --strip-components=1
 c_info "Relay $version unpacked in $dir"
 
@@ -84,8 +86,8 @@ if [ "$upgrade" -eq 1 ]; then
     pm2 save >/dev/null 2>&1 || true
   fi
   c_info "Upgraded to $version. Tokens, chats and settings are unchanged."
-  c_info "For status, tokens or agent CLIs run: $dir/backends/linux/setup.sh"
+  c_info "For status, tokens or agent CLIs run: $dir/scripts/install/linux/setup.sh"
   exit 0
 fi
 
-exec "$dir/backends/linux/setup.sh" install </dev/tty
+exec "$dir/scripts/install/linux/setup.sh" install </dev/tty

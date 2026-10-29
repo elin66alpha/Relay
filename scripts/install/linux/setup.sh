@@ -5,10 +5,10 @@
 # A menu that installs, reinstalls or uninstalls the backend, shows its status,
 # and manages device tokens. Installing starts the backend with PM2, optionally
 # opens a Cloudflare tunnel, then generates the credential QR that the Relay app
-# scans. Run from the repo root (scripts/install.sh downloads a release and
+# scans. Run from the repo root (install.sh downloads a release and
 # runs it with `install`, which skips the menu on a fresh host):
 #
-#   ./backends/linux/setup.sh [install]
+#   ./scripts/install/linux/setup.sh [install]
 #
 # Network modes:
 #   1. No tunnel: for a VPS / box with a reachable public IP or domain.
@@ -17,9 +17,8 @@
 #
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LINUX_ADAPTER_DIR="$ROOT_DIR/backends/linux"
-# shellcheck source=../backends/linux/lib/common.sh
+LINUX_ADAPTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/common.sh
 source "$LINUX_ADAPTER_DIR/lib/common.sh"
 ENV_EXAMPLE="$SERVER_DIR/.env.example"
 TUNNEL_CONFIG_DIR="$SERVER_DIR/cloudflared-config"
@@ -143,7 +142,7 @@ EOF
 # Under sudo, PM2, the backend, its state files and agent CLI logins would all
 # belong to root instead of the user who runs Relay.
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
-  c_err "Do not run setup with sudo. Run it as $SUDO_USER: ./backends/linux/setup.sh"
+  c_err "Do not run setup with sudo. Run it as $SUDO_USER: ./scripts/install/linux/setup.sh"
   c_err "Setup asks for sudo itself when it installs system software."
   exit 1
 fi
@@ -488,7 +487,7 @@ esac
 
 c_info "Done. In the app, tap \"Scan QR\", scan the QR above, and enter the password you just set."
 c_info "Backend is managed by PM2 (pm2 list / pm2 logs / pm2 restart ${SERVER_PROC})."
-c_info "Run ./backends/linux/setup.sh again for status, tokens, reinstall or uninstall."
+c_info "Run ./scripts/install/linux/setup.sh again for status, tokens, reinstall or uninstall."
 }
 
 # ---- menu ----
