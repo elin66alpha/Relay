@@ -33,7 +33,7 @@ jobs:
           version="$(node -p "require('./server/package.json').version")"
           git show-ref --verify --quiet "refs/tags/v$version" && { echo "v$version already exists." >&2; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
-            --jq 'any(.check_runs[]; .name == "CI complete" and .status == "completed" and .conclusion == "success")' | grep -qx true
+            --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
 
   source-bundle:
     name: Backend setup bundle
@@ -128,7 +128,7 @@ jobs:
           tag="v$version"
           git show-ref --verify --quiet "refs/tags/$tag" && { echo "$tag already exists." >&2; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
-            --jq 'any(.check_runs[]; .name == "CI complete" and .status == "completed" and .conclusion == "success")' | grep -qx true
+            --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
           cd build/release
           sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
             "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" > SHA256SUMS

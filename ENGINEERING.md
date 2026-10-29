@@ -128,6 +128,7 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
+- `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
 - On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes.
 - On Windows, `scripts/release/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
