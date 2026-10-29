@@ -57,6 +57,16 @@ fi
 upgrade=0
 [ -f "$dir/server/.env" ] && upgrade=1
 
+# Existing installations are upgraded without running setup again. Check the
+# new runtime requirement before removing or replacing any of their files.
+if [ "$upgrade" -eq 1 ] && [ "$(printf '%s\n' 0.1.10 "$version" | sort -V | head -n 1)" = 0.1.10 ]; then
+  current_node="$(node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || echo 0)"
+  if [ "$current_node" -lt 22 ] || ! need npm; then
+    c_err "Relay $version needs Node.js 22+ and npm. Upgrade them before rerunning the installer; the existing installation was not changed."
+    exit 1
+  fi
+fi
+
 name="relay-backend-setup-v$version.tar.gz"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

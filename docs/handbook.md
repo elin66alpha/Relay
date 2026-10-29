@@ -582,6 +582,8 @@ desktop client and an unsigned iOS client, tests the backend on Node 22 and 24,
 and checks the versions and local documentation links. The `CI complete` check
 must pass before a pull request can be merged into `main`. Dependabot reports
 vulnerabilities and proposes grouped weekly dependency updates.
+Changes to the release or install scripts also build and audit the release
+bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing

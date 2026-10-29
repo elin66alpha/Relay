@@ -23,6 +23,9 @@ Cloudflare Tunnel startup to each operating system.
   is missing or older than 22, and `cloudflared` from Cloudflare's release
   `.deb` when a tunnel mode needs it. Run it as the user who will run Relay,
   not with `sudo`.
+- Before upgrading an existing Relay installation to 0.1.10 or later, update
+  Node.js to 22 or newer. The one-line installer checks this before replacing
+  files and leaves the existing installation untouched if it is too old.
 
 ## Install
 

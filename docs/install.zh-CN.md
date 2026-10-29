@@ -18,6 +18,8 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
   Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 22
   时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
   安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
+- 将现有 Relay 升级到 0.1.10 或更新版本前，请先把 Node.js 更新到 22 或更新版本。
+  一键安装脚本会在替换文件前检查；版本过低时不会改动现有安装。
 
 ## 安装
 

@@ -49,7 +49,7 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib
       - run: node scripts/release/check_versions.js
       - run: node scripts/release/check_docs.js
-      - run: node --test scripts/release/checks.test.js
+      - run: node --test scripts/release/*.test.js
       - run: flutter analyze --no-pub
         working-directory: app/core
       - run: flutter analyze --no-pub
