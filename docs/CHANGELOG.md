@@ -17,6 +17,9 @@
 - Backend setup now requires Node.js 22 or newer; Node.js 18 and 20 are no
   longer supported upstream. Linux setup offers Node.js 24 when an upgrade is needed.
 - Updated locked backend dependencies to pick up available security fixes.
+- Updated the Claude Agent SDK, Firebase Admin and other backend
+  dependencies, client plugins (including local notifications 22) and the
+  CI actions, which now run on Node.js 24.
 - The repository is grouped by role. The Flutter client is `app/`:
   `app/core` is the `relay_core` package with every screen, controller, test
   and asset, and `app/shell` is the runnable app with `main.dart` and the
