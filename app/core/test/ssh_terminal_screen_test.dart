@@ -118,51 +118,55 @@ void main() {
     ),
   );
 
-  testWidgets('SSH terminal names its view when it attaches text input', (
-    WidgetTester tester,
-  ) async {
-    // The Windows embedder rejects a text input client without a view id,
-    // which leaves typed characters nowhere to go while Ctrl keys still work.
-    bool attached = false;
-    Object? viewId;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.textInput,
-      (MethodCall call) async {
-        if (call.method == 'TextInput.setClient') {
-          attached = true;
-          viewId = ((call.arguments as List<Object?>).last
-              as Map<Object?, Object?>)['viewId'];
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.textInput, null),
-    );
-    final SshTerminalController controller = SshTerminalController(
-      backend: _FailingBackendClient(),
-    );
-    addTearDown(controller.dispose);
+  testWidgets(
+    'SSH terminal names its view when it attaches text input',
+    (
+      WidgetTester tester,
+    ) async {
+      // The Windows embedder rejects a text input client without a view id,
+      // which leaves typed characters nowhere to go while Ctrl keys still work.
+      bool attached = false;
+      Object? viewId;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.textInput,
+        (MethodCall call) async {
+          if (call.method == 'TextInput.setClient') {
+            attached = true;
+            viewId = ((call.arguments as List<Object?>).last
+                as Map<Object?, Object?>)['viewId'];
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.textInput, null),
+      );
+      final SshTerminalController controller = SshTerminalController(
+        backend: _FailingBackendClient(),
+      );
+      addTearDown(controller.dispose);
 
-    await tester.pumpWidget(
-      AppScope(
-        controller: AppSettingsController(),
-        child: MaterialApp(
-          theme: AppTheme.light(),
-          home:
-              SshTerminalScreen(controller: controller, machineId: 'machine-1'),
+      await tester.pumpWidget(
+        AppScope(
+          controller: AppSettingsController(),
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: SshTerminalScreen(
+              controller: controller,
+              machineId: 'machine-1',
+            ),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(attached, isTrue);
-    expect(viewId, tester.view.viewId);
-  },
-      // Known bug: xterm 4.0.0 sends no view id, so typing is dead on Windows.
-      // Unskip once xterm is patched (TerminalStudio/xterm.dart #228, #231).
-      skip: true,
+      expect(attached, isTrue);
+      expect(viewId, tester.view.viewId);
+    },
+    // Known bug: xterm 4.0.0 sends no view id, so typing is dead on Windows.
+    // Unskip once xterm is patched (TerminalStudio/xterm.dart #228, #231).
+    skip: true,
   );
 }
 
