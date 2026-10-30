@@ -20,7 +20,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.22.3",
     "express-rate-limit": "^8.5.2",
-    "firebase-admin": "^13.10.0",
+    "firebase-admin": "^14.5.0",
     "node-pty": "^1.1.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
