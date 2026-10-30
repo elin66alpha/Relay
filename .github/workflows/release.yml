@@ -21,7 +21,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: node scripts/release/check_versions.js
@@ -40,10 +40,10 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: subosito/flutter-action@v2
@@ -57,7 +57,7 @@ jobs:
         working-directory: app/shell
       - run: ./scripts/release/package_backend.sh
       - run: cp scripts/install/linux/install.sh build/release/install.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: source-bundle
           path: |
@@ -70,8 +70,8 @@ jobs:
     needs: validate
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: subosito/flutter-action@v2
@@ -93,7 +93,7 @@ jobs:
       - name: Build and audit Windows backend bundle
         shell: powershell
         run: ./scripts/release/package_windows_backend.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-bundles
           path: |
@@ -106,8 +106,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Install Linux desktop dependencies
@@ -124,7 +124,7 @@ jobs:
       - run: flutter build linux --release --no-pub
         working-directory: app/shell
       - run: ./scripts/release/package_linux_desktop.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-desktop
           path: build/release/relay-desktop_*_amd64.deb
@@ -135,7 +135,7 @@ jobs:
     needs: validate
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.8
@@ -157,7 +157,7 @@ jobs:
           cp -R app/shell/build/ios/iphoneos/Runner.app build/ipa/Payload/
           (cd build/ipa && zip -qry "../release/relay-ios-unsigned-v$version.ipa" Payload)
           ditto -c -k --keepParent app/shell/build/macos/Build/Products/Release/Relay.app "build/release/relay-macos-v$version.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: apple-clients
           path: |
@@ -176,10 +176,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: build/release
           merge-multiple: true
