@@ -70,6 +70,10 @@ tests.
   `docs/CHANGELOG.md` entry, and a plain-language English and Chinese entry
   (1-3 highlights, other changes as short lines) at the top of
   `app/core/lib/features/settings/whats_new_screen.dart`.
+- Dependabot pull requests merge into the release branch in development, never
+  straight into `main`. When a new release branch starts, point every
+  `target-branch` in `.github/dependabot.yml` at it, on `main`, where
+  Dependabot reads it.
 - `.github/workflows/ci.yml` runs the verification commands on pull requests.
   Update it when those commands change so CI keeps checking the same commands.
 
