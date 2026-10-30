@@ -111,7 +111,10 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev
+          sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev dpkg-dev desktop-file-utils
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.8
@@ -127,12 +130,26 @@ jobs:
       # hosts without depending on their newer system libraries.
       - name: Package Linux client
         if: matrix.os == 'ubuntu-22.04'
-        run: tar -C app/shell/build/linux/x64/release -czf "$RUNNER_TEMP/relay-linux-x64.tar.gz" bundle
+        run: |
+          tar -C app/shell/build/linux/x64/release -czf "$RUNNER_TEMP/relay-linux-x64.tar.gz" bundle
+          ./scripts/release/package_linux_desktop.sh app/shell/build/linux/x64/release/bundle "$RUNNER_TEMP"
+          dpkg-deb --info "$RUNNER_TEMP"/relay-desktop_*_amd64.deb
+          dpkg-deb --extract "$RUNNER_TEMP"/relay-desktop_*_amd64.deb "$RUNNER_TEMP/relay-desktop-check"
+          test -x "$RUNNER_TEMP/relay-desktop-check/usr/lib/relay-desktop/relay"
+          test -L "$RUNNER_TEMP/relay-desktop-check/usr/bin/relay-desktop"
+          desktop-file-validate "$RUNNER_TEMP/relay-desktop-check/usr/share/applications/dev.relay.app.desktop"
+          for size in 16 32 64 128 256 512; do
+            cmp "app/shell/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${size}.png" \
+              "$RUNNER_TEMP/relay-desktop-check/usr/share/icons/hicolor/${size}x${size}/apps/dev.relay.app.png"
+          done
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-22.04'
         with:
           name: relay-linux-x64-ubuntu-22.04
-          path: ${{ runner.temp }}/relay-linux-x64.tar.gz
+          path: |
+            ${{ runner.temp }}/relay-linux-x64.tar.gz
+            ${{ runner.temp }}/relay-desktop_*_amd64.deb
+            ${{ runner.temp }}/relay-desktop_*_amd64.deb.sha256
           if-no-files-found: error
 
   windows-client:

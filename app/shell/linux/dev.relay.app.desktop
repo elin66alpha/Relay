@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Relay
+Comment=Control coding agents running on your own machine
+Exec=relay-desktop
+Icon=dev.relay.app
+Terminal=false
+Categories=Development;
+StartupWMClass=dev.relay.app

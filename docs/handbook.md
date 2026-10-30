@@ -558,8 +558,16 @@ Build prerequisites:
 Typical artifacts, under `app/shell/`, are `build/windows/x64/runner/Release/`,
 `build/macos/Build/Products/Release/Relay.app`, and
 `build/linux/x64/release/bundle/`. Keep the entire Linux bundle together when
-moving it. CI also offers an Ubuntu 22.04-built Linux archive as a workflow
-artifact. Store signing and macOS notarization are not configured.
+moving it. CI also offers an Ubuntu 22.04-built Linux archive and `.deb` as
+workflow artifacts. To build the `.deb` after the Linux release build, run
+`./scripts/release/package_linux_desktop.sh` from the repository root; it uses
+`dpkg-dev` and `desktop-file-utils`. Build it on Ubuntu 22.04 for releases so
+that its system library requirements also work on newer Ubuntu versions.
+
+Install the package with `sudo apt install ./relay-desktop_<VERSION>_amd64.deb`,
+then launch **Relay** from the applications menu or run `relay-desktop`.
+Removing the package does not remove the backend or the user's settings.
+Store signing and macOS notarization are not configured.
 
 ### Android release signing
 
@@ -582,8 +590,8 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 ### Release assets
 
 The `CI` workflow checks pull requests on Linux, Windows and macOS. It analyzes
-and tests the Flutter client, builds Web, an Android debug APK, a Windows
-desktop client and an unsigned iOS client, tests the backend on Node 22 and 24,
+and tests the Flutter client, builds Web, an Android debug APK, Ubuntu and Windows
+desktop clients and an unsigned iOS client, tests the backend on Node 22 and 24,
 and checks the versions and local documentation links. The `CI complete` check
 must pass before a pull request can be merged into `main`. Dependabot reports
 vulnerabilities and proposes grouped weekly dependency updates.
@@ -593,7 +601,7 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend and Windows bundles, verifies their
+`main`. It builds the source backend, Ubuntu desktop and Windows bundles, verifies their
 contents and checksums, and creates a draft for that exact commit. It refuses
 an existing version tag. The draft is marked incomplete until the Android APK
 is signed locally; signing keys must not be uploaded to GitHub.
@@ -628,6 +636,8 @@ A GitHub release `v<VERSION>` carries:
   tree with uncommitted tracked changes.
 - `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
   (`app/shell/build/windows/x64/runner/Release/`);
+- `relay-desktop_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
+  Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
 - `SHA256SUMS` — `sha256sum` of every asset above.
@@ -642,7 +652,8 @@ from `app/shell` (after `flutter pub get`) to export the
 Android, iOS, macOS, Web, and Windows assets into the shell. The Windows ICO includes 16, 24,
 32, 48, 64, 128, and 256 pixel images. iOS and maskable Web exports use an opaque
 navy background; other exports retain the master's transparency. Rebuild each
-client to embed its new assets.
+client to embed its new assets. The Linux `.deb` uses the 16–512 pixel PNGs
+exported for the macOS desktop icon.
 
 ### Backend settings
 

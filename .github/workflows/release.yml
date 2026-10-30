@@ -101,10 +101,39 @@ jobs:
             build/release/relay-backend-windows-x64-*.zip
           if-no-files-found: error
 
+  linux-desktop:
+    name: Ubuntu desktop package
+    needs: validate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev dpkg-dev desktop-file-utils
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - run: flutter build linux --release --no-pub
+        working-directory: app/shell
+      - run: ./scripts/release/package_linux_desktop.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
+          path: build/release/relay-desktop_*_amd64.deb
+          if-no-files-found: error
+
   draft:
     name: Create draft
     if: github.event_name == 'workflow_dispatch'
-    needs: [source-bundle, windows-bundles]
+    needs: [source-bundle, windows-bundles, linux-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -131,7 +160,8 @@ jobs:
             --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
           cd build/release
           sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
-            "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" > SHA256SUMS
+            "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
+            "relay-desktop_${version}_amd64.deb" > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ../..
           {
@@ -143,4 +173,5 @@ jobs:
             --notes-file build/release/notes.md build/release/install.sh \
             "build/release/relay-backend-setup-$tag.tar.gz" \
             "build/release/relay-windows-x64-$tag.zip" \
-            "build/release/relay-backend-windows-x64-$tag.zip" build/release/SHA256SUMS
+            "build/release/relay-backend-windows-x64-$tag.zip" \
+            "build/release/relay-desktop_${version}_amd64.deb" build/release/SHA256SUMS
