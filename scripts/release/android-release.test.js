@@ -42,8 +42,9 @@ set -eu
 case "$1 $2" in
   'repo view') echo owner/Relay ;;
   'release view')
-    if [[ "$*" == *isDraft* ]]; then echo true; else echo '> Android APK is pending local signing. Do not publish this draft yet.'; fi ;;
-  'api repos/owner/Relay/git/ref/tags/v1.2.3') echo abc123 ;;
+    if [[ "$*" == *isDraft* ]]; then echo true
+    elif [[ "$*" == *targetCommitish* ]]; then echo abc123
+    else echo '> Android APK is pending local signing. Do not publish this draft yet.'; fi ;;
   'release download')
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --dir ]; then target="$2"; break; fi

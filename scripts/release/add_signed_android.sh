@@ -16,8 +16,9 @@ repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 [ "$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft)" = true ] || {
   echo "$tag must be an existing release draft." >&2; exit 1;
 }
-tag_commit="$(gh api "repos/$repo/git/ref/tags/$tag" --jq 'select(.object.type == "commit") | .object.sha')"
-[ "$tag_commit" = "$(git rev-parse HEAD)" ] || { echo 'Check out the exact release commit before signing.' >&2; exit 1; }
+# A draft has no tag yet; its target is the commit the tag will name.
+target="$(gh release view "$tag" --repo "$repo" --json targetCommitish --jq .targetCommitish)"
+[ "$target" = "$(git rev-parse HEAD)" ] || { echo 'Check out the exact release commit before signing.' >&2; exit 1; }
 [ -f app/shell/android/key.properties ] || { echo 'Android release signing is not configured.' >&2; exit 1; }
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
