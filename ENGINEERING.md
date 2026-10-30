@@ -336,7 +336,7 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `./scripts/release/package_linux_desktop.sh` on Ubuntu 22.04 after the Linux build -> an amd64 `.deb` and checksum in `build/release/`, with the desktop launcher and hicolor icons; installation adds Relay to the applications menu.
 - (Ubuntu desktop with an unlocked GNOME Keyring) a test machine credential survives an app restart and is removed when deleted.
 - `(cd app/shell && flutter build apk --debug --no-pub)` -> exit 0 without a release signing key
-- CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client and an unsigned iOS client.
+- CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client, an unsigned iOS client and the macOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `scripts/release/add_signed_android.sh` expects (`expected_cert`)
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.

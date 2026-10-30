@@ -5,7 +5,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class DeviceIdStore {
   DeviceIdStore({FlutterSecureStorage? secureStorage, Random? random})
-      : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+      : _secureStorage = secureStorage ??
+            const FlutterSecureStorage(
+              // The data protection keychain needs an Apple team signature,
+              // which the released macOS app does not have.
+              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+            ),
         _random = random ?? Random.secure();
 
   static const String _deviceIdKey = 'relay.device_id.v1';

@@ -167,6 +167,7 @@ const List<_Release> _zhReleases = <_Release>[
       '项目文件按用途重新整理：客户端在 app/，后端在 server/，所有脚本在 scripts/，所有文档在 docs/。',
       '后端现在需要 Node.js 22 或更新版本；Linux 安装脚本会在需要时提示升级。',
       '后端依赖已更新，修复了已知的安全问题。',
+      '发布页新增 Ubuntu 安装包、macOS 版和未签名的 iOS 安装包（iOS 需要自己签名后安装）。',
     ],
   ),
   _Release(
@@ -251,6 +252,7 @@ const List<_Release> _enReleases = <_Release>[
       'The project files are grouped by purpose: the app in app/, the backend in server/, every script in scripts/ and every document in docs/.',
       'The backend now needs Node.js 22 or newer; Linux setup offers an upgrade when needed.',
       'Backend dependencies include available security fixes.',
+      'Releases now include an Ubuntu package, a macOS app and an unsigned iOS app that you sign while installing.',
     ],
   ),
   _Release(

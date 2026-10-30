@@ -591,7 +591,7 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 
 The `CI` workflow checks pull requests on Linux, Windows and macOS. It analyzes
 and tests the Flutter client, builds Web, an Android debug APK, Ubuntu and Windows
-desktop clients and an unsigned iOS client, tests the backend on Node 22 and 24,
+desktop clients, an unsigned iOS client and the macOS client, tests the backend on Node 22 and 24,
 and checks the versions and local documentation links. The `CI complete` check
 must pass before a pull request can be merged into `main`. Dependabot reports
 vulnerabilities and proposes grouped weekly dependency updates.
@@ -601,7 +601,7 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend, Ubuntu desktop and Windows bundles, verifies their
+`main`. It builds the source backend, Ubuntu desktop, Windows, macOS and iOS bundles, verifies their
 contents and checksums, and creates a draft for that exact commit. It refuses
 an existing version tag. The draft is marked incomplete until the Android APK
 is signed locally; signing keys must not be uploaded to GitHub.
@@ -640,6 +640,15 @@ A GitHub release `v<VERSION>` carries:
   Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
+- `relay-macos-v<VERSION>.zip` — the macOS desktop client
+  (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
+  Intel). It has only an ad-hoc signature, so macOS blocks the first launch:
+  open it from the context menu, or run
+  `xattr -dr com.apple.quarantine Relay.app`. It keeps credentials in the login
+  keychain, which may ask for access again after an update;
+- `relay-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
+  it while installing, for example with Sideloadly or AltStore; an app signed
+  with a free Apple ID expires after seven days;
 - `SHA256SUMS` — `sha256sum` of every asset above.
 
 ## Configuration

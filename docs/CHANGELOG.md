@@ -2,6 +2,16 @@
 
 ## 0.1.10 - 2026-10-29
 
+### Added
+
+- Releases include an Ubuntu desktop package (`.deb`), a macOS desktop client
+  and an unsigned iOS app (`.ipa`) to sign while installing.
+
+### Fixed
+
+- The macOS client can save machine credentials, pick files and save
+  downloads to the Downloads folder without an Apple developer signature.
+
 ### Changed
 
 - Backend setup now requires Node.js 22 or newer; Node.js 18 and 20 are no

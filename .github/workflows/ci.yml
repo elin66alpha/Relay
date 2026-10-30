@@ -168,7 +168,7 @@ jobs:
         working-directory: app/shell
 
   ios:
-    name: iOS client
+    name: iOS and macOS clients
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -180,6 +180,8 @@ jobs:
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: flutter build ios --release --no-pub --no-codesign
+        working-directory: app/shell
+      - run: flutter build macos --release --no-pub
         working-directory: app/shell
 
   required:
