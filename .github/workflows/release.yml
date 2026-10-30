@@ -1,0 +1,177 @@
+name: Prepare release draft
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release/**
+      - scripts/install/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node scripts/release/check_versions.js
+      - name: Require tested main commit and unused tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo 'Run this workflow on main.' >&2; exit 1; }
+          version="$(node -p "require('./server/package.json').version")"
+          git show-ref --verify --quiet "refs/tags/v$version" && { echo "v$version already exists." >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
+
+  source-bundle:
+    name: Backend setup bundle
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: node scripts/release/check_versions.js
+      - run: node scripts/release/check_docs.js
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - run: ./scripts/release/package_backend.sh
+      - run: cp scripts/install/linux/install.sh build/release/install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-bundle
+          path: |
+            build/release/relay-backend-setup-*.tar.gz
+            build/release/install.sh
+          if-no-files-found: error
+
+  windows-bundles:
+    name: Windows backend and desktop
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: node scripts/release/check_versions.js
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - run: flutter build windows --release --no-pub
+        working-directory: app/shell
+      - name: Package Windows desktop client
+        shell: pwsh
+        run: |
+          $version = node -p "require('./server/package.json').version"
+          New-Item -ItemType Directory -Force -Path build/release | Out-Null
+          Compress-Archive -Path app/shell/build/windows/x64/runner/Release/* -DestinationPath "build/release/relay-windows-x64-v$version.zip"
+      - name: Build and audit Windows backend bundle
+        shell: powershell
+        run: ./scripts/release/package_windows_backend.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundles
+          path: |
+            build/release/relay-windows-x64-*.zip
+            build/release/relay-backend-windows-x64-*.zip
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Ubuntu desktop package
+    needs: validate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev dpkg-dev desktop-file-utils
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - run: flutter build linux --release --no-pub
+        working-directory: app/shell
+      - run: ./scripts/release/package_linux_desktop.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
+          path: build/release/relay-desktop_*_amd64.deb
+          if-no-files-found: error
+
+  draft:
+    name: Create draft
+    if: github.event_name == 'workflow_dispatch'
+    needs: [source-bundle, windows-bundles, linux-desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      checks: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/release
+          merge-multiple: true
+      - name: Verify source and prepare draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo 'Run this workflow on main.' >&2; exit 1; }
+          version="$(node -p "require('./server/package.json').version")"
+          tag="v$version"
+          git show-ref --verify --quiet "refs/tags/$tag" && { echo "$tag already exists." >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
+          cd build/release
+          sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
+            "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
+            "relay-desktop_${version}_amd64.deb" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cd ../..
+          {
+            echo '> Android APK is pending local signing. Do not publish this draft yet.'
+            echo
+            awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md
+          } > build/release/notes.md
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Relay $version" \
+            --notes-file build/release/notes.md build/release/install.sh \
+            "build/release/relay-backend-setup-$tag.tar.gz" \
+            "build/release/relay-windows-x64-$tag.zip" \
+            "build/release/relay-backend-windows-x64-$tag.zip" \
+            "build/release/relay-desktop_${version}_amd64.deb" build/release/SHA256SUMS

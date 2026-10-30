@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+    groups:
+      npm-dependencies:
+        patterns: ['*']
+  - package-ecosystem: pub
+    directory: /app/core
+    schedule:
+      interval: weekly
+    groups:
+      core-dependencies:
+        patterns: ['*']
+  - package-ecosystem: pub
+    directory: /app/shell
+    schedule:
+      interval: weekly
+    groups:
+      shell-dependencies:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']

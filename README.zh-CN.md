@@ -7,17 +7,17 @@
 一个连接 Claude Code、Codex、Cursor、OpenCode 与 Hermes 的私有、自托管远程工作台。
 
 ![Flutter 客户端](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
-![Node.js 后端](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
+![Node.js 后端](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
 ![自托管](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
-[English](README.md) · [安装后端](backends/README.zh-CN.md) ·
-[安全模型](SECURITY.md) · [技术手册](docs/handbook.md)
+[English](README.md) · [安装后端](docs/install.zh-CN.md) ·
+[安全模型](docs/SECURITY.md) · [技术手册](docs/handbook.md)
 
 </div>
 
-<a href="assets/screenshots/relay-overview-web-zh.png">
-  <img src="assets/screenshots/relay-overview-web-zh.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
+<a href="docs/screenshots/relay-overview-web-zh.png">
+  <img src="docs/screenshots/relay-overview-web-zh.png" alt="暗色主题加壁纸的 Relay 首页，显示当前机器、工作区以及 agent 与蜂群侧栏" width="100%">
 </a>
 
 Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上。手机、Web 与桌面共用
@@ -45,17 +45,17 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 聊天面板、消息气泡和其他页面使用同一种亚克力材质；滑块下方的两个输入框设置其模糊度
 （0-30，默认 6）和底色（0-100%，默认 55%），亮色与暗色共用。
 
-<a href="assets/screenshots/relay-chat-web-zh.png">
-  <img src="assets/screenshots/relay-chat-web-zh.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
+<a href="docs/screenshots/relay-chat-web-zh.png">
+  <img src="docs/screenshots/relay-chat-web-zh.png" alt="Relay Web 客户端中的持久 Claude Code 会话，带命名会话、额度与上下文用量" width="100%">
 </a>
 
 ### 在手机上聊天、协作和管理文件
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile-zh.png"><img src="assets/screenshots/relay-chat-mobile-zh.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile-zh.png"><img src="assets/screenshots/relay-swarm-mobile-zh.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile-zh.png"><img src="assets/screenshots/relay-files-mobile-zh.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-chat-mobile-zh.png"><img src="docs/screenshots/relay-chat-mobile-zh.png" alt="Relay 移动端智能体会话" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-swarm-mobile-zh.png"><img src="docs/screenshots/relay-swarm-mobile-zh.png" alt="Relay 移动端多智能体蜂群" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-files-mobile-zh.png"><img src="docs/screenshots/relay-files-mobile-zh.png" alt="Relay 移动端远程文件浏览器" width="100%"></a></td>
   </tr>
   <tr>
     <td align="center"><strong>持久会话</strong><br>从任意地点继续长时间运行的 agent 任务。</td>
@@ -107,7 +107,7 @@ Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenC
 
 ### 1. 准备后端主机
 
-在 Linux、macOS 或 Windows 主机安装 Node.js 18+ 和至少一个支持的 CLI。Claude、
+在 Linux、macOS 或 Windows 主机安装 Node.js 22+ 和至少一个支持的 CLI。Claude、
 Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
 Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
 
@@ -132,13 +132,13 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 | 后端系统 | 安装命令 |
 |---|---|
-| Linux | `./backends/linux/setup.sh` |
-| macOS | `./backends/macos/setup.sh` |
-| Windows PowerShell | `.\backends\windows\setup.ps1` |
+| Linux | `./scripts/install/linux/setup.sh` |
+| macOS | `./scripts/install/macos/setup.sh` |
+| Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
 安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
-[后端前置要求](backends/README.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
+[后端前置要求](docs/install.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
 时需要 `zip`。在 Debian 和 Ubuntu 上，缺少这些工具或 Node.js 时，Linux 安装脚本会提出
 替你安装。
 
@@ -156,7 +156,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 在 Android 与 iOS App 中，在聊天页任意位置右滑即可打开侧栏。
 发送任务前，通过“文件系统 → 设为工作路径”选择项目。首页“教程”提供命名会话、
 智能体设置、蜂群、文件操作和手机终端快捷键的详细说明。服务命令、网络配置与各平台说明
-见[后端安装指南](backends/README.zh-CN.md)。
+见[后端安装指南](docs/install.zh-CN.md)。
 
 ## 安全边界
 
@@ -170,23 +170,22 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 > [!IMPORTANT]
 > Relay 不是沙箱。Agent 和终端进程拥有后端系统用户的权限。请使用受限的非 root 用户
-> 运行，公网部署时终止 TLS，并先阅读 [SECURITY.md](SECURITY.md) 和
+> 运行，公网部署时终止 TLS，并先阅读 [SECURITY.md](docs/SECURITY.md) 和
 > [生产部署清单](docs/handbook.md#production-deployment)。
 
 ## 开发
 
 ```bash
-flutter pub get
-flutter analyze --no-pub
-flutter test --no-pub
+(cd app/core && flutter pub get && flutter analyze --no-pub && flutter test --no-pub)
+(cd app/shell && flutter pub get && flutter analyze --no-pub)
 npm --prefix server install
 npm --prefix server test
 ```
 
-使用 `flutter run` 启动客户端。自托管 Web 构建：
+在 `app/shell` 里用 `flutter run` 启动客户端。自托管 Web 构建：
 
 ```bash
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
@@ -197,13 +196,17 @@ Web 参数会有意禁用 service worker，并在本地打包 CanvasKit。Window
 
 ```text
 Relay/
-├── lib/          共享 Flutter 客户端
-├── server/       Node.js 后端与测试
-├── backends/     各系统安装和服务管理适配
-├── docs/         运维与架构手册
-├── scripts/      开发与部署工具
-└── test/         Flutter 测试
+├── app/              客户端（前端）
+│   ├── core/         所有界面、逻辑、测试和资源（Dart 包 relay_core）
+│   └── shell/        各平台的可运行外壳：android、ios、linux、macos、windows、web
+├── server/           后端：Node.js 服务及其测试
+├── scripts/
+│   ├── install/      安装和管理后端：linux、macos、windows
+│   ├── release/      构建和检查发布包
+│   └── dev/          本地开发工具
+├── docs/             手册、安装指南、安全模型、更新日志
+└── .github/workflows 每个 PR 上 GitHub 自动运行的 CI 检查
 ```
 
 贡献者和编程 agent 请先阅读 [AGENTS.md](AGENTS.md)，版本记录见
-[CHANGELOG.md](CHANGELOG.md)。Relay 使用 [MIT License](LICENSE) 发布。
+[CHANGELOG.md](docs/CHANGELOG.md)。Relay 使用 [MIT License](LICENSE) 发布。

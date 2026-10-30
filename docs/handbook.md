@@ -1,8 +1,8 @@
 # Relay handbook
 
 This is the durable operating and architecture reference for Relay. Start with
-the [README](../README.md), use the [backend setup guide](../backends/README.md)
-for installation, and read [SECURITY.md](../SECURITY.md) before exposing a
+the [README](../README.md), use the [backend setup guide](install.md)
+for installation, and read [SECURITY.md](SECURITY.md) before exposing a
 backend outside a trusted network.
 
 ## Production deployment
@@ -457,7 +457,7 @@ npm start
 
 On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
-Debian/Ubuntu; `./backends/linux/setup.sh` installs them there when
+Debian/Ubuntu; `./scripts/install/linux/setup.sh` installs them there when
 missing). macOS and Windows use the package's supported prebuilt binaries
 when available. Unix hosts also need `zip` for directory downloads.
 
@@ -471,18 +471,19 @@ an incomplete installation.
 To let the backend serve the Flutter Web client:
 
 ```bash
-flutter pub get
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter pub get && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
-The server serves `build/web` when present, unless `RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the
-service worker is disabled to keep the self-hosted client current.
+The server serves `app/shell/build/web` when present, unless
+`RELAY_SERVE_WEB=0`. CanvasKit is bundled locally and the service worker is
+disabled to keep the self-hosted client current.
 
-`scripts/restart_backend.sh` restarts only the PM2 backend: it syntax-checks the
-backend JavaScript (`SKIP_CHECK=1` skips this), restarts or recreates
-`relay-server`, and waits until the port answers. `scripts/build_flow.sh` also
-rebuilds Web and an APK.
+`scripts/dev/restart_backend.sh` restarts only the PM2 backend: it
+syntax-checks the backend JavaScript (`SKIP_CHECK=1` skips this), restarts or
+recreates `relay-server`, and waits until the port answers.
+`scripts/dev/build_flow.sh` also analyzes and tests the client, rebuilds Web
+and builds a debug APK.
 
 ### Windows backend release bundle
 
@@ -491,11 +492,11 @@ Build the backend bundle on Windows x64 using a complete Node.js distribution
 C# compiler and access to the npm registry:
 
 ```powershell
-.\scripts\package_windows_backend.ps1
+.\scripts\release\package_windows_backend.ps1
 # Optional: select a different installed runtime or output directory.
-.\scripts\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
+.\scripts\release\package_windows_backend.ps1 -NodeDirectory C:\node -OutputDirectory C:\releases
 # Reuse a Web build made from the same source instead of rebuilding it.
-.\scripts\package_windows_backend.ps1 -SkipWebBuild
+.\scripts\release\package_windows_backend.ps1 -SkipWebBuild
 ```
 
 The script writes `build/release/relay-backend-windows-x64-v<VERSION>.zip` and a
@@ -515,11 +516,11 @@ The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
 installation. `Setup.exe` is a Windows Forms UI built with the system .NET
 Framework compiler, without a downloaded GUI runtime. It and the console menu
-share `backends/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+share `scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
 agent installation and token create/delete/list/re-show. Passwords reach the
 worker through stdin and the existing credential generator through its
 environment, never command arguments or temporary request files. The bundle
-includes `build/web`; Node serves it alongside the API, without another Web
+includes `app/shell/build/web`; Node serves it alongside the API, without another Web
 server. Setup enables it by default and can turn it off. Tunnel modes download
 missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows
 installers and require the user to sign in afterward. Uninstall can remove Web
@@ -531,13 +532,16 @@ README when migrating a deployment to a new directory.
 ### Desktop clients
 
 Desktop runner projects exist for Windows, macOS, and Linux, but each target
-must be built on its own operating system. Windows release builds have been
-exercised in this repository; macOS and Linux runners still need broader
-release/secure-storage validation before being advertised as packaged releases.
+must be built on its own operating system. Windows and Ubuntu release builds
+have been exercised; broader Linux distribution and macOS release validation
+is still needed before advertising them as packaged releases.
 
 ```bash
+cd app/shell
 flutter run -d windows       # or macos / linux
 flutter build windows --release
+flutter build linux --release --no-pub
+./build/linux/x64/release/bundle/relay
 ```
 
 Build prerequisites:
@@ -547,17 +551,28 @@ Build prerequisites:
   the MSVC coroutine compatibility define needed by the notifications plugin.
 - macOS: Xcode, command-line tools, CocoaPods, and Flutter desktop enabled.
 - Linux: clang, CMake, Ninja, pkg-config, GTK development packages,
-  `libsecret-1-dev`, and a keyring such as GNOME Keyring.
+  `libsecret-1-dev`, and a keyring such as GNOME Keyring. On Ubuntu:
+  `sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev`.
+  The desktop session also needs an XDG desktop portal for file picking.
 
-Typical artifacts are `build/windows/x64/runner/Release/`,
+Typical artifacts, under `app/shell/`, are `build/windows/x64/runner/Release/`,
 `build/macos/Build/Products/Release/Relay.app`, and
-`build/linux/x64/release/bundle/`. Packaging, store signing, macOS notarization,
-are not configured.
+`build/linux/x64/release/bundle/`. Keep the entire Linux bundle together when
+moving it. CI also offers an Ubuntu 22.04-built Linux archive and `.deb` as
+workflow artifacts. To build the `.deb` after the Linux release build, run
+`./scripts/release/package_linux_desktop.sh` from the repository root; it uses
+`dpkg-dev` and `desktop-file-utils`. Build it on Ubuntu 22.04 for releases so
+that its system library requirements also work on newer Ubuntu versions.
+
+Install the package with `sudo apt install ./relay-desktop_<VERSION>_amd64.deb`,
+then launch **Relay** from the applications menu or run `relay-desktop`.
+Removing the package does not remove the backend or the user's settings.
+Store signing and macOS notarization are not configured.
 
 ### Android release signing
 
 Android release builds are signed with a keystore described by the gitignored
-`android/key.properties`; without that file a release build fails rather than
+`app/shell/android/key.properties`; without that file a release build fails rather than
 falling back to debug signing. Debug builds need no key. Create the keystore
 once, outside the repository, and back it up: every later release must use the
 same key, or installed apps cannot be updated in place.
@@ -567,27 +582,62 @@ keytool -genkeypair -v -keystore ~/relay-release.jks -storetype PKCS12 \
   -keyalg RSA -keysize 2048 -validity 10000 -alias relay
 ```
 
-Copy `android/key.properties.example` to `android/key.properties`, set
+In `app/shell/android/`, copy `key.properties.example` to `key.properties`, set
 `storeFile` to the keystore's absolute path, and fill in both passwords; with a
 PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
-`flutter build apk --release` produces a release-signed APK.
+`flutter build apk --release` in `app/shell` produces a release-signed APK.
 
 ### Release assets
 
+The `CI` workflow checks pull requests on Linux, Windows and macOS. It analyzes
+and tests the Flutter client, builds Web, an Android debug APK, Ubuntu and Windows
+desktop clients and an unsigned iOS client, tests the backend on Node 22 and 24,
+and checks the versions and local documentation links. The `CI complete` check
+must pass before a pull request can be merged into `main`. Dependabot reports
+vulnerabilities and proposes grouped weekly dependency updates.
+CI also blocks high and critical vulnerabilities in production npm dependencies.
+Changes to the release or install scripts also build and audit the release
+bundles on the pull request without creating a release.
+
+To prepare a release after the changes merge and `CI complete` passes on
+`main`, run **Prepare release draft** from the repository's Actions tab, choosing
+`main`. It builds the source backend, Ubuntu desktop and Windows bundles, verifies their
+contents and checksums, and creates a draft for that exact commit. It refuses
+an existing version tag. The draft is marked incomplete until the Android APK
+is signed locally; signing keys must not be uploaded to GitHub.
+From a terminal, the same workflow starts with
+`gh workflow run release.yml --ref main`.
+
+On the machine holding the Relay Android release key, check out the draft's
+commit, set `ANDROID_HOME` and authenticate the GitHub CLI, then run
+`./scripts/release/add_signed_android.sh`. It verifies
+the draft and source commit, signs in a clean temporary checkout, checks the
+APK's version and release certificate, verifies the other downloads, uploads
+the APK and replaces `SHA256SUMS`. The signing configuration must use an
+absolute keystore path. The clean checkout excludes local
+`google-services.json`, so the public APK has no Firebase configuration;
+deployments using Android FCM must build their own configured client. Review
+the completed draft on GitHub before publishing it.
+For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the
+downloaded artifact must be signed before installation. It can also be started
+with `gh workflow run ios.yml --ref main`.
+
 A GitHub release `v<VERSION>` carries:
 
-- `relay-android-v<VERSION>.apk` — `build/app/outputs/flutter-apk/app-release.apk`;
-- `install.sh` — `scripts/install.sh`, the Linux one-line installer
+- `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
+- `install.sh` — `scripts/install/linux/install.sh`, the Linux one-line installer
   (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
   It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
   them;
 - `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
   service adapters, without tests, dependencies, or deployment state, plus the
-  compiled Web client in `build/web`. `./scripts/package_backend.sh` builds the
+  compiled Web client in `app/shell/build/web`. `./scripts/release/package_backend.sh` builds the
   Web client and writes it with a `.sha256` to `build/release/`; it refuses a
   tree with uncommitted tracked changes.
 - `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
-  (`build/windows/x64/runner/Release/`);
+  (`app/shell/build/windows/x64/runner/Release/`);
+- `relay-desktop_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
+  Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
 - `SHA256SUMS` — `sha256sum` of every asset above.
@@ -596,12 +646,14 @@ A GitHub release `v<VERSION>` carries:
 
 ### Refreshing application icons
 
-`assets/icon.png` is the transparent master. After replacing it, run
-`dart run scripts/generate_icons.dart` from the repository root to export the
-Android, iOS, macOS, Web, and Windows assets. The Windows ICO includes 16, 24,
+`app/core/assets/icon.png` is the transparent master. After replacing it, run
+`dart --packages=.dart_tool/package_config.json ../../scripts/dev/generate_icons.dart`
+from `app/shell` (after `flutter pub get`) to export the
+Android, iOS, macOS, Web, and Windows assets into the shell. The Windows ICO includes 16, 24,
 32, 48, 64, 128, and 256 pixel images. iOS and maskable Web exports use an opaque
 navy background; other exports retain the master's transparency. Rebuild each
-client to embed its new assets.
+client to embed its new assets. The Linux `.deb` uses the 16–512 pixel PNGs
+exported for the macOS desktop icon.
 
 ### Backend settings
 

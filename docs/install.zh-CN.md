@@ -1,0 +1,154 @@
+# 后端安装
+
+[English](install.md) · [生产部署手册](handbook.md#production-deployment)
+
+Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 HTTP/SSE API。`scripts/install/`
+下的脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。
+
+## 前置要求
+
+- Node.js 22 或更新版本。
+- 后端至少安装一个支持的 CLI：Claude Code、Codex、Cursor、OpenCode 或 Hermes。
+- 每个 CLI 都必须直接在后端主机上完成认证或 provider 配置。Relay 只报告状态，
+  不执行 OAuth 登录，也不收集 provider 密钥。
+- Unix 主机下载文件夹时需要 `zip`。Linux 安装还需要 PM2、Python 3、`make` 和
+  C++ 编译器，以编译终端的 PTY 依赖。
+- 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
+- 在 Debian 和 Ubuntu 上，Linux 安装脚本会检查上面除 agent CLI 以外的所有项，包括
+  Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 22
+  时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
+  安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
+- 将现有 Relay 升级到 0.1.10 或更新版本前，请先把 Node.js 更新到 22 或更新版本。
+  一键安装脚本会在替换文件前检查；版本过低时不会改动现有安装。
+
+## 安装
+
+在 Linux 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到 `~/relay`
+（运行时可改，或用 `RELAY_DIR` 指定），然后运行安装脚本。再次运行即原地升级代码，保留
+`server/.env`、令牌、聊天和设置，并重启后端。`RELAY_VERSION=<版本>` 可安装指定版本。
+
+```bash
+curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
+```
+
+使用仓库副本时，在仓库根目录运行一个命令：
+
+| 后端系统 | 命令 | 服务管理 |
+|---|---|---|
+| Linux | `./scripts/install/linux/setup.sh` | PM2 |
+| macOS | `./scripts/install/macos/setup.sh` | 当前用户 LaunchAgent |
+| Windows | `.\scripts\install\windows\setup.ps1` | 当前用户计划任务 |
+
+安装脚本会按需创建 `server/.env`、安装服务端依赖、配置网络模式、启动服务并生成加密
+凭证。然后在 app 中导入生成的 `.relay.png` 或 `.relay.json`，输入生成时设置的密码。
+
+在 Linux 上，`setup.sh` 会打开一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
+查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌）、安装 agent
+CLI，以及新建、删除、列出或重新展示设备令牌。安装 agent CLI 会列出 Claude Code、Codex、
+Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PATH、`~/.local/bin`、
+`~/.opencode/bin`），用各 CLI 的官方安装方式安装你选的几个（Codex 用
+`npm install -g @openai/codex`），并打印登录命令；Relay 不会替 CLI 登录。安装流程里也
+有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
+不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
+
+源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `app/shell/build/web` 中自带编译好的
+Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
+下的接口始终需要设备令牌。Windows 后端 ZIP 也包含相同的 Web 前端：
+
+- Linux 和 Windows 安装会询问是否提供 Web 前端；卸载会删除它，同时保留后端状态。
+  Windows 的 Web 与 API 共用一个 Node.js 进程，不需要额外的 Web 服务器。
+- macOS 安装会直接提供包内的 Web 前端；要关闭，在 `server/.env` 中设置
+  `RELAY_SERVE_WEB=0` 后重启后端。
+- 源码仓库需要先运行 `flutter build web` 才有。
+
+### 网络模式
+
+1. **直连：** 使用自己可访问的地址。服务会绑定 `0.0.0.0`；公开暴露前必须在前面
+   配置 HTTPS。
+2. **正式 Cloudflare Tunnel：** 使用 Cloudflare zone 下的稳定域名，服务保持绑定
+   `127.0.0.1`。
+3. **Cloudflare Quick Tunnel：** 适合试用。重启后 `trycloudflare.com` 地址可能变化，
+   地址变化时需要重新生成并导入凭证。先从服务日志找到新地址，再在仓库根目录运行
+   `npm --prefix server run credential -- --url https://新地址`。
+
+## 服务管理
+
+### Linux
+
+```bash
+./scripts/install/linux/status.sh
+./scripts/install/linux/start.sh
+./scripts/install/linux/stop.sh
+./scripts/install/linux/uninstall.sh
+```
+
+这些脚本封装 PM2，也可以继续直接使用 PM2 命令：
+
+```bash
+pm2 list
+pm2 logs relay-server
+pm2 restart relay-server --update-env
+pm2 logs relay-tunnel
+```
+
+Linux 安装需要 PM2（`npm install -g pm2`）。进程名为 `relay-server`；隧道模式还会创建
+`relay-tunnel`。日志位于 `~/.pm2/logs/`，文件名为 `relay-server-*.log` 和
+`relay-tunnel-*.log`。`uninstall.sh` 会删除 PM2 进程和 Web 前端，询问是否删除正式
+Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js；后端数据、令牌和
+凭证保留不动。
+交互终端的 PTY 依赖会在 Linux 上本地编译，因此首次安装还需要 Python 3、
+`make` 和 C++ 编译器（Debian/Ubuntu 可安装 `build-essential`）。如果客户端需要下载
+文件夹，还要安装 `zip`。
+
+### macOS
+
+```bash
+./scripts/install/macos/status.sh
+./scripts/install/macos/start.sh
+./scripts/install/macos/stop.sh
+./scripts/install/macos/uninstall.sh
+```
+
+LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 下，文件名为
+`backend.*.log` 和 `tunnel.*.log`。生成的服务 PATH 已包含常见 Homebrew 和用户 bin 路径。
+
+### Windows
+
+0.1.9 的 `relay-backend-windows-x64-v0.1.9.zip` 包含 Node.js、npm、按锁文件安装的
+生产依赖、Web 前端和 `Setup.exe`。将整个 ZIP 解压到固定、可写的目录，双击
+`Setup.exe`，或运行 `.\setup.cmd` 打开命令行菜单。两种入口共用安装、重装、卸载、
+状态查询、CLI 安装和设备令牌管理功能。Web 默认开启；隧道模式缺少 `cloudflared`
+时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。包内 `README.md`
+说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
+`.\uninstall.cmd` 是下面相同服务脚本的入口。计划任务在当前用户登录时启动。
+
+```powershell
+.\scripts\install\windows\status.ps1
+.\scripts\install\windows\start.ps1
+.\scripts\install\windows\stop.ps1
+.\scripts\install\windows\uninstall.ps1
+```
+
+日志和 PID 文件位于 `%LOCALAPPDATA%\Relay\logs\` 与
+`%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell 阻止脚本执行，只为当前会话临时放开：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+三个平台的卸载脚本都只移除受管理的服务，配置、token、凭证、历史和日志会保留，需按需
+手动清理。
+
+## 手动启动
+
+开发或排障时可以绕过平台服务脚本：
+
+```bash
+cd server
+npm install
+cp .env.example .env
+npm start
+```
+
+在这台主机上完成所选 agent CLI 的认证，再用 `npm run credential` 单独生成凭证。
+配置项见 `server/.env.example`，生产加固见技术手册。

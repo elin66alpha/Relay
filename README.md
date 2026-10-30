@@ -7,17 +7,17 @@
 A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, and Hermes.
 
 ![Flutter client](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
-![Node.js backend](https://img.shields.io/badge/backend-Node.js_18%2B-339933?logo=node.js&logoColor=white)
+![Node.js backend](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
 ![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-5B5BD6)
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
-[中文](README.zh-CN.md) · [Install a backend](backends/README.md) ·
-[Security](SECURITY.md) · [Handbook](docs/handbook.md)
+[中文](README.zh-CN.md) · [Install a backend](docs/install.md) ·
+[Security](docs/SECURITY.md) · [Handbook](docs/handbook.md)
 
 </div>
 
-<a href="assets/screenshots/relay-overview-web.png">
-  <img src="assets/screenshots/relay-overview-web.png" alt="Relay home screen in the dark theme with a wallpaper, showing the current machine and workspace beside the agent and Swarm drawer" width="100%">
+<a href="docs/screenshots/relay-overview-web.png">
+  <img src="docs/screenshots/relay-overview-web.png" alt="Relay home screen in the dark theme with a wallpaper, showing the current machine and workspace beside the agent and Swarm drawer" width="100%">
 </a>
 
 Relay leaves your source code, shell access, and CLI credentials on the computer
@@ -50,17 +50,17 @@ every other page share one acrylic surface over the centered, filling image;
 two fields below the slider set its blur (0-30, default 6) and tint (0-100%,
 default 55%) for both themes.
 
-<a href="assets/screenshots/relay-chat-web.png">
-  <img src="assets/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">
+<a href="docs/screenshots/relay-chat-web.png">
+  <img src="docs/screenshots/relay-chat-web.png" alt="A persistent Claude Code conversation with named sessions, quota and context usage in the Relay Web client" width="100%">
 </a>
 
 ### Chat, coordinate, and manage files from mobile
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-chat-mobile.png"><img src="assets/screenshots/relay-chat-mobile.png" alt="Relay agent chat on mobile" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-swarm-mobile.png"><img src="assets/screenshots/relay-swarm-mobile.png" alt="Relay multi-agent Swarm on mobile" width="100%"></a></td>
-    <td width="33%" align="center"><a href="assets/screenshots/relay-files-mobile.png"><img src="assets/screenshots/relay-files-mobile.png" alt="Relay remote file browser on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-chat-mobile.png"><img src="docs/screenshots/relay-chat-mobile.png" alt="Relay agent chat on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-swarm-mobile.png"><img src="docs/screenshots/relay-swarm-mobile.png" alt="Relay multi-agent Swarm on mobile" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/screenshots/relay-files-mobile.png"><img src="docs/screenshots/relay-files-mobile.png" alt="Relay remote file browser on mobile" width="100%"></a></td>
   </tr>
   <tr>
     <td align="center"><strong>Persistent chat</strong><br>Follow a long-running agent session from anywhere.</td>
@@ -113,7 +113,7 @@ integrations. Relay never logs an agent in for you.
 
 ### 1. Prepare the backend machine
 
-Install Node.js 18+ and at least one supported CLI on Linux, macOS, or Windows.
+Install Node.js 22+ and at least one supported CLI on Linux, macOS, or Windows.
 Claude, Codex, and Cursor must already be logged in on that host (`agent login`
 for Cursor); OpenCode and Hermes use the provider configuration managed there,
 and Relay lists the models that configuration provides.
@@ -143,14 +143,14 @@ its root:
 
 | Backend OS | Setup command |
 |---|---|
-| Linux | `./backends/linux/setup.sh` |
-| macOS | `./backends/macos/setup.sh` |
-| Windows PowerShell | `.\backends\windows\setup.ps1` |
+| Linux | `./scripts/install/linux/setup.sh` |
+| macOS | `./scripts/install/macos/setup.sh` |
+| Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
 The installer walks through direct access, a named Cloudflare Tunnel, or a
 temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
 Linux also needs PM2 and the native tools listed in the
-[backend requirements](backends/README.md#requirements); Unix hosts need `zip`
+[backend requirements](docs/install.md#requirements); Unix hosts need `zip`
 for folder downloads. On Debian and Ubuntu, the Linux installer offers to
 install any of these, and Node.js itself, when they are missing.
 
@@ -172,7 +172,7 @@ Use File system → Set as work path to select the project before sending a task
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the
-[backend guide](backends/README.md).
+[backend guide](docs/install.md).
 
 ## Security boundary
 
@@ -190,23 +190,23 @@ For service commands, networking details, and platform notes, continue with the
 > [!IMPORTANT]
 > Relay is not a sandbox. Agent and terminal processes have the permissions of
 > the backend OS user. Run it as a restricted non-root user, terminate TLS for
-> public deployments, and read [SECURITY.md](SECURITY.md) plus the
+> public deployments, and read [SECURITY.md](docs/SECURITY.md) plus the
 > [production checklist](docs/handbook.md#production-deployment) first.
 
 ## Development
 
 ```bash
-flutter pub get
-flutter analyze --no-pub
-flutter test --no-pub
+(cd app/core && flutter pub get && flutter analyze --no-pub && flutter test --no-pub)
+(cd app/shell && flutter pub get && flutter analyze --no-pub)
 npm --prefix server install
 npm --prefix server test
 ```
 
-Run the client with `flutter run`. To serve a self-hosted Web build:
+Run the client with `flutter run` in `app/shell`. To serve a self-hosted Web
+build:
 
 ```bash
-flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 npm --prefix server start
 ```
 
@@ -219,14 +219,18 @@ need a signing key; see
 
 ```text
 Relay/
-├── lib/          shared Flutter client
-├── server/       Node.js backend and tests
-├── backends/     OS-specific install/service adapters
-├── docs/         operations and architecture handbook
-├── scripts/      development and deployment helpers
-└── test/         Flutter tests
+├── app/              the client (front end)
+│   ├── core/         every screen, its logic, tests and assets (Dart package relay_core)
+│   └── shell/        the runnable app per platform: android, ios, linux, macos, windows, web
+├── server/           the backend: Node.js server and its tests
+├── scripts/
+│   ├── install/      install and manage a backend: linux, macos, windows
+│   ├── release/      build and check release bundles
+│   └── dev/          local development helpers
+├── docs/             handbook, install guides, security, changelog
+└── .github/workflows CI checks GitHub runs on every pull request
 ```
 
 Contributors and coding agents should read [AGENTS.md](AGENTS.md). Release
-history is in [CHANGELOG.md](CHANGELOG.md), and Relay is released under the
+history is in [CHANGELOG.md](docs/CHANGELOG.md), and Relay is released under the
 [MIT License](LICENSE).

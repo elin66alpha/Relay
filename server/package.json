@@ -1,6 +1,6 @@
 {
   "name": "relay-server",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Local HTTP backend for the Relay Flutter client.",
   "private": true,
   "main": "server.js",
@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.233",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "express-rate-limit": "^8.5.2",
     "firebase-admin": "^13.10.0",
     "node-pty": "^1.1.0",
@@ -28,7 +28,7 @@
     "ws": "^8.21.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

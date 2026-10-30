@@ -1,0 +1,42 @@
+name: iOS build
+
+# Builds an unsigned iOS app on demand. The repository holds no Apple signing
+# identity, so the IPA must be signed when it is installed (Sideloadly,
+# AltStore, or a re-sign with your own certificate).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    name: Unsigned IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Same pin as ci.yml.
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+
+      # Flutter generates the Podfile and runs pod install itself.
+      - run: flutter build ios --release --no-pub --no-codesign
+        working-directory: app/shell
+
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry Relay-unsigned.ipa Payload
+        working-directory: app/shell
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-ios-unsigned
+          path: app/shell/Relay-unsigned.ipa
+          if-no-files-found: error
