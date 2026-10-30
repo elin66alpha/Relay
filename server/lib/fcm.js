@@ -13,11 +13,13 @@ const path = require('path');
 
 const { createSubscriptionStore, normalizeCategories } = require('./subscription-store');
 
-let admin = null;
+let firebaseApp = null;
+let getMessaging = null;
 try {
-  admin = require('firebase-admin');
+  firebaseApp = require('firebase-admin/app');
+  ({ getMessaging } = require('firebase-admin/messaging'));
 } catch (_err) {
-  admin = null;
+  firebaseApp = null;
 }
 
 const TOKENS_FILE = path.join(__dirname, '..', 'fcm-tokens.json');
@@ -32,13 +34,13 @@ const SERVICE_ACCOUNT_FILE = configuredServiceAccount
 let app = null;
 let configured = false;
 
-if (admin && SERVICE_ACCOUNT_FILE) {
+if (firebaseApp && SERVICE_ACCOUNT_FILE) {
   try {
     const raw = fs.readFileSync(SERVICE_ACCOUNT_FILE, 'utf-8');
     const serviceAccount = JSON.parse(raw);
-    app = admin.initializeApp(
+    app = firebaseApp.initializeApp(
       {
-        credential: admin.credential.cert(serviceAccount),
+        credential: firebaseApp.cert(serviceAccount),
       },
       'relay-fcm',
     );
@@ -65,7 +67,7 @@ const store = createSubscriptionStore({
   filePath: TOKENS_FILE,
   key: 'token',
   send(record, { title, body, tag }) {
-    return admin.messaging(app).send({
+    return getMessaging(app).send({
       token: record.token,
       notification: { title, body },
       data: { title, body, tag },
