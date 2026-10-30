@@ -22,10 +22,21 @@ let dirty = false;
 let flushTimer = null;
 let maxFlushTimer = null;
 
+// A missing file is a fresh start. A file that exists but cannot be loaded is
+// set aside instead of read as empty, because the next flush would overwrite it.
+// shortcut: if the rename fails too, the next flush still overwrites the file.
 function loadAll() {
   try {
     return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
-  } catch (_err) {
+  } catch (err) {
+    if (err.code === 'ENOENT') return {};
+    const aside = `${HISTORY_FILE}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(HISTORY_FILE, aside);
+      console.warn(`[history] could not load chat history (${err.message}); kept it as ${aside}`);
+    } catch (renameErr) {
+      console.warn(`[history] could not load chat history (${err.message}) or set it aside: ${renameErr.message}`);
+    }
     return {};
   }
 }
@@ -37,20 +48,40 @@ function saveAll(data) {
 }
 
 // Background flush path. The debounced timer fires constantly while an agent
-// turn streams deltas, so its disk I/O must not block the event loop the way a
-// writeFileSync of the whole history would. Writes are chained so two timer
-// flushes can never interleave on the temp file; the synchronous saveAll stays
-// for shutdown (process.on('exit') cannot await) and uses its own temp name so
-// it can't collide with an in-flight async write.
+// turn streams deltas, so neither its disk I/O nor its JSON.stringify may block
+// the event loop the way a whole-history writeFileSync would. The file is
+// written scope by scope in chunks, which hands the event loop back between
+// chunks; the bytes equal JSON.stringify(data). A scope that changes mid-write
+// marks the history dirty again, so the next flush saves it. Writes are chained
+// so two timer flushes can never interleave on the temp file; the synchronous
+// saveAll stays for shutdown (process.on('exit') cannot await) and uses its own
+// temp name so it can't collide with an in-flight async write.
+const WRITE_CHUNK_CHARS = 64 * 1024;
 let writeChain = Promise.resolve();
 
+async function writeHistoryFile(data) {
+  const tmp = `${HISTORY_FILE}.tmp-async`;
+  const handle = await fs.promises.open(tmp, 'w', 0o600);
+  try {
+    let chunk = '{';
+    let first = true;
+    for (const [scopeKey, list] of Object.entries(data)) {
+      chunk += `${first ? '' : ','}${JSON.stringify(scopeKey)}:${JSON.stringify(list)}`;
+      first = false;
+      if (chunk.length >= WRITE_CHUNK_CHARS) {
+        await handle.write(chunk);
+        chunk = '';
+      }
+    }
+    await handle.write(`${chunk}}`);
+  } finally {
+    await handle.close();
+  }
+  await fs.promises.rename(tmp, HISTORY_FILE);
+}
+
 function saveAllAsync(data) {
-  const body = JSON.stringify(data);
-  writeChain = writeChain.then(async () => {
-    const tmp = `${HISTORY_FILE}.tmp-async`;
-    await fs.promises.writeFile(tmp, body, { mode: 0o600 });
-    await fs.promises.rename(tmp, HISTORY_FILE);
-  });
+  writeChain = writeChain.then(() => writeHistoryFile(data));
   return writeChain;
 }
 
