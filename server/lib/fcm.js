@@ -13,7 +13,7 @@ const path = require('path');
 
 const { createSubscriptionStore, normalizeCategories } = require('./subscription-store');
 
-let firebaseApp = null;
+let firebaseApp;
 let getMessaging = null;
 try {
   firebaseApp = require('firebase-admin/app');
