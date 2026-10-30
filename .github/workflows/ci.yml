@@ -17,7 +17,7 @@ jobs:
     name: Windows setup adapter
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify setup operations without host changes
         shell: powershell
         run: ./scripts/release/test_windows_setup.ps1
@@ -29,12 +29,12 @@ jobs:
     name: Flutter client
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: subosito/flutter-action@v2
@@ -82,8 +82,8 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -107,12 +107,12 @@ jobs:
         os: [ubuntu-22.04, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev dpkg-dev desktop-file-utils
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: subosito/flutter-action@v2
@@ -142,7 +142,7 @@ jobs:
             cmp "app/shell/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${size}.png" \
               "$RUNNER_TEMP/relay-desktop-check/usr/share/icons/hicolor/${size}x${size}/apps/dev.relay.app.png"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-22.04'
         with:
           name: relay-linux-x64-ubuntu-22.04
@@ -156,7 +156,7 @@ jobs:
     name: Windows desktop client
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.8
@@ -171,7 +171,7 @@ jobs:
     name: iOS client
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.8
