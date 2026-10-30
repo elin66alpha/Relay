@@ -655,6 +655,51 @@ navy background; other exports retain the master's transparency. Rebuild each
 client to embed its new assets. The Linux `.deb` uses the 16–512 pixel PNGs
 exported for the macOS desktop icon.
 
+### Refreshing README screenshots
+
+`docs/screenshots/` holds the five README screenshots in English and, with a
+`-zh` suffix, in Chinese: `relay-overview-web` and `relay-chat-web` at
+1440×960, and `relay-chat-mobile`, `relay-swarm-mobile` and
+`relay-files-mobile` at 800×1640 (a 400×820 viewport at 2×). Both READMEs
+reference them by name, so a recapture only replaces the files. To recapture
+all ten:
+
+```bash
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
+node scripts/dev/readme_screenshots.js /path/to/wallpaper.png
+```
+
+The script:
+
+1. Rebuilds `/tmp/relay-demo`: the demo workspace
+   `projects/aurora-api`, a copy of the tracked `server/` code (none of the
+   local deployment state), and seeded state. The seeded state is a Relay Demo
+   token, the Main, Release notes and Flaky tests Claude Code sessions with the
+   invoice-race conversation, and the Release readiness Swarm (Lead, Reviewer
+   and Docs).
+2. Starts that backend on `127.0.0.1:8790` (`DEMO_PORT` changes it) with the
+   quota watch and keepalive off and none of the shell's `PORT`, `HOST`,
+   `RELAY_*` or `ENABLE_*` settings, so the running deployment is not touched.
+   It serves the Web build from `app/shell/build/web`.
+3. Opens headless Chromium with Playwright and, in local storage, sets the
+   dark theme, the language and the Relay Demo credential. It also stores the
+   wallpaper, prepared the way the Web client prepares an import, at dark
+   opacity 0.6 (`WALLPAPER_DARK_OPACITY` changes it).
+4. Taps through each screen at fixed coordinates, writes the screenshots and
+   stops the backend.
+
+Playwright is not a repository dependency. The script installs a pinned
+`playwright-core` and its Chromium into the temporary directory and the
+Playwright browser cache on first use; set `PLAYWRIGHT_CORE` to use an existing
+`playwright-core` module instead.
+
+Chat times are today's date at fixed hours, shown in UTC. The quota bars show
+the backend machine's real Claude Code usage, and the agent dots show
+which CLIs are installed there. The example content stays in English in the
+Chinese shots; only the app language changes. When the drawer or Home layout
+changes, adjust the tap coordinates in `SHOTS` at the top of the script, then
+review every image before committing it.
+
 ### Backend settings
 
 `server/.env.example` documents supported deployment settings. The most useful

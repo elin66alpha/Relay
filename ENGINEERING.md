@@ -38,7 +38,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
 | scripts/release | release bundle builders, version/documentation checks, Windows setup checks and local Android signing for a release draft |
-| scripts/dev | local development helpers (build flow, backend restart, icon export) |
+| scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
 | .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft |
 
