@@ -204,7 +204,7 @@ Relay/
 │   ├── install/      安装和管理后端：linux、macos、windows
 │   ├── release/      构建和检查发布包
 │   └── dev/          本地开发工具
-├── docs/             手册、安装指南、安全模型、更新日志、发布说明
+├── docs/             手册、安装指南、安全模型、更新日志
 └── .github/workflows 每个 PR 上 GitHub 自动运行的 CI 检查
 ```
 

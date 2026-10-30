@@ -227,7 +227,7 @@ Relay/
 │   ├── install/      install and manage a backend: linux, macos, windows
 │   ├── release/      build and check release bundles
 │   └── dev/          local development helpers
-├── docs/             handbook, install guides, security, changelog, release notes
+├── docs/             handbook, install guides, security, changelog
 └── .github/workflows CI checks GitHub runs on every pull request
 ```
 
