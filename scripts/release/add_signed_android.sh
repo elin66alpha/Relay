@@ -16,8 +16,9 @@ repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 [ "$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft)" = true ] || {
   echo "$tag must be an existing release draft." >&2; exit 1;
 }
-tag_commit="$(gh api "repos/$repo/git/ref/tags/$tag" --jq 'select(.object.type == "commit") | .object.sha')"
-[ "$tag_commit" = "$(git rev-parse HEAD)" ] || { echo 'Check out the exact release commit before signing.' >&2; exit 1; }
+# A draft has no tag yet; its target is the commit the tag will name.
+target="$(gh release view "$tag" --repo "$repo" --json targetCommitish --jq .targetCommitish)"
+[ "$target" = "$(git rev-parse HEAD)" ] || { echo 'Check out the exact release commit before signing.' >&2; exit 1; }
 [ -f app/shell/android/key.properties ] || { echo 'Android release signing is not configured.' >&2; exit 1; }
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
@@ -38,13 +39,15 @@ trap cleanup EXIT
 gh release download "$tag" --repo "$repo" --dir "$tmp" \
   --pattern SHA256SUMS --pattern install.sh --pattern "relay-backend-setup-$tag.tar.gz" \
   --pattern "relay-windows-x64-$tag.zip" --pattern "relay-backend-windows-x64-$tag.zip" \
-  --pattern "relay-desktop_${version}_amd64.deb"
+  --pattern "relay-desktop_${version}_amd64.deb" --pattern "relay-macos-$tag.zip" \
+  --pattern "relay-ios-unsigned-$tag.ipa"
 (
   cd "$tmp"
   : > base-checksums
   for asset in install.sh "relay-backend-setup-$tag.tar.gz" \
     "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
-    "relay-desktop_${version}_amd64.deb"; do
+    "relay-desktop_${version}_amd64.deb" "relay-macos-$tag.zip" \
+    "relay-ios-unsigned-$tag.ipa"; do
     awk -v name="$asset" '$2 == name { print; found++ } END { if (found != 1) exit 1 }' SHA256SUMS >> base-checksums
   done
   sha256sum --check base-checksums
@@ -67,8 +70,8 @@ grep -Fq "package: name='dev.relay.app' versionCode='$build_number' versionName=
 cp "$apk" "$tmp/relay-android-$tag.apk"
 (cd "$tmp" && sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
   "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
-  "relay-desktop_${version}_amd64.deb" \
-  "relay-android-$tag.apk" > SHA256SUMS && sha256sum --check SHA256SUMS)
+  "relay-desktop_${version}_amd64.deb" "relay-macos-$tag.zip" \
+  "relay-ios-unsigned-$tag.ipa" "relay-android-$tag.apk" > SHA256SUMS && sha256sum --check SHA256SUMS)
 gh release upload "$tag" --repo "$repo" --clobber "$tmp/relay-android-$tag.apk" "$tmp/SHA256SUMS"
 gh release view "$tag" --repo "$repo" --json body --jq .body > "$tmp/notes.md"
 sed '1{/^> Android APK is pending local signing\. Do not publish this draft yet\.$/d;}' "$tmp/notes.md" > "$tmp/complete-notes.md"

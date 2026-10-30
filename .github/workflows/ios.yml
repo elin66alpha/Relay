@@ -12,7 +12,7 @@ jobs:
     name: Unsigned IPA
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -35,7 +35,7 @@ jobs:
           zip -qry Relay-unsigned.ipa Payload
         working-directory: app/shell
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: relay-ios-unsigned
           path: app/shell/Relay-unsigned.ipa

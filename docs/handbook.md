@@ -591,7 +591,7 @@ PKCS12 keystore, `keyPassword` is the same as `storePassword`. Then
 
 The `CI` workflow checks pull requests on Linux, Windows and macOS. It analyzes
 and tests the Flutter client, builds Web, an Android debug APK, Ubuntu and Windows
-desktop clients and an unsigned iOS client, tests the backend on Node 22 and 24,
+desktop clients, an unsigned iOS client and the macOS client, tests the backend on Node 22 and 24,
 and checks the versions and local documentation links. The `CI complete` check
 must pass before a pull request can be merged into `main`. Dependabot reports
 vulnerabilities and proposes grouped weekly dependency updates.
@@ -601,7 +601,7 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend, Ubuntu desktop and Windows bundles, verifies their
+`main`. It builds the source backend, Ubuntu desktop, Windows, macOS and iOS bundles, verifies their
 contents and checksums, and creates a draft for that exact commit. It refuses
 an existing version tag. The draft is marked incomplete until the Android APK
 is signed locally; signing keys must not be uploaded to GitHub.
@@ -640,6 +640,15 @@ A GitHub release `v<VERSION>` carries:
   Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
+- `relay-macos-v<VERSION>.zip` — the macOS desktop client
+  (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
+  Intel). It has only an ad-hoc signature, so macOS blocks the first launch:
+  open it from the context menu, or run
+  `xattr -dr com.apple.quarantine Relay.app`. It keeps credentials in the login
+  keychain, which may ask for access again after an update;
+- `relay-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
+  it while installing, for example with Sideloadly or AltStore; an app signed
+  with a free Apple ID expires after seven days;
 - `SHA256SUMS` — `sha256sum` of every asset above.
 
 ## Configuration
@@ -654,6 +663,51 @@ Android, iOS, macOS, Web, and Windows assets into the shell. The Windows ICO inc
 navy background; other exports retain the master's transparency. Rebuild each
 client to embed its new assets. The Linux `.deb` uses the 16–512 pixel PNGs
 exported for the macOS desktop icon.
+
+### Refreshing README screenshots
+
+`docs/screenshots/` holds the five README screenshots in English and, with a
+`-zh` suffix, in Chinese: `relay-overview-web` and `relay-chat-web` at
+1440×960, and `relay-chat-mobile`, `relay-swarm-mobile` and
+`relay-files-mobile` at 800×1640 (a 400×820 viewport at 2×). Both READMEs
+reference them by name, so a recapture only replaces the files. To recapture
+all ten:
+
+```bash
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
+node scripts/dev/readme_screenshots.js /path/to/wallpaper.png
+```
+
+The script:
+
+1. Rebuilds `/tmp/relay-demo`: the demo workspace
+   `projects/aurora-api`, a copy of the tracked `server/` code (none of the
+   local deployment state), and seeded state. The seeded state is a Relay Demo
+   token, the Main, Release notes and Flaky tests Claude Code sessions with the
+   invoice-race conversation, and the Release readiness Swarm (Lead, Reviewer
+   and Docs).
+2. Starts that backend on `127.0.0.1:8790` (`DEMO_PORT` changes it) with the
+   quota watch and keepalive off and none of the shell's `PORT`, `HOST`,
+   `RELAY_*` or `ENABLE_*` settings, so the running deployment is not touched.
+   It serves the Web build from `app/shell/build/web`.
+3. Opens headless Chromium with Playwright and, in local storage, sets the
+   dark theme, the language and the Relay Demo credential. It also stores the
+   wallpaper, prepared the way the Web client prepares an import, at dark
+   opacity 0.6 (`WALLPAPER_DARK_OPACITY` changes it).
+4. Taps through each screen at fixed coordinates, writes the screenshots and
+   stops the backend.
+
+Playwright is not a repository dependency. The script installs a pinned
+`playwright-core` and its Chromium into the temporary directory and the
+Playwright browser cache on first use; set `PLAYWRIGHT_CORE` to use an existing
+`playwright-core` module instead.
+
+Chat times are today's date at fixed hours, shown in UTC. The quota bars show
+the backend machine's real Claude Code usage, and the agent dots show
+which CLIs are installed there. The example content stays in English in the
+Chinese shots; only the app language changes. When the drawer or Home layout
+changes, adjust the tap coordinates in `SHOTS` at the top of the script, then
+review every image before committing it.
 
 ### Backend settings
 

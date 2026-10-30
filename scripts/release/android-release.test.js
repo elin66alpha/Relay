@@ -28,7 +28,7 @@ test('Android release signs the matching draft and rejects the wrong certificate
   write('app/core/lib/features/settings/app_settings_screen.dart', "const _applicationVersion = '1.2.3';");
   write('app/core/lib/features/settings/whats_new_screen.dart', "const List<_Release> _zhReleases = [version: '1.2.3'];\nconst List<_Release> _enReleases = [version: '1.2.3'];");
   write('docs/CHANGELOG.md', '## 1.2.3 - today\n');
-  const assets = ['install.sh', 'relay-backend-setup-v1.2.3.tar.gz', 'relay-windows-x64-v1.2.3.zip', 'relay-backend-windows-x64-v1.2.3.zip', 'relay-desktop_1.2.3_amd64.deb'];
+  const assets = ['install.sh', 'relay-backend-setup-v1.2.3.tar.gz', 'relay-windows-x64-v1.2.3.zip', 'relay-backend-windows-x64-v1.2.3.zip', 'relay-desktop_1.2.3_amd64.deb', 'relay-macos-v1.2.3.zip', 'relay-ios-unsigned-v1.2.3.ipa'];
   let sums = '';
   for (const asset of assets) {
     write(`fixtures/${asset}`, `fixture ${asset}`);
@@ -42,8 +42,9 @@ set -eu
 case "$1 $2" in
   'repo view') echo owner/Relay ;;
   'release view')
-    if [[ "$*" == *isDraft* ]]; then echo true; else echo '> Android APK is pending local signing. Do not publish this draft yet.'; fi ;;
-  'api repos/owner/Relay/git/ref/tags/v1.2.3') echo abc123 ;;
+    if [[ "$*" == *isDraft* ]]; then echo true
+    elif [[ "$*" == *targetCommitish* ]]; then echo abc123
+    else echo '> Android APK is pending local signing. Do not publish this draft yet.'; fi ;;
   'release download')
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --dir ]; then target="$2"; break; fi

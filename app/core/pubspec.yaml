@@ -9,22 +9,22 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: ^9.2.2
-  shared_preferences: ^2.3.0
+  shared_preferences: ^2.5.6
   http: ^1.2.0
   cryptography: ^2.7.0
-  mobile_scanner: ^7.2.0
-  flutter_local_notifications: ^21.0.0
-  image: ^4.8.0
+  mobile_scanner: ^7.4.2
+  flutter_local_notifications: ^22.3.3
+  image: ^4.12.0
   zxing2: ^0.2.4
-  file_picker: ^11.0.2
-  path_provider: ^2.1.4
+  file_picker: ^11.0.3
+  path_provider: ^2.1.6
   web: ^1.1.1
-  flutter_markdown_plus: ^1.0.7
+  flutter_markdown_plus: ^1.0.12
   # Already pulled in by flutter_markdown_plus; declared directly so chat
   # rendering can add its own inline syntax (the search-hit marker).
   markdown: ^7.3.1
-  firebase_core: ^4.10.0
-  firebase_messaging: ^16.3.0
+  firebase_core: ^4.15.2
+  firebase_messaging: ^16.7.1
   xterm: ^4.0.0
   web_socket_channel: ^3.0.3
   re_highlight: ^0.0.3
@@ -32,7 +32,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

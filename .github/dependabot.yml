@@ -1,7 +1,11 @@
 version: 2
+# Version updates go to the release branch in development, not main. Point
+# target-branch at the next one when it starts; Dependabot reads this file
+# from main, so the change takes effect once it is on main.
 updates:
   - package-ecosystem: npm
     directory: /server
+    target-branch: '0.1.10'
     schedule:
       interval: weekly
     groups:
@@ -9,6 +13,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: pub
     directory: /app/core
+    target-branch: '0.1.10'
     schedule:
       interval: weekly
     groups:
@@ -16,6 +21,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: pub
     directory: /app/shell
+    target-branch: '0.1.10'
     schedule:
       interval: weekly
     groups:
@@ -23,6 +29,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: github-actions
     directory: /
+    target-branch: '0.1.10'
     schedule:
       interval: weekly
     groups:

@@ -2,11 +2,24 @@
 
 ## 0.1.10 - 2026-10-29
 
+### Added
+
+- Releases include an Ubuntu desktop package (`.deb`), a macOS desktop client
+  and an unsigned iOS app (`.ipa`) to sign while installing.
+
+### Fixed
+
+- The macOS client can save machine credentials, pick files and save
+  downloads to the Downloads folder without an Apple developer signature.
+
 ### Changed
 
 - Backend setup now requires Node.js 22 or newer; Node.js 18 and 20 are no
   longer supported upstream. Linux setup offers Node.js 24 when an upgrade is needed.
 - Updated locked backend dependencies to pick up available security fixes.
+- Updated the Claude Agent SDK, Firebase Admin and other backend
+  dependencies, client plugins (including local notifications 22) and the
+  CI actions, which now run on Node.js 24.
 - The repository is grouped by role. The Flutter client is `app/`:
   `app/core` is the `relay_core` package with every screen, controller, test
   and asset, and `app/shell` is the runnable app with `main.dart` and the
