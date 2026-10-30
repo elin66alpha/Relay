@@ -532,14 +532,16 @@ README when migrating a deployment to a new directory.
 ### Desktop clients
 
 Desktop runner projects exist for Windows, macOS, and Linux, but each target
-must be built on its own operating system. Windows release builds have been
-exercised in this repository; macOS and Linux runners still need broader
-release/secure-storage validation before being advertised as packaged releases.
+must be built on its own operating system. Windows and Ubuntu release builds
+have been exercised; broader Linux distribution and macOS release validation
+is still needed before advertising them as packaged releases.
 
 ```bash
 cd app/shell
 flutter run -d windows       # or macos / linux
 flutter build windows --release
+flutter build linux --release --no-pub
+./build/linux/x64/release/bundle/relay
 ```
 
 Build prerequisites:
@@ -549,12 +551,15 @@ Build prerequisites:
   the MSVC coroutine compatibility define needed by the notifications plugin.
 - macOS: Xcode, command-line tools, CocoaPods, and Flutter desktop enabled.
 - Linux: clang, CMake, Ninja, pkg-config, GTK development packages,
-  `libsecret-1-dev`, and a keyring such as GNOME Keyring.
+  `libsecret-1-dev`, and a keyring such as GNOME Keyring. On Ubuntu:
+  `sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev`.
+  The desktop session also needs an XDG desktop portal for file picking.
 
 Typical artifacts, under `app/shell/`, are `build/windows/x64/runner/Release/`,
 `build/macos/Build/Products/Release/Relay.app`, and
-`build/linux/x64/release/bundle/`. Packaging, store signing, macOS notarization,
-are not configured.
+`build/linux/x64/release/bundle/`. Keep the entire Linux bundle together when
+moving it. CI also offers an Ubuntu 22.04-built Linux archive as a workflow
+artifact. Store signing and macOS notarization are not configured.
 
 ### Android release signing
 

@@ -332,8 +332,10 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
 - `(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)` -> exit 0, `app/shell/build/web/index.html` exists; `app/shell/build/web/assets/FontManifest.json` lists `packages/relay_core/RelayTerminalMono`
+- `(cd app/shell && flutter build linux --release --no-pub)` -> exit 0, `app/shell/build/linux/x64/release/bundle/relay` exists on Ubuntu with GTK and libsecret development files installed
+- (Ubuntu desktop with an unlocked GNOME Keyring) a test machine credential survives an app restart and is removed when deleted.
 - `(cd app/shell && flutter build apk --debug --no-pub)` -> exit 0 without a release signing key
-- CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Windows desktop client and an unsigned iOS client.
+- CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, the Windows desktop client, and an unsigned iOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `scripts/release/add_signed_android.sh` expects (`expected_cert`)
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.

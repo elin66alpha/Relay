@@ -99,6 +99,42 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == 24
         run: npm audit --omit=dev --audit-level=high
 
+  linux-client:
+    name: Linux desktop client (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build pkg-config libgtk-3-dev libsecret-1-dev liblzma-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - run: flutter build linux --release --no-pub
+        working-directory: app/shell
+      - run: test -x build/linux/x64/release/bundle/relay
+        working-directory: app/shell
+      # Build on the older supported Ubuntu so the binary also works on newer
+      # hosts without depending on their newer system libraries.
+      - name: Package Linux client
+        if: matrix.os == 'ubuntu-22.04'
+        run: tar -C app/shell/build/linux/x64/release -czf "$RUNNER_TEMP/relay-linux-x64.tar.gz" bundle
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-22.04'
+        with:
+          name: relay-linux-x64-ubuntu-22.04
+          path: ${{ runner.temp }}/relay-linux-x64.tar.gz
+          if-no-files-found: error
+
   windows-client:
     name: Windows desktop client
     runs-on: windows-latest
@@ -132,7 +168,7 @@ jobs:
   required:
     name: CI complete
     if: always()
-    needs: [windows-setup, flutter, server, windows-client, ios]
+    needs: [windows-setup, flutter, server, linux-client, windows-client, ios]
     runs-on: ubuntu-latest
     steps:
       - name: Require all jobs to pass
