@@ -36,8 +36,7 @@ void main() {
     expect(controller.messages.single.content, 'History for /work/b:other');
   });
 
-  test(
-      'sends one human message, streams member replies, and reconciles history',
+  test('sends one human message and shows each reply once its member finishes',
       () async {
     backend.history['builders'] = <ChatMessage>[];
     await controller.start();
@@ -74,23 +73,12 @@ void main() {
     expect(controller.messages.last.metadata['author'], 'claude');
     expect(controller.messages.last.metadata['agentLabel'], 'Reviewer');
 
+    // Replies are not streamed: partial text never reaches the bubble.
     backend
         .emit('agent_delta', <String, Object?>{...member, 'text': 'Checking'});
-    backend.emit('agent_delta', <String, Object?>{...member, 'text': ' files'});
-    expect(controller.messages.last.content, 'Checking files');
-    expect(controller.messages.last.metadata['awaitingFirstToken'], isFalse);
     backend.emit('agent_segment', member);
-    backend.emit(
-      'agent_delta',
-      <String, Object?>{...member, 'text': 'Looks good'},
-    );
-    expect(controller.messages.last.content, 'Checking files\n\nLooks good');
-    expect(
-      controller.messages.last.segments.map((MessageSegment s) => s.text),
-      <String>['Checking files', 'Looks good'],
-    );
-    backend.emit('agent_done', member);
-    expect(controller.messages.last.metadata['streaming'], isFalse);
+    expect(controller.messages.last.content, isEmpty);
+    expect(controller.messages.last.metadata['awaitingFirstToken'], isTrue);
 
     final ChatMessage reply = _message(
       memberRequestId,
@@ -98,11 +86,19 @@ void main() {
       role: ChatRole.assistant,
     );
     backend.history['builders'] = <ChatMessage>[human, reply];
+    backend.running = requestId;
+    backend.emit('agent_done', member);
+    await pumpEventQueue();
+    expect(controller.messages, <ChatMessage>[human, reply]);
+    expect(controller.sending, isTrue);
+
+    backend.running = null;
     backend.round.complete();
     expect(await sending, isTrue);
     expect(controller.sending, isFalse);
     expect(controller.messages, <ChatMessage>[human, reply]);
     expect(backend.historyRequests, <String>[
+      '/work/a:builders',
       '/work/a:builders',
       '/work/a:builders',
     ]);
@@ -155,21 +151,28 @@ void main() {
     final Future<bool> sending = controller.send('@claude start');
     final String requestId = backend.sent.single['requestId']!;
     final String memberRequestId = '$requestId:claude';
-    backend.emit('agent_delta', <String, Object?>{
+    backend.emit('agent_start', <String, Object?>{
       'requestId': memberRequestId,
-      'text': 'Partial reply',
       'agent': <String, Object?>{'key': 'claude', 'label': 'Claude Code'},
     });
     await controller.cancel();
     expect(backend.cancelled, <String>[requestId]);
 
+    backend.history['builders'] = <ChatMessage>[
+      ChatMessage(
+        id: memberRequestId,
+        role: ChatRole.assistant,
+        content: 'Partial reply',
+        createdAt: DateTime.utc(2026, 1, 2),
+        metadata: const <String, Object?>{'cancelled': true},
+      ),
+    ];
     backend.emit('agent_cancelled', <String, Object?>{
       'requestId': memberRequestId,
     });
+    await pumpEventQueue();
     expect(controller.messages.last.content, 'Partial reply');
-    expect(controller.messages.last.metadata['streaming'], isFalse);
     expect(controller.messages.last.metadata['cancelled'], isTrue);
-    backend.history['builders'] = controller.messages;
     backend.round.completeError(
       BackendException('request cancelled', code: 'AGENT_CANCELLED'),
     );
@@ -178,7 +181,25 @@ void main() {
     expect(controller.sending, isFalse);
     expect(controller.error, isNull);
     expect(controller.messages.last.content, 'Partial reply');
-    expect(backend.historyRequests, hasLength(2));
+    expect(backend.historyRequests, hasLength(3));
+  });
+
+  test('reopening a swarm with a running round keeps Stop until it ends',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.running = 'round-1';
+    await controller.start();
+
+    expect(controller.sending, isTrue);
+    expect(await controller.send('@claude again'), isFalse);
+    expect(backend.sent, isEmpty);
+    await controller.cancel();
+    expect(backend.cancelled, <String>['round-1']);
+
+    backend.running = null;
+    backend.emit('group_done', <String, Object?>{'requestId': 'round-1'});
+    await pumpEventQueue();
+    expect(controller.sending, isFalse);
   });
 }
 
@@ -222,6 +243,7 @@ class _GroupBackendClient extends BackendClient {
   final List<Map<String, String>> sent = <Map<String, String>>[];
   final List<String> cancelled = <String>[];
   final Completer<void> round = Completer<void>();
+  String? running;
 
   void emit(String type, Map<String, Object?> data) {
     events.add(
@@ -253,6 +275,7 @@ class _GroupBackendClient extends BackendClient {
           <ChatMessage>[
             _message(groupId, 'History for $activeWorkdir:$groupId'),
           ],
+      runningRequestId: running,
     );
   }
 

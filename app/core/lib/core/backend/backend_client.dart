@@ -711,6 +711,7 @@ class BackendClient {
           .whereType<Map>()
           .map((Map item) => ChatMessage.fromJson(item.cast<String, Object?>()))
           .toList(growable: false),
+      runningRequestId: decoded['runningRequestId'] as String?,
     );
   }
 

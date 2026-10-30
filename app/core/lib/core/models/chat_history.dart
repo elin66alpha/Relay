@@ -83,8 +83,15 @@ class ConversationExport {
 }
 
 class GroupHistory {
-  const GroupHistory({required this.group, required this.messages});
+  const GroupHistory({
+    required this.group,
+    required this.messages,
+    this.runningRequestId,
+  });
 
   final ChatGroup group;
   final List<ChatMessage> messages;
+
+  /// The round running in this swarm, so Stop survives leaving the screen.
+  final String? runningRequestId;
 }
