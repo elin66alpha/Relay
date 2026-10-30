@@ -53,7 +53,7 @@ case "$1 $2" in
     cp "$RELAY_TEST_FIXTURES"/* "$target"/ ;;
   'release upload')
     for arg in "$@"; do case "$arg" in *.apk|*/SHA256SUMS) cp "$arg" "$RELAY_TEST_UPLOADS"/ ;; esac; done ;;
-  'release edit') touch "$RELAY_TEST_UPLOADS/edited" ;;
+  'release edit') printf '%s\n' "$@" > "$RELAY_TEST_UPLOADS/edited" ;;
   *) echo "unexpected gh call" >&2; exit 1 ;;
 esac
 `, 0o755);
@@ -77,7 +77,7 @@ esac
   const accepted = run(cert);
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.ok(fs.existsSync(path.join(root, 'uploads', 'relay-android-v1.2.3.apk')));
-  assert.ok(fs.existsSync(path.join(root, 'uploads', 'edited')));
+  assert.match(fs.readFileSync(path.join(root, 'uploads', 'edited'), 'utf8'), /^--tag\nv1\.2\.3$/m);
   const updated = fs.readFileSync(path.join(root, 'uploads', 'SHA256SUMS'), 'utf8');
   assert.match(updated, new RegExp(`${createHash('sha256').update('signed-apk').digest('hex')}  relay-android-v1.2.3\\.apk`));
 
