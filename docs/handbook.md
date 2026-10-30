@@ -378,6 +378,13 @@ summoning human-only), because two members that keep naming each other would
 otherwise run — and bill — without end. A member cannot summon itself, and a
 turn that failed or was cancelled summons no one.
 
+A Swarm runs one round at a time. While a round runs, the composer offers Stop
+instead of Send, including after leaving and reopening the Swarm or on another
+device; a message sent meanwhile is refused with `GROUP_BUSY` rather than
+started alongside it, because two rounds would interleave their waves in the
+one transcript. Replies are not streamed: each member shows as working until
+its whole reply is in.
+
 At creation, a Swarm selects its work tree and per-member model, effort,
 permission, nickname, and prompt/persona. The work tree cannot be changed later
 because it is part of the keys for the Swarm transcript and each member's
@@ -704,10 +711,23 @@ Playwright browser cache on first use; set `PLAYWRIGHT_CORE` to use an existing
 
 Chat times are today's date at fixed hours, shown in UTC. The quota bars show
 the backend machine's real Claude Code usage, and the agent dots show
-which CLIs are installed there. The example content stays in English in the
-Chinese shots; only the app language changes. When the drawer or Home layout
-changes, adjust the tap coordinates in `SHOTS` at the top of the script, then
-review every image before committing it.
+which CLIs are installed there. Chinese shots use translated conversation
+text, session names and Swarm nicknames as well as the Chinese app language.
+When the drawer or Home layout changes, adjust the tap coordinates for the
+selected capture mode in the script, then review every image before committing
+it.
+
+For a separate set of Chinese 9:16 phone images (home, chat, empty chat, Swarm,
+files, machine details, quota usage, settings and credentials),
+use the same script with `--mobile-zh`:
+
+```bash
+node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh
+```
+
+This writes 1080×1920 PNGs (432×768 viewport at 2.5×) under
+`docs/screenshots/mobile-zh-9x16/`, preserving the README captures. Wallpaper
+settings remain dark opacity 0.6, light opacity 0.8, blur 6 and tint 0.55.
 
 ### Backend settings
 

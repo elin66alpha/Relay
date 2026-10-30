@@ -255,7 +255,11 @@ architecture change (see Changes).
   human's `@mentions` open wave one; `@mentions` inside a member's reply summon
   the next wave, bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since
   two members naming each other would otherwise never stop. A member never
-  summons itself, and a failed or cancelled turn summons no one.
+  summons itself, and a failed or cancelled turn summons no one. One round runs
+  at a time: a message sent meanwhile is refused (`GROUP_BUSY`), and the Swarm
+  history reports the running round (`runningRequestId`) so a reopened screen
+  still offers Stop. The app shows a member as working until its reply is
+  complete; Swarm replies are not streamed.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
 - The SSH terminal exchanges the bearer credential for a short-lived,
@@ -310,6 +314,7 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `node scripts/release/check_versions.js`, `node scripts/release/check_docs.js` and `node --test scripts/release/*.test.js` -> exit 0
 - `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
+- `node scripts/dev/readme_screenshots.js <wallpaper image> --mobile-zh` (Web build present) -> nine Chinese demo screenshots (home, chat, empty chat, Swarm, files, machine details, quota usage, settings and credentials) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings.
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.

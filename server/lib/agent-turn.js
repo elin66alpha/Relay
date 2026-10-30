@@ -296,6 +296,13 @@ async function runAgentTurn(options) {
   // (its own arrival timestamp) and separate it from the previous one in the
   // flat content so search/export still reads naturally.
   const persistSegmentBoundary = () => {
+    // A message with no text (only tool calls) leaves its segment empty; the
+    // next message reuses it instead of stacking blank segments and separators.
+    const last = segments[segments.length - 1];
+    if (last && !last.text.trim()) {
+      last.ts = new Date().toISOString();
+      return;
+    }
     segments.push({ ts: new Date().toISOString(), text: '' });
     updateAssistantHistory((message) => {
       const separator = message.content ? '\n\n' : '';
@@ -477,6 +484,8 @@ async function runAgentTurn(options) {
     // single result string. For a single-message turn the runner's content is
     // authoritative (it can be fuller than what streamed, e.g. codex's -o file),
     // so we keep it and reconcile the lone segment to match.
+    // Only the last segment can be empty: a final message without text.
+    if (segments.length && !segments[segments.length - 1].text.trim()) segments.pop();
     const multiSegment = segments.length > 1;
     const baseContent = multiSegment
       ? segments

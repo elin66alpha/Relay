@@ -326,6 +326,29 @@ test('multi-message turn keeps each segment with its own timestamp', async () =>
   assert.equal(done.data.message.segments.length, 2);
 });
 
+test('messages without text leave no empty segments or blank lines', async () => {
+  const harness = makeHarness(async (onEvent) => {
+    // Claude opens a message per tool call; most carry no text.
+    onEvent({ type: 'segment' });
+    onEvent({ type: 'segment' });
+    onEvent({ type: 'delta', text: 'Looking into it' });
+    onEvent({ type: 'segment' });
+    onEvent({ type: 'segment' });
+    onEvent({ type: 'delta', text: 'All done' });
+    onEvent({ type: 'segment' });
+    return 'All done';
+  });
+
+  await runAgentTurn(turnOptions({ dependencies: harness.dependencies }));
+
+  const assistant = harness.histories.get('scope')[1];
+  assert.equal(assistant.content, 'Looking into it\n\nAll done');
+  assert.deepEqual(
+    assistant.metadata.segments.map((segment) => segment.text),
+    ['Looking into it', 'All done'],
+  );
+});
+
 test('single-message turn keeps the runner result and one timestamped segment', async () => {
   const harness = makeHarness(async (onEvent) => {
     onEvent({ type: 'delta', text: 'partial' });

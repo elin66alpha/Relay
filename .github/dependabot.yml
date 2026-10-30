@@ -5,7 +5,7 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /server
-    target-branch: '0.1.10'
+    target-branch: '0.1.11'
     schedule:
       interval: weekly
     groups:
@@ -13,7 +13,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: pub
     directory: /app/core
-    target-branch: '0.1.10'
+    target-branch: '0.1.11'
     schedule:
       interval: weekly
     groups:
@@ -21,7 +21,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: pub
     directory: /app/shell
-    target-branch: '0.1.10'
+    target-branch: '0.1.11'
     schedule:
       interval: weekly
     groups:
@@ -29,7 +29,7 @@ updates:
         patterns: ['*']
   - package-ecosystem: github-actions
     directory: /
-    target-branch: '0.1.10'
+    target-branch: '0.1.11'
     schedule:
       interval: weekly
     groups:
