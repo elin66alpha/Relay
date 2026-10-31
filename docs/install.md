@@ -134,7 +134,7 @@ service PATH includes common Homebrew and per-user binary locations.
 
 ### Windows
 
-For release 0.1.9, `relay-backend-windows-x64-v0.1.9.zip` includes the Node.js
+`relay-backend-windows-x64-v<VERSION>.zip` from each release includes the Node.js
 runtime, npm, locked production dependencies, Web client and `Setup.exe`.
 Extract the whole ZIP to a permanent writable directory and double-click
 `Setup.exe`, or run `.\setup.cmd` for the console menu. Both provide install,

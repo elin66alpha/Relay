@@ -682,7 +682,10 @@ class _MessageBubble extends StatelessWidget {
     // ones folded behind a toggle. The leading spinner becomes typing dots.
     final List<MessageSegment> segments = message.segments;
     final bool segmented = !isHuman && segments.length > 1;
-    final bool awaiting = awaitingFirstToken && message.content.isEmpty;
+    // Swarm replies are not streamed: a working member shows typing dots, not
+    // the partial text a reload may carry, until its whole reply is in.
+    final bool awaiting =
+        streaming || (awaitingFirstToken && message.content.isEmpty);
     final DateTime stampTime =
         (!isHuman && segments.isNotEmpty && segments.first.createdAt != null)
             ? segments.first.createdAt!

@@ -118,14 +118,15 @@ Claude, Codex, and Cursor must already be logged in on that host (`agent login`
 for Cursor); OpenCode and Hermes use the provider configuration managed there,
 and Relay lists the models that configuration provides.
 
-Windows x64 users can download `relay-backend-windows-x64-v0.1.9.zip` from
-[release 0.1.9](https://github.com/elin66alpha/Relay/releases/tag/v0.1.9), extract
+Windows x64 users can download `relay-backend-windows-x64-v<VERSION>.zip` from
+the [latest release](https://github.com/elin66alpha/Relay/releases/latest), extract
 it, and double-click `Setup.exe` (or run `.\setup.cmd` for the console menu).
 The bundle includes Node.js, production dependencies and the compiled Web
 client, served by the same Node.js process as the API. Setup offers agent CLI
 installation, Web on/off, network setup and device token management; sign in
 to the selected CLIs yourself on the host. The asset
-`relay-windows-x64-v0.1.9.zip` is the desktop client.
+`relay-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
+the Android, iOS, macOS and Ubuntu clients.
 
 On Linux, one command downloads the latest release into `~/relay` (or a
 directory you choose), checks it against the release checksums, and runs setup:

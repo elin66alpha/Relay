@@ -111,12 +111,13 @@ Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenC
 Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
 Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
 
-Windows x64 用户可从 [0.1.9 release](https://github.com/elin66alpha/Relay/releases/tag/v0.1.9)
-下载 `relay-backend-windows-x64-v0.1.9.zip`，解压后双击 `Setup.exe`，或运行
+Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/releases/latest)
+下载 `relay-backend-windows-x64-v<版本>.zip`，解压后双击 `Setup.exe`，或运行
 `.\setup.cmd` 打开命令行菜单。包内包含 Node.js、生产依赖和编译后的 Web 前端，
 Web 与 API 共用同一个 Node.js 服务。安装向导支持选装 agent CLI、开关 Web、配置网络和
 管理设备令牌；CLI 登录仍由你在主机上完成。
-`relay-windows-x64-v0.1.9.zip` 是桌面客户端。
+`relay-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
+和 Ubuntu 客户端。
 
 在 Linux 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的校验和
 核对后运行安装脚本：

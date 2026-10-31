@@ -38,6 +38,8 @@ const sentEvents = [];
 // Per-agent reply text, so a test can make one member @mention another. Empty
 // means the default "reply from <agent>", which mentions nobody.
 const scriptedReplies = new Map();
+// Per-agent promises a turn waits on, so a test can hold a round open.
+const heldReplies = new Map();
 
 function buildContext() {
   const sessionContextKeyFor = (agentKey, workdir) => `${workdir}${SEP}${agentKey}`;
@@ -66,6 +68,7 @@ function buildContext() {
         settings: opts.settings,
       });
       const reply = scriptedReplies.get(agentKey) || `reply from ${agentKey}`;
+      await heldReplies.get(agentKey);
       onEvent({ type: 'delta', text: reply });
       return reply;
     },
@@ -359,4 +362,49 @@ test('unknown group and empty members are rejected', async () => {
 
   const noMembers = await api('POST', '/api/groups', { name: 'X', members: ['ghost'] });
   assert.equal(noMembers.status, 400);
+});
+
+test('a second message while a round runs is refused and history names the round', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'One At A Time',
+    members: ['claude'],
+  })).json();
+  const group = created.group;
+  let release;
+  heldReplies.set('claude', new Promise((resolve) => { release = resolve; }));
+  const historyOf = async () =>
+    (await api('GET', `/api/group/history?groupId=${group.id}`)).json();
+
+  const first = api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@claude take your time',
+    requestId: 'round-held',
+  });
+  try {
+    for (let i = 0; i < 400 && !runCalls.some((c) => c.prompt.includes('take your time')); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal((await historyOf()).runningRequestId, 'round-held');
+
+    const busy = await api('POST', '/api/group/chat', {
+      groupId: group.id,
+      prompt: '@claude and another thing',
+    });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).code, 'GROUP_BUSY');
+  } finally {
+    release();
+    heldReplies.clear();
+  }
+  assert.equal((await (await first).json()).turns[0].status, 'done');
+  const settled = await historyOf();
+  assert.equal(settled.runningRequestId, null);
+  const reply = settled.messages.find((m) => m.role === 'assistant');
+  assert.equal(reply.content, 'reply from claude');
+  assert.equal(reply.metadata.cancelled, undefined);
+  assert.equal(
+    settled.messages.filter((m) => m.role === 'user').length,
+    1,
+    'the refused message is not recorded',
+  );
 });

@@ -114,7 +114,7 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 
 ### Windows
 
-0.1.9 的 `relay-backend-windows-x64-v0.1.9.zip` 包含 Node.js、npm、按锁文件安装的
+每个 release 的 `relay-backend-windows-x64-v<版本>.zip` 包含 Node.js、npm、按锁文件安装的
 生产依赖、Web 前端和 `Setup.exe`。将整个 ZIP 解压到固定、可写的目录，双击
 `Setup.exe`，或运行 `.\setup.cmd` 打开命令行菜单。两种入口共用安装、重装、卸载、
 状态查询、CLI 安装和设备令牌管理功能。Web 默认开启；隧道模式缺少 `cloudflared`

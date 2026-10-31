@@ -3,7 +3,7 @@
 // Chinese) against an isolated demo backend. See docs/handbook.md,
 // "Refreshing README screenshots".
 //
-//   node scripts/dev/readme_screenshots.js <wallpaper image>
+//   node scripts/dev/readme_screenshots.js <wallpaper image> [--mobile-zh]
 'use strict';
 
 const fs = require('node:fs');
@@ -12,7 +12,8 @@ const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
 
 const REPO = path.resolve(__dirname, '../..');
-const OUT = path.join(REPO, 'docs', 'screenshots');
+const MOBILE_ZH = process.argv.includes('--mobile-zh');
+const OUT = path.join(REPO, 'docs', 'screenshots', ...(MOBILE_ZH ? ['mobile-zh-9x16'] : []));
 const WEB = path.join(REPO, 'app', 'shell', 'build', 'web');
 // The path is visible in the screenshots, so it stays fixed.
 const ROOT = '/tmp/relay-demo';
@@ -44,6 +45,22 @@ const SHOTS = [
   { name: 'relay-files-mobile', size: [400, 820, 2], steps: [{ tap: DRAWER }, { tap: [95, 739] }] },
 ];
 
+// Same layout as the first phone set, rendered at 2.5× for 1080×1920 PNGs.
+const MOBILE_SHOTS = [
+  { name: 'relay-overview-mobile', steps: [] },
+  { name: 'relay-chat-mobile', steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
+  { name: 'relay-chat-empty-mobile', empty: true, steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
+  {
+    name: 'relay-swarm-mobile',
+    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { tap: [136, 550] }],
+  },
+  { name: 'relay-files-mobile', steps: [{ tap: DRAWER }, { tap: [95, 688] }] },
+  { name: 'relay-machine-mobile', steps: [{ tap: [180, 132] }] },
+  { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 213] }] },
+  { name: 'relay-settings-mobile', steps: [{ tap: DRAWER }, { tap: [95, 739] }] },
+  { name: 'relay-credentials-mobile', steps: [{ tap: DRAWER }, { tap: [100, 165] }] },
+].map((shot) => ({ ...shot, size: [432, 768, 2.5] }));
+
 function loadPlaywright() {
   if (process.env.PLAYWRIGHT_CORE) return require(process.env.PLAYWRIGHT_CORE);
   const dir = path.join(os.tmpdir(), `relay-playwright-${PLAYWRIGHT_VERSION}`);
@@ -62,7 +79,8 @@ function writeJson(name, value) {
   fs.writeFileSync(path.join(SERVER, name), JSON.stringify(value, null, 2));
 }
 
-function seed() {
+function seed(lang) {
+  const text = (en, zh) => lang === 'zh' ? zh : en;
   fs.rmSync(ROOT, { recursive: true, force: true });
 
   const files = {
@@ -102,8 +120,8 @@ function seed() {
       activeSessionId: 'default',
       sessions: [
         { id: 'default', name: 'Main', createdAt: at('09:00'), updatedAt: at('10:17') },
-        { id: 'release-notes', name: 'Release notes', createdAt: at('09:10'), updatedAt: at('09:40') },
-        { id: 'flaky-tests', name: 'Flaky tests', createdAt: at('09:05'), updatedAt: at('09:30') },
+        { id: 'release-notes', name: text('Release notes', '发布说明'), createdAt: at('09:10'), updatedAt: at('09:40') },
+        { id: 'flaky-tests', name: text('Flaky tests', '不稳定测试'), createdAt: at('09:05'), updatedAt: at('09:30') },
       ],
     },
   });
@@ -124,11 +142,11 @@ function seed() {
     },
   });
   const fixReply = [
-    'I ran `tests/billing.test.ts` 40 times and reproduced the timeout 4 times. Every failure happens when two invoices for the same customer are created in parallel.',
+    text('I ran `tests/billing.test.ts` 40 times and reproduced the timeout 4 times. Every failure happens when two invoices for the same customer are created in parallel.', '我运行了 40 次 `tests/billing.test.ts`，其中 4 次出现超时。每次失败都发生在为同一客户并发创建两张发票时。'),
     '',
-    '**Root cause:** `createInvoice` reads the next invoice number and then inserts it, so concurrent calls race and the second insert waits on the unique index lock.',
+    text('**Root cause:** `createInvoice` reads the next invoice number and then inserts it, so concurrent calls race and the second insert waits on the unique index lock.', '**根本原因：** `createInvoice` 先读取下一个发票编号，再执行插入。并发调用产生竞争，第二次插入因此等待唯一索引锁。'),
     '',
-    'I moved the read into the insert:',
+    text('I moved the read into the insert:', '我将读取编号合并到了插入语句中：'),
     '',
     '```ts',
     'const invoice = await db.one(',
@@ -140,19 +158,19 @@ function seed() {
     ');',
     '```',
     '',
-    'The suite now passes 40/40 runs.',
+    text('The suite now passes 40/40 runs.', '修复后连续运行 40 次，全部通过。'),
   ].join('\n');
   const doneReply = [
-    'Done:',
+    text('Done:', '已完成：'),
     '',
-    '- Added `creates sequential numbers under concurrency` to `tests/billing.test.ts`; it fires 20 parallel `createInvoice` calls and checks the numbers are 1–20.',
-    '- Added a **Fixed** entry to `CHANGELOG.md` under 2.4.1.',
+    text('- Added `creates sequential numbers under concurrency` to `tests/billing.test.ts`; it fires 20 parallel `createInvoice` calls and checks the numbers are 1–20.', '- 在 `tests/billing.test.ts` 中新增“并发创建时编号连续”的回归测试：并行调用 20 次 `createInvoice`，检查编号为 1–20。'),
+    text('- Added a **Fixed** entry to `CHANGELOG.md` under 2.4.1.', '- 在 `CHANGELOG.md` 的 2.4.1 版本下添加了**修复**记录。'),
     '',
-    '`npm test` → 128 passed, 0 failed.',
+    text('`npm test` → 128 passed, 0 failed.', '`npm test` → 128 项通过，0 项失败。'),
   ].join('\n');
 
   const groupId = 'release-readiness';
-  const groupName = 'Release readiness';
+  const groupName = text('Release readiness', '发布检查');
   const member = (id, agent, label, content, hm) => ({
     id,
     role: 'assistant',
@@ -175,26 +193,26 @@ function seed() {
 
   writeJson('chat-history.json', {
     [claudeContext]: [
-      solo('u1', 'user', '`tests/billing.test.ts` times out about one run in ten in CI. Find out why and fix it.', '09:48'),
+      solo('u1', 'user', text('`tests/billing.test.ts` times out about one run in ten in CI. Find out why and fix it.', '`tests/billing.test.ts` 在 CI 中大约每十次运行就有一次超时。请找出原因并修复。'), '09:48'),
       solo('a1', 'assistant', fixReply, '09:50', { context: { used: 31000, size: 200000 } }),
-      solo('u2', 'user', 'Nice. Add a regression test and update the changelog.', '10:17'),
+      solo('u2', 'user', text('Nice. Add a regression test and update the changelog.', '很好，再补一个回归测试，并更新变更日志。'), '10:17'),
       solo('a2', 'assistant', doneReply, '10:17', { context: { used: 42000, size: 200000 } }),
     ],
     [`${WORKDIR}${SEP}group:${groupId}`]: [
       {
         id: 'g1',
         role: 'user',
-        content: '@Lead @Reviewer is 2.4.1 ready to ship?',
+        content: text('@Lead @Reviewer is 2.4.1 ready to ship?', '@负责人 @审查员 2.4.1 可以发布了吗？'),
         agent: 'human',
         createdAt: at('10:06'),
         metadata: { author: 'human', summonedBy: 'human', groupId, groupName, mentions: ['claude', 'codex'] },
       },
-      member('g2', 'claude', 'Lead',
-        'The invoice race is fixed and covered by a regression test. All 128 tests pass. I would ship once the release notes are updated. @Docs can you draft them?', '10:07'),
-      member('g3', 'codex', 'Reviewer',
-        'Reviewed the diff: the single-statement insert is correct. Migration `0007_add_invoice_index.sql` keeps the lookup fast. No blockers.', '10:07'),
-      member('g4', 'opencode', 'Docs',
-        'Drafted the 2.4.1 notes:\n\n- **Fixed** duplicate invoice numbers under concurrent checkout\n- **Added** an index on `invoices(customer_id, number)`', '10:09'),
+      member('g2', 'claude', text('Lead', '负责人'),
+        text('The invoice race is fixed and covered by a regression test. All 128 tests pass. I would ship once the release notes are updated. @Docs can you draft them?', '发票编号的并发问题已修复，并补上了回归测试。128 项测试全部通过，更新发布说明后就可以发布。@文档 请起草发布说明。'), '10:07'),
+      member('g3', 'codex', text('Reviewer', '审查员'),
+        text('Reviewed the diff: the single-statement insert is correct. Migration `0007_add_invoice_index.sql` keeps the lookup fast. No blockers.', '已审查代码差异，合并后的插入语句没有问题。迁移 `0007_add_invoice_index.sql` 保证了查询速度，没有发布阻碍。'), '10:07'),
+      member('g4', 'opencode', text('Docs', '文档'),
+        text('Drafted the 2.4.1 notes:\n\n- **Fixed** duplicate invoice numbers under concurrent checkout\n- **Added** an index on `invoices(customer_id, number)`', '2.4.1 发布说明已起草：\n\n- **修复**并发结账时发票编号重复的问题\n- **新增** `invoices(customer_id, number)` 索引'), '10:09'),
     ],
   });
 
@@ -205,7 +223,7 @@ function seed() {
         name: groupName,
         members: ['claude', 'codex', 'opencode'],
         workdir: WORKDIR,
-        memberConfigs: { claude: { nickname: 'Lead' }, codex: { nickname: 'Reviewer' }, opencode: { nickname: 'Docs' } },
+        memberConfigs: { claude: { nickname: text('Lead', '负责人') }, codex: { nickname: text('Reviewer', '审查员') }, opencode: { nickname: text('Docs', '文档') } },
         createdAt: at('10:00'),
         updatedAt: at('10:09'),
       }],
@@ -251,6 +269,14 @@ async function shoot(browser, wallpaper, lang, shot) {
     timezoneId: 'UTC',
     locale: lang === 'zh' ? 'zh-CN' : 'en-US',
   });
+  if (shot.empty) {
+    // Empty only this browser's history; the demo's translated chat stays intact.
+    await page.route('**/api/history?*', async (route) => {
+      const response = await route.fetch();
+      const history = await response.json();
+      await route.fulfill({ response, json: { ...history, messages: [] } });
+    });
+  }
   await page.goto(BASE_URL);
   await page.evaluate(async ({ lang, wallpaper, darkOpacity, baseUrl, token }) => {
     localStorage.clear();
@@ -321,7 +347,7 @@ async function shoot(browser, wallpaper, lang, shot) {
 async function main() {
   const image = process.argv[2];
   if (!image || !fs.existsSync(image)) {
-    console.error('usage: node scripts/dev/readme_screenshots.js <wallpaper image>');
+    console.error('usage: node scripts/dev/readme_screenshots.js <wallpaper image> [--mobile-zh]');
     process.exit(2);
   }
   if (!fs.existsSync(path.join(WEB, 'index.html'))) {
@@ -329,17 +355,23 @@ async function main() {
     process.exit(2);
   }
   const { chromium } = loadPlaywright();
-  seed();
-  const server = await startServer();
+  fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
   try {
     const wallpaper = fs.readFileSync(image).toString('base64');
-    for (const lang of ['en', 'zh']) {
-      for (const shot of SHOTS) await shoot(browser, wallpaper, lang, shot);
+    for (const lang of MOBILE_ZH ? ['zh'] : ['en', 'zh']) {
+      seed(lang);
+      const server = await startServer();
+      try {
+        const shots = MOBILE_ZH ? MOBILE_SHOTS : SHOTS;
+        for (const shot of shots) await shoot(browser, wallpaper, lang, shot);
+      } finally {
+        server.kill();
+        await new Promise((resolve) => server.once('exit', resolve));
+      }
     }
   } finally {
     await browser.close();
-    server.kill();
   }
 }
 

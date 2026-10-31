@@ -89,6 +89,9 @@ class ChatMessage {
     return raw
         .whereType<Map>()
         .map((Map e) => MessageSegment.fromJson(e.cast<String, Object?>()))
+        // Older replies kept an empty segment for each message that only
+        // called tools.
+        .where((MessageSegment s) => s.text.trim().isNotEmpty)
         .toList(growable: false);
   }
 

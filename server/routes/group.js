@@ -109,6 +109,14 @@ module.exports = function createGroupRouter(ctx) {
   // separate from the member's solo Main chat in the same work tree).
   const memberSessionKeyFor = (workdir, groupId, memberKey) =>
     scopeKeyFor(memberKey, workdir, groupId);
+  // The round running in this swarm, so a device that reopens it can show Stop
+  // and cancel it. One round runs at a time, so the first match is the round.
+  const runningRoundFor = (scopeKey) => {
+    for (const runState of activeRequests.values()) {
+      if (runState.group && runState.scopeKey === scopeKey) return runState.requestId;
+    }
+    return null;
+  };
   const labelFor = (agentKey) => {
     const agent = getAgent(agentKey);
     return agent ? agent.label : agentKey;
@@ -252,7 +260,12 @@ module.exports = function createGroupRouter(ctx) {
     if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
       finalizeStaleStreamingHistory(scopeKey);
     }
-    return res.json({ workdir, group, messages: readHistory(scopeKey) });
+    return res.json({
+      workdir,
+      group,
+      messages: readHistory(scopeKey),
+      runningRequestId: runningRoundFor(scopeKey),
+    });
   });
 
   // Reset a swarm's transcript and every member's forked CLI session, keeping the
@@ -338,6 +351,14 @@ module.exports = function createGroupRouter(ctx) {
     // device that can see the swarm can cancel the round.
     const runWorkdir = runWorkdirOf(group, workdir);
     const scopeKey = groupScopeKeyFor(runWorkdir, group.id);
+    // One round at a time: a second one would interleave its waves with the
+    // first in the shared transcript and feed members each other's half-done
+    // turns. Stop the running round to start another.
+    if (runningScopes.has(scopeKey)) {
+      return res
+        .status(409)
+        .json({ error: 'swarm has a running round', code: 'GROUP_BUSY' });
+    }
     // A member's display name inside this swarm: its user-set nickname when
     // present, otherwise the agent's default label. Used for @mention matching,
     // the speaker labels in each prompt, and the recorded message attribution so
