@@ -7,7 +7,7 @@ the reason for each. How agents work together in this workspace lives in
 
 ## Purpose
 
-Relay lets one person drive Claude Code, Codex, Cursor, OpenCode, and Hermes
+Relay lets one person drive Claude Code, Codex, Cursor, OpenCode, Antigravity, and Hermes
 running on their own machine from a Flutter client (mobile, Web, desktop) over
 an authenticated HTTP/SSE backend.
 
@@ -106,7 +106,7 @@ architecture change (see Changes).
 - `server/lib/agent-options.js` owns option validation and the SDK or
   protocol representation of each setting. `server/lib/agent-settings.js`
   persists normalized solo-chat settings.
-- No agent runs one process per turn. All five keep a live session that turns
+- No agent runs one process per turn. All six keep a live session that turns
   are fed into. Every pool is a *cache*: the stored session id stays
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
@@ -123,13 +123,13 @@ architecture change (see Changes).
     own, queued on the scope and stopped by Stop like any turn, once it
     writes text. A message pushed while it runs may be folded into it; the
     result naming that message then ends both.
-  - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
+  - `server/lib/stdio-agent-pool.js` — the shared pool for the CLIs that
     speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
     session cap, idle eviction and cancellation; a `driver` supplies the
     protocol. One process per agent hosts *all* of that agent's scopes, since
     each session carries its own `cwd`, so a large startup cost is paid once
-    instead of once per chat.
-    - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor). Settings apply
+    instead of once per chat. Antigravity adds one isolated worker per session.
+    - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor, agy). Settings apply
       over the protocol (`acpSessionOptions`) with no restart. Capabilities from
       `initialize` gate optional calls: hermes has no `session/close`, so an
       evicted session is simply dropped.
@@ -145,7 +145,7 @@ architecture change (see Changes).
     driver's job (`allow_once` vs `accept` vs `approved`). ACP approvals pick
     `allow_once` over `allow_always`, because Cursor persists an "always" into
     the host user's own CLI allowlist.
-  - `runAcpAgent` in `agents.js` is the shared runner for opencode, hermes, and
+  - `runAcpAgent` in `agents.js` is the shared runner for opencode, hermes, agy, and
     cursor, which differ only by their pool and their entries in the option
     tables. Cursor's binary is `agent`; its pool passes `authMethod:
     cursor_login` because the CLI rejects a session until that call.
@@ -182,6 +182,20 @@ architecture change (see Changes).
   deletion on a best-effort basis. Cursor has no delete command, so Relay
   removes `<CURSOR_CONFIG_DIR>/acp-sessions/<id>` itself. Use `clearSession` only for the internal
   stale-session retry.
+- Antigravity uses `agy acp --process-per-session` through the existing ACP pool.
+  The CLI must support this flag; isolated workers keep concurrent conversations'
+  settings separate. Models come from `agy models` on the catalog refresh
+  schedule. Multiple effort variants become one model with a separate effort
+  picker; ACP config options apply the model before `thought_level`. Saved
+  variant model ids migrate to the corresponding model and effort. Permissions use ACP's `default` mode with Relay
+  refusing requests by default, or approving them in the `bypass` tier. Host login
+  uses `agy acp --login`; cli-paths owns the token path used by status and the file
+  API denylist. Purge closes and forgets the session; CLI transcript deletion is
+  unavailable and transcripts remain on the host. Quota reads the running CLI
+  language server on loopback, using ports from bounded recent CLI logs; no
+  prompt or new process is started for quota. All returned subscription buckets
+  (including separate Argon limits) appear in the usage page and composer strip,
+  with the shared cache/stale handling. No scheduler is added for agy.
 - Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
   Claude receives a `fastMode` settings override; Codex receives an explicit
   `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
@@ -196,8 +210,8 @@ architecture change (see Changes).
   result (including "not installed"); `agent-options.js` caches
   `models-extra.json` by mtime. A CLI update calls `clearModelDiscoveryCache`,
   which is what makes new models appear at once.
-- `GET /api/agents` returns all five known agents with install/auth/usability
-  state, in the order Claude Code, Codex, Cursor, OpenCode, Hermes. Claude and
+- `GET /api/agents` returns all six known agents with install/auth/usability
+  state, in the order Claude Code, Codex, Cursor, OpenCode, Antigravity, Hermes. Claude and
   Cursor require their CLI login (Cursor also accepts `CURSOR_API_KEY`). Codex reports its active app-server auth mode,
   including managed ChatGPT, API-key, external-token, and host-managed provider
   modes; OpenCode and Hermes credentials are managed on the host and become
@@ -287,6 +301,7 @@ architecture change (see Changes).
 | Model picker second page (bottom link): Cursor models outside its plan (`paid`), Claude/Codex models a newer one replaced (`legacy`); Swarms list first-page models only | agent-options, chat/agent_controls, chat/swarm_form_dialog | active |
 | Live OpenCode models (`opencode models`: free models plus providers configured on the host) and a Hermes model page showing the host's configured model | agents (refreshAgentModels), model-discovery, agent-options | active |
 | Cursor agent over ACP (design under Invariants, "Agents and controls") | agents, acp-session-pool, stdio-agent-pool, agent-options, agent-status, model-discovery, usage, routes/meta, cli_agent, chat/agent_controls, chat/context_meter | active |
+| Antigravity (`agy`) over ACP with isolated session workers, streaming and resume; separate model/effort controls, host OAuth, approval tiers and subscription quota | agents, acp-session-pool, stdio-agent-pool, agent-options, model-discovery, agent-status, cli-paths, filesystem, usage, cli_agent, agent_icon, features/quota | active |
 | Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
@@ -367,13 +382,18 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Model page: a model with `group` `legacy` (Claude Code, Codex) or `paid` (Cursor) in `GET /api/agent-options?agent=<key>` is listed only behind the bottom link, whose label shows how many there are; every other model is on the first page. Choosing a model on the second page saves it and returns to chat; reopening shows "Current: <model>" under the link. A Swarm member's model dropdown lists only first-page models.
 - Within a minute of backend start, OpenCode's model page lists exactly the ids `opencode models` prints on the host, each as model name over provider; a provider added to the host's OpenCode config appears after the next picker open more than ten minutes later, or after Update CLI.
 - Hermes shows a Model entry; its page lists one choice, the name `hermes config get model.default` prints, with the provider under it.
-- `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
+- `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `agy`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
+
+- (Antigravity installed and signed in) Select Antigravity, send two turns, stop a
+  running turn, and resume after backend restart: the scope retains its conversation.
+  Two sessions with different models use isolated workers; the selected model and
+  permission policy apply to each session. The file API rejects the agy OAuth file.
 
 ## Milestones
 
 | Milestone | Completion criteria | Status |
 |---|---|---|
-| 0.1.10 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.10"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; the repository root has no directory named backends, lib, test or assets, and ``git grep -n 'backends[/]' -- '*.md' ':!docs/CHANGELOG.md' ':!docs/releases'`` prints nothing | in progress |
+| 0.1.11 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.11"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; Antigravity appears in agent controls and quota views with host credentials protected | in progress |
 
 ## Changes
 
@@ -389,11 +409,12 @@ one summary line.
 - 2026-10-26: chat screens split by responsibility, and routes take state and I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
 - 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
+- 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers and reads quota from its running host CLI service. Reason: concurrent conversations need independent settings, and quota checks must not start a conversation or a new agent process.
 
 ## Review
 
 Last review: 2026-10-29
-Features since last review: 0
+Features since last review: 1
 Last result: Intent OK, Structure OK, Entropy OK, Test value Problem, Documentation OK, Operability OK, Evolution OK, Performance OK; 3 open findings (no test checks that Cursor's process starts with Relay's CURSOR_CONFIG_DIR; history.js background writes never recover after one failed write; json-store overwrites a file it cannot load).
 
 ## Deviations

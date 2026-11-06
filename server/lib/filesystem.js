@@ -9,7 +9,7 @@ const { randomUUID } = require('crypto');
 const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
 const { TOKENS_FILE } = require('./tokens');
 const { SERVICE_ACCOUNT_FILE } = require('./fcm');
-const { CURSOR_CONFIG_DIR, cursorAuthFile } = require('./cli-paths');
+const { CURSOR_CONFIG_DIR, cursorAuthFile, agyAuthFile } = require('./cli-paths');
 
 class FilesystemError extends Error {
   constructor(message, { status = 400, code = 'FS_ERROR' } = {}) {
@@ -52,6 +52,7 @@ const SENSITIVE_PATHS = [
   path.join(os.homedir(), '.claude', '.credentials.json'),
   path.join(os.homedir(), '.codex', 'auth.json'),
   cursorAuthFile(),
+  agyAuthFile(),
   // Relay's own Cursor config: model choices, settings and session transcripts.
   CURSOR_CONFIG_DIR,
 ];

@@ -5,12 +5,13 @@ const os = require('os');
 const path = require('path');
 
 const { AGENTS } = require('./agents');
-const { commandExists, cursorAuthFile } = require('./cli-paths');
+const { commandExists, cursorAuthFile, agyAuthFile } = require('./cli-paths');
 
 const STATUS_TTL_MS = 60 * 1000;
 const statusCache = new Map();
 
 const AUTH_KIND = {
+  agy: 'oauth',
   claude: 'oauth',
   codex: 'oauth',
   hermes: 'apiKey',
@@ -171,6 +172,12 @@ function cursorCredential(fsModule, homeDir, environment, platform) {
 // login deadline.
 function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform) {
   switch (agentKey) {
+    case 'agy':
+      try {
+        return { authed: nonEmpty(fsModule.readFileSync(agyAuthFile(homeDir), 'utf8')) };
+      } catch (_err) {
+        return { authed: false };
+      }
     case 'claude':
       return claudeCredential(fsModule, homeDir);
     case 'codex':

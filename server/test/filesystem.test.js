@@ -631,3 +631,15 @@ test('a directory downloads as a zip and is aborted past the byte cap', { skip: 
     await capped.arrayBuffer();
   });
 });
+
+test('Antigravity credentials and backup copies are restricted', async () => {
+  const home = path.join(scratchRoot, 'agy-home');
+  const api = loadFilesystem({ home });
+  const token = path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+  fs.mkdirSync(path.dirname(token), { recursive: true });
+  for (const target of [token, `${token}.bak`]) {
+    fs.writeFileSync(target, 'test-secret');
+    const err = await rejects(() => api.prepareDownloadAbsolute(target));
+    assert.equal(err.code, 'FS_PATH_RESTRICTED');
+  }
+});

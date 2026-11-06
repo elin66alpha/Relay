@@ -4,7 +4,7 @@
 
 **让 AI 编程智能体留在你的机器上，在任何屏幕上继续控制它们。**
 
-一个连接 Claude Code、Codex、Cursor、OpenCode 与 Hermes 的私有、自托管远程工作台。
+一个连接 Claude Code、Codex、Cursor、OpenCode、Antigravity 与 Hermes 的私有、自托管远程工作台。
 
 ![Flutter 客户端](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
 ![Node.js 后端](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
@@ -72,7 +72,7 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 flowchart LR
     C["Flutter 客户端<br/>手机 · Web · 桌面"]
     R["Relay 后端<br/>运行在你的机器上的 Node.js"]
-    A["持久 agent 会话<br/>Claude · Codex · Cursor · OpenCode · Hermes"]
+    A["持久 agent 会话<br/>Claude · Codex · Cursor · OpenCode · Antigravity · Hermes"]
     F["项目与文件"]
     T["可恢复 PTY shell"]
 
@@ -96,7 +96,7 @@ flowchart LR
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
 | 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据，以及 Claude/Codex/Cursor 快速模式。模型页先列主力模型；Claude/Codex 的旧版模型和 Cursor 套餐外的模型放在第二页。OpenCode 列出主机上 OpenCode 提供的模型，包括在那里配置的服务商；Hermes 显示它配置好的模型。 |
 | 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
-| 📊 | **额度工作流** | 查看 Claude/Codex/Cursor 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
+| 📊 | **额度工作流** | 查看 Claude/Codex/Cursor/Antigravity 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
 | 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
 
@@ -110,6 +110,10 @@ Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenC
 在 Linux、macOS 或 Windows 主机安装 Node.js 22+ 和至少一个支持的 CLI。Claude、
 Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
 Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
+
+Antigravity 需在后端主机自行安装支持 `agy acp --process-per-session` 的 `agy`，
+并通过 `agy acp --login` 登录。重启后端并重新检查智能体状态后即可选择。
+模型和思考强度分别选择；订阅额度展示各模型组的独立额度。若额度服务未运行，先开始一次对话。
 
 Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/releases/latest)
 下载 `relay-backend-windows-x64-v<版本>.zip`，解压后双击 `Setup.exe`，或运行

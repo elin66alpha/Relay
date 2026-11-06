@@ -385,6 +385,37 @@ function parseCursorCatalog(raw) {
   return models;
 }
 
+// Current agy prints a stable model id and display name separated by a tab.
+function parseAgyModels(stdout) {
+  const models = new Map();
+  for (const line of String(stdout || '').split(/\r?\n/)) {
+    const [id, label] = line.trim().split('\t');
+    if (!id || !label || !REPORTED_ID_RE.test(id)) continue;
+    models.set(id, { id, label: reportedText(label, id) });
+  }
+  return groupAgyModels([...models.values()]);
+}
+
+function groupAgyModels(models) {
+  const groups = new Map();
+  for (const model of models) {
+    const match = /^(.*)-(low|medium|high|xhigh|max)$/.exec(model.id);
+    const key = match ? match[1] : model.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ model, effort: match && match[2] });
+  }
+  return [...groups.entries()].map(([id, variants]) => {
+    if (variants.length < 2 || variants.some((v) => !v.effort)) return variants[0].model;
+    return {
+      id,
+      label: variants[0].model.label.replace(/ \([^()]+\)$/, ''),
+      efforts: variants.map(({ effort }) => ({ id: effort, label: effort.charAt(0).toUpperCase() + effort.slice(1) })),
+      defaultEffort: variants.some((v) => v.effort === 'medium') ? 'medium' : variants[0].effort,
+      variants: Object.fromEntries(variants.map(({ model, effort }) => [effort, model.id])),
+    };
+  });
+}
+
 // `opencode models` prints one `provider/model` per line: the free models plus
 // every provider configured on the host. A model id may itself contain `/`
 // (openrouter/anthropic/...), so only the first segment is the provider.
@@ -489,6 +520,8 @@ function clearModelDiscoveryCache(agentKey) {
 }
 
 module.exports = {
+  parseAgyModels,
+  groupAgyModels,
   clearModelDiscoveryCache,
   discoverModels,
   hermesModelOptions,

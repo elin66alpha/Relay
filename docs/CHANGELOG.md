@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.11 - 2026-11-06
+
+### Added
+
+- Antigravity (`agy`) as a sixth agent, between OpenCode and Hermes. Install a
+  host CLI supporting `agy acp --process-per-session` and sign in with
+  `agy acp --login`. Conversations stream, resume and run concurrently with
+  isolated session workers, separate model and reasoning-effort controls, and
+  cautious or auto-approve permission tiers.
+- Antigravity subscription quota in Usage and the composer strip, with Gemini,
+  Claude/GPT and Argon buckets shown separately. Quota reads the host CLI's
+  running local service and retains stale cached results when it stops.
+
+### Changed
+
+- Antigravity model lists refresh from the host CLI; saved model variants retain
+  their model and effort when moving to separate controls.
+- Updated the English and Chinese setup guides for Antigravity. Quota schedules
+  remain available for Claude Code and Codex.
+
+### Security
+
+- The file API denies access to Antigravity's OAuth credential file and backup
+  copies. Agent status and quota responses keep credentials and account details
+  on the backend host.
+
 ## 0.1.10 - 2026-10-29
 
 ### Added

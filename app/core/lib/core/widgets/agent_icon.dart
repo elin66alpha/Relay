@@ -15,6 +15,7 @@ String? agentIconAssetPath(String key, Brightness brightness) {
         ? 'assets/agent_icons/cursor_inverse.png'
         : 'assets/agent_icons/cursor.png',
     'opencode' => 'assets/agent_icons/opencode.png',
+    'agy' => 'assets/agent_icons/agy.png',
     'hermes' => 'assets/agent_icons/hermes.png',
     _ => null,
   };

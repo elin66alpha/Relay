@@ -330,3 +330,12 @@ test('caches status detection briefly', () => {
   assert.equal(refreshedCache.claude.installed, false);
   assert.equal(expired.claude.installed, false);
 });
+
+test('Antigravity requires a host token and never exposes it', () => {
+  const home = makeHome();
+  assert.equal(statuses(home, new Set(['agy'])).agy.authed, false);
+  writeText(path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'private-agy-token');
+  const status = statuses(home, new Set(['agy'])).agy;
+  assert.deepEqual(status, { installed: true, authed: true, authKind: 'oauth' });
+  assert.equal(JSON.stringify(status).includes('private-agy-token'), false);
+});

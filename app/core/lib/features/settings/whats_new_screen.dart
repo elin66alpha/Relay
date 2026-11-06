@@ -154,6 +154,28 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.1.11',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.add_circle_outline_rounded,
+        title: '加入 Antigravity',
+        body:
+            '在后端主机安装支持隔离会话的 agy，并运行 agy acp --login 登录后，就能在 Relay 中选择 Antigravity，继续对话、切换模型和思考强度，也能同时处理多个会话。',
+      ),
+      _Highlight(
+        icon: Icons.data_usage_rounded,
+        title: '查看 Antigravity 额度',
+        body:
+            '用量页和输入框上方会显示 Antigravity 的订阅额度，Gemini、Claude/GPT 和 Argon 各自显示。首次查看前需先开始一次对话，让主机上的额度服务运行起来。',
+      ),
+    ],
+    changes: <String>[
+      'Antigravity 可选择谨慎或自动批准权限；不同会话的模型和设置互不影响。',
+      'Antigravity 的登录文件不能通过文件浏览器读取，凭据和账号详情保留在后端主机。',
+      '中英文部署和入门教程已更新；额度预约仍仅支持 Claude Code 和 Codex。',
+    ],
+  ),
+  _Release(
     version: '0.1.10',
     highlights: <_Highlight>[
       _Highlight(
@@ -238,6 +260,28 @@ const List<_Release> _zhReleases = <_Release>[
 ];
 
 const List<_Release> _enReleases = <_Release>[
+  _Release(
+    version: '0.1.11',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.add_circle_outline_rounded,
+        title: 'Antigravity joins Relay',
+        body:
+            'Install agy with isolated-session support on the backend host and sign in there with agy acp --login. You can then select Antigravity in Relay, continue conversations, pick its model and reasoning effort, and work in several sessions at once.',
+      ),
+      _Highlight(
+        icon: Icons.data_usage_rounded,
+        title: 'Check Antigravity quota',
+        body:
+            'Usage and the strip above the message box show Antigravity subscription quota, with separate Gemini, Claude/GPT and Argon pools. Start a conversation before the first check so the host CLI quota service is running.',
+      ),
+    ],
+    changes: <String>[
+      'Antigravity offers cautious and auto-approve permissions; each session keeps its own model and settings.',
+      'Antigravity login files are protected from the file browser, and credentials and account details stay on the backend host.',
+      'English and Chinese setup and getting-started guides are updated; quota schedules remain Claude Code and Codex only.',
+    ],
+  ),
   _Release(
     version: '0.1.10',
     highlights: <_Highlight>[

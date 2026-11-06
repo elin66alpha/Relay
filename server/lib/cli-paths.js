@@ -111,7 +111,12 @@ const CURSOR_CONFIG_DIR = process.env.RELAY_CURSOR_CONFIG_DIR
   ? path.resolve(process.env.RELAY_CURSOR_CONFIG_DIR)
   : path.join(__dirname, '..', 'cursor-config');
 
+function agyAuthFile(homeDir = os.homedir()) {
+  return path.join(homeDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+}
+
 module.exports = {
+  agyAuthFile,
   CURSOR_CONFIG_DIR,
   commandExists,
   cursorAuthFile,

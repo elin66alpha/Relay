@@ -286,6 +286,20 @@ the last reported window per agent and model in the generated state file
 `server/context-windows.json`, so an empty conversation can show the known limit.
 Cursor reports no context usage, so the line is hidden while Cursor is active.
 
+Antigravity requires a recent `agy` supporting `agy acp --process-per-session`.
+Install it and run `agy acp --login` on the backend host, then restart Relay and
+recheck agent status. Relay uses the shared ACP pool with isolated session workers;
+turns stream, reuse the live session, and resume the saved conversation after eviction.
+Models come from `agy models`, refreshed at startup and on picker opens every ten
+minutes. Multiple effort variants appear as one model with a separate effort
+control. Saved variant selections retain their model and effort. Cautious mode refuses approval
+requests; auto-approve accepts them. Deleting a Relay chat closes its live session
+and forgets its ID; agy transcripts remain managed by the host CLI. Antigravity
+quota appears in Usage and the composer strip, with each Gemini, Claude/GPT
+and Argon bucket kept separate. A running host CLI language server is required;
+start an Antigravity conversation if the quota page requests it. Cached results
+are marked stale when that server stops. Quota schedules remain Claude/Codex only.
+
 Agent controls are capability-aware:
 
 | Agent | Model | Effort | Permission | Fast | Authentication |
@@ -294,6 +308,7 @@ Agent controls are capability-aware:
 | Codex | yes | model-specific | yes | yes | active app-server mode: managed ChatGPT, API key, external token, or host-managed provider |
 | Cursor | yes | model-specific | yes | yes, models with a fast option | host auth file or `CURSOR_API_KEY` |
 | OpenCode | yes | yes | yes | no | host-managed, optional key |
+| Antigravity | yes | model-specific | cautious / auto-approve | no | host `agy acp --login` |
 | Hermes | shows the host's configured model; pins | no | yes | no | host-managed key |
 
 Fast mode defaults off, may use more quota or cost more, and is visible only in

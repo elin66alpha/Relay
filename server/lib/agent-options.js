@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { discoverModels } = require('./model-discovery');
+const { discoverModels, groupAgyModels } = require('./model-discovery');
 
 // Static fallback model catalog. The live list normally comes from
 // model-discovery (which reads what the installed CLI actually ships, newest
@@ -24,6 +24,7 @@ const { discoverModels } = require('./model-discovery');
 // older pinned ids can be added without a code change via models-extra.json (see
 // mergeExtraModels).
 const BASE_MODELS = {
+  agy: [],
   // Static fallback only — normally replaced by live discovery. Ids match the
   // discovered scheme (full model id) so toggling discovery never churns a
   // stored selection.
@@ -119,6 +120,10 @@ const FAST_MODES = {
 // keeps approvals off on every tier, so the sandbox is the whole boundary:
 // Relay has no approval UI, so a prompt has no one to answer it.
 const PERMISSIONS = {
+  agy: [
+    { id: 'cautious', label: 'Cautious', description: 'Refuse tool requests that need approval.' },
+    { id: 'bypass', label: 'Auto-approve', description: 'Approve all tool requests.' },
+  ],
   claude: [
     {
       id: 'bypass',
@@ -203,6 +208,7 @@ const PERMISSIONS = {
 
 // CLI invocation + how to query/update each binary.
 const CLI = {
+  agy: { bin: 'agy', versionArgs: ['--version'], updateArgs: ['update'] },
   claude: { bin: 'claude', versionArgs: ['--version'], updateArgs: ['update'] },
   codex: { bin: 'codex', versionArgs: ['--version'], updateArgs: ['update'] },
   // TODO(opencode/hermes): confirm version/update subcommands once installed.
@@ -219,6 +225,7 @@ const CLI = {
 // edits and codex writes within the workspace (approvals disabled so exec never
 // hangs).
 const AGENT_DEFAULTS = {
+  agy: { permission: 'cautious' },
   claude: { effort: 'high', permission: 'acceptEdits', fast: 'off' },
   codex: { effort: 'medium', permission: 'workspace-write', fast: 'off' },
   // Non-interactive defaults that can actually do work; effort stays unset
@@ -232,7 +239,7 @@ const AGENT_DEFAULTS = {
 
 // Agents whose model group gets an automatic default (the newest catalog entry
 // or the CLI's configured default when available).
-const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode', 'hermes']);
+const MODEL_DEFAULT_AGENTS = new Set(['claude', 'codex', 'opencode', 'hermes', 'agy']);
 
 const EXTRA_MODELS_FILE = path.join(__dirname, '..', 'models-extra.json');
 
@@ -397,7 +404,8 @@ function modelsFor(agentKey) {
   const discovered = discoverModels(agentKey);
   const base =
     discovered && discovered.length ? discovered : fallbackModelsFor(agentKey);
-  return withModelGroups(agentKey, mergeExtraModels(agentKey, base));
+  return withModelGroups(agentKey, mergeExtraModels(agentKey,
+    agentKey === 'agy' ? groupAgyModels(base) : base));
 }
 
 function effortOptionsFor(agentKey, model) {
@@ -497,7 +505,16 @@ function pick(list, id, fallbackId) {
 // Normalize an arbitrary settings object to valid ids for the agent, dropping
 // selections the agent doesn't support.
 function normalizeSettings(agentKey, settings) {
-  const s = settings || {};
+  let s = settings || {};
+  if (agentKey === 'agy') {
+    for (const model of modelsFor(agentKey)) {
+      const legacy = Object.entries(model.variants || {}).find(([, id]) => id === s.model);
+      if (legacy) {
+        s = { ...s, model: model.id, effort: s.effort || legacy[0] };
+        break;
+      }
+    }
+  }
   const groups = groupsFor(agentKey, s);
   const out = {};
   const model = pick(groups.model, s.model, groups.defaults.model);
@@ -546,7 +563,7 @@ function claudeSdkOptions(settings) {
   return options;
 }
 
-// ACP agents (opencode, hermes, cursor) hold a persistent session too, but their
+// ACP agents (opencode, hermes, cursor, agy) hold a persistent session too, but their
 // settings are applied over the protocol rather than as argv: the model with
 // session/set_model, the permission tier as a session mode where the agent has
 // one that matches, and in every case by deciding how Relay answers the agent's
@@ -556,13 +573,14 @@ function claudeSdkOptions(settings) {
 // opencode's tiers have no mode to map onto — its `plan` mode disallows edits
 // entirely, which is not what "Ask" means — so it relies on the answers alone.
 const ACP_PERMISSION_MODES = {
+  agy: { cautious: 'default', bypass: 'default' },
   hermes: { yolo: 'dont_ask', cautious: 'default' },
   cursor: { bypass: 'agent', plan: 'plan', ask: 'ask' },
 };
 
 // The tier that means "approve whatever the agent asks for". Every other tier
 // refuses, because Relay has no approval UI to route the request to.
-const ACP_AUTO_APPROVE = { opencode: 'bypass', hermes: 'yolo', cursor: 'bypass' };
+const ACP_AUTO_APPROVE = { agy: 'bypass', opencode: 'bypass', hermes: 'yolo', cursor: 'bypass' };
 
 // Cursor applies a model and its parameters to its whole process, as config
 // options: the model first, since choosing it resets the rest.
@@ -590,6 +608,10 @@ function acpSessionOptions(agentKey, settings) {
   if (agentKey === 'hermes' && options.modelId) {
     options.modelId =
       options.modelId === 'default' ? null : options.modelId.replace('/', ':');
+  }
+  if (agentKey === 'agy' && chosen.effort) {
+    options.modelId = null;
+    options.configOptions = [['model', chosen.model], ['thought_level', chosen.effort]];
   }
   if (agentKey === 'cursor') {
     options.modelId = null;

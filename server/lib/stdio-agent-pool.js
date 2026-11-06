@@ -12,7 +12,7 @@ const { createSessionSlots } = require('./session-slots');
 // turn ended, so anything it started in the background died with it, and every
 // turn paid the cold-start cost of booting the CLI again.
 //
-// opencode, hermes, and cursor speak ACP (`<agent> acp`); codex speaks its own app-server
+// opencode, hermes, agy, and cursor speak ACP (`<agent> acp`); codex speaks its own app-server
 // protocol (`codex app-server`). Both are JSON-RPC 2.0 on stdio, and in both one
 // process hosts *many* sessions (the working directory is chosen per session),
 // so a pool keeps a single process per agent and multiplexes every chat through

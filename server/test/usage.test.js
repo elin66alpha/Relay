@@ -6,6 +6,8 @@ const { test } = require('node:test');
 const {
   buildUsageReport,
   cursorUsageFromBodies,
+  agyUsageFromBody,
+  agyQuotaLogNames,
   markExpiredQuotas,
 } = require('../lib/usage');
 
@@ -86,4 +88,23 @@ test('buildUsageReport rejects an unknown source before querying anything', asyn
     status: 400,
     message: 'Unknown usage source: nope',
   });
+});
+
+test('Antigravity keeps every subscription bucket including Argon and real zero remaining', () => {
+  const quota = agyUsageFromBody({ response: { groups: [
+    { displayName: 'Gemini', buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0, resetTime: '2026-11-07T00:00:00Z' }] },
+    { displayName: 'Claude/GPT', buckets: [{ bucketId: '3p-weekly', remainingFraction: 0.75 }] },
+    { displayName: 'Argon', buckets: [{ bucketId: 'argon-weekly', remainingFraction: 1 }, { bucketId: 'missing' }] },
+  ], accountEmail: 'private@example.invalid' } });
+  assert.deepEqual(quota.quotas.map((q) => q.remainingPercent), [0, 75, 100]);
+  assert.equal(quota.quotas[0].resetsAt, '2026-11-07T00:00:00.000Z');
+  assert.equal(quota.quotas[1].resetsAt, null);
+  assert.equal(JSON.stringify(quota).includes('private@'), false);
+  assert.throws(() => agyUsageFromBody({}), /no quota buckets/);
+});
+
+test('Antigravity quota discovers ACP worker logs as well as interactive CLI logs', () => {
+  assert.deepEqual(agyQuotaLogNames(['cli-20261106_010000.log',
+    'acp-worker-20261106_020000-42.log', 'acp-front-20261106_030000-41.log', 'other.log']),
+  ['acp-worker-20261106_020000-42.log', 'cli-20261106_010000.log']);
 });

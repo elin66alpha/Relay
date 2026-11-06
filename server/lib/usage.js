@@ -4,8 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const { createJsonStore } = require('./json-store');
-const { cursorAuthFile } = require('./cli-paths');
+const { cursorAuthFile, agyAuthFile } = require('./cli-paths');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -62,8 +63,10 @@ function attachTimeout(req, url) {
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
+let agyCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let cursorCache = { at: 0, fetchedAt: '', value: null, stale: false };
 const usageBackoff = {
+  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   cursor: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
@@ -78,6 +81,7 @@ const USAGE_CRED_FILES = {
   claude: CLAUDE_CREDS_PATH,
   codex: CODEX_AUTH,
   cursor: cursorAuthFile(),
+  agy: agyAuthFile(),
 };
 
 function credentialMtimeMs(key) {
@@ -236,7 +240,7 @@ function readClaudeCreds() {
   return JSON.parse(raw);
 }
 
-function httpJson(method, url, headers, body) {
+function httpJson(method, url, headers, body, timeoutMs) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const opts = { method, headers: { ...headers } };
@@ -244,7 +248,8 @@ function httpJson(method, url, headers, body) {
       opts.headers['Content-Type'] = 'application/json';
       opts.headers['Content-Length'] = Buffer.byteLength(data);
     }
-    const req = https.request(url, opts, (res) => {
+    const transport = new URL(url).protocol === 'http:' ? http : https;
+    const req = transport.request(url, opts, (res) => {
       let buffer = '';
       res.on('data', (chunk) => {
         buffer += chunk;
@@ -260,6 +265,7 @@ function httpJson(method, url, headers, body) {
       });
     });
     attachTimeout(req, url);
+    if (timeoutMs) req.setTimeout(timeoutMs);
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -394,6 +400,7 @@ function invalidateUsageCache(key) {
     claude: () => claudeCache,
     codex: () => codexCache,
     cursor: () => cursorCache,
+    agy: () => agyCache,
   };
   const cache = caches[key] && caches[key]();
   if (cache) cache.at = 0;
@@ -724,6 +731,77 @@ async function getCursorUsage() {
 // Agents whose quota we can report. `normalize` maps each fetcher's own result
 // shape onto a common { detail, asOf, stale, fiveHour, sevenDay } or a ready
 // `quotas` list, so the agent payload is built once below.
+// Preserve every quota pool: Argon can have a separate limit from other Gemini models.
+function agyUsageFromBody(body) {
+  const response = body && (body.response || body);
+  const quotas = [];
+  for (const group of Array.isArray(response && response.groups) ? response.groups : []) {
+    for (const bucket of Array.isArray(group.buckets) ? group.buckets : []) {
+      const fraction = bucket.remainingFraction;
+      if (typeof fraction !== 'number' || !Number.isFinite(fraction)) continue;
+      const reset = Date.parse(bucket.resetTime);
+      quotas.push({
+        key: String(bucket.bucketId || `agy-${quotas.length}`),
+        label: `${String(group.displayName || 'Antigravity').slice(0, 80)} · ${String(bucket.displayName || bucket.window || 'Quota').slice(0, 80)}`,
+        usedPercent: clampPercent((1 - fraction) * 100),
+        remainingPercent: clampPercent(fraction * 100),
+        resetsAt: Number.isFinite(reset) ? new Date(reset).toISOString() : null,
+        expired: false,
+      });
+    }
+  }
+  if (!quotas.length) throw new UsageQueryError('Antigravity returned no quota buckets.', 503);
+  return { quotas };
+}
+
+function agyQuotaLogNames(names) {
+  return names.filter((name) => /^(?:cli-|acp-worker-)\d{8}_\d{6}(?:-\d+)?\.log$/.test(name))
+    .sort((a, b) => b.replace(/^[a-z-]+/, '').localeCompare(a.replace(/^[a-z-]+/, '')))
+    .slice(0, 12);
+}
+
+async function fetchAgyUsage() {
+  const dir = path.join(path.dirname(agyAuthFile()), 'log');
+  let files = [];
+  try {
+    files = agyQuotaLogNames(fs.readdirSync(dir));
+  } catch (_err) { /* No CLI has run on this host yet. */ }
+  const tried = new Set();
+  for (const name of files) {
+    let text;
+    try {
+      const file = path.join(dir, name);
+      const fd = fs.openSync(file, 'r');
+      try {
+        const size = fs.fstatSync(fd).size;
+        const bytes = Buffer.alloc(Math.min(size, 65536));
+        fs.readSync(fd, bytes, 0, bytes.length, Math.max(0, size - bytes.length));
+        text = bytes.toString('utf8');
+      } finally { fs.closeSync(fd); }
+    } catch (_err) { continue; }
+    const ports = [...text.matchAll(/Language server listening on random port at (\d+) for HTTP/g)].reverse();
+    for (const match of ports) {
+      const port = Number(match[1]);
+      if (port < 1 || port > 65535 || tried.has(port) || tried.size >= 12) continue;
+      tried.add(port);
+      try {
+        const result = await httpJson('POST',
+          `http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`,
+          { Accept: 'application/json' }, {}, 1000);
+        if (result.status === 200) return agyUsageFromBody(result.body);
+      } catch (_err) { /* A stopped CLI leaves a stale port in its log. */ }
+    }
+  }
+  throw new UsageQueryError('Start an Antigravity conversation on this host, then refresh quota.', 503);
+}
+
+function getAgyUsage() {
+  return cachedUsage({ key: 'agy', ttlMs: 60000,
+    getMemoryCache: () => agyCache,
+    setMemoryCache: (cache) => { agyCache = cache; },
+    fetcher: fetchAgyUsage });
+}
+
 const USAGE_SOURCES = [
   {
     key: 'claude',
@@ -760,6 +838,8 @@ const USAGE_SOURCES = [
       quotas: Array.isArray(r.quotas) ? r.quotas : [],
     }),
   },
+  { key: 'agy', label: 'Antigravity', fetch: getAgyUsage,
+    normalize: (r) => ({ detail: '', asOf: r.fetchedAt || null, stale: !!r.stale, quotas: r.quotas }) },
 ];
 
 async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
@@ -811,6 +891,8 @@ async function buildUsageReport({ source } = {}) {
 }
 
 module.exports = {
+  agyUsageFromBody,
+  agyQuotaLogNames,
   getClaudeUsage,
   getCodexUsage,
   cursorUsageFromBodies,

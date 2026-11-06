@@ -9,7 +9,10 @@ import 'quota_controller.dart';
 
 /// The agents whose quota the backend reports.
 bool quotaStripSupports(String agentKey) =>
-    agentKey == 'claude' || agentKey == 'codex' || agentKey == 'cursor';
+    agentKey == 'claude' ||
+    agentKey == 'codex' ||
+    agentKey == 'cursor' ||
+    agentKey == 'agy';
 
 /// The active agent's remaining quota, pinned above the composer. Display
 /// only: the full quota screen opens from the agents drawer.

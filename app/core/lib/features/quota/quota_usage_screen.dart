@@ -27,6 +27,7 @@ const Map<String, String> _usageSources = <String, String>{
   'claude': 'Claude Code',
   'codex': 'Codex',
   'cursor': 'Cursor',
+  'agy': 'Antigravity',
 };
 
 class _QuotaUsageScreenState extends State<QuotaUsageScreen> {

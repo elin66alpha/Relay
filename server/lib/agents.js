@@ -14,6 +14,7 @@ const { createJsonStore } = require('./json-store');
 const {
   hermesModelOptions,
   parseOpenCodeModels,
+  parseAgyModels,
   recordCursorCatalog,
   recordReportedModels,
 } = require('./model-discovery');
@@ -194,7 +195,7 @@ function claudeExecutablePath() {
 // ever a cache over the stored session id.
 const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS });
 
-// opencode, hermes, and cursor each ship an `acp` subcommand: the same idea as
+// opencode, hermes, agy, and cursor each ship an `acp` subcommand: the same idea as
 // the Claude SDK over a different protocol — one process that stays open and
 // takes turn after turn. See acp-session-pool.js. ACP itself has no delete, so
 // the purge path shells out to each CLI that has a delete command.
@@ -208,6 +209,15 @@ const opencodePool = createAcpSessionPool({
   deleteCommand: (sessionId) => {
     const bin = locateBin('opencode');
     return bin ? { cmd: bin, args: ['session', 'delete', sessionId] } : null;
+  },
+});
+
+const agyPool = createAcpSessionPool({
+  agentKey: 'agy',
+  turnTimeoutMs: TIMEOUT_MS,
+  command: () => {
+    const bin = locateBin('agy');
+    return bin ? { cmd: bin, args: ['acp', '--process-per-session'] } : null;
   },
 });
 
@@ -304,6 +314,11 @@ function cliOutput(bin, args) {
 // OpenCode's from `opencode models` (free models change server-side, and it
 // lists every provider configured on the host), and Hermes' configured model.
 const CATALOG_FETCHERS = {
+  agy: {
+    bin: 'agy',
+    fetch: (bin) => cliOutput(bin, ['models']).then((out) =>
+      recordReportedModels('agy', parseAgyModels(out))),
+  },
   cursor: {
     bin: 'agent',
     fetch: () =>
@@ -384,6 +399,7 @@ const SESSION_POOLS = {
   claude: claudePool,
   opencode: opencodePool,
   hermes: hermesPool,
+  agy: agyPool,
   cursor: cursorPool,
   codex: codexPool,
 };
@@ -754,7 +770,7 @@ function errorLines(text) {
     .trim();
 }
 
-// opencode, hermes, and cursor run as persistent ACP sessions (see
+// opencode, hermes, agy, and cursor run as persistent ACP sessions (see
 // acp-session-pool.js): one process hosts every chat, `session/prompt` carries
 // a turn, and the reply arrives as `agent_message_chunk` updates — real
 // token-level streaming, where the old per-turn CLI paths could stream whole
@@ -883,6 +899,19 @@ async function runCursor(prompt, onEvent, sessionKey, signal, workdir, settings)
   });
 }
 
+function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  return runAcpAgent({
+    agentKey: 'agy',
+    pool: agyPool,
+    prompt,
+    onEvent,
+    sessionKey,
+    signal,
+    workdir,
+    settings,
+  });
+}
+
 const AGENTS = {
   claude: {
     key: 'claude',
@@ -909,6 +938,12 @@ const AGENTS = {
     description: 'OpenCode CLI',
     run: runOpencode,
     bin: 'opencode',
+  },
+  agy: {
+    key: 'agy',
+    label: 'Antigravity',
+    description: 'Antigravity CLI',
+    run: runAgy,
   },
   hermes: {
     key: 'hermes',

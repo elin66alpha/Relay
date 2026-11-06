@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const sessions = {};
-const pools = { claude: {}, codex: {}, opencode: {}, hermes: {}, cursor: {} };
+const pools = { agy: {}, claude: {}, codex: {}, opencode: {}, hermes: {}, cursor: {} };
 // Every Cursor process pool agents.js creates, with the options it passed and
 // the scope keys it was asked to forget.
 const cursorCreated = [];
@@ -40,6 +40,7 @@ const replacements = {
   '../lib/claude-session-pool': { createClaudeSessionPool: () => pools.claude },
   '../lib/codex-session-pool': { createCodexSessionPool: () => pools.codex },
   '../lib/model-discovery': {
+    groupAgyModels: require('../lib/model-discovery').groupAgyModels,
     discoverModels: (agentKey) => (agentKey === 'cursor' ? cursorCatalog : null),
     recordCursorCatalog: () => {},
   },
@@ -128,6 +129,16 @@ const cases = [
     reply: 'Checking filesDone',
   },
   {
+    agent: 'agy',
+    settings: { permission: 'cautious' },
+    options: { modeId: 'default' },
+    messages: [
+      { sessionUpdate: 'agent_message_chunk', messageId: 'first', content: { type: 'text', text: 'Checking' } },
+      { sessionUpdate: 'agent_message_chunk', messageId: 'first', content: { type: 'text', text: ' files' } },
+      { sessionUpdate: 'agent_message_chunk', messageId: 'last', content: { type: 'text', text: 'Done' } },
+    ],
+    reply: 'Checking filesDone',
+  },  {
     agent: 'hermes',
     settings: { permission: 'cautious' },
     options: { modeId: 'default' },
@@ -228,7 +239,7 @@ for (const { agent, settings, options, messages, reply } of cases) {
 test('lists cursor between codex and opencode', () => {
   assert.deepEqual(
     agents.listAgents().map((agent) => agent.key),
-    ['claude', 'codex', 'cursor', 'opencode', 'hermes'],
+    ['claude', 'codex', 'cursor', 'opencode', 'agy', 'hermes'],
   );
 });
 
@@ -276,4 +287,16 @@ test('an unknown agent is refused before using a pool', async () => {
   await assert.rejects(runAgent('missing', 'hello', () => {}, {
     workdir: '/tmp/runner-work', settings: {}, sessionKey: 'unknown',
   }), /Unknown agent: missing/);
+});
+
+test('Antigravity approvals follow the selected tier', async () => {
+  for (const permission of ['cautious', 'bypass']) {
+    pools.agy.send = async (call) => {
+      assert.equal(call.onPermission({ title: 'Write a file' }), permission === 'bypass');
+      return { result: {}, sessionId: 'agy-permission', stderr: '' };
+    };
+    await runAgent('agy', 'hi', () => {}, {
+      sessionKey: 'agy-permission', workdir: '/tmp/w', settings: { permission },
+    });
+  }
 });
