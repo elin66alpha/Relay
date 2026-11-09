@@ -66,3 +66,6 @@ app.*.map.json
 /server/fcm-service-account.json
 /server/fcm-tokens.json
 /server/credentials/
+
+# oh-my-claudecode session state
+.omc/
