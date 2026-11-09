@@ -95,6 +95,16 @@ class _WorkTreePickerDialogState extends State<WorkTreePickerDialog> {
                       ? Center(child: Text(_error!))
                       : ListView(
                           children: <Widget>[
+                            if (listing != null && listing.parentPath != null)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.drive_folder_upload_outlined,
+                                ),
+                                title: const Text('..'),
+                                subtitle: Text(strings.parentFolder),
+                                onTap: () => _load(listing.parentPath!),
+                              ),
                             for (final FsEntry dir in dirs)
                               ListTile(
                                 dense: true,

@@ -97,6 +97,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     });
     try {
       final WorkdirInfo info = await widget.backend.workdir();
+      if (!mounted) return;
       _workPath = info.dir;
       await _browse(info.dir);
     } catch (err) {
@@ -311,194 +312,335 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     final bool atWorkPath = listing != null &&
         _workPath != null &&
         listing.absolutePath == _workPath;
+    final String activePath = listing?.absolutePath ?? _workPath ?? '';
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n.fileSystem)),
+      appBar: AppBar(
+        title: Text(context.l10n.fileSystem),
+        actions: <Widget>[
+          IconButton(
+            tooltip: _showHidden
+                ? context.l10n.hideHiddenFiles
+                : context.l10n.showHiddenFiles,
+            onPressed: _isLoading || _isBusy ? null : _toggleHiddenFiles,
+            icon: Icon(
+              _showHidden
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+            ),
+          ),
+          IconButton(
+            tooltip: context.l10n.refresh,
+            onPressed: _isLoading || _isBusy
+                ? null
+                : activePath.isEmpty
+                    ? _loadInitial
+                    : () => _browse(activePath),
+            icon: const Icon(Icons.refresh_outlined),
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: CustomScrollView(
-          slivers: <Widget>[
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              sliver: SliverToBoxAdapter(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1040),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        if (_workPath != null)
-                          Text(
-                            context.l10n.currentWorkPath(_workPath!),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
+        child: Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1040),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      _BreadcrumbBar(
+                        path: activePath,
+                        canGoUp: listing?.parentPath != null,
+                        atWorkPath: atWorkPath,
+                        busy: _isLoading || _isBusy,
+                        onParent: listing?.parentPath == null
+                            ? null
+                            : () => _browse(listing!.parentPath!),
+                        onNavigate: _browse,
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          FilledButton.icon(
+                            onPressed: _isLoading || _isBusy || atWorkPath
+                                ? null
+                                : _setAsWorkPath,
+                            icon: Icon(
+                              atWorkPath
+                                  ? Icons.check_rounded
+                                  : Icons.flag_outlined,
                             ),
+                            label: Text(context.l10n.setAsWorkPath),
                           ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            FilledButton.icon(
-                              onPressed: _isLoading || _isBusy || atWorkPath
-                                  ? null
-                                  : _setAsWorkPath,
-                              icon: const Icon(Icons.flag_outlined),
-                              label: Text(context.l10n.setAsWorkPath),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: _isLoading || _isBusy
-                                  ? null
-                                  : () => _pickUpload(),
-                              icon: const Icon(Icons.upload_file_outlined),
-                              label: Text(context.l10n.uploadFile),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: _isLoading || _isBusy
-                                  ? null
-                                  : () => _browse(
-                                        _listing?.absolutePath ??
-                                            _workPath ??
-                                            '',
-                                      ),
-                              icon: const Icon(Icons.refresh_outlined),
-                              label: Text(context.l10n.refresh),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          context.l10n.transferLimitHint,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.outline,
+                          OutlinedButton.icon(
+                            onPressed:
+                                _isLoading || _isBusy ? null : _pickUpload,
+                            icon: const Icon(Icons.upload_file_outlined),
+                            label: Text(context.l10n.uploadFile),
                           ),
-                        ),
-                        if (kIsWeb) ...<Widget>[
-                          const SizedBox(height: 12),
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: theme.colorScheme.outlineVariant,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                children: <Widget>[
-                                  const Icon(
-                                    Icons.drive_folder_upload_outlined,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(context.l10n.dragDropUpload),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Text(
-                          context.l10n.currentFolder,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        if (listing != null)
-                          Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: SelectableText(
-                                  listing.absolutePath,
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ),
-                              if (atWorkPath)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 8),
-                                  child: Chip(
-                                    label: Text(context.l10n.workPathTag),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            OutlinedButton.icon(
-                              onPressed: listing?.parentPath == null ||
-                                      _isLoading ||
-                                      _isBusy
-                                  ? null
-                                  : () => _browse(listing!.parentPath!),
-                              icon: const Icon(Icons.arrow_upward_outlined),
-                              label: Text(context.l10n.parentFolder),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: _isLoading || _isBusy
-                                  ? null
-                                  : _toggleHiddenFiles,
-                              icon: Icon(
-                                _showHidden
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined,
+                          if (_workPath != null && !atWorkPath)
+                            ActionChip(
+                              avatar: Icon(
+                                Icons.folder_open_rounded,
+                                size: 16,
+                                color: theme.colorScheme.primary,
                               ),
                               label: Text(
-                                _showHidden
-                                    ? context.l10n.hideHiddenFiles
-                                    : context.l10n.showHiddenFiles,
+                                context.l10n.currentWorkPath(_workPath!),
+                                overflow: TextOverflow.ellipsis,
                               ),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _isLoading || _isBusy
+                                  ? null
+                                  : () => _browse(_workPath!),
                             ),
-                          ],
-                        ),
-                        ListenableBuilder(
-                          listenable: _downloads,
-                          builder: (BuildContext context, Widget? _) =>
-                              _DownloadStatus(downloads: _downloads),
-                        ),
-                        if (_operationText != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          Text(_operationText!),
                         ],
-                        if (_isLoading) ...<Widget>[
-                          const SizedBox(height: 24),
-                          const Center(child: CircularProgressIndicator()),
-                          const SizedBox(height: 12),
-                          Center(child: Text(context.l10n.loadingFiles)),
-                        ] else if (_error != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          Text(
-                            _error!,
-                            style: TextStyle(color: theme.colorScheme.error),
-                          ),
-                        ] else if (listing != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        kIsWeb
+                            ? '${context.l10n.transferLimitHint} ${context.l10n.dragDropUpload}'
+                            : context.l10n.transferLimitHint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                      ListenableBuilder(
+                        listenable: _downloads,
+                        builder: (BuildContext context, Widget? _) =>
+                            _DownloadStatus(downloads: _downloads),
+                      ),
+                      if (_operationText != null) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Text(_operationText!),
                       ],
-                    ),
+                    ],
                   ),
                 ),
               ),
             ),
-            if (!_isLoading && _error == null && listing != null)
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                sliver: _FileList(
-                  listing: listing,
-                  isBusy: _isBusy,
-                  downloadActive: _downloadActive,
-                  onOpen: _open,
-                  onDownload: _download,
-                  onParent: listing.parentPath == null || _isBusy
-                      ? null
-                      : () => _browse(listing.parentPath!),
+            Expanded(
+              child: _isLoading
+                  ? Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 12),
+                        Text(context.l10n.loadingFiles),
+                      ],
+                    )
+                  : _error != null
+                      ? Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 1040),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: Text(
+                                  _error!,
+                                  style: TextStyle(
+                                    color: theme.colorScheme.error,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      : listing == null
+                          ? const SizedBox.shrink()
+                          : CustomScrollView(
+                              slivers: <Widget>[
+                                SliverPadding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    4,
+                                    16,
+                                    16,
+                                  ),
+                                  sliver: _FileList(
+                                    listing: listing,
+                                    workPath: _workPath,
+                                    isBusy: _isBusy,
+                                    downloadActive: _downloadActive,
+                                    onOpen: _open,
+                                    onDownload: _download,
+                                    onParent: listing.parentPath == null ||
+                                            _isBusy
+                                        ? null
+                                        : () => _browse(listing.parentPath!),
+                                  ),
+                                ),
+                              ],
+                            ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Splits an absolute POSIX or Windows path into `(label, path)` breadcrumb
+/// segments from root down to the target directory.
+List<({String label, String path})> splitPathBreadcrumbs(String rawPath) {
+  final String trimmed = rawPath.trim();
+  if (trimmed.isEmpty) return const <({String label, String path})>[];
+  if (trimmed.startsWith('/')) {
+    final List<({String label, String path})> crumbs =
+        <({String label, String path})>[(label: '/', path: '/')];
+    String current = '';
+    for (final String part in trimmed.split('/')) {
+      if (part.isEmpty) continue;
+      current = '$current/$part';
+      crumbs.add((label: part, path: current));
+    }
+    return crumbs;
+  }
+  final String sep = trimmed.contains(r'\') ? r'\' : '/';
+  final List<String> parts = trimmed
+      .split(RegExp(r'[\\/]+'))
+      .where((String part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) {
+    return <({String label, String path})>[(label: trimmed, path: trimmed)];
+  }
+  final bool isUnc = trimmed.startsWith(r'\\') && parts.length >= 2;
+  final String rootName =
+      isUnc ? '$sep$sep${parts[0]}$sep${parts[1]}' : parts.first;
+  final String root = '$rootName$sep';
+  final List<({String label, String path})> crumbs =
+      <({String label, String path})>[(label: rootName, path: root)];
+  String current = rootName;
+  for (int i = isUnc ? 2 : 1; i < parts.length; i += 1) {
+    current = '$current$sep${parts[i]}';
+    crumbs.add((label: parts[i], path: current));
+  }
+  return crumbs;
+}
+
+class _BreadcrumbBar extends StatelessWidget {
+  const _BreadcrumbBar({
+    required this.path,
+    required this.canGoUp,
+    required this.atWorkPath,
+    required this.busy,
+    required this.onParent,
+    required this.onNavigate,
+  });
+
+  final String path;
+  final bool canGoUp;
+  final bool atWorkPath;
+  final bool busy;
+  final VoidCallback? onParent;
+  final ValueChanged<String> onNavigate;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final List<({String label, String path})> crumbs =
+        splitPathBreadcrumbs(path);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          children: <Widget>[
+            IconButton(
+              tooltip: context.l10n.parentFolder,
+              visualDensity: VisualDensity.compact,
+              onPressed: busy || !canGoUp ? null : onParent,
+              icon: const Icon(Icons.arrow_upward_outlined, size: 20),
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      for (int i = 0; i < crumbs.length; i += 1) ...<Widget>[
+                        if (i > 0)
+                          Icon(
+                            Icons.chevron_right,
+                            size: 16,
+                            color: theme.colorScheme.outline,
+                          ),
+                        _BreadcrumbChip(
+                          label: crumbs[i].label,
+                          current: i == crumbs.length - 1,
+                          onTap: busy || !canGoUp || i == crumbs.length - 1
+                              ? null
+                              : () => onNavigate(crumbs[i].path),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (atWorkPath)
+              Padding(
+                padding: const EdgeInsets.only(left: 6, right: 6),
+                child: Chip(
+                  label: Text(context.l10n.workPathTag),
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BreadcrumbChip extends StatelessWidget {
+  const _BreadcrumbChip({
+    required this.label,
+    required this.current,
+    this.onTap,
+  });
+
+  final String label;
+  final bool current;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Widget text = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Text(
+        label,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+          color: current
+              ? theme.colorScheme.onSurface
+              : onTap != null
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+    if (onTap == null) return text;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: text,
     );
   }
 }
@@ -776,6 +918,7 @@ class _DownloadProgress extends StatelessWidget {
 class _FileList extends StatelessWidget {
   const _FileList({
     required this.listing,
+    required this.workPath,
     required this.isBusy,
     required this.downloadActive,
     required this.onOpen,
@@ -784,6 +927,7 @@ class _FileList extends StatelessWidget {
   });
 
   final FsListing listing;
+  final String? workPath;
   final bool isBusy;
   final bool downloadActive;
   final ValueChanged<FsEntry> onOpen;
@@ -804,27 +948,53 @@ class _FileList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (listing.entries.isEmpty) {
-      return SliverToBoxAdapter(
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1040),
-            child: _swipeToParent(
-              _FileListFrame(
-                first: true,
-                last: true,
-                child: ListTile(title: Text(context.l10n.emptyFolder)),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
+    final bool hasParent = listing.parentPath != null;
+    final int parentCount = hasParent ? 1 : 0;
+    final int bodyCount = listing.entries.isEmpty ? 1 : listing.entries.length;
+    final int totalCount = parentCount + bodyCount;
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
     return SliverList.builder(
-      itemCount: listing.entries.length,
+      itemCount: totalCount,
       itemBuilder: (BuildContext context, int index) {
-        final FsEntry entry = listing.entries[index];
+        final Widget tile;
+        if (hasParent && index == 0) {
+          tile = ListTile(
+            leading: const Icon(Icons.drive_folder_upload_outlined),
+            title: const Text('..'),
+            subtitle: Text(context.l10n.parentFolder),
+            enabled: !isBusy,
+            onTap: isBusy ? null : onParent,
+          );
+        } else if (listing.entries.isEmpty) {
+          tile = ListTile(title: Text(context.l10n.emptyFolder));
+        } else {
+          final FsEntry entry = listing.entries[index - parentCount];
+          final bool isWorkPath =
+              entry.isDirectory && entry.absolutePath == workPath;
+          tile = ListTile(
+            leading: Icon(
+              entry.isDirectory
+                  ? (isWorkPath
+                      ? Icons.folder_open_rounded
+                      : Icons.folder_outlined)
+                  : Icons.insert_drive_file_outlined,
+              color: isWorkPath ? colors.primary : null,
+            ),
+            title: Text(entry.name),
+            subtitle: Text(_subtitleFor(context, entry, isWorkPath)),
+            enabled: !isBusy,
+            onTap: (entry.isDirectory || entry.isFile) && !isBusy
+                ? () => onOpen(entry)
+                : null,
+            trailing: IconButton(
+              tooltip: context.l10n.download,
+              onPressed:
+                  isBusy || downloadActive ? null : () => onDownload(entry),
+              icon: const Icon(Icons.download_outlined),
+            ),
+          );
+        }
         return Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
@@ -832,27 +1002,8 @@ class _FileList extends StatelessWidget {
             child: _swipeToParent(
               _FileListFrame(
                 first: index == 0,
-                last: index == listing.entries.length - 1,
-                child: ListTile(
-                  leading: Icon(
-                    entry.isDirectory
-                        ? Icons.folder_outlined
-                        : Icons.insert_drive_file_outlined,
-                  ),
-                  title: Text(entry.name),
-                  subtitle: Text(_subtitleFor(context, entry)),
-                  enabled: !isBusy,
-                  onTap: (entry.isDirectory || entry.isFile) && !isBusy
-                      ? () => onOpen(entry)
-                      : null,
-                  trailing: IconButton(
-                    tooltip: context.l10n.download,
-                    onPressed: isBusy || downloadActive
-                        ? null
-                        : () => onDownload(entry),
-                    icon: const Icon(Icons.download_outlined),
-                  ),
-                ),
+                last: index == totalCount - 1,
+                child: tile,
               ),
             ),
           ),
@@ -861,17 +1012,18 @@ class _FileList extends StatelessWidget {
     );
   }
 
-  String _subtitleFor(BuildContext context, FsEntry entry) {
+  String _subtitleFor(BuildContext context, FsEntry entry, bool isWorkPath) {
     final String type = entry.isDirectory
         ? context.l10n.fileTypeDirectory
         : entry.isFile
             ? context.l10n.fileTypeFile
             : context.l10n.fileTypeOther;
+    final String workTag = isWorkPath ? ' · ${context.l10n.workPathTag}' : '';
     final String size =
         entry.isDirectory ? '' : ' · ${formatBytes(entry.size)}';
     final String modifiedAt = formatLongTime(entry.modifiedAt);
     final String modified = modifiedAt.isEmpty ? '' : ' · $modifiedAt';
-    return '$type$size$modified';
+    return '$type$workTag$size$modified';
   }
 }
 

@@ -19,6 +19,7 @@ import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../quota/quota_strip.dart';
 import 'bot_chat_controller.dart';
@@ -792,19 +793,37 @@ class _ChatTitle extends StatelessWidget {
             ? <String>[agentLabel, if (session != null) session.name]
                 .join(' - ')
             : '';
-        return Column(
+        final Widget content = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(
-              !hasChatTarget
-                  ? context.l10n.home
-                  : workdir == null
-                      ? agentLabel
-                      : workdirName(workdir),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Flexible(
+                  child: Text(
+                    !hasChatTarget
+                        ? context.l10n.home
+                        : workdir == null
+                            ? agentLabel
+                            : workdirName(workdir),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (hasChatTarget) ...<Widget>[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ],
+              ],
             ),
             if (subtitle.isNotEmpty)
               Text(
@@ -817,6 +836,24 @@ class _ChatTitle extends StatelessWidget {
                 ),
               ),
           ],
+        );
+        if (!hasChatTarget) return content;
+        return InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () {
+            Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => FileSystemScreen(
+                  backend: chatController.backend,
+                  onSetWorkdir: chatController.setWorkdir,
+                ),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: content,
+          ),
         );
       },
     );

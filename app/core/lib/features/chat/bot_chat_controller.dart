@@ -593,6 +593,7 @@ class BotChatController extends ChangeNotifier {
       create: create,
     );
     _activeWorkdir = info.dir;
+    notifyListeners();
     await _enterWorkdirContext();
     return info;
   }

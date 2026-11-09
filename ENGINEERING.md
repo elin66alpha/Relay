@@ -316,7 +316,8 @@ architecture change (see Changes).
 | Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
-| Filesystem | routes/fs, filesystem, features/filesystem | active |
+| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
+| Workspace navigation (Home current/recent directories and chat title open the file browser; recent directory selection stays scoped to its machine and ignores stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
@@ -370,9 +371,12 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client, an unsigned iOS client and the macOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `scripts/release/add_signed_android.sh` expects (`expected_cert`)
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
+- Home: tapping the current workspace opens File System; tapping a recent workspace selects it. While refreshing, directory actions are disabled; switching machines clears recent directories immediately and late responses from earlier refreshes cannot replace the list or enable a previous machine's directory action.
+- Solo chat: tapping the chat title opens File System through BackendClient and the set-workdir callback.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
-- File browser: tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
+- File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
+- File browser: Windows UNC breadcrumbs keep the server and share as one absolute root; after an initial workdir request fails, Refresh retries it without leaving the screen. Regression coverage lives in `app/core/test/file_system_screen_test.dart` and `app/core/test/home_navigation_page_test.dart` (including delayed responses across machine switches).
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.
 - (Linux host without Relay) `curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash` asks for a directory (default `~/relay`), unpacks the release there and starts setup at Step 1/5 without the menu; running it again prints "Upgraded to <version>" and `server/.env` is unchanged.
 - Linux setup → 5 (Install agent CLIs): lists Claude Code, Codex, Cursor, OpenCode and Hermes with ✔ installed / ✘ not installed matching `GET /api/agents` `installed`; Enter installs nothing; each installed pick prints its login command.

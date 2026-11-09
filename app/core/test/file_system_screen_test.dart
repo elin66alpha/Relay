@@ -11,6 +11,36 @@ import 'package:relay_core/features/filesystem/file_system_screen.dart';
 import 'package:relay_core/features/quota/quota_controller.dart';
 
 void main() {
+  testWidgets('refresh retries a failed initial workdir request',
+      (tester) async {
+    final backend = _RetryWorkdirBackend();
+    await _openFiles(tester, backend);
+    expect(backend.browsed, isEmpty);
+    final refresh = find.widgetWithIcon(IconButton, Icons.refresh_outlined);
+    expect(tester.widget<IconButton>(refresh).onPressed, isNotNull);
+    await tester.tap(refresh);
+    await tester.pumpAndSettle();
+    expect(backend.workdirRequests, 2);
+    expect(backend.browsed, <String>['/repo/app']);
+    expect(find.text('src'), findsOneWidget);
+  });
+
+  test('UNC breadcrumbs keep the server and share together as the root', () {
+    expect(
+      splitPathBreadcrumbs(r'\\host\share\project\src'),
+      <({String label, String path})>[
+        (label: r'\\host\share', path: r'\\host\share\'),
+        (label: 'project', path: r'\\host\share\project'),
+        (label: 'src', path: r'\\host\share\project\src'),
+      ],
+    );
+    for (final root in <String>[r'\\host\share', r'\\host\share\']) {
+      expect(splitPathBreadcrumbs(root), <({String label, String path})>[
+        (label: r'\\host\share', path: r'\\host\share\'),
+      ]);
+    }
+  });
+
   testWidgets('set as work path is primary and swiping right goes up a folder',
       (
     WidgetTester tester,
@@ -50,6 +80,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.browsed.last, '/repo');
     expect(find.text('app'), findsOneWidget);
+
+    // Tapping the current work path chip jumps back to /repo/app.
+    await tester.tap(find.text('Work path: /repo/app'));
+    await tester.pumpAndSettle();
+    expect(backend.browsed.last, '/repo/app');
+
+    // Tapping ".." in the list goes up to /repo.
+    await tester.tap(find.text('..'));
+    await tester.pumpAndSettle();
+    expect(backend.browsed.last, '/repo');
+
+    // Entering app and tapping a breadcrumb segment jumps directly to it.
+    await tester.tap(find.text('app'));
+    await tester.pumpAndSettle();
+    expect(backend.browsed.last, '/repo/app');
+    await tester.tap(find.text('repo'));
+    await tester.pumpAndSettle();
+    expect(backend.browsed.last, '/repo');
+  });
+
+  test('splitPathBreadcrumbs parses POSIX and Windows paths', () {
+    expect(
+      splitPathBreadcrumbs('/repo/app'),
+      <({String label, String path})>[
+        (label: '/', path: '/'),
+        (label: 'repo', path: '/repo'),
+        (label: 'app', path: '/repo/app'),
+      ],
+    );
+    expect(
+      splitPathBreadcrumbs(r'C:\Users\pc\Relay'),
+      <({String label, String path})>[
+        (label: 'C:', path: r'C:\'),
+        (label: 'Users', path: r'C:\Users'),
+        (label: 'pc', path: r'C:\Users\pc'),
+        (label: 'Relay', path: r'C:\Users\pc\Relay'),
+      ],
+    );
   });
 
   testWidgets('tapping a text file shows selectable contents and download', (
@@ -243,4 +311,14 @@ class _FsBackendClient extends BackendClient {
 
   @override
   Future<void> close() async {}
+}
+
+class _RetryWorkdirBackend extends _FsBackendClient {
+  int workdirRequests = 0;
+
+  @override
+  Future<WorkdirInfo> workdir() async {
+    if (++workdirRequests == 1) throw BackendException('offline');
+    return super.workdir();
+  }
 }
