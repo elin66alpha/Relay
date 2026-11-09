@@ -182,6 +182,7 @@ const List<_Release> _zhReleases = <_Release>[
       '切换机器后会清除旧目录列表，避免误选上一台机器的项目。',
       '修复 Windows 网络共享路径导航；首次加载文件系统失败后可直接刷新重试。',
       '刷新和隐藏文件开关移至顶部；蜂群工作树选择器新增“..”上级目录入口。',
+      '新增 Relay MCP：个人 Agent 用凭证 JSON 加密码登录后，可以调用本机所有 Agent、切换工作区和模型、查看额度。',
     ],
   ),
   _Release(
@@ -298,6 +299,7 @@ const List<_Release> _enReleases = <_Release>[
       'Switching machines clears old directory lists so you cannot accidentally select the previous machine’s project.',
       'Windows network-share navigation is fixed; Refresh can retry a failed initial File System load.',
       'Refresh and hidden-file controls moved to the top; the Swarm work-tree picker now includes a “..” parent row.',
+      'New Relay MCP: a personal agent signs in with a credential JSON and its password, then can use every agent on the machine, switch workdir and model, and check quota.',
     ],
   ),
   _Release(

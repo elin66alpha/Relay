@@ -41,6 +41,10 @@ npm --prefix server run lint
 npm --prefix server test
 npm --prefix server start
 
+# Relay MCP (stdio, no dependencies); lint reuses the backend's ESLint.
+npm --prefix mcp test
+server/node_modules/.bin/eslint -c server/eslint.config.js mcp
+
 (cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
 ./scripts/dev/build_flow.sh
 ```
@@ -59,13 +63,14 @@ tests.
 - Backend changes: run `node --check` on touched JavaScript,
   `npm --prefix server run lint`, and `npm --prefix server test`.
 - Cross-stack API changes: verify both suites and keep old payload parsing safe
-  when adding response fields.
+  when adding response fields. `mcp/` is also a client of the API: run its
+  tests when a route it calls changes.
 - Documentation changes: verify local Markdown links, commands, environment
   names, English/Chinese README parity, and the embedded guides in
   `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
   rather than old docs.
 - Release bumps update these files together:
-  `app/shell/pubspec.yaml`, `server/package.json`, `_applicationVersion` in
+  `app/shell/pubspec.yaml`, `server/package.json`, `mcp/package.json`, `_applicationVersion` in
   `app/core/lib/features/settings/app_settings_screen.dart`, a
   `docs/CHANGELOG.md` entry, and a plain-language English and Chinese entry
   (1-3 highlights, other changes as short lines) at the top of

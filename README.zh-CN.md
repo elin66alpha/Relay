@@ -97,6 +97,7 @@ flowchart LR
 | 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据，以及 Claude/Codex/Cursor 快速模式。模型页先列主力模型；Claude/Codex 的旧版模型和 Cursor 套餐外的模型放在第二页。OpenCode 列出主机上 OpenCode 提供的模型，包括在那里配置的服务商；Hermes 显示它配置好的模型。 |
 | 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
 | 📊 | **额度工作流** | 查看 Claude/Codex/Cursor/Antigravity 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
+| 🤖 | **通过 MCP 接入个人 Agent** | `mcp/` 是一个零依赖的 stdio MCP server：机器人和 App 一样用凭证 JSON 加密码登录，可以调用所有 Agent、切换工作区、模型和思考深度、查看额度、管理会话、蜂群和文件，并使用终端。见 [Relay MCP](docs/handbook.md#relay-mcp)。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
 | 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
 

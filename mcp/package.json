@@ -1,0 +1,17 @@
+{
+  "name": "relay-mcp",
+  "version": "0.1.11",
+  "description": "stdio MCP server that drives a Relay backend over its HTTP API.",
+  "private": true,
+  "main": "index.js",
+  "bin": {
+    "relay-mcp": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

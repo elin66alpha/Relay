@@ -207,6 +207,75 @@ days) and `TERMINAL_BUFFER_MAX_BYTES` (64 KB to 16 MB), or select a shell with
 has the full permissions of the backend OS user and bypasses the file API's
 denylist and `RELAY_FS_ROOTS`.
 
+## Relay MCP
+
+`mcp/` is a stdio [MCP](https://modelcontextprotocol.io) server that lets a
+personal agent (an MCP client such as a chat bot) use a Relay backend the way
+the app does. It has no npm dependencies and needs Node.js 22 or later on the
+machine that runs the MCP client, which does not have to be the backend host.
+
+It signs in exactly like the app: give it a credential JSON from
+`npm run credential` and that credential's password. It decrypts them in its own
+process, then talks only to the backend's HTTP API with the token inside.
+
+1. On the backend host, from `server/`, create a credential for the bot so it
+   can be revoked on its own:
+   `npm run credential -- --label grokbot`.
+   The credential's URL must be a fixed address: a named Cloudflare Tunnel or
+   other domain, or a LAN/Tailscale address the bot can reach. **Relay MCP
+   refuses a Cloudflare Quick Tunnel (`*.trycloudflare.com`) URL**, because it
+   changes on every cloudflared restart.
+2. On the bot's machine, get the code:
+   `git clone --depth 1 https://github.com/elin66alpha/Relay.git`.
+3. Add a stdio MCP server to the bot:
+
+   | Field | Value |
+   |---|---|
+   | command | `node` |
+   | args | `["<clone>/mcp/index.js"]` |
+   | env `RELAY_CREDENTIAL` | the credential JSON text, or a path to the `.relay.json` file |
+   | env `RELAY_CREDENTIAL_PASSPHRASE` | the credential password |
+   | env `RELAY_WORKDIR` (optional) | starting workdir on the backend host; default is the backend's |
+   | env `RELAY_MCP_NAME` (optional) | name shown with the token in Machine details (`Relay MCP (<name>)`) |
+
+   Keep the password in the bot's secret store, not in chat or a file next to
+   the credential.
+
+Tools (each returns JSON text; long text is paged with `offset`/`maxChars`):
+
+| Tool | Does |
+|---|---|
+| `relay_status` | backend status, this connection's workdir, agents with installed/authed/usable |
+| `relay_agent_options`, `relay_agent_settings`, `relay_agent_update` | model, effort, permission and fast choices; get/set them per session; update a CLI |
+| `relay_chat`, `relay_task`, `relay_cancel` | send to an agent; poll a turn's status, progress lines and reply; stop it |
+| `relay_history` | newest messages, one message paged, search, Markdown export |
+| `relay_sessions` | list, create, activate, rename, delete, clear |
+| `relay_workdir` | get, set (optionally create), recent |
+| `relay_files` | browse, mkdir, read text (binary files report size only), write text |
+| `relay_swarms`, `relay_swarm_chat` | list, create, members, delete, clear, history; send a round |
+| `relay_usage`, `relay_quota_schedules` | quota report; list, create, cancel scheduled messages |
+| `relay_machine` | hardware/disks/temperatures or the diagnostics report |
+| `relay_terminal` | type into this credential's own PTY and read the output |
+
+Not available: wallpaper, push registration, switching machines (add one MCP
+server per backend), token management, and the app's local settings screens.
+
+Behaviour to know:
+
+- `relay_chat` waits up to `waitSeconds` (default 20) and then returns
+  `status: "running"` with a `requestId`. The backend keeps running the turn;
+  call `relay_task` with the returned `requestId`, `agent`, `sessionId` and
+  `workdir` until it is `done`, `cancelled` or `error`.
+- The workdir belongs to the MCP process, so switching it moves no other device.
+  Conversations are shared: the app shows the bot's messages in the same
+  workdir, agent and session, sending a message makes that session active there,
+  and a finished turn sends a notification when no device is viewing that
+  workdir.
+- The credential and password grant what the app grants: every agent, files
+  outside the denylist, and a shell. Revoke the bot's token in **Machine
+  details** to cut it off. Pointing a bot that is itself a coding agent at the
+  workdir it is working in lets two agents edit the same files.
+
 ## Runtime model
 
 ### Agent sessions

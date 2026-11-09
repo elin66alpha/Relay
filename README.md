@@ -102,6 +102,7 @@ can run concurrently without sharing a global backend directory.
 | 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, and Fast mode for Claude/Codex/Cursor. The model page lists main models first; older Claude/Codex models and Cursor models outside its plan sit on a second page. OpenCode lists what the host's OpenCode offers, including providers configured there; Hermes shows its configured model. |
 | 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
 | 📊 | **Quota workflows** | Claude/Codex/Cursor/Antigravity usage views, plus one queued prompt for the next detected Claude or Codex five-hour reset. |
+| 🤖 | **Personal agents over MCP** | `mcp/` is a dependency-free stdio MCP server: a bot signs in with a credential JSON and its password, like the app, and can chat with every agent, switch workdir, model and effort, read quota, manage sessions, Swarms and files, and use the terminal. See [Relay MCP](docs/handbook.md#relay-mcp). |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
 | 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
 

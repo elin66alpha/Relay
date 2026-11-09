@@ -17,6 +17,7 @@ function checkVersions(root) {
     .match(new RegExp(`const List<_Release> _${language}Releases[\\s\\S]*?version:\\s*'([^']+)'`))?.[1];
   const versions = {
     'server/package-lock.json': lock.version,
+    'mcp/package.json': JSON.parse(read('mcp/package.json')).version,
     'server/package-lock.json root package': lock.packages?.['']?.version,
     'app/shell/pubspec.yaml': app,
     'app settings': settings,

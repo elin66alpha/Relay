@@ -20,6 +20,7 @@ In:
 - SSH-style PTY terminal via single-use WebSocket ticket.
 - Quota/usage reporting, scheduled quota messages, keepalive; Web Push + FCM notifications.
 - Linux/macOS/Windows backend install adapters; credential QR/file onboarding.
+- Relay MCP (`mcp/`): a stdio MCP server through which a personal agent does what the app does (except wallpaper), signed in with the same encrypted credential JSON and password.
 
 Out:
 - Logging agents in from Relay. Reason: every credential is created on the host by the CLI itself.
@@ -36,6 +37,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/core | the `relay_core` Dart package: every screen, controller, test and asset (`lib/`, `test/`, `assets/`) |
 | app/shell | the runnable Flutter app `relay`: `main.dart`, the app version, and the android, ios, linux, macos, windows and web platform projects |
 | server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
+| mcp | `relay-mcp`, a dependency-free stdio MCP server that drives a backend over its HTTP API |
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
 | scripts/release | release bundle builders, version/documentation checks, Windows setup checks and local Android signing for a release draft |
 | scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
@@ -73,8 +75,11 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/core/lib/features/{cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
 | app/shell/lib/main.dart | creates the shared controllers and starts the app | main() | app/core |
 | scripts/install/{linux,macos,windows} | install/service adapters | setup/start/stop/status/uninstall | server/scripts, PM2/launchd/Windows |
+| mcp/index.js | stdio entry: decrypts the credential once, newline-delimited JSON-RPC loop; env `RELAY_CREDENTIAL` (JSON or path), `RELAY_CREDENTIAL_PASSPHRASE`, optional `RELAY_WORKDIR`, `RELAY_MCP_NAME` | stdin/stdout | mcp/lib/* |
+| mcp/lib/{credential,protocol}.js | `relay.credentials.v1` decryption with the app's limits, refusing `*.trycloudflare.com`; MCP initialize/ping/tools/list/tools/call | decryptCredential; createMcpHandler | node:crypto |
+| mcp/lib/{relay-client,tools,terminal}.js | HTTP/SSE client sending Bearer, `x-workdir`, `x-device-id`; 17 tools mapped onto `/api/*`; terminal over the ticket WebSocket | createRelayClient, createTools, runTerminal | Relay HTTP API only (never `server/lib`) |
 
-Dependency direction: server routes -> lib -> json-store; app/shell -> app/core; within app/core/lib, features/chat -> other features -> core. Nothing outside features/chat imports it, the other features import each other without cycles, and core imports no feature.
+Dependency direction: mcp -> Relay HTTP API (no code import of server/); server routes -> lib -> json-store; app/shell -> app/core; within app/core/lib, features/chat -> other features -> core. Nothing outside features/chat imports it, the other features import each other without cycles, and core imports no feature.
 
 ## Invariants
 
@@ -256,6 +261,25 @@ architecture change (see Changes).
 - Chat prompt payloads and generated Swarm prompts are capped by
   `PROMPT_MAX_BYTES`. Preserve that validation in every chat path.
 
+### Relay MCP
+
+- `mcp/` is another client of the HTTP API, like the app: it requires nothing
+  from `server/` at runtime and has no npm dependencies, so a bot clones the
+  repository and runs `node mcp/index.js` on another machine (Node 22+). Every
+  rule (auth, scope queue, session cap, path denylist) stays in the backend.
+- It signs in exactly like the app: the encrypted credential JSON and its
+  password, decrypted in the MCP process. A Quick Tunnel `baseUrl` is refused
+  because it changes on every cloudflared restart.
+- The workdir lives in the MCP process and travels as `x-workdir`, so a bot
+  switching workdir never moves another device.
+- Agent turns are asynchronous: `relay_chat`/`relay_swarm_chat` wait at most
+  `waitSeconds` on the SSE reply, then return a requestId. The backend does not
+  cancel a turn when its client disconnects, and `relay_task` reads the result
+  from history (`<requestId>:assistant`, or ids prefixed by the requestId in a
+  Swarm), so polling survives MCP restarts and dropped connections.
+- Not mapped: wallpaper, push/FCM registration, multi-machine switching (one
+  MCP entry per backend), token management, and the app's local screens.
+
 ### Client boundaries
 
 - `app/core/lib/core/backend/api_transport.dart` is the shared authenticated
@@ -328,6 +352,7 @@ architecture change (see Changes).
 | Machine details hardware card (CPU, memory, GPU, temperatures refreshed every 10 s while the page is open) | machine-info, routes/meta, features/machines | active |
 | Credential onboarding | server/scripts/create-credential, core/credentials, features/machines | active |
 | Update check (Settings → Check for updates compares with the latest GitHub release and only reports it; no download) | features/settings | active |
+| Relay MCP for personal agents (stdio; status, chat/task/cancel, history, sessions, agent options/settings/update, workdir, files, Swarms, usage, quota schedules, machine, terminal) | mcp | active |
 
 Deprecated features stay listed until their code is deleted, then the row is
 removed.
@@ -362,6 +387,8 @@ navigation on 2026-11-09.
 - `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
+- `npm --prefix mcp test` -> "# fail 0"; `server/node_modules/.bin/eslint -c server/eslint.config.js mcp` -> exit 0
+- (Backend running, a credential made with `npm --prefix server run credential -- --label <bot>`) `RELAY_CREDENTIAL=<json> RELAY_CREDENTIAL_PASSPHRASE=<password> node mcp/index.js` answers `tools/list` with 17 tools; `relay_status` lists the agents, `relay_terminal` with `echo ok` returns `ok`, and a `relay_chat` that outlasts `waitSeconds` returns `running` and then `done` from `relay_task`.
 - On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes.
 - On Windows, `scripts/release/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
@@ -424,8 +451,7 @@ navigation on 2026-11-09.
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Before 2026-10-18: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17).
-- 2026-10-18: upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ modules. Reason: server.js loads by starting the server, so that logic could not be tested.
+- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18).
 - 2026-10-18: extracted session-slots, sse and bounded-integer from the session pools and streams. Reason: duplicated cap/eviction/idle policies and helpers could drift.
 - 2026-10-25: ACP pool gained an optional authenticate step so Cursor joins the existing session pool. Reason: Cursor's CLI rejects a session until `cursor_login`.
 - 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
@@ -433,6 +459,7 @@ one summary line.
 - 2026-10-26: chat screens split by responsibility, and routes take state and I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
 - 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
+- 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
 - 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review

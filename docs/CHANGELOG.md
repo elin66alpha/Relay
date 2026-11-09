@@ -9,6 +9,10 @@
   `agy acp --login`. Conversations stream, resume and run concurrently with
   isolated session workers, separate model and reasoning-effort controls, and
   cautious or auto-approve permission tiers.
+- Relay MCP (`mcp/`): a dependency-free stdio MCP server for personal agents.
+  It signs in with a credential JSON and its password, like the app, refuses
+  Cloudflare Quick Tunnel URLs, and maps the app's features (except wallpaper)
+  onto 17 tools; long agent turns return a request id to poll with `relay_task`.
 - Antigravity subscription quota in Usage and the composer strip, with Gemini,
   Claude/GPT and Argon buckets shown separately. Quota reads the host CLI's
   running local service and retains stale cached results when it stops.
