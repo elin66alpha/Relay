@@ -609,9 +609,12 @@ function acpSessionOptions(agentKey, settings) {
     options.modelId =
       options.modelId === 'default' ? null : options.modelId.replace('/', ':');
   }
-  if (agentKey === 'agy' && chosen.effort) {
+  if (agentKey === 'agy' && chosen.model) {
     options.modelId = null;
-    options.configOptions = [['model', chosen.model], ['thought_level', chosen.effort]];
+    options.configOptions = [['model', chosen.model]];
+    if (chosen.effort) {
+      options.configOptions.push(['thought_level', chosen.effort]);
+    }
   }
   if (agentKey === 'cursor') {
     options.modelId = null;

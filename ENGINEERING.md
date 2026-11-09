@@ -186,16 +186,27 @@ architecture change (see Changes).
   The CLI must support this flag; isolated workers keep concurrent conversations'
   settings separate. Models come from `agy models` on the catalog refresh
   schedule. Multiple effort variants become one model with a separate effort
-  picker; ACP config options apply the model before `thought_level`. Saved
+  picker ordered low → max like the other agents; ACP config options apply the model before `thought_level`. Saved
   variant model ids migrate to the corresponding model and effort. Permissions use ACP's `default` mode with Relay
   refusing requests by default, or approving them in the `bypass` tier. Host login
   uses `agy acp --login`; cli-paths owns the token path used by status and the file
   API denylist. Purge closes and forgets the session; CLI transcript deletion is
-  unavailable and transcripts remain on the host. Quota reads the running CLI
-  language server on loopback, using ports from bounded recent CLI logs; no
-  prompt or new process is started for quota. All returned subscription buckets
-  (including separate Argon limits) appear in the usage page and composer strip,
-  with the shared cache/stale handling. No scheduler is added for agy.
+  unavailable and transcripts remain on the host. Because `agy acp` does not emit
+  ACP `usage_update` notifications, Relay queries `GetCascadeTrajectory` on the
+  local language servers in parallel after each turn (read-only; the worker that ran
+  the turn holds it, so nothing is loaded into another process) and reads `contextWindowMetadata.estimatedTokensUsed` and `maxContextTokens` from
+  the latest `generatorMetadata` entry to emit `{ type: 'context', used, size }`.
+  Quota reads `RetrieveUserQuotaSummary` from a running CLI language server on
+  loopback using the HTTP port logged at the head of each live ACP worker log (pid in
+  the file name, never crowded out) plus the 12 newest CLI logs, and falls back to
+  `agy -p /usage --output-format json` (which executes the `/usage` slash command
+  headlessly with zero model turns or token cost) when no language server is
+  running. All returned subscription buckets (including separate Argon limits)
+  appear in the usage page and composer strip; each quota's `label` is the shortened
+  model group and its `window` (`5h`/`weekly`) is localized by the app, with the shared cache/stale
+  handling; the agy cache lives 5 minutes, longer than the strip's one-minute poll,
+  and concurrent reads of any source share one in-flight fetch. No scheduler is
+  added for agy.
 - Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
   Claude receives a `fastMode` settings override; Codex receives an explicit
   `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
@@ -301,7 +312,7 @@ architecture change (see Changes).
 | Model picker second page (bottom link): Cursor models outside its plan (`paid`), Claude/Codex models a newer one replaced (`legacy`); Swarms list first-page models only | agent-options, chat/agent_controls, chat/swarm_form_dialog | active |
 | Live OpenCode models (`opencode models`: free models plus providers configured on the host) and a Hermes model page showing the host's configured model | agents (refreshAgentModels), model-discovery, agent-options | active |
 | Cursor agent over ACP (design under Invariants, "Agents and controls") | agents, acp-session-pool, stdio-agent-pool, agent-options, agent-status, model-discovery, usage, routes/meta, cli_agent, chat/agent_controls, chat/context_meter | active |
-| Antigravity (`agy`) over ACP with isolated session workers, streaming and resume; separate model/effort controls, host OAuth, approval tiers and subscription quota | agents, acp-session-pool, stdio-agent-pool, agent-options, model-discovery, agent-status, cli-paths, filesystem, usage, cli_agent, agent_icon, features/quota | active |
+| Antigravity (`agy`) over ACP with isolated session workers, streaming and resume; separate model/effort controls, context usage meter (`GetCascadeTrajectory`), host OAuth, approval tiers and subscription quota (`RetrieveUserQuotaSummary` + headless `/usage` fallback) | agents, acp-session-pool, stdio-agent-pool, agent-options, model-discovery, agent-status, cli-paths, filesystem, usage, cli_agent, agent_icon, features/chat/context_meter, features/quota | active |
 | Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
@@ -371,7 +382,7 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher it shows "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later."
 - `grep -rn "import '\.\./chat/\|features/chat/" app/core/lib/features --include=*.dart | grep -v '^app/core/lib/features/chat/'` -> no output
 - `grep -rn "features/" app/core/lib/core --include=*.dart` -> no output
-- After a reply in solo chat with Claude Code, Codex, OpenCode, or Hermes, the line above the composer ends with `<used> / <window>` (e.g. `42k / 200k`); `<window>` reads `?` until that agent + model has replied once.
+- After a reply in solo chat with Claude Code, Codex, OpenCode, Antigravity, or Hermes, the line above the composer ends with `<used> / <window>` (e.g. `42k / 200k`); `<window>` reads `?` until that agent + model has replied once.
 - A new or cleared conversation shows `0 / <window>`; one whose replies predate the feature shows `? / <window>`; with Cursor active the line is absent.
 - (Cursor signed in on a Premium plan) Quota Usage lists Cursor after Codex. The Cursor card shows plan `Premium` and one weekly remaining percent with a reset time. While Cursor is the active agent, the composer strip shows that same percent. Scheduled messages stay Claude Code and Codex only.
 - (Cursor signed in on the host with `agent login`) Within a minute of backend start, `server/reported-models.json` holds a `cursor` list of plain ids (`default`, ...); Cursor's model picker shows those names with Auto selected, a model with effort levels shows its effort choices, and the model page has the Fast switch.
@@ -385,7 +396,13 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `agy`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
 
 - (Antigravity installed and signed in) Select Antigravity, send two turns, stop a
-  running turn, and resume after backend restart: the scope retains its conversation.
+  running turn, and resume after backend restart: the scope retains its conversation,
+  context occupancy and window size (`<used> / <window>`) update after each turn,
+  clearing resets to `0 / <window>`, and switching models updates the active model's
+  window. Quota Usage and the composer strip report Antigravity's three model groups
+  and five quota buckets even when no language server is running prior to the query,
+  labelled like Claude and Codex as model plus window (`Gemini 5 小时`, `Gemini 本周`,
+  `Claude/GPT 5 小时`, `Gemini 4 Argon 本周`), 5 hours before the week.
   Two sessions with different models use isolated workers; the selected model and
   permission policy apply to each session. The file API rejects the agy OAuth file.
 
@@ -409,7 +426,7 @@ one summary line.
 - 2026-10-26: chat screens split by responsibility, and routes take state and I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
 - 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
-- 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers and reads quota from its running host CLI service. Reason: concurrent conversations need independent settings, and quota checks must not start a conversation or a new agent process.
+- 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review
 

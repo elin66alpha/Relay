@@ -243,7 +243,7 @@ test('Antigravity groups effort variants and migrates old saved selections', () 
   assert.equal(models.length, 2);
   assert.equal(models[0].id, 'sonnet');
   assert.equal(models[0].label, 'Sonnet');
-  assert.deepEqual(models[0].efforts.map((e) => e.id), ['high', 'low', 'medium']);
+  assert.deepEqual(models[0].efforts.map((e) => e.id), ['low', 'medium', 'high']);
   assert.equal(models[1].id, 'gpt-medium');
   recordReportedModels('agy', models);
   const { normalizeSettings, acpSessionOptions } = require('../lib/agent-options');
@@ -252,4 +252,7 @@ test('Antigravity groups effort variants and migrates old saved selections', () 
   const options = acpSessionOptions('agy', { model: 'sonnet', effort: 'low' });
   assert.equal(options.modelId, null);
   assert.deepEqual(options.configOptions, [['model', 'sonnet'], ['thought_level', 'low']]);
+  const singleVariant = acpSessionOptions('agy', { model: 'gpt-medium' });
+  assert.equal(singleVariant.modelId, null);
+  assert.deepEqual(singleVariant.configOptions, [['model', 'gpt-medium']]);
 });

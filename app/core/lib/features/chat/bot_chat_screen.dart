@@ -705,6 +705,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                           onClear: _confirmClearHistory,
                           onCompress: _sendCompact,
                           onExportMarkdown: _exportMarkdown,
+                          onSettingsChanged:
+                              widget.chatController.refreshContextWindow,
                         );
                       },
                     ),

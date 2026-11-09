@@ -28,6 +28,7 @@ const cursorCatalog = [
     defaultEffort: 'high',
   },
 ];
+const agyContexts = {};
 // Replace factories before agents.js captures them. The session store is in
 // memory because its production filename has no environment override.
 const replacements = {
@@ -36,6 +37,9 @@ const replacements = {
       load: () => sessions,
       mutate: (fn) => fn(sessions),
     }),
+  },
+  '../lib/usage': {
+    readAgyContext: async (sessionId) => agyContexts[sessionId] || null,
   },
   '../lib/claude-session-pool': { createClaudeSessionPool: () => pools.claude },
   '../lib/codex-session-pool': { createCodexSessionPool: () => pools.codex },
@@ -81,6 +85,7 @@ const { runAgent, AgentCancelledError, AgentAuthError } = agents;
 
 beforeEach(() => {
   for (const key of Object.keys(sessions)) delete sessions[key];
+  for (const key of Object.keys(agyContexts)) delete agyContexts[key];
   for (const pool of Object.values(pools)) {
     pool.send = async () => assert.fail('unexpected pool call');
   }
@@ -299,4 +304,27 @@ test('Antigravity approvals follow the selected tier', async () => {
       sessionKey: 'agy-permission', workdir: '/tmp/w', settings: { permission },
     });
   }
+});
+
+test('Antigravity emits context usage from trajectory metadata after a turn', async () => {
+  agyContexts['agy-ctx-session'] = { used: 10428, size: 256000 };
+  pools.agy.send = async (call) => {
+    call.onMessage({
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'm1',
+      content: { type: 'text', text: 'Hello' },
+    });
+    return { result: { stopReason: 'end_turn' }, sessionId: 'agy-ctx-session', stderr: '' };
+  };
+  const events = [];
+  const reply = await runAgent('agy', 'hi', (event) => events.push(event), {
+    sessionKey: 'agy-ctx',
+    workdir: '/tmp/w',
+    settings: { permission: 'cautious' },
+  });
+  assert.equal(reply, 'Hello');
+  assert.deepEqual(
+    events.filter((e) => e.type === 'context'),
+    [{ type: 'context', used: 10428, size: 256000 }],
+  );
 });

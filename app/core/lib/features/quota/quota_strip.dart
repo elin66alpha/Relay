@@ -162,11 +162,13 @@ class _QuotaMeter extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final AppStrings strings = context.l10n;
-    final String label = switch (quota.key) {
-      'five_hour' => strings.fiveHourQuotaShort,
-      'seven_day' => strings.weeklyQuotaShort,
-      'cursor_models' => strings.cursorModelsQuotaShort,
-      'api_models' => strings.apiModelsQuotaShort,
+    final String label = switch ((quota.window, quota.key)) {
+      ('5h', _) => '${quota.label} ${strings.fiveHourQuotaShort}',
+      ('weekly', _) => '${quota.label} ${strings.weeklyQuotaShort}',
+      (_, 'five_hour') => strings.fiveHourQuotaShort,
+      (_, 'seven_day') => strings.weeklyQuotaShort,
+      (_, 'cursor_models') => strings.cursorModelsQuotaShort,
+      (_, 'api_models') => strings.apiModelsQuotaShort,
       _ => quota.label,
     };
     final TextStyle labelStyle = TextStyle(fontSize: 12, color: colors.outline);

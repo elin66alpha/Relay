@@ -396,6 +396,9 @@ function parseAgyModels(stdout) {
   return groupAgyModels([...models.values()]);
 }
 
+// agy lists variants in its own order (medium, high, low); efforts read low → max like the other agents.
+const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 function groupAgyModels(models) {
   const groups = new Map();
   for (const model of models) {
@@ -406,6 +409,7 @@ function groupAgyModels(models) {
   }
   return [...groups.entries()].map(([id, variants]) => {
     if (variants.length < 2 || variants.some((v) => !v.effort)) return variants[0].model;
+    variants.sort((a, b) => AGY_EFFORTS.indexOf(a.effort) - AGY_EFFORTS.indexOf(b.effort));
     return {
       id,
       label: variants[0].model.label.replace(/ \([^()]+\)$/, ''),

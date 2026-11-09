@@ -26,6 +26,7 @@ const {
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
+const { readAgyContext } = require('./usage');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
@@ -667,16 +668,17 @@ function codexItemLabel(item) {
 // that still resumes the same conversation.
 // Settle a codex or ACP pool turn. The streamed text is the reply, and only a
 // turn that produced one saves its session id for the next turn to resume.
-function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text }) {
+function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text, afterTurn }) {
   const noOutput = `(${agentKey} produced no output)`;
   const run = sent.then(
-    ({ result, sessionId, startedNew, stderr }) => {
+    async ({ result, sessionId, startedNew, stderr }) => {
       if (startedNew) {
         emit(onEvent, 'The old session is no longer valid. Started a new one.');
       }
       const reply = text().trim();
       if (reply) {
         if (sessionId) setSession(sessionKey, { id: sessionId });
+        if (afterTurn) await afterTurn(sessionId);
         return reply;
       }
       if (result.stopReason === 'timeout') return result.message;
@@ -801,6 +803,7 @@ function runAcpAgent({
   // result; multi-message turns are rebuilt from segments by agent-turn.
   let finalText = '';
   let currentMsgId = null;
+  let hasContext = false;
 
   // ACP chunks are already deltas, so they are emitted as-is rather than
   // through makeDeltaEmitter (whose prefix de-duplication is for CLIs that
@@ -826,6 +829,7 @@ function runAcpAgent({
       if (currentMsgId !== null) currentMsgId = AFTER_TOOL;
       emit(onEvent, `Tool: ${oneLine(update.title || update.kind || 'tool', 60)}`);
     } else if (update.sessionUpdate === 'usage_update') {
+      hasContext = true;
       emit(onEvent, { type: 'context', used: update.used, size: update.size });
     }
   };
@@ -851,7 +855,26 @@ function runAcpAgent({
     onMessage,
     onPermission,
   });
-  return settlePoolTurn(run, { agentKey, sessionKey, onEvent, text: () => finalText });
+  return settlePoolTurn(run, {
+    agentKey,
+    sessionKey,
+    onEvent,
+    text: () => finalText,
+    afterTurn:
+      agentKey === 'agy'
+        ? async (sessionId) => {
+            if (hasContext || !sessionId) return;
+            const ctx = await readAgyContext(sessionId);
+            if (ctx) {
+              emit(onEvent, {
+                type: 'context',
+                used: ctx.used,
+                size: ctx.size,
+              });
+            }
+          }
+        : null,
+  });
 }
 
 function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {

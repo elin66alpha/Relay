@@ -291,11 +291,13 @@ class _UsageQuotaRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final AppStrings strings = context.l10n;
-    final String label = switch (quota.key) {
-      'five_hour' => strings.fiveHourQuota,
-      'seven_day' => strings.weeklyQuota,
-      'cursor_models' => strings.cursorModelsQuota,
-      'api_models' => strings.apiModelsQuota,
+    final String label = switch ((quota.window, quota.key)) {
+      ('5h', _) => '${quota.label} ${strings.fiveHourQuota}',
+      ('weekly', _) => '${quota.label} ${strings.weeklyQuota}',
+      (_, 'five_hour') => strings.fiveHourQuota,
+      (_, 'seven_day') => strings.weeklyQuota,
+      (_, 'cursor_models') => strings.cursorModelsQuota,
+      (_, 'api_models') => strings.apiModelsQuota,
       _ => quota.label,
     };
     // An expired bucket's cached percentage is meaningless (its window already

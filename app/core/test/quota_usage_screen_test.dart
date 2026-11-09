@@ -55,6 +55,9 @@ void main() {
     await tester.pump();
     expect(find.text('58% remaining'), findsNWidgets(4));
     expect(find.text('Loading quota...'), findsNothing);
+    // Antigravity reads like Claude and Codex: model group plus window.
+    expect(find.text('Gemini 5 hours'), findsOneWidget);
+    expect(find.text('Gemini This week'), findsOneWidget);
     expect(
       quotaController.lastUsageReport?.agents.map((UsageAgent a) => a.key),
       <String>['claude', 'codex', 'cursor', 'agy'],
@@ -235,9 +238,27 @@ class _UsageBackendClient extends BackendClient {
             'key': source,
             'label': _labels[source],
             'available': true,
-            'quotas': <Object?>[
-              <String, Object?>{'key': 'five_hour', 'remainingPercent': 58},
-            ],
+            'quotas': source == 'agy'
+                ? <Object?>[
+                    <String, Object?>{
+                      'key': 'gemini-5h',
+                      'label': 'Gemini',
+                      'window': '5h',
+                      'remainingPercent': 58,
+                    },
+                    <String, Object?>{
+                      'key': 'gemini-weekly',
+                      'label': 'Gemini',
+                      'window': 'weekly',
+                      'remainingPercent': 40,
+                    },
+                  ]
+                : <Object?>[
+                    <String, Object?>{
+                      'key': 'five_hour',
+                      'remainingPercent': 58,
+                    },
+                  ],
           },
         ],
       }),

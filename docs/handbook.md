@@ -292,13 +292,13 @@ recheck agent status. Relay uses the shared ACP pool with isolated session worke
 turns stream, reuse the live session, and resume the saved conversation after eviction.
 Models come from `agy models`, refreshed at startup and on picker opens every ten
 minutes. Multiple effort variants appear as one model with a separate effort
-control. Saved variant selections retain their model and effort. Cautious mode refuses approval
+control, ordered low to high. Saved variant selections retain their model and effort. Cautious mode refuses approval
 requests; auto-approve accepts them. Deleting a Relay chat closes its live session
 and forgets its ID; agy transcripts remain managed by the host CLI. Antigravity
 quota appears in Usage and the composer strip, with each Gemini, Claude/GPT
-and Argon bucket kept separate. A running host CLI language server is required;
-start an Antigravity conversation if the quota page requests it. Cached results
-are marked stale when that server stops. Quota schedules remain Claude/Codex only.
+and Argon bucket kept separate. A running Antigravity conversation answers
+instantly; otherwise Relay runs `agy -p /usage` (about two seconds, no model
+turn). Results are cached for five minutes. Quota schedules remain Claude/Codex only.
 
 Agent controls are capability-aware:
 
