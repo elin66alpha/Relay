@@ -132,7 +132,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '先确认工作区，再开始任务',
     body:
-        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n从左侧栏打开“文件系统”，进入项目目录，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
+        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n点击首页当前工作区、聊天标题或左侧栏的“文件系统”即可打开文件浏览器；点击其他最近工作区可直接切换项目。浏览到新项目目录后，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
   ),
   _GettingStartedStep(
     title: '在机器详情检查 CLI 状态',
@@ -162,7 +162,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '浏览、上传和下载文件',
     body:
-        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。文件列表向右滑动可返回上一级。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
+        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。顶部路径栏始终可见，点击上级路径段可直接跳转；点击向上箭头、“..”或在文件列表右滑可返回上一级。浏览其他目录时，点击工作路径标签即可回到当前项目。顶部还有刷新和隐藏文件开关；首次加载失败可刷新重试。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
   ),
   _GettingStartedStep(
     title: '从机器详情进入 SSH 终端',
@@ -185,7 +185,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose the workspace before starting',
     body:
-        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nOpen File system from the drawer, navigate to your project, and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
+        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nTap the current workspace on Home, the chat title, or File system in the drawer to open the file browser; tap a different recent workspace to switch projects directly. To choose a new project, browse to its directory and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
   ),
   _GettingStartedStep(
     title: 'Check CLI status in Machine details',
@@ -215,7 +215,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Browse, upload, and download files',
     body:
-        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. Swipe right on the file list to go up one directory.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
+        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. The path bar stays visible: tap an ancestor segment to jump there, or use the up arrow, “..”, or a right swipe on the file list to go up one directory. When browsing elsewhere, tap the work-path chip to return to the active project. Refresh and hidden-file controls are at the top; Refresh also retries a failed initial load.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
   ),
   _GettingStartedStep(
     title: 'Open the SSH terminal from Machine details',

@@ -176,6 +176,11 @@ Home shows the current machine, current workspace, and up to three recent
 workspaces. Tap the machine for CLI status checks, device tokens, and Enter SSH.
 In the Android and iOS apps, swipe right anywhere in a chat to open the drawer.
 Use File system → Set as work path to select the project before sending a task.
+Tap the current workspace on Home or the chat title to open File system; tap a
+different recent workspace to switch to it. In the file browser, the path bar
+stays visible: tap a parent segment to jump there, or use `..`, the up arrow, or
+a right swipe on the file list to go up one directory. When browsing elsewhere,
+tap the work-path chip to return to the active project.
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the

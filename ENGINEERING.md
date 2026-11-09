@@ -316,8 +316,8 @@ architecture change (see Changes).
 | Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
-| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
-| Workspace navigation (Home current/recent directories and chat title open the file browser; recent directory selection stays scoped to its machine and ignores stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
+| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
+| Workspace navigation (Home current directory and chat title open the file browser; selecting a different recent directory switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
@@ -335,6 +335,9 @@ removed.
 ## Verification
 
 Command lines are automated. The rest are manual checks in the app or on the host; a precondition in parentheses must hold first.
+
+The user confirmed manual acceptance of the rebuilt Web filesystem and workspace
+navigation on 2026-11-09.
 
 - `dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib` with Flutter's pinned Dart SDK -> no files changed
 - `flutter pub get --enforce-lockfile` in both `app/core` and `app/shell` with Flutter 3.44.8 -> exit 0 without changing the lock files

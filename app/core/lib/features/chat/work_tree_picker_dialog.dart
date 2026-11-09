@@ -54,6 +54,59 @@ class _WorkTreePickerDialogState extends State<WorkTreePickerDialog> {
     }
   }
 
+  Future<void> _createFolder() async {
+    final FsListing? listing = _listing;
+    if (listing == null || _loading) return;
+    final AppStrings strings = context.l10n;
+    String draftName = '';
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(strings.newFolder),
+          content: TextFormField(
+            autofocus: true,
+            decoration: InputDecoration(labelText: strings.folderName),
+            textInputAction: TextInputAction.done,
+            onChanged: (String value) => draftName = value,
+            onFieldSubmitted: (String value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(strings.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(draftName.trim()),
+              child: Text(strings.create),
+            ),
+          ],
+        );
+      },
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.backend.createDirectory(
+        path: listing.absolutePath,
+        name: name,
+      );
+      if (!mounted) return;
+      await _load(listing.absolutePath);
+    } on BackendException catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err.message;
+        _loading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
@@ -84,6 +137,11 @@ class _WorkTreePickerDialogState extends State<WorkTreePickerDialog> {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                  ),
+                  IconButton(
+                    tooltip: strings.newFolder,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    onPressed: _loading ? null : _createFolder,
                   ),
                 ],
               ),

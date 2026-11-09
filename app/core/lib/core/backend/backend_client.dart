@@ -983,6 +983,21 @@ class BackendClient {
     return FsListing.fromJson(decoded.cast<String, Object?>());
   }
 
+  Future<FsEntry> createDirectory({
+    required String path,
+    required String name,
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/fs/mkdir',
+      body: <String, Object?>{'path': path, 'name': name},
+    );
+    if (decoded is! Map || decoded['entry'] is! Map) {
+      throw BackendException('Invalid directory creation response.');
+    }
+    return FsEntry.fromJson((decoded['entry'] as Map).cast<String, Object?>());
+  }
+
   /// Opens a streaming download. [FsDownloadStream.bytes] is the live response
   /// stream; the caller writes it straight to disk (native) or a blob (web) so a
   /// large file is never buffered whole in memory. Throws before any bytes (e.g.

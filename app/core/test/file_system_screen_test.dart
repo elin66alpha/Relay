@@ -69,7 +69,17 @@ void main() {
       find.widgetWithText(FilledButton, 'Set as work path'),
       findsOneWidget,
     );
+    expect(find.widgetWithText(OutlinedButton, 'New folder'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Upload file'), findsOneWidget);
+
+    // Creating a new folder refreshes the current directory and shows it.
+    await tester.tap(find.widgetWithText(OutlinedButton, 'New folder'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'docs');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+    expect(backend.createdDirs, <String>['/repo/app/docs']);
+    expect(find.text('docs'), findsOneWidget);
 
     // A left swipe does nothing; a right swipe opens the parent folder.
     await tester.fling(find.text('src'), const Offset(-300, 0), 1000);
@@ -245,11 +255,29 @@ class _FsBackendClient extends BackendClient {
 
   final Map<String, List<int>> files;
   final List<String> browsed = <String>[];
+  final List<String> createdDirs = <String>[];
   int downloadedBytes = 0;
   bool downloadClosed = false;
 
   @override
   Future<WorkdirInfo> workdir() async => const WorkdirInfo(dir: '/repo/app');
+
+  @override
+  Future<FsEntry> createDirectory({
+    required String path,
+    required String name,
+  }) async {
+    final String full = '$path/$name';
+    createdDirs.add(full);
+    return FsEntry(
+      name: name,
+      path: full,
+      absolutePath: full,
+      type: 'directory',
+      size: 0,
+      modifiedAt: '',
+    );
+  }
 
   @override
   Future<FsListing> browseWorkdir(
@@ -273,6 +301,16 @@ class _FsBackendClient extends BackendClient {
           size: 0,
           modifiedAt: '',
         ),
+        for (final String dir in createdDirs)
+          if (dir.startsWith('$path/'))
+            FsEntry(
+              name: dir.substring(path.length + 1),
+              path: dir,
+              absolutePath: dir,
+              type: 'directory',
+              size: 0,
+              modifiedAt: '',
+            ),
         for (final MapEntry<String, List<int>> file in files.entries)
           FsEntry(
             name: file.key,

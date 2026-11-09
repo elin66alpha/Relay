@@ -341,6 +341,78 @@ async function prepareDownloadAbsolute(value, { maxBytes } = {}) {
   };
 }
 
+function createAbsoluteDirectory(value, folderName) {
+  const raw = String(value || '').trim();
+  if (!raw || !path.isAbsolute(raw)) {
+    throw new FilesystemError('directory path must be absolute', {
+      status: 400,
+      code: 'FS_PATH_MUST_BE_ABSOLUTE',
+    });
+  }
+  const directory = path.resolve(raw);
+  let stat;
+  try {
+    stat = fs.statSync(directory);
+  } catch (_err) {
+    throw new FilesystemError('path not found', {
+      status: 404,
+      code: 'FS_PATH_NOT_FOUND',
+    });
+  }
+  if (!stat.isDirectory()) {
+    throw new FilesystemError('target is not a directory', {
+      status: 400,
+      code: 'FS_PATH_NOT_DIRECTORY',
+    });
+  }
+  assertPathAllowed(directory);
+  const rawName = String(folderName || '').trim();
+  const name = path.basename(rawName);
+  if (
+    !name ||
+    name === '.' ||
+    name === '..' ||
+    rawName.includes('/') ||
+    rawName.includes('\\') ||
+    rawName.includes('\0')
+  ) {
+    throw new FilesystemError('invalid folder name', {
+      status: 400,
+      code: 'FS_INVALID_FOLDER_NAME',
+    });
+  }
+  const target = path.resolve(directory, name);
+  if (!isInside(directory, target)) {
+    throw new FilesystemError('path is outside the target directory', {
+      status: 403,
+      code: 'FS_PATH_OUTSIDE_WORKDIR',
+    });
+  }
+  assertPathAllowed(target);
+  const realDirectory = fs.realpathSync(directory);
+  assertPathAllowed(path.join(realDirectory, name));
+  try {
+    fs.mkdirSync(target);
+  } catch (err) {
+    if (err && err.code === 'EEXIST') {
+      throw new FilesystemError('folder already exists', {
+        status: 409,
+        code: 'FS_ALREADY_EXISTS',
+      });
+    }
+    throw err;
+  }
+  const createdStat = fs.lstatSync(target);
+  return {
+    name,
+    path: target,
+    absolutePath: target,
+    type: 'directory',
+    size: createdStat.size,
+    modifiedAt: createdStat.mtime.toISOString(),
+  };
+}
+
 // Upload into an absolute directory chosen in the unified file browser. Mirrors
 // resolveUploadTarget but without the workdir confinement, matching the
 // browser's whole-filesystem reach. The filename is still sanitised to a bare
@@ -682,6 +754,7 @@ function sendDirectoryZip(download, res, maxBytes) {
 }
 
 module.exports = {
+  createAbsoluteDirectory,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,

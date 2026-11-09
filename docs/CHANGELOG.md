@@ -19,6 +19,20 @@
   their model and effort when moving to separate controls.
 - Updated the English and Chinese setup guides for Antigravity. Quota schedules
   remain available for Claude Code and Codex.
+- File System keeps its path breadcrumbs visible while scrolling, adds a `..`
+  parent row, and offers a work-path chip to return to the active project.
+  Refresh and hidden-file controls are in the app bar; the current work
+  directory is marked in directory listings.
+- The current workspace on Home and the chat title open File System. Selecting
+  a different recent workspace switches the active project. The Swarm work-tree
+  picker also includes a `..` parent row.
+
+### Fixed
+
+- Switching machines clears the previous machine's recent directories and
+  rejects stale refresh results and directory actions.
+- Windows UNC breadcrumbs preserve the server and share as one absolute root.
+- Refresh retries a failed initial workdir request without reopening File System.
 
 ### Security
 

@@ -643,3 +643,66 @@ test('Antigravity credentials and backup copies are restricted', async () => {
     assert.equal(err.code, 'FS_PATH_RESTRICTED');
   }
 });
+
+test('POST /api/fs/mkdir creates a folder and enforces path, name, duplicate, and root policies', async (t) => {
+  const home = scratchCase();
+  const allowed = path.join(home, 'allowed');
+  const outside = path.join(home, 'outside');
+  fs.mkdirSync(allowed);
+  fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(allowed, 'link'), 'junction');
+  const filesystem = loadFilesystem({ home, roots: `${allowed},${path.join(home, '.ssh')}` });
+
+  const app = express();
+  app.use(express.json());
+  app.use(createFsRouter({
+    ...filesystem,
+    MAX_UPLOAD_BYTES: 1024,
+    requestWorkdir: () => allowed,
+  }));
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const mkdir = (body) => fetch(`http://127.0.0.1:${server.address().port}/api/fs/mkdir`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const created = await mkdir({ path: allowed, name: 'new-project' });
+  assert.equal(created.status, 200);
+  const payload = await created.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.entry.name, 'new-project');
+  assert.equal(payload.entry.type, 'directory');
+  assert.equal(payload.entry.absolutePath, path.join(allowed, 'new-project'));
+  assert.equal(fs.statSync(path.join(allowed, 'new-project')).isDirectory(), true);
+
+  const duplicate = await mkdir({ path: allowed, name: 'new-project' });
+  assert.equal(duplicate.status, 409);
+  assert.equal((await duplicate.json()).code, 'FS_ALREADY_EXISTS');
+
+  for (const bad of ['', '.', '..', '../escape', 'a/b', 'a\\b']) {
+    const res = await mkdir({ path: allowed, name: bad });
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).code, 'FS_INVALID_FOLDER_NAME');
+  }
+
+  const outsideRes = await mkdir({ path: outside, name: 'nope' });
+  assert.equal(outsideRes.status, 403);
+  assert.equal((await outsideRes.json()).code, 'FS_PATH_OUTSIDE_ROOTS');
+
+  const symlinkEscape = await mkdir({ path: path.join(allowed, 'link'), name: 'nope' });
+  assert.equal(symlinkEscape.status, 403);
+  assert.equal((await symlinkEscape.json()).code, 'FS_PATH_OUTSIDE_ROOTS');
+
+  const unrestricted = loadFilesystem({ home });
+  assert.throws(
+    () => unrestricted.createAbsoluteDirectory(home, '.ssh'),
+    (err) => err.status === 403 && err.code === 'FS_PATH_RESTRICTED',
+  );
+});

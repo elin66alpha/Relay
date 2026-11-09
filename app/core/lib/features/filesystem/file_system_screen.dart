@@ -170,6 +170,67 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     }
   }
 
+  Future<void> _createFolder() async {
+    final FsListing? listing = _listing;
+    if (listing == null || _isLoading || _isBusy) return;
+    final AppStrings strings = context.l10n;
+    String draftName = '';
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text(strings.newFolder),
+          content: TextFormField(
+            autofocus: true,
+            decoration: InputDecoration(labelText: strings.folderName),
+            textInputAction: TextInputAction.done,
+            onChanged: (String value) => draftName = value,
+            onFieldSubmitted: (String value) =>
+                Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(strings.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(draftName.trim()),
+              child: Text(strings.create),
+            ),
+          ],
+        );
+      },
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+    try {
+      final FsEntry created = await widget.backend.createDirectory(
+        path: listing.absolutePath,
+        name: name,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.folderCreated(created.name))),
+      );
+      await _browse(listing.absolutePath);
+    } catch (err) {
+      if (!mounted) return;
+      setState(
+        () => _error = context.l10n.createFolderFailed(
+          friendlyErrorText(context.l10n, err),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
   Future<void> _pickUpload() async {
     final FilePickerResult? result = await FilePicker.pickFiles(
       allowMultiple: true,
@@ -377,6 +438,13 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                                   : Icons.flag_outlined,
                             ),
                             label: Text(context.l10n.setAsWorkPath),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _isLoading || _isBusy || listing == null
+                                ? null
+                                : _createFolder,
+                            icon: const Icon(Icons.create_new_folder_outlined),
+                            label: Text(context.l10n.newFolder),
                           ),
                           OutlinedButton.icon(
                             onPressed:

@@ -168,11 +168,20 @@ const List<_Release> _zhReleases = <_Release>[
         body:
             '用量页和输入框上方会显示 Antigravity 的订阅额度，Gemini、Claude/GPT 和 Argon 各自显示。首次查看前需先开始一次对话，让主机上的额度服务运行起来。',
       ),
+      _Highlight(
+        icon: Icons.folder_open_rounded,
+        title: '更方便地浏览项目文件',
+        body:
+            '点击首页当前工作区或聊天标题即可打开文件系统，点击其他最近工作区可直接切换项目。顶部路径栏始终可见，点击路径段或“..”可返回上级；浏览其他目录时，点击工作路径标签即可回到当前项目。',
+      ),
     ],
     changes: <String>[
       'Antigravity 可选择谨慎或自动批准权限；不同会话的模型和设置互不影响。',
       'Antigravity 的登录文件不能通过文件浏览器读取，凭据和账号详情保留在后端主机。',
       '中英文部署和入门教程已更新；额度预约仍仅支持 Claude Code 和 Codex。',
+      '切换机器后会清除旧目录列表，避免误选上一台机器的项目。',
+      '修复 Windows 网络共享路径导航；首次加载文件系统失败后可直接刷新重试。',
+      '刷新和隐藏文件开关移至顶部；蜂群工作树选择器新增“..”上级目录入口。',
     ],
   ),
   _Release(
@@ -275,11 +284,20 @@ const List<_Release> _enReleases = <_Release>[
         body:
             'Usage and the strip above the message box show Antigravity subscription quota, with separate Gemini, Claude/GPT and Argon pools. Start a conversation before the first check so the host CLI quota service is running.',
       ),
+      _Highlight(
+        icon: Icons.folder_open_rounded,
+        title: 'Browse project files more easily',
+        body:
+            'Tap the current workspace on Home or the chat title to open File System, or a different recent workspace to switch projects. The path bar stays visible: tap an ancestor or “..” to go up, and use the work-path chip to return to your active project from another directory.',
+      ),
     ],
     changes: <String>[
       'Antigravity offers cautious and auto-approve permissions; each session keeps its own model and settings.',
       'Antigravity login files are protected from the file browser, and credentials and account details stay on the backend host.',
       'English and Chinese setup and getting-started guides are updated; quota schedules remain Claude Code and Codex only.',
+      'Switching machines clears old directory lists so you cannot accidentally select the previous machine’s project.',
+      'Windows network-share navigation is fixed; Refresh can retry a failed initial File System load.',
+      'Refresh and hidden-file controls moved to the top; the Swarm work-tree picker now includes a “..” parent row.',
     ],
   ),
   _Release(

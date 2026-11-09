@@ -27,6 +27,7 @@ const {
   validateWorkdir,
 } = require('./lib/workdir');
 const {
+  createAbsoluteDirectory,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,
@@ -561,6 +562,7 @@ const routeContext = {
   cancelQuotaSchedule,
   clearHistory,
   clearModelDiscoveryCache,
+  createAbsoluteDirectory,
   createGroup,
   deleteGroup,
   purgeSession,

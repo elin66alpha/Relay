@@ -250,6 +250,23 @@ delete command, so Relay removes that session's directory under
 
 ### Workdirs, conversations, and settings
 
+Open File System from the drawer, the current workspace on Home, or the solo-chat
+title. Selecting a different recent workspace on Home switches the active
+project; selecting the current one opens the file browser. Home disables
+directory actions during refresh, clears recent directories on a machine
+switch, and ignores responses and directory actions belonging to the old machine.
+
+The file browser keeps its breadcrumb bar above the scrolling list. Select an
+ancestor segment to jump to it, or use the up arrow, `..` row, or a right swipe
+on the list to visit the parent. Windows UNC paths retain the server and share
+as a single root. Browsing does not change the active workdir: use **Set as work
+path** to select a project, or the work-path chip to return to the current one.
+The current workdir is also marked when it appears in a directory listing.
+Refresh and hidden-file controls are in the app bar. If the initial workdir
+request fails, Refresh retries it without leaving the page. The Swarm work-tree
+picker also has a `..` row; selecting its work tree does not change the device's
+active workspace.
+
 Each device stores its current workdir per backend and sends it in `X-Workdir`. Backend state
 then uses two related scopes:
 
