@@ -95,6 +95,13 @@ jobs:
         run: git ls-files '*.js' | xargs -r -n1 node --check
       - run: npm run lint
       - run: npm test
+      - name: Lint the MCP server with the backend's ESLint config
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: server/node_modules/.bin/eslint -c server/eslint.config.js mcp
+      - name: Test the MCP server
+        working-directory: mcp
+        run: npm test
       - name: Audit production dependencies
         if: matrix.os == 'ubuntu-latest' && matrix.node == 24
         run: npm audit --omit=dev --audit-level=high

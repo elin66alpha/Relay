@@ -29,6 +29,7 @@ class ChatInputBar extends StatefulWidget {
     required this.onClear,
     required this.onCompress,
     required this.onExportMarkdown,
+    this.onSettingsChanged,
     this.header,
     this.acrylic = false,
   });
@@ -49,6 +50,7 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback onClear;
   final VoidCallback onCompress;
   final VoidCallback onExportMarkdown;
+  final VoidCallback? onSettingsChanged;
 
   @override
   State<ChatInputBar> createState() => _InputBarState();
@@ -292,6 +294,7 @@ class _InputBarState extends State<ChatInputBar> {
                         busy: widget.isThinking,
                         onAttachFile: _isUploading ? null : _attachFiles,
                         onOpenSettingsPage: _closeActions,
+                        onSettingsChanged: widget.onSettingsChanged,
                         onClear: () => _runAction(widget.onClear),
                         onCompress: () => _runAction(widget.onCompress),
                         onExportMarkdown: () =>
@@ -372,6 +375,7 @@ class _ComposerActionPanel extends StatelessWidget {
     required this.onClear,
     required this.onCompress,
     required this.onExportMarkdown,
+    this.onSettingsChanged,
   });
 
   final BackendClient backend;
@@ -382,6 +386,7 @@ class _ComposerActionPanel extends StatelessWidget {
   final bool busy;
   final VoidCallback? onAttachFile;
   final VoidCallback onOpenSettingsPage;
+  final VoidCallback? onSettingsChanged;
   final VoidCallback onClear;
   final VoidCallback onCompress;
   final VoidCallback onExportMarkdown;
@@ -398,6 +403,7 @@ class _ComposerActionPanel extends StatelessWidget {
             agentKey: agentKey,
             sessionId: sessionId,
             onOpenPage: onOpenSettingsPage,
+            onSettingsChanged: onSettingsChanged,
           ),
           const SizedBox(height: 14),
           ComposerActionRow(

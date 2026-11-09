@@ -4,7 +4,7 @@
 
 **让 AI 编程智能体留在你的机器上，在任何屏幕上继续控制它们。**
 
-一个连接 Claude Code、Codex、Cursor、OpenCode 与 Hermes 的私有、自托管远程工作台。
+一个连接 Claude Code、Codex、Cursor、OpenCode、Antigravity 与 Hermes 的私有、自托管远程工作台。
 
 ![Flutter 客户端](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
 ![Node.js 后端](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
@@ -72,7 +72,7 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
 flowchart LR
     C["Flutter 客户端<br/>手机 · Web · 桌面"]
     R["Relay 后端<br/>运行在你的机器上的 Node.js"]
-    A["持久 agent 会话<br/>Claude · Codex · Cursor · OpenCode · Hermes"]
+    A["持久 agent 会话<br/>Claude · Codex · Cursor · OpenCode · Antigravity · Hermes"]
     F["项目与文件"]
     T["可恢复 PTY shell"]
 
@@ -96,7 +96,8 @@ flowchart LR
 | 🐝 | **多智能体蜂群** | 共享记录、独立角色和参数、并行波次、有限的 `@mention` 接力与可复用 JSON 模板。 |
 | 🎛️ | **Agent 控制** | 模型、思考深度、权限、安装/认证状态、按需验证 Codex 凭据，以及 Claude/Codex/Cursor 快速模式。模型页先列主力模型；Claude/Codex 的旧版模型和 Cursor 套餐外的模型放在第二页。OpenCode 列出主机上 OpenCode 提供的模型，包括在那里配置的服务商；Hermes 显示它配置好的模型。 |
 | 📁 | **文件与终端** | 受策略约束的浏览、UTF-8 文本只读预览（前 512 KiB，支持的代码可语法高亮）、上传、下载、文件夹压缩、工作目录切换，以及每个设备凭证一条可恢复 PTY。 |
-| 📊 | **额度工作流** | 查看 Claude/Codex/Cursor 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
+| 📊 | **额度工作流** | 查看 Claude/Codex/Cursor/Antigravity 用量，并预约一条消息在下一个检测到的 Claude 或 Codex 5 小时额度重置后发送。 |
+| 🤖 | **通过 MCP 接入个人 Agent** | `mcp/` 是一个零依赖的 stdio MCP server：机器人和 App 一样用凭证 JSON 加密码登录，可以调用所有 Agent、切换工作区、模型和思考深度、查看额度、管理会话、蜂群和文件，并使用终端。见 [Relay MCP](docs/handbook.md#relay-mcp)。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
 | 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
 
@@ -110,6 +111,10 @@ Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenC
 在 Linux、macOS 或 Windows 主机安装 Node.js 22+ 和至少一个支持的 CLI。Claude、
 Codex 与 Cursor 需要事先在这台主机登录（Cursor 用 `agent login`）；OpenCode 与
 Hermes 使用主机上管理的 provider 配置，Relay 会列出这些配置提供的模型。
+
+Antigravity 需在后端主机自行安装支持 `agy acp --process-per-session` 的 `agy`，
+并通过 `agy acp --login` 登录。重启后端并重新检查智能体状态后即可选择。
+模型和思考强度分别选择；订阅额度展示各模型组的独立额度。若额度服务未运行，先开始一次对话。
 
 Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/releases/latest)
 下载 `relay-backend-windows-x64-v<版本>.zip`，解压后双击 `Setup.exe`，或运行
@@ -155,7 +160,10 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 选择后端、设置工作目录，然后打开 agent 会话或蜂群。首页显示当前机器、当前工作区和
 最多三个最近工作区；点击机器可检查 CLI 状态、管理设备令牌并进入 SSH。
 在 Android 与 iOS App 中，在聊天页任意位置右滑即可打开侧栏。
-发送任务前，通过“文件系统 → 设为工作路径”选择项目。首页“教程”提供命名会话、
+发送任务前，通过“文件系统 → 设为工作路径”选择项目。点击首页当前工作区或聊天标题
+可打开文件系统；点击其他最近工作区可直接切换。文件浏览器顶部的路径栏始终可见，
+点击上级路径段可直接跳转，也可点击 `..`、向上箭头或在文件列表右滑返回上一级。
+浏览其他目录时，点击工作路径标签即可回到当前项目。首页“教程”提供命名会话、
 智能体设置、蜂群、文件操作和手机终端快捷键的详细说明。服务命令、网络配置与各平台说明
 见[后端安装指南](docs/install.zh-CN.md)。
 

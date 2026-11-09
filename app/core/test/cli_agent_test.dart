@@ -1,11 +1,30 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:relay_core/core/widgets/agent_icon.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_core/core/models/cli_agent.dart';
 
 void main() {
+  testWidgets('Antigravity uses its packaged icon in both themes',
+      (WidgetTester tester) async {
+    for (final Brightness brightness in Brightness.values) {
+      expect(
+        agentIconAssetPath('agy', brightness),
+        'assets/agent_icons/agy.png',
+      );
+    }
+    final ByteData bytes =
+        await rootBundle.load('packages/relay_core/assets/agent_icons/agy.png');
+    expect(bytes.lengthInBytes, greaterThan(0));
+    await tester
+        .pumpWidget(const MaterialApp(home: AgentIcon(agentKey: 'agy')));
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   test('known agents list Cursor between Codex and OpenCode', () {
     expect(
       knownCliAgents.map((CliAgent agent) => agent.key).toList(),
-      <String>['claude', 'codex', 'cursor', 'opencode', 'hermes'],
+      <String>['claude', 'codex', 'cursor', 'opencode', 'agy', 'hermes'],
     );
     expect(defaultAuthKindForAgent('cursor'), 'oauth');
   });

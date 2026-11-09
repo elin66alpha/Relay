@@ -132,12 +132,12 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '先确认工作区，再开始任务',
     body:
-        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n从左侧栏打开“文件系统”，进入项目目录，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
+        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n点击首页当前工作区、聊天标题或左侧栏的“文件系统”即可打开文件浏览器；点击其他最近工作区可直接切换项目。浏览到新项目目录后，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
   ),
   _GettingStartedStep(
     title: '在机器详情检查 CLI 状态',
     body:
-        '点击首页或左侧栏里的机器，打开“机器详情”：这里集中显示 SSH 入口、CLI 智能体状态、设备令牌和后端状态。\n在主机上完成 Claude Code、Codex、Cursor 的认证，或 OpenCode、Hermes 的 provider 配置后，重新检查状态。Codex 的显式检查会向 app-server 验证当前认证；网络或验证错误不一定表示需要重新登录。各 CLI 会自动续期登录，所以这里不显示登录到期倒计时。',
+        '点击首页或左侧栏里的机器，打开“机器详情”：这里集中显示 SSH 入口、CLI 智能体状态、设备令牌和后端状态。\n在主机上完成 Claude Code、Codex、Cursor、Antigravity 的认证，或 OpenCode、Hermes 的 provider 配置后，重新检查状态。Codex 的显式检查会向 app-server 验证当前认证；网络或验证错误不一定表示需要重新登录。各 CLI 会自动续期登录，所以这里不显示登录到期倒计时。',
   ),
   _GettingStartedStep(
     title: '选择智能体和会话',
@@ -147,7 +147,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '设置模型、思考强度和权限',
     body:
-        '在聊天输入区域选择该智能体支持的模型、思考强度和权限等级，再发送任务。模型和选项以主机上 CLI 的能力为准。模型页先列主力模型，Claude Code 和 Codex 的旧版模型、Cursor 套餐外需要预付费的模型在页面底部的入口里。OpenCode 列出主机上 OpenCode 提供的模型，包括你在那里配好的 API；Hermes 只显示主机上配置好的模型。\n这些设置按会话保存，同一会话的所有设备共享；新建会话会复制当前会话的设置，之后各自独立。Claude Code、Codex 和 Cursor 另有默认关闭的 Fast 模式，可用性取决于模型及账号。Relay 会按所选权限等级处理 CLI 的审批请求，请按任务需要选择。',
+        '在聊天输入区域选择该智能体支持的模型、思考强度和权限等级，再发送任务。模型和选项以主机上 CLI 的能力为准。模型页先列主力模型，Claude Code 和 Codex 的旧版模型、Cursor 套餐外需要预付费的模型在页面底部的入口里。OpenCode 列出主机上 OpenCode 提供的模型，包括你在那里配好的 API；Hermes 只显示主机上配置好的模型；Antigravity 的模型和思考强度分别选择。\n这些设置按会话保存，同一会话的所有设备共享；新建会话会复制当前会话的设置，之后各自独立。Claude Code、Codex 和 Cursor 另有默认关闭的 Fast 模式，可用性取决于模型及账号。Relay 会按所选权限等级处理 CLI 的审批请求，请按任务需要选择。',
   ),
   _GettingStartedStep(
     title: '描述任务，查看和找回结果',
@@ -162,7 +162,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '浏览、上传和下载文件',
     body:
-        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。文件列表向右滑动可返回上一级。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
+        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。顶部路径栏始终可见，点击上级路径段可直接跳转；点击向上箭头、“..”或在文件列表右滑可返回上一级。浏览其他目录时，点击工作路径标签即可回到当前项目。顶部还有刷新和隐藏文件开关；首次加载失败可刷新重试。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
   ),
   _GettingStartedStep(
     title: '从机器详情进入 SSH 终端',
@@ -172,7 +172,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '查看用量与管理设备',
     body:
-        '“用量查询”分别加载 Claude Code、Codex 和 Cursor 的卡片；一张卡片仍在等待时，其他卡片可以先显示结果。此页面用于查看额度，与机器详情中的认证状态不同。\n在机器详情检查设备令牌与最近使用信息。不再使用的设备可先撤销令牌再删除记录；撤销当前设备会断开自己的访问及终端。需要重读本教程时，可从首页“教程”或设置进入。',
+        '“用量查询”分别加载 Claude Code、Codex、Cursor 和 Antigravity 的卡片；一张卡片仍在等待时，其他卡片可以先显示结果。此页面用于查看额度，与机器详情中的认证状态不同。\n在机器详情检查设备令牌与最近使用信息。不再使用的设备可先撤销令牌再删除记录；撤销当前设备会断开自己的访问及终端。需要重读本教程时，可从首页“教程”或设置进入。',
   ),
 ];
 
@@ -185,12 +185,12 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose the workspace before starting',
     body:
-        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nOpen File system from the drawer, navigate to your project, and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
+        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nTap the current workspace on Home, the chat title, or File system in the drawer to open the file browser; tap a different recent workspace to switch projects directly. To choose a new project, browse to its directory and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
   ),
   _GettingStartedStep(
     title: 'Check CLI status in Machine details',
     body:
-        'Tap the machine on Home or in the drawer to open Machine details, which brings together Enter SSH, CLI agent status, device tokens, and backend status.\nAfter authenticating Claude Code, Codex, or Cursor, or configuring an OpenCode or Hermes provider on the host, recheck the status. An explicit Codex recheck verifies current authentication with its app-server. A network or verification error does not necessarily mean login is required. Every CLI renews its own login, so no login-expiry countdown is shown.',
+        'Tap the machine on Home or in the drawer to open Machine details, which brings together Enter SSH, CLI agent status, device tokens, and backend status.\nAfter authenticating Claude Code, Codex, Cursor, or Antigravity, or configuring an OpenCode or Hermes provider on the host, recheck the status. An explicit Codex recheck verifies current authentication with its app-server. A network or verification error does not necessarily mean login is required. Every CLI renews its own login, so no login-expiry countdown is shown.',
   ),
   _GettingStartedStep(
     title: 'Choose an agent and conversation',
@@ -200,7 +200,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Set the model, effort, and permissions',
     body:
-        'Use the chat composer controls to select the supported model, reasoning effort, and permission tier before sending a task. Available options depend on the CLI on the host. The model page lists main models first; older Claude Code and Codex models, and Cursor models that bill prepaid usage outside its plan, are behind a link at the bottom. OpenCode lists the models OpenCode on the host offers, including any API you configured there; Hermes shows only the model configured on the host.\nSettings are saved per session and shared by every device on it; a new session starts from a copy of the current session settings and is independent after that. Claude Code, Codex, and Cursor also offer Fast mode, off by default and subject to model and account availability. Relay handles CLI approval requests according to the chosen permission tier; select it to fit the task.',
+        'Use the chat composer controls to select the supported model, reasoning effort, and permission tier before sending a task. Available options depend on the CLI on the host. The model page lists main models first; older Claude Code and Codex models, and Cursor models that bill prepaid usage outside its plan, are behind a link at the bottom. OpenCode lists the models OpenCode on the host offers, including any API you configured there; Hermes shows only the model configured on the host; Antigravity separates model and reasoning effort.\nSettings are saved per session and shared by every device on it; a new session starts from a copy of the current session settings and is independent after that. Claude Code, Codex, and Cursor also offer Fast mode, off by default and subject to model and account availability. Relay handles CLI approval requests according to the chosen permission tier; select it to fit the task.',
   ),
   _GettingStartedStep(
     title: 'Describe tasks and find results',
@@ -215,7 +215,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Browse, upload, and download files',
     body:
-        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. Swipe right on the file list to go up one directory.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
+        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. The path bar stays visible: tap an ancestor segment to jump there, or use the up arrow, “..”, or a right swipe on the file list to go up one directory. When browsing elsewhere, tap the work-path chip to return to the active project. Refresh and hidden-file controls are at the top; Refresh also retries a failed initial load.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
   ),
   _GettingStartedStep(
     title: 'Open the SSH terminal from Machine details',
@@ -225,6 +225,6 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Check usage and manage devices',
     body:
-        'Usage query loads Claude Code, Codex, and Cursor cards independently, so one can show results while another is still loading. Usage reporting is separate from authentication status in Machine details.\nReview device tokens and last-use details in Machine details. Revoke an unused device before deleting its record; revoking the current device disconnects your own access and terminal. Reopen this guide from the Tutorial section on Home or from Settings.',
+        'Usage query loads Claude Code, Codex, Cursor, and Antigravity cards independently, so one can show results while another is still loading. Usage reporting is separate from authentication status in Machine details.\nReview device tokens and last-use details in Machine details. Revoke an unused device before deleting its record; revoking the current device disconnects your own access and terminal. Reopen this guide from the Tutorial section on Home or from Settings.',
   ),
 ];

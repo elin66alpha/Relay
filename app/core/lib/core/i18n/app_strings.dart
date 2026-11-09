@@ -213,6 +213,12 @@ class AppStrings {
   String get emptyFolder => isZh ? '这个文件夹是空的。' : 'This folder is empty.';
   String get loadingFiles => isZh ? '正在读取文件...' : 'Loading files...';
   String get uploadFile => isZh ? '上传文件' : 'Upload file';
+  String get newFolder => isZh ? '新建文件夹' : 'New folder';
+  String get folderName => isZh ? '文件夹名称' : 'Folder name';
+  String folderCreated(String name) =>
+      isZh ? '已创建文件夹：$name' : 'Created folder: $name';
+  String createFolderFailed(Object err) =>
+      isZh ? '新建文件夹失败：$err' : 'Failed to create folder: $err';
   String get download => isZh ? '下载' : 'Download';
   String get cannotPreviewFile =>
       isZh ? '无法预览此文件。' : 'Cannot preview this file.';

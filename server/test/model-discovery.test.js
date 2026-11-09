@@ -18,6 +18,7 @@ const {
   hermesModelOptions,
   parseCodexCatalog,
   parseOpenCodeModels,
+  parseAgyModels,
   recordCursorCatalog,
   recordReportedModels,
 } = require('../lib/model-discovery');
@@ -230,4 +231,28 @@ test('parseCodexCatalog rejects malformed, hidden, duplicate, and unsafe entries
     ['medium'],
   );
   assert.equal(models[2].defaultEffort, 'medium');
+});
+
+test('Antigravity model ids remain intact and progress lines are ignored', () => {
+  assert.deepEqual(parseAgyModels('Fetching available models...\nclaude-high\tClaude (High)\nclaude-high\tClaude (High)\ninvalid id\tBad\n'),
+    [{ id: 'claude-high', label: 'Claude (High)' }]);
+});
+
+test('Antigravity groups effort variants and migrates old saved selections', () => {
+  const models = parseAgyModels('sonnet-high\tSonnet (High)\nsonnet-low\tSonnet (Low)\nsonnet-medium\tSonnet (Medium)\ngpt-medium\tGPT (Medium)');
+  assert.equal(models.length, 2);
+  assert.equal(models[0].id, 'sonnet');
+  assert.equal(models[0].label, 'Sonnet');
+  assert.deepEqual(models[0].efforts.map((e) => e.id), ['low', 'medium', 'high']);
+  assert.equal(models[1].id, 'gpt-medium');
+  recordReportedModels('agy', models);
+  const { normalizeSettings, acpSessionOptions } = require('../lib/agent-options');
+  assert.deepEqual(normalizeSettings('agy', { model: 'sonnet-high' }),
+    { model: 'sonnet', effort: 'high', permission: 'cautious' });
+  const options = acpSessionOptions('agy', { model: 'sonnet', effort: 'low' });
+  assert.equal(options.modelId, null);
+  assert.deepEqual(options.configOptions, [['model', 'sonnet'], ['thought_level', 'low']]);
+  const singleVariant = acpSessionOptions('agy', { model: 'gpt-medium' });
+  assert.equal(singleVariant.modelId, null);
+  assert.deepEqual(singleVariant.configOptions, [['model', 'gpt-medium']]);
 });

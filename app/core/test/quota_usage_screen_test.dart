@@ -35,27 +35,32 @@ void main() {
     // answers instead of a full-screen spinner.
     expect(
       backendClient.pending.keys,
-      unorderedEquals(<String>['claude', 'codex', 'cursor']),
+      unorderedEquals(<String>['claude', 'codex', 'cursor', 'agy']),
     );
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.text('Claude Code'), findsOneWidget);
     expect(find.text('Codex'), findsOneWidget);
     expect(find.text('Cursor'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsNWidgets(3));
+    expect(find.text('Antigravity'), findsOneWidget);
+    expect(find.text('Loading quota...'), findsNWidgets(4));
 
     backendClient.answer('claude');
     await tester.pump();
     expect(find.text('58% remaining'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsNWidgets(2));
+    expect(find.text('Loading quota...'), findsNWidgets(3));
 
     backendClient.answer('codex');
     backendClient.answer('cursor');
+    backendClient.answer('agy');
     await tester.pump();
-    expect(find.text('58% remaining'), findsNWidgets(3));
+    expect(find.text('58% remaining'), findsNWidgets(4));
     expect(find.text('Loading quota...'), findsNothing);
+    // Antigravity reads like Claude and Codex: model group plus window.
+    expect(find.text('Gemini 5 hours'), findsOneWidget);
+    expect(find.text('Gemini This week'), findsOneWidget);
     expect(
       quotaController.lastUsageReport?.agents.map((UsageAgent a) => a.key),
-      <String>['claude', 'codex', 'cursor'],
+      <String>['claude', 'codex', 'cursor', 'agy'],
     );
   });
 
@@ -162,20 +167,21 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     // Opening usage shows the strip's cached report before any refresh lands.
     expect(find.text('58% remaining'), findsOneWidget);
-    expect(find.text('Loading quota...'), findsNWidgets(2));
+    expect(find.text('Loading quota...'), findsNWidgets(3));
     // The usage screen always refreshes every source; only the strip throttles.
     expect(
       backendClient.requests,
-      <String?>['claude', 'claude', 'codex', 'cursor'],
+      <String?>['claude', 'claude', 'codex', 'cursor', 'agy'],
     );
 
     backendClient.answer('codex');
     backendClient.answer('cursor');
+    backendClient.answer('agy');
     await tester.pump();
-    expect(find.text('58% remaining'), findsNWidgets(3));
+    expect(find.text('58% remaining'), findsNWidgets(4));
     expect(
       quotaController.lastUsageReport?.agents.map((UsageAgent a) => a.key),
-      <String>['claude', 'codex', 'cursor'],
+      <String>['claude', 'codex', 'cursor', 'agy'],
     );
     backendClient.pending['claude']!.complete(
       UsageReport.fromJson(<String, Object?>{
@@ -200,7 +206,7 @@ void main() {
     expect(find.text('42%'), findsOneWidget);
     expect(
       backendClient.requests,
-      <String?>['claude', 'claude', 'codex', 'cursor'],
+      <String?>['claude', 'claude', 'codex', 'cursor', 'agy'],
     );
   });
 }
@@ -232,9 +238,27 @@ class _UsageBackendClient extends BackendClient {
             'key': source,
             'label': _labels[source],
             'available': true,
-            'quotas': <Object?>[
-              <String, Object?>{'key': 'five_hour', 'remainingPercent': 58},
-            ],
+            'quotas': source == 'agy'
+                ? <Object?>[
+                    <String, Object?>{
+                      'key': 'gemini-5h',
+                      'label': 'Gemini',
+                      'window': '5h',
+                      'remainingPercent': 58,
+                    },
+                    <String, Object?>{
+                      'key': 'gemini-weekly',
+                      'label': 'Gemini',
+                      'window': 'weekly',
+                      'remainingPercent': 40,
+                    },
+                  ]
+                : <Object?>[
+                    <String, Object?>{
+                      'key': 'five_hour',
+                      'remainingPercent': 58,
+                    },
+                  ],
           },
         ],
       }),
@@ -245,6 +269,7 @@ class _UsageBackendClient extends BackendClient {
     'claude': 'Claude Code',
     'codex': 'Codex',
     'cursor': 'Cursor',
+    'agy': 'Antigravity',
   };
 
   @override

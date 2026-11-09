@@ -27,6 +27,7 @@ const {
   validateWorkdir,
 } = require('./lib/workdir');
 const {
+  createAbsoluteDirectory,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,
@@ -561,6 +562,7 @@ const routeContext = {
   cancelQuotaSchedule,
   clearHistory,
   clearModelDiscoveryCache,
+  createAbsoluteDirectory,
   createGroup,
   deleteGroup,
   purgeSession,
@@ -711,7 +713,7 @@ const server = app.listen(PORT, HOST, () => {
         // Best-effort; discovery falls back to the static catalog at call time.
       }
     }
-    for (const agent of ['cursor', 'opencode', 'hermes']) refreshAgentModels(agent);
+    for (const agent of ['cursor', 'opencode', 'hermes', 'agy']) refreshAgentModels(agent);
   });
   if (PUBLIC_BASE_URL) {
     console.log(`public tunnel URL: ${PUBLIC_BASE_URL}`);

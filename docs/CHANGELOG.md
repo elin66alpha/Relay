@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.1.11 - 2026-11-09
+
+### Added
+
+- Antigravity (`agy`) as a sixth agent, between OpenCode and Hermes. Install a
+  host CLI supporting `agy acp --process-per-session` and sign in with
+  `agy acp --login`. Conversations stream, resume and run concurrently with
+  isolated session workers, separate model and reasoning-effort controls, and
+  cautious or auto-approve permission tiers.
+- Relay MCP (`mcp/`): a dependency-free stdio MCP server for personal agents.
+  It signs in with a credential JSON and its password, like the app, refuses
+  Cloudflare Quick Tunnel URLs, and maps the app's features (except wallpaper)
+  onto 17 tools; long agent turns return a request id to poll with `relay_task`.
+- Antigravity subscription quota in Usage and the composer strip, with Gemini,
+  Claude/GPT and Argon buckets shown separately. Quota reads the host CLI's
+  running local service and retains stale cached results when it stops.
+
+### Changed
+
+- Antigravity model lists refresh from the host CLI; saved model variants retain
+  their model and effort when moving to separate controls.
+- Updated the English and Chinese setup guides for Antigravity. Quota schedules
+  remain available for Claude Code and Codex.
+- File System keeps its path breadcrumbs visible while scrolling, adds a `..`
+  parent row, and offers a work-path chip to return to the active project.
+  Refresh and hidden-file controls are in the app bar; the current work
+  directory is marked in directory listings.
+- The current workspace on Home and the chat title open File System. Selecting
+  a different recent workspace switches the active project. The Swarm work-tree
+  picker also includes a `..` parent row.
+
+### Fixed
+
+- Switching machines clears the previous machine's recent directories and
+  rejects stale refresh results and directory actions.
+- Windows UNC breadcrumbs preserve the server and share as one absolute root.
+- Refresh retries a failed initial workdir request without reopening File System.
+
+### Security
+
+- The file API denies access to Antigravity's OAuth credential file and backup
+  copies. Agent status and quota responses keep credentials and account details
+  on the backend host.
+
 ## 0.1.10 - 2026-10-29
 
 ### Added

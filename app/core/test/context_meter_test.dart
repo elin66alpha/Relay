@@ -122,4 +122,19 @@ void main() {
     expect(formatTokenCount(1000000), '1M');
     expect(formatTokenCount(1500000), '1.5M');
   });
+
+  test(
+      'contextMeterSupports includes Antigravity alongside Claude, Codex, OpenCode, and Hermes',
+      () {
+    for (final String key in <String>[
+      'claude',
+      'codex',
+      'opencode',
+      'agy',
+      'hermes',
+    ]) {
+      expect(contextMeterSupports(key), isTrue, reason: key);
+    }
+    expect(contextMeterSupports('cursor'), isFalse);
+  });
 }

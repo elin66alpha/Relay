@@ -7,7 +7,7 @@ the reason for each. How agents work together in this workspace lives in
 
 ## Purpose
 
-Relay lets one person drive Claude Code, Codex, Cursor, OpenCode, and Hermes
+Relay lets one person drive Claude Code, Codex, Cursor, OpenCode, Antigravity, and Hermes
 running on their own machine from a Flutter client (mobile, Web, desktop) over
 an authenticated HTTP/SSE backend.
 
@@ -20,6 +20,7 @@ In:
 - SSH-style PTY terminal via single-use WebSocket ticket.
 - Quota/usage reporting, scheduled quota messages, keepalive; Web Push + FCM notifications.
 - Linux/macOS/Windows backend install adapters; credential QR/file onboarding.
+- Relay MCP (`mcp/`): a stdio MCP server through which a personal agent does what the app does (except wallpaper), signed in with the same encrypted credential JSON and password.
 
 Out:
 - Logging agents in from Relay. Reason: every credential is created on the host by the CLI itself.
@@ -36,6 +37,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/core | the `relay_core` Dart package: every screen, controller, test and asset (`lib/`, `test/`, `assets/`) |
 | app/shell | the runnable Flutter app `relay`: `main.dart`, the app version, and the android, ios, linux, macos, windows and web platform projects |
 | server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
+| mcp | `relay-mcp`, a dependency-free stdio MCP server that drives a backend over its HTTP API |
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
 | scripts/release | release bundle builders, version/documentation checks, Windows setup checks and local Android signing for a release draft |
 | scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
@@ -73,8 +75,11 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/core/lib/features/{cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
 | app/shell/lib/main.dart | creates the shared controllers and starts the app | main() | app/core |
 | scripts/install/{linux,macos,windows} | install/service adapters | setup/start/stop/status/uninstall | server/scripts, PM2/launchd/Windows |
+| mcp/index.js | stdio entry: decrypts the credential once, newline-delimited JSON-RPC loop; env `RELAY_CREDENTIAL` (JSON or path), `RELAY_CREDENTIAL_PASSPHRASE`, optional `RELAY_WORKDIR`, `RELAY_MCP_NAME` | stdin/stdout | mcp/lib/* |
+| mcp/lib/{credential,protocol}.js | `relay.credentials.v1` decryption with the app's limits, refusing `*.trycloudflare.com`; MCP initialize/ping/tools/list/tools/call | decryptCredential; createMcpHandler | node:crypto |
+| mcp/lib/{relay-client,tools,terminal}.js | HTTP/SSE client sending Bearer, `x-workdir`, `x-device-id`; 17 tools mapped onto `/api/*`; terminal over the ticket WebSocket | createRelayClient, createTools, runTerminal | Relay HTTP API only (never `server/lib`) |
 
-Dependency direction: server routes -> lib -> json-store; app/shell -> app/core; within app/core/lib, features/chat -> other features -> core. Nothing outside features/chat imports it, the other features import each other without cycles, and core imports no feature.
+Dependency direction: mcp -> Relay HTTP API (no code import of server/); server routes -> lib -> json-store; app/shell -> app/core; within app/core/lib, features/chat -> other features -> core. Nothing outside features/chat imports it, the other features import each other without cycles, and core imports no feature.
 
 ## Invariants
 
@@ -106,7 +111,7 @@ architecture change (see Changes).
 - `server/lib/agent-options.js` owns option validation and the SDK or
   protocol representation of each setting. `server/lib/agent-settings.js`
   persists normalized solo-chat settings.
-- No agent runs one process per turn. All five keep a live session that turns
+- No agent runs one process per turn. All six keep a live session that turns
   are fed into. Every pool is a *cache*: the stored session id stays
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
@@ -123,13 +128,13 @@ architecture change (see Changes).
     own, queued on the scope and stopped by Stop like any turn, once it
     writes text. A message pushed while it runs may be folded into it; the
     result naming that message then ends both.
-  - `server/lib/stdio-agent-pool.js` — the shared pool for the three CLIs that
+  - `server/lib/stdio-agent-pool.js` — the shared pool for the CLIs that
     speak line-delimited JSON-RPC on stdio. It owns the process, the wire, the
     session cap, idle eviction and cancellation; a `driver` supplies the
     protocol. One process per agent hosts *all* of that agent's scopes, since
     each session carries its own `cwd`, so a large startup cost is paid once
-    instead of once per chat.
-    - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor). Settings apply
+    instead of once per chat. Antigravity adds one isolated worker per session.
+    - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor, agy). Settings apply
       over the protocol (`acpSessionOptions`) with no restart. Capabilities from
       `initialize` gate optional calls: hermes has no `session/close`, so an
       evicted session is simply dropped.
@@ -145,7 +150,7 @@ architecture change (see Changes).
     driver's job (`allow_once` vs `accept` vs `approved`). ACP approvals pick
     `allow_once` over `allow_always`, because Cursor persists an "always" into
     the host user's own CLI allowlist.
-  - `runAcpAgent` in `agents.js` is the shared runner for opencode, hermes, and
+  - `runAcpAgent` in `agents.js` is the shared runner for opencode, hermes, agy, and
     cursor, which differ only by their pool and their entries in the option
     tables. Cursor's binary is `agent`; its pool passes `authMethod:
     cursor_login` because the CLI rejects a session until that call.
@@ -182,6 +187,31 @@ architecture change (see Changes).
   deletion on a best-effort basis. Cursor has no delete command, so Relay
   removes `<CURSOR_CONFIG_DIR>/acp-sessions/<id>` itself. Use `clearSession` only for the internal
   stale-session retry.
+- Antigravity uses `agy acp --process-per-session` through the existing ACP pool.
+  The CLI must support this flag; isolated workers keep concurrent conversations'
+  settings separate. Models come from `agy models` on the catalog refresh
+  schedule. Multiple effort variants become one model with a separate effort
+  picker ordered low → max like the other agents; ACP config options apply the model before `thought_level`. Saved
+  variant model ids migrate to the corresponding model and effort. Permissions use ACP's `default` mode with Relay
+  refusing requests by default, or approving them in the `bypass` tier. Host login
+  uses `agy acp --login`; cli-paths owns the token path used by status and the file
+  API denylist. Purge closes and forgets the session; CLI transcript deletion is
+  unavailable and transcripts remain on the host. Because `agy acp` does not emit
+  ACP `usage_update` notifications, Relay queries `GetCascadeTrajectory` on the
+  local language servers in parallel after each turn (read-only; the worker that ran
+  the turn holds it, so nothing is loaded into another process) and reads `contextWindowMetadata.estimatedTokensUsed` and `maxContextTokens` from
+  the latest `generatorMetadata` entry to emit `{ type: 'context', used, size }`.
+  Quota reads `RetrieveUserQuotaSummary` from a running CLI language server on
+  loopback using the HTTP port logged at the head of each live ACP worker log (pid in
+  the file name, never crowded out) plus the 12 newest CLI logs, and falls back to
+  `agy -p /usage --output-format json` (which executes the `/usage` slash command
+  headlessly with zero model turns or token cost) when no language server is
+  running. All returned subscription buckets (including separate Argon limits)
+  appear in the usage page and composer strip; each quota's `label` is the shortened
+  model group and its `window` (`5h`/`weekly`) is localized by the app, with the shared cache/stale
+  handling; the agy cache lives 5 minutes, longer than the strip's one-minute poll,
+  and concurrent reads of any source share one in-flight fetch. No scheduler is
+  added for agy.
 - Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
   Claude receives a `fastMode` settings override; Codex receives an explicit
   `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
@@ -196,8 +226,8 @@ architecture change (see Changes).
   result (including "not installed"); `agent-options.js` caches
   `models-extra.json` by mtime. A CLI update calls `clearModelDiscoveryCache`,
   which is what makes new models appear at once.
-- `GET /api/agents` returns all five known agents with install/auth/usability
-  state, in the order Claude Code, Codex, Cursor, OpenCode, Hermes. Claude and
+- `GET /api/agents` returns all six known agents with install/auth/usability
+  state, in the order Claude Code, Codex, Cursor, OpenCode, Antigravity, Hermes. Claude and
   Cursor require their CLI login (Cursor also accepts `CURSOR_API_KEY`). Codex reports its active app-server auth mode,
   including managed ChatGPT, API-key, external-token, and host-managed provider
   modes; OpenCode and Hermes credentials are managed on the host and become
@@ -230,6 +260,25 @@ architecture change (see Changes).
   configured Web Push and FCM channels.
 - Chat prompt payloads and generated Swarm prompts are capped by
   `PROMPT_MAX_BYTES`. Preserve that validation in every chat path.
+
+### Relay MCP
+
+- `mcp/` is another client of the HTTP API, like the app: it requires nothing
+  from `server/` at runtime and has no npm dependencies, so a bot clones the
+  repository and runs `node mcp/index.js` on another machine (Node 22+). Every
+  rule (auth, scope queue, session cap, path denylist) stays in the backend.
+- It signs in exactly like the app: the encrypted credential JSON and its
+  password, decrypted in the MCP process. A Quick Tunnel `baseUrl` is refused
+  because it changes on every cloudflared restart.
+- The workdir lives in the MCP process and travels as `x-workdir`, so a bot
+  switching workdir never moves another device.
+- Agent turns are asynchronous: `relay_chat`/`relay_swarm_chat` wait at most
+  `waitSeconds` on the SSE reply, then return a requestId. The backend does not
+  cancel a turn when its client disconnects, and `relay_task` reads the result
+  from history (`<requestId>:assistant`, or ids prefixed by the requestId in a
+  Swarm), so polling survives MCP restarts and dropped connections.
+- Not mapped: wallpaper, push/FCM registration, multi-machine switching (one
+  MCP entry per backend), token management, and the app's local screens.
 
 ### Client boundaries
 
@@ -287,10 +336,12 @@ architecture change (see Changes).
 | Model picker second page (bottom link): Cursor models outside its plan (`paid`), Claude/Codex models a newer one replaced (`legacy`); Swarms list first-page models only | agent-options, chat/agent_controls, chat/swarm_form_dialog | active |
 | Live OpenCode models (`opencode models`: free models plus providers configured on the host) and a Hermes model page showing the host's configured model | agents (refreshAgentModels), model-discovery, agent-options | active |
 | Cursor agent over ACP (design under Invariants, "Agents and controls") | agents, acp-session-pool, stdio-agent-pool, agent-options, agent-status, model-discovery, usage, routes/meta, cli_agent, chat/agent_controls, chat/context_meter | active |
+| Antigravity (`agy`) over ACP with isolated session workers, streaming and resume; separate model/effort controls, context usage meter (`GetCascadeTrajectory`), host OAuth, approval tiers and subscription quota (`RetrieveUserQuotaSummary` + headless `/usage` fallback) | agents, acp-session-pool, stdio-agent-pool, agent-options, model-discovery, agent-status, cli-paths, filesystem, usage, cli_agent, agent_icon, features/chat/context_meter, features/quota | active |
 | Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
-| Filesystem | routes/fs, filesystem, features/filesystem | active |
+| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
+| Workspace navigation (Home current directory and chat title open the file browser; selecting a different recent directory switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
@@ -301,6 +352,7 @@ architecture change (see Changes).
 | Machine details hardware card (CPU, memory, GPU, temperatures refreshed every 10 s while the page is open) | machine-info, routes/meta, features/machines | active |
 | Credential onboarding | server/scripts/create-credential, core/credentials, features/machines | active |
 | Update check (Settings → Check for updates compares with the latest GitHub release and only reports it; no download) | features/settings | active |
+| Relay MCP for personal agents (stdio; status, chat/task/cancel, history, sessions, agent options/settings/update, workdir, files, Swarms, usage, quota schedules, machine, terminal) | mcp | active |
 
 Deprecated features stay listed until their code is deleted, then the row is
 removed.
@@ -308,6 +360,9 @@ removed.
 ## Verification
 
 Command lines are automated. The rest are manual checks in the app or on the host; a precondition in parentheses must hold first.
+
+The user confirmed manual acceptance of the rebuilt Web filesystem and workspace
+navigation on 2026-11-09.
 
 - `dart format --output=none --set-exit-if-changed app/core/lib app/core/test app/shell/lib` with Flutter's pinned Dart SDK -> no files changed
 - `flutter pub get --enforce-lockfile` in both `app/core` and `app/shell` with Flutter 3.44.8 -> exit 0 without changing the lock files
@@ -332,6 +387,8 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - `npm --prefix server run lint` -> exit 0, no problems reported
 - `npm --prefix server test` -> "# fail 0"
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
+- `npm --prefix mcp test` -> "# fail 0"; `server/node_modules/.bin/eslint -c server/eslint.config.js mcp` -> exit 0
+- (Backend running, a credential made with `npm --prefix server run credential -- --label <bot>`) `RELAY_CREDENTIAL=<json> RELAY_CREDENTIAL_PASSPHRASE=<password> node mcp/index.js` answers `tools/list` with 17 tools; `relay_status` lists the agents, `relay_terminal` with `echo ok` returns `ok`, and a `relay_chat` that outlasts `waitSeconds` returns `running` and then `done` from `relay_task`.
 - On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes.
 - On Windows, `scripts/release/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
@@ -344,9 +401,12 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client, an unsigned iOS client and the macOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `scripts/release/add_signed_android.sh` expects (`expected_cert`)
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
+- Home: tapping the current workspace opens File System; tapping a recent workspace selects it. While refreshing, directory actions are disabled; switching machines clears recent directories immediately and late responses from earlier refreshes cannot replace the list or enable a previous machine's directory action.
+- Solo chat: tapping the chat title opens File System through BackendClient and the set-workdir callback.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
-- File browser: tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
+- File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
+- File browser: Windows UNC breadcrumbs keep the server and share as one absolute root; after an initial workdir request fails, Refresh retries it without leaving the screen. Regression coverage lives in `app/core/test/file_system_screen_test.dart` and `app/core/test/home_navigation_page_test.dart` (including delayed responses across machine switches).
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.
 - (Linux host without Relay) `curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash` asks for a directory (default `~/relay`), unpacks the release there and starts setup at Step 1/5 without the menu; running it again prints "Upgraded to <version>" and `server/.env` is unchanged.
 - Linux setup → 5 (Install agent CLIs): lists Claude Code, Codex, Cursor, OpenCode and Hermes with ✔ installed / ✘ not installed matching `GET /api/agents` `installed`; Enter installs nothing; each installed pick prints its login command.
@@ -356,7 +416,7 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher it shows "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later."
 - `grep -rn "import '\.\./chat/\|features/chat/" app/core/lib/features --include=*.dart | grep -v '^app/core/lib/features/chat/'` -> no output
 - `grep -rn "features/" app/core/lib/core --include=*.dart` -> no output
-- After a reply in solo chat with Claude Code, Codex, OpenCode, or Hermes, the line above the composer ends with `<used> / <window>` (e.g. `42k / 200k`); `<window>` reads `?` until that agent + model has replied once.
+- After a reply in solo chat with Claude Code, Codex, OpenCode, Antigravity, or Hermes, the line above the composer ends with `<used> / <window>` (e.g. `42k / 200k`); `<window>` reads `?` until that agent + model has replied once.
 - A new or cleared conversation shows `0 / <window>`; one whose replies predate the feature shows `? / <window>`; with Cursor active the line is absent.
 - (Cursor signed in on a Premium plan) Quota Usage lists Cursor after Codex. The Cursor card shows plan `Premium` and one weekly remaining percent with a reset time. While Cursor is the active agent, the composer strip shows that same percent. Scheduled messages stay Claude Code and Codex only.
 - (Cursor signed in on the host with `agent login`) Within a minute of backend start, `server/reported-models.json` holds a `cursor` list of plain ids (`default`, ...); Cursor's model picker shows those names with Auto selected, a model with effort levels shows its effort choices, and the model page has the Fast switch.
@@ -367,21 +427,31 @@ Command lines are automated. The rest are manual checks in the app or on the hos
 - Model page: a model with `group` `legacy` (Claude Code, Codex) or `paid` (Cursor) in `GET /api/agent-options?agent=<key>` is listed only behind the bottom link, whose label shows how many there are; every other model is on the first page. Choosing a model on the second page saves it and returns to chat; reopening shows "Current: <model>" under the link. A Swarm member's model dropdown lists only first-page models.
 - Within a minute of backend start, OpenCode's model page lists exactly the ids `opencode models` prints on the host, each as model name over provider; a provider added to the host's OpenCode config appears after the next picker open more than ten minutes later, or after Update CLI.
 - Hermes shows a Model entry; its page lists one choice, the name `hermes config get model.default` prints, with the provider under it.
-- `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
+- `GET /api/agents` lists keys in order `claude`, `codex`, `cursor`, `opencode`, `agy`, `hermes`. Cursor is usable only when the `agent` binary is installed and the host auth file has both tokens, or `CURSOR_API_KEY` is set. The response does not contain the token.
+
+- (Antigravity installed and signed in) Select Antigravity, send two turns, stop a
+  running turn, and resume after backend restart: the scope retains its conversation,
+  context occupancy and window size (`<used> / <window>`) update after each turn,
+  clearing resets to `0 / <window>`, and switching models updates the active model's
+  window. Quota Usage and the composer strip report Antigravity's three model groups
+  and five quota buckets even when no language server is running prior to the query,
+  labelled like Claude and Codex as model plus window (`Gemini 5 小时`, `Gemini 本周`,
+  `Claude/GPT 5 小时`, `Gemini 4 Argon 本周`), 5 hours before the week.
+  Two sessions with different models use isolated workers; the selected model and
+  permission policy apply to each session. The file API rejects the agy OAuth file.
 
 ## Milestones
 
 | Milestone | Completion criteria | Status |
 |---|---|---|
-| 0.1.10 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.10"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; the repository root has no directory named backends, lib, test or assets, and ``git grep -n 'backends[/]' -- '*.md' ':!docs/CHANGELOG.md' ':!docs/releases'`` prints nothing | in progress |
+| 0.1.11 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.11"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; Antigravity appears in agent controls and quota views with host credentials protected | in progress |
 
 ## Changes
 
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Before 2026-10-18: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17).
-- 2026-10-18: upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ modules. Reason: server.js loads by starting the server, so that logic could not be tested.
+- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18).
 - 2026-10-18: extracted session-slots, sse and bounded-integer from the session pools and streams. Reason: duplicated cap/eviction/idle policies and helpers could drift.
 - 2026-10-25: ACP pool gained an optional authenticate step so Cursor joins the existing session pool. Reason: Cursor's CLI rejects a session until `cursor_login`.
 - 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
@@ -389,11 +459,13 @@ one summary line.
 - 2026-10-26: chat screens split by responsibility, and routes take state and I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
 - 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
+- 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
+- 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review
 
 Last review: 2026-10-29
-Features since last review: 0
+Features since last review: 1
 Last result: Intent OK, Structure OK, Entropy OK, Test value Problem, Documentation OK, Operability OK, Evolution OK, Performance OK; 3 open findings (no test checks that Cursor's process starts with Relay's CURSOR_CONFIG_DIR; history.js background writes never recover after one failed write; json-store overwrites a file it cannot load).
 
 ## Deviations

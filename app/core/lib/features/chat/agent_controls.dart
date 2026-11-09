@@ -110,6 +110,7 @@ class AgentControlsButtons extends StatefulWidget {
     required this.agentKey,
     this.sessionId,
     this.onOpenPage,
+    this.onSettingsChanged,
     super.key,
   });
 
@@ -118,6 +119,7 @@ class AgentControlsButtons extends StatefulWidget {
   // The chat session the settings belong to; null addresses Main.
   final String? sessionId;
   final VoidCallback? onOpenPage;
+  final VoidCallback? onSettingsChanged;
 
   @override
   State<AgentControlsButtons> createState() => _AgentControlsButtonsState();
@@ -243,6 +245,7 @@ class _AgentControlsButtonsState extends State<AgentControlsButtons> {
       _catalog = _catalogCache[widget.agentKey] ?? catalog;
       _adoptSettings(result);
     });
+    widget.onSettingsChanged?.call();
   }
 
   Future<void> _updateCli() async {

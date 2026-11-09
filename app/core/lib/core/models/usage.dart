@@ -4,6 +4,7 @@ class UsageQuota {
     required this.label,
     required this.remainingPercent,
     required this.resetsAt,
+    this.window,
     this.expired = false,
   });
 
@@ -13,6 +14,7 @@ class UsageQuota {
       label: json['label'] as String? ?? '',
       remainingPercent: (json['remainingPercent'] as num?)?.toDouble(),
       resetsAt: json['resetsAt'] as String?,
+      window: json['window'] as String?,
       expired: json['expired'] as bool? ?? false,
     );
   }
@@ -21,6 +23,10 @@ class UsageQuota {
   final String label;
   final double? remainingPercent;
   final String? resetsAt;
+
+  /// `5h` or `weekly` when [label] names only the model group (Antigravity);
+  /// the app appends the localized window.
+  final String? window;
 
   /// True when this is a stale cached bucket whose reset window has already
   /// passed, so [remainingPercent] no longer reflects reality and the UI should

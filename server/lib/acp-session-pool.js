@@ -2,7 +2,7 @@
 
 const { createStdioAgentPool } = require('./stdio-agent-pool');
 
-// The ACP (Agent Client Protocol) driver, used by opencode, hermes, and cursor:
+// The ACP (Agent Client Protocol) driver, used by opencode, hermes, agy, and cursor:
 // each ships an `acp` subcommand that speaks it on stdio. stdio-agent-pool.js
 // owns the process, the wire and the session cap; this file is only the protocol.
 // Cursor-only options, unset for opencode and hermes so their handshake stays

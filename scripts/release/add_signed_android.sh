@@ -75,5 +75,6 @@ cp "$apk" "$tmp/relay-android-$tag.apk"
 gh release upload "$tag" --repo "$repo" --clobber "$tmp/relay-android-$tag.apk" "$tmp/SHA256SUMS"
 gh release view "$tag" --repo "$repo" --json body --jq .body > "$tmp/notes.md"
 sed '1{/^> Android APK is pending local signing\. Do not publish this draft yet\.$/d;}' "$tmp/notes.md" > "$tmp/complete-notes.md"
-gh release edit "$tag" --repo "$repo" --notes-file "$tmp/complete-notes.md"
+# Editing a draft without its tag name resets it to "untagged-...".
+gh release edit "$tag" --repo "$repo" --tag "$tag" --notes-file "$tmp/complete-notes.md"
 echo "Signed Android APK and verified checksums added to the $tag draft. Review it before publishing."

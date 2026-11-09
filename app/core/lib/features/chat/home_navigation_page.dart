@@ -4,11 +4,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/backend/backend_client.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/util/error_text.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../settings/getting_started_screen.dart';
 import '../settings/whats_new_screen.dart';
@@ -35,11 +38,13 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
   bool _loading = false;
   List<String> _recentWorkdirs = const <String>[];
   String? _lastMachineId;
+  int _refreshSequence = 0;
 
   @override
   void initState() {
     super.initState();
     widget.machinesController.addListener(_onMachineChanged);
+    widget.chatController.addListener(_onWorkdirChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_refresh());
     });
@@ -48,7 +53,12 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
   @override
   void dispose() {
     widget.machinesController.removeListener(_onMachineChanged);
+    widget.chatController.removeListener(_onWorkdirChanged);
     super.dispose();
+  }
+
+  void _onWorkdirChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onMachineChanged() {
@@ -60,8 +70,11 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
   }
 
   Future<void> _refresh() async {
-    _lastMachineId = widget.machinesController.activeMachine?.id;
-    if (_lastMachineId == null) {
+    final int sequence = ++_refreshSequence;
+    final String? machineId = widget.machinesController.activeMachine?.id;
+    final bool machineChanged = machineId != _lastMachineId;
+    _lastMachineId = machineId;
+    if (machineId == null) {
       setState(() {
         _recentWorkdirs = const <String>[];
         _loading = false;
@@ -69,7 +82,10 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      if (machineChanged) _recentWorkdirs = const <String>[];
+    });
     final Future<void> workdir = widget.chatController.refreshWorkdir();
     List<String> recent = const <String>[];
     try {
@@ -78,11 +94,62 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
       // An offline backend should not break the home page.
     }
     await workdir;
-    if (!mounted) return;
+    if (!mounted ||
+        sequence != _refreshSequence ||
+        machineId != widget.machinesController.activeMachine?.id) {
+      return;
+    }
     setState(() {
       _recentWorkdirs = recent.take(3).toList(growable: false);
       _loading = false;
     });
+  }
+
+  Future<void> _openFileSystem() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FileSystemScreen(
+          backend: widget.chatController.backend,
+          onSetWorkdir: widget.chatController.setWorkdir,
+        ),
+      ),
+    );
+    if (mounted) unawaited(_refresh());
+  }
+
+  Future<void> _selectRecentWorkdir(String dir, String machineId) async {
+    if (_loading || machineId != widget.machinesController.activeMachine?.id) {
+      return;
+    }
+    if (widget.chatController.activeWorkdir == dir) {
+      await _openFileSystem();
+      return;
+    }
+    try {
+      await widget.chatController.setWorkdir(dir);
+      if (!mounted ||
+          machineId != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.workdirUpdated)),
+      );
+      unawaited(_refresh());
+    } catch (err) {
+      if (!mounted ||
+          machineId != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            err is BackendException && err.code == 'WORKDIR_BUSY'
+                ? context.l10n.workdirBusy
+                : friendlyErrorText(context.l10n, err),
+          ),
+        ),
+      );
+    }
   }
 
   void _openWhatsNew() {
@@ -142,7 +209,13 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                     _HomeSection(
                       title: strings.currentWorkspace,
                       children: <Widget>[
-                        _WorkdirTile(dir: workdir, current: true),
+                        _WorkdirTile(
+                          dir: workdir,
+                          current: true,
+                          onTap: _loading || machine == null
+                              ? null
+                              : _openFileSystem,
+                        ),
                       ],
                     ),
                   ],
@@ -152,7 +225,13 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                     emptyText: strings.noRecentWorkspaces,
                     children: <Widget>[
                       for (final String dir in _recentWorkdirs)
-                        _WorkdirTile(dir: dir),
+                        _WorkdirTile(
+                          dir: dir,
+                          current: dir == workdir,
+                          onTap: _loading || machine == null
+                              ? null
+                              : () => _selectRecentWorkdir(dir, machine.id),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -275,12 +354,17 @@ class _HomeSectionCard extends StatelessWidget {
 }
 
 class _WorkdirTile extends StatelessWidget {
-  const _WorkdirTile({required this.dir, this.current = false});
+  const _WorkdirTile({
+    required this.dir,
+    this.current = false,
+    this.onTap,
+  });
 
   final String dir;
 
   /// The device's active workdir, marked with an open, accented folder.
   final bool current;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -300,6 +384,8 @@ class _WorkdirTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: AppTheme.mono(colors.onSurfaceVariant).copyWith(fontSize: 12),
       ),
+      trailing: onTap != null ? const Icon(Icons.chevron_right) : null,
+      onTap: onTap,
     );
   }
 }

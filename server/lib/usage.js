@@ -1,11 +1,13 @@
 'use strict';
 
+const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const { createJsonStore } = require('./json-store');
-const { cursorAuthFile } = require('./cli-paths');
+const { cursorAuthFile, agyAuthFile, locateBin } = require('./cli-paths');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -62,8 +64,10 @@ function attachTimeout(req, url) {
 
 let codexCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
+let agyCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let cursorCache = { at: 0, fetchedAt: '', value: null, stale: false };
 const usageBackoff = {
+  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
   cursor: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
@@ -78,6 +82,7 @@ const USAGE_CRED_FILES = {
   claude: CLAUDE_CREDS_PATH,
   codex: CODEX_AUTH,
   cursor: cursorAuthFile(),
+  agy: agyAuthFile(),
 };
 
 function credentialMtimeMs(key) {
@@ -168,19 +173,27 @@ function fallbackRecord(key, cache) {
   return persistedRecord(key) || memoryRecord(cache);
 }
 
-function scheduleRefresh({ key, fetcher, setMemoryCache }) {
+// One fetch per source at a time: concurrent callers (strip, quota page, other
+// devices) share it instead of each starting its own request or CLI process.
+function refreshUsage({ key, fetcher, setMemoryCache }) {
   const state = usageBackoff[key];
-  if (state.refreshPromise) return;
-  state.refreshPromise = (async () => {
-    try {
-      const value = await fetcher();
-      rememberUsageSuccess(key, value, setMemoryCache);
-    } catch (err) {
-      rememberBackoff(key, err);
-    } finally {
-      state.refreshPromise = null;
-    }
-  })();
+  if (!state.refreshPromise) {
+    state.refreshPromise = (async () => {
+      try {
+        return rememberUsageSuccess(key, await fetcher(), setMemoryCache);
+      } catch (err) {
+        rememberBackoff(key, err);
+        throw err;
+      } finally {
+        state.refreshPromise = null;
+      }
+    })();
+  }
+  return state.refreshPromise;
+}
+
+function scheduleRefresh(options) {
+  refreshUsage(options).catch(() => {});
 }
 
 async function cachedUsage({
@@ -221,10 +234,8 @@ async function cachedUsage({
   }
 
   try {
-    const value = await fetcher();
-    return rememberUsageSuccess(key, value, setMemoryCache);
+    return await refreshUsage({ key, fetcher, setMemoryCache });
   } catch (err) {
-    rememberBackoff(key, err);
     const latestFallback = fallbackRecord(key, getMemoryCache());
     if (latestFallback) return withUsageMetadata(latestFallback, true);
     throw err;
@@ -236,7 +247,7 @@ function readClaudeCreds() {
   return JSON.parse(raw);
 }
 
-function httpJson(method, url, headers, body) {
+function httpJson(method, url, headers, body, timeoutMs) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const opts = { method, headers: { ...headers } };
@@ -244,7 +255,8 @@ function httpJson(method, url, headers, body) {
       opts.headers['Content-Type'] = 'application/json';
       opts.headers['Content-Length'] = Buffer.byteLength(data);
     }
-    const req = https.request(url, opts, (res) => {
+    const transport = new URL(url).protocol === 'http:' ? http : https;
+    const req = transport.request(url, opts, (res) => {
       let buffer = '';
       res.on('data', (chunk) => {
         buffer += chunk;
@@ -260,6 +272,7 @@ function httpJson(method, url, headers, body) {
       });
     });
     attachTimeout(req, url);
+    if (timeoutMs) req.setTimeout(timeoutMs);
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -394,6 +407,7 @@ function invalidateUsageCache(key) {
     claude: () => claudeCache,
     codex: () => codexCache,
     cursor: () => cursorCache,
+    agy: () => agyCache,
   };
   const cache = caches[key] && caches[key]();
   if (cache) cache.at = 0;
@@ -724,6 +738,248 @@ async function getCursorUsage() {
 // Agents whose quota we can report. `normalize` maps each fetcher's own result
 // shape onto a common { detail, asOf, stale, fiveHour, sevenDay } or a ready
 // `quotas` list, so the agent payload is built once below.
+// Preserve every quota pool: Argon can have a separate limit from other Gemini models.
+function agyUsageFromBody(body) {
+  const response =
+    body &&
+    ((body.command && body.command.data) ||
+      (body.response && typeof body.response === 'object'
+        ? body.response
+        : null) ||
+      body);
+  const quotas = [];
+  for (const group of Array.isArray(response && response.groups) ? response.groups : []) {
+    const groupName =
+      group.displayName || group.display_name || group.name || 'Antigravity';
+    // "Claude and GPT models" → "Claude/GPT"; the app adds the localized window.
+    const model = String(groupName).replace(/\s+models$/i, '').replace(/ and /gi, '/').slice(0, 80);
+    const items = [];
+    for (const bucket of Array.isArray(group.buckets) ? group.buckets : []) {
+      const fraction = bucket.remainingFraction ?? bucket.remaining_fraction;
+      if (typeof fraction !== 'number' || !Number.isFinite(fraction)) continue;
+      const reset = Date.parse(bucket.resetTime || bucket.reset_time);
+      const bucketId =
+        bucket.bucketId || bucket.bucket_id || bucket.id || `agy-${quotas.length + items.length}`;
+      const windowMatch = /(5h|weekly)$/.exec(String(bucket.window || bucketId));
+      const window = windowMatch ? windowMatch[1] : null;
+      const bucketName =
+        bucket.displayName ||
+        bucket.display_name ||
+        bucket.name ||
+        bucket.window ||
+        bucketId;
+      items.push({
+        key: String(bucketId),
+        label: window ? model : `${model} · ${String(bucketName).slice(0, 80)}`,
+        window,
+        usedPercent: clampPercent((1 - fraction) * 100),
+        remainingPercent: clampPercent(fraction * 100),
+        resetsAt: Number.isFinite(reset) ? new Date(reset).toISOString() : null,
+        expired: false,
+      });
+    }
+    // 5 hours before the week, as Claude and Codex read.
+    const rank = (item) => (item.window === '5h' ? 0 : item.window === 'weekly' ? 1 : 2);
+    quotas.push(...items.sort((a, b) => rank(a) - rank(b)));
+  }
+  if (!quotas.length) throw new UsageQueryError('Antigravity returned no quota buckets.', 503);
+  return { quotas };
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+// Live ACP workers (pid in the file name) always count: `agy models` and each
+// /usage fallback add a cli log, which would otherwise push a running worker out.
+function agyQuotaLogNames(names, isAlive = pidAlive) {
+  const newest = (list) =>
+    list.sort((a, b) => b.replace(/^[a-z-]+/, '').localeCompare(a.replace(/^[a-z-]+/, '')));
+  const workers = names.filter((name) => {
+    const match = /^acp-worker-\d{8}_\d{6}-(\d+)\.log$/.exec(name);
+    return match && isAlive(Number(match[1]));
+  });
+  const clis = names.filter((name) => /^cli-\d{8}_\d{6}(?:-\d+)?\.log$/.test(name));
+  return [...newest(workers), ...newest(clis).slice(0, 12)];
+}
+
+function readAgyPorts() {
+  const dir = path.join(path.dirname(agyAuthFile()), 'log');
+  let files = [];
+  try {
+    files = agyQuotaLogNames(fs.readdirSync(dir));
+  } catch (_err) { /* No CLI has run on this host yet. */ }
+  const tried = new Set();
+  for (const name of files) {
+    let text;
+    try {
+      const fd = fs.openSync(path.join(dir, name), 'r');
+      try {
+        // The port is logged at startup; a long conversation grows the log far past it.
+        const bytes = Buffer.alloc(65536);
+        text = bytes.toString('utf8', 0, fs.readSync(fd, bytes, 0, bytes.length, 0));
+      } finally { fs.closeSync(fd); }
+    } catch (_err) { continue; }
+    const match = /Language server listening on random port at (\d+) for HTTP\b/.exec(text);
+    const port = match && Number(match[1]);
+    if (port >= 1 && port <= 65535) tried.add(port);
+  }
+  return [...tried];
+}
+
+function callAgyLanguageServer(port, method, body = {}, timeoutMs = 1000) {
+  return httpJson(
+    'POST',
+    `http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/${method}`,
+    { Accept: 'application/json' },
+    body,
+    timeoutMs,
+  );
+}
+
+function runAgyUsageCommand(bin = locateBin('agy')) {
+  return new Promise((resolve, reject) => {
+    if (!bin) {
+      reject(new UsageQueryError('Antigravity CLI is not installed on this host.', 503));
+      return;
+    }
+    execFile(
+      bin,
+      ['-p', '/usage', '--output-format', 'json'],
+      { timeout: 20000, maxBuffer: 1024 * 1024 },
+      (err, stdout) => {
+        const text = String(stdout || '').trim();
+        if (!text && err) {
+          reject(err);
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+          return;
+        } catch (_err) {
+          const lines = text.split(/\r?\n/).reverse();
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('{')) continue;
+            try {
+              resolve(JSON.parse(trimmed));
+              return;
+            } catch (_lineErr) { /* Keep scanning. */ }
+          }
+          reject(err || new UsageQueryError('Antigravity usage output was not valid JSON.', 503));
+        }
+      },
+    );
+  });
+}
+
+async function fetchAgyUsage(options = {}) {
+  const ports =
+    options.ports || (options.readPorts ? options.readPorts() : readAgyPorts());
+  const callRpc =
+    options.callRpc || options.callServer || callAgyLanguageServer;
+  for (const port of ports) {
+    try {
+      const result = await callRpc(
+        port,
+        'RetrieveUserQuotaSummary',
+        {},
+        1000,
+      );
+      const body =
+        result && result.status === 200
+          ? result.body
+          : result && (result.response || result.groups)
+            ? result
+            : null;
+      if (body) return agyUsageFromBody(body);
+    } catch (_err) { /* A stopped CLI leaves a stale port in its log. */ }
+  }
+  const runCli = options.runCli || runAgyUsageCommand;
+  try {
+    return agyUsageFromBody(await runCli());
+  } catch (err) {
+    if (err instanceof UsageQueryError) throw err;
+    throw new UsageQueryError(
+      'Antigravity quota query failed. Check that agy is logged in on this host.',
+      503,
+    );
+  }
+}
+
+function agyContextFromTrajectory(body) {
+  const gm = body && body.trajectory && body.trajectory.generatorMetadata;
+  if (!Array.isArray(gm) || !gm.length) return null;
+  for (let i = gm.length - 1; i >= 0; i -= 1) {
+    const chatModel = gm[i] && gm[i].chatModel;
+    const meta =
+      chatModel &&
+      chatModel.chatStartMetadata &&
+      chatModel.chatStartMetadata.contextWindowMetadata;
+    if (!meta) continue;
+    const used = Number(
+      meta.estimatedTokensUsed ??
+        (meta.tokenBreakdown && meta.tokenBreakdown.totalTokens),
+    );
+    const size = Number(meta.maxContextTokens);
+    if (Number.isFinite(used) && used >= 0 && Number.isFinite(size) && size > 0) {
+      return {
+        used: Math.round(used),
+        size: Math.round(size),
+        steps: gm.length,
+        model: chatModel.model || null,
+      };
+    }
+  }
+  return null;
+}
+
+const AGY_SESSION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function readAgyContext(sessionId, options = {}) {
+  const id = String(sessionId || '').trim();
+  if (!AGY_SESSION_UUID_RE.test(id)) return null;
+  const ports =
+    options.ports || (options.readPorts ? options.readPorts() : readAgyPorts());
+  const callRpc =
+    options.callRpc || options.callServer || callAgyLanguageServer;
+  // Read-only on every candidate at once: the worker that just ran the turn holds
+  // it in memory, so no LoadTrajectory into another process is needed.
+  const found = await Promise.all(ports.map(async (port) => {
+    try {
+      const result = await callRpc(port, 'GetCascadeTrajectory', { cascadeId: id }, 1500);
+      const body =
+        result && result.status === 200
+          ? result.body
+          : result && result.trajectory
+            ? result
+            : null;
+      return body ? agyContextFromTrajectory(body) : null;
+    } catch (_err) {
+      return null; // A stopped CLI leaves a stale port in its log.
+    }
+  }));
+  let best = null;
+  for (const ctx of found) {
+    if (ctx && (!best || ctx.steps > best.steps)) best = ctx;
+  }
+  return best ? { used: best.used, size: best.size } : null;
+}
+
+function getAgyUsage() {
+  // Longer than the composer strip's one-minute poll, so a poll is not a cold `agy -p /usage`.
+  return cachedUsage({ key: 'agy', ttlMs: 5 * 60 * 1000,
+    getMemoryCache: () => agyCache,
+    setMemoryCache: (cache) => { agyCache = cache; },
+    fetcher: fetchAgyUsage });
+}
+
 const USAGE_SOURCES = [
   {
     key: 'claude',
@@ -760,6 +1016,8 @@ const USAGE_SOURCES = [
       quotas: Array.isArray(r.quotas) ? r.quotas : [],
     }),
   },
+  { key: 'agy', label: 'Antigravity', fetch: getAgyUsage,
+    normalize: (r) => ({ detail: '', asOf: r.fetchedAt || null, stale: !!r.stale, quotas: r.quotas }) },
 ];
 
 async function buildAgentUsage({ key, label, fetch, normalize, unavailable }) {
@@ -811,6 +1069,11 @@ async function buildUsageReport({ source } = {}) {
 }
 
 module.exports = {
+  agyContextFromTrajectory,
+  agyUsageFromBody,
+  agyQuotaLogNames,
+  fetchAgyUsage,
+  readAgyContext,
   getClaudeUsage,
   getCodexUsage,
   cursorUsageFromBodies,

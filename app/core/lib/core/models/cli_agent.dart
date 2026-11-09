@@ -78,6 +78,7 @@ String defaultAuthKindForAgent(String key) {
     case 'claude':
     case 'codex':
     case 'cursor':
+    case 'agy':
       return 'oauth';
     case 'hermes':
       return 'apiKey';
@@ -123,6 +124,12 @@ const List<CliAgent> knownCliAgents = <CliAgent>[
     label: 'OpenCode',
     description: 'OpenCode CLI',
     authKind: 'apiKeyOptional',
+  ),
+  CliAgent(
+    key: 'agy',
+    label: 'Antigravity',
+    description: 'Antigravity CLI',
+    authKind: 'oauth',
   ),
   CliAgent(
     key: 'hermes',

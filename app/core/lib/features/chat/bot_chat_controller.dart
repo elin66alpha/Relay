@@ -593,6 +593,7 @@ class BotChatController extends ChangeNotifier {
       create: create,
     );
     _activeWorkdir = info.dir;
+    notifyListeners();
     await _enterWorkdirContext();
     return info;
   }
@@ -1091,6 +1092,10 @@ class BotChatController extends ChangeNotifier {
             },
           )
           .toList(growable: false);
+      final Object? reportedSize = reply.context?['size'];
+      if (reportedSize is int && reportedSize > 0) {
+        _contextWindow = reportedSize;
+      }
       _finalizeAssistantByRequestId(
         requestId,
         reply.content,
@@ -1195,6 +1200,28 @@ class BotChatController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // Best-effort; the next interaction will reconcile.
+    }
+  }
+
+  Future<void> refreshContextWindow() async {
+    final MachineCredential? machine = _machine;
+    if (machine == null || isThinking || _remoteActive) return;
+    final CliAgent agent = _agent;
+    final String? sessionId = activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    try {
+      final ChatHistory? history = await _fetchHistoryIfCurrent(
+        agent,
+        machine,
+        sessionId,
+      );
+      if (history == null || isThinking || _remoteActive) return;
+      if (_contextWindow != history.contextWindow) {
+        _contextWindow = history.contextWindow;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Best-effort refresh.
     }
   }
 

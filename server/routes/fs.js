@@ -12,6 +12,7 @@ module.exports = function createFsRouter(ctx) {
   const {
     MAX_DOWNLOAD_BYTES,
     MAX_UPLOAD_BYTES,
+    createAbsoluteDirectory,
     eventWorkdir,
     listAbsoluteDirectory,
     prepareDownload,
@@ -69,6 +70,18 @@ module.exports = function createFsRouter(ctx) {
           fallbackDir: eventWorkdir(req),
         }),
       );
+    } catch (err) {
+      return sendFilesystemError(res, err);
+    }
+  });
+
+  router.post('/api/fs/mkdir', (req, res) => {
+    try {
+      const entry = createAbsoluteDirectory(
+        req.body && req.body.path,
+        req.body && req.body.name,
+      );
+      return res.json({ ok: true, entry });
     } catch (err) {
       return sendFilesystemError(res, err);
     }

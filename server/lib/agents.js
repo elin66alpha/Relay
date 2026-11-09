@@ -14,6 +14,7 @@ const { createJsonStore } = require('./json-store');
 const {
   hermesModelOptions,
   parseOpenCodeModels,
+  parseAgyModels,
   recordCursorCatalog,
   recordReportedModels,
 } = require('./model-discovery');
@@ -25,6 +26,7 @@ const {
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
+const { readAgyContext } = require('./usage');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
@@ -194,7 +196,7 @@ function claudeExecutablePath() {
 // ever a cache over the stored session id.
 const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS });
 
-// opencode, hermes, and cursor each ship an `acp` subcommand: the same idea as
+// opencode, hermes, agy, and cursor each ship an `acp` subcommand: the same idea as
 // the Claude SDK over a different protocol — one process that stays open and
 // takes turn after turn. See acp-session-pool.js. ACP itself has no delete, so
 // the purge path shells out to each CLI that has a delete command.
@@ -208,6 +210,15 @@ const opencodePool = createAcpSessionPool({
   deleteCommand: (sessionId) => {
     const bin = locateBin('opencode');
     return bin ? { cmd: bin, args: ['session', 'delete', sessionId] } : null;
+  },
+});
+
+const agyPool = createAcpSessionPool({
+  agentKey: 'agy',
+  turnTimeoutMs: TIMEOUT_MS,
+  command: () => {
+    const bin = locateBin('agy');
+    return bin ? { cmd: bin, args: ['acp', '--process-per-session'] } : null;
   },
 });
 
@@ -304,6 +315,11 @@ function cliOutput(bin, args) {
 // OpenCode's from `opencode models` (free models change server-side, and it
 // lists every provider configured on the host), and Hermes' configured model.
 const CATALOG_FETCHERS = {
+  agy: {
+    bin: 'agy',
+    fetch: (bin) => cliOutput(bin, ['models']).then((out) =>
+      recordReportedModels('agy', parseAgyModels(out))),
+  },
   cursor: {
     bin: 'agent',
     fetch: () =>
@@ -384,6 +400,7 @@ const SESSION_POOLS = {
   claude: claudePool,
   opencode: opencodePool,
   hermes: hermesPool,
+  agy: agyPool,
   cursor: cursorPool,
   codex: codexPool,
 };
@@ -651,16 +668,17 @@ function codexItemLabel(item) {
 // that still resumes the same conversation.
 // Settle a codex or ACP pool turn. The streamed text is the reply, and only a
 // turn that produced one saves its session id for the next turn to resume.
-function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text }) {
+function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text, afterTurn }) {
   const noOutput = `(${agentKey} produced no output)`;
   const run = sent.then(
-    ({ result, sessionId, startedNew, stderr }) => {
+    async ({ result, sessionId, startedNew, stderr }) => {
       if (startedNew) {
         emit(onEvent, 'The old session is no longer valid. Started a new one.');
       }
       const reply = text().trim();
       if (reply) {
         if (sessionId) setSession(sessionKey, { id: sessionId });
+        if (afterTurn) await afterTurn(sessionId);
         return reply;
       }
       if (result.stopReason === 'timeout') return result.message;
@@ -754,7 +772,7 @@ function errorLines(text) {
     .trim();
 }
 
-// opencode, hermes, and cursor run as persistent ACP sessions (see
+// opencode, hermes, agy, and cursor run as persistent ACP sessions (see
 // acp-session-pool.js): one process hosts every chat, `session/prompt` carries
 // a turn, and the reply arrives as `agent_message_chunk` updates — real
 // token-level streaming, where the old per-turn CLI paths could stream whole
@@ -785,6 +803,7 @@ function runAcpAgent({
   // result; multi-message turns are rebuilt from segments by agent-turn.
   let finalText = '';
   let currentMsgId = null;
+  let hasContext = false;
 
   // ACP chunks are already deltas, so they are emitted as-is rather than
   // through makeDeltaEmitter (whose prefix de-duplication is for CLIs that
@@ -810,6 +829,7 @@ function runAcpAgent({
       if (currentMsgId !== null) currentMsgId = AFTER_TOOL;
       emit(onEvent, `Tool: ${oneLine(update.title || update.kind || 'tool', 60)}`);
     } else if (update.sessionUpdate === 'usage_update') {
+      hasContext = true;
       emit(onEvent, { type: 'context', used: update.used, size: update.size });
     }
   };
@@ -835,7 +855,26 @@ function runAcpAgent({
     onMessage,
     onPermission,
   });
-  return settlePoolTurn(run, { agentKey, sessionKey, onEvent, text: () => finalText });
+  return settlePoolTurn(run, {
+    agentKey,
+    sessionKey,
+    onEvent,
+    text: () => finalText,
+    afterTurn:
+      agentKey === 'agy'
+        ? async (sessionId) => {
+            if (hasContext || !sessionId) return;
+            const ctx = await readAgyContext(sessionId);
+            if (ctx) {
+              emit(onEvent, {
+                type: 'context',
+                used: ctx.used,
+                size: ctx.size,
+              });
+            }
+          }
+        : null,
+  });
 }
 
 function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
@@ -883,6 +922,19 @@ async function runCursor(prompt, onEvent, sessionKey, signal, workdir, settings)
   });
 }
 
+function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
+  return runAcpAgent({
+    agentKey: 'agy',
+    pool: agyPool,
+    prompt,
+    onEvent,
+    sessionKey,
+    signal,
+    workdir,
+    settings,
+  });
+}
+
 const AGENTS = {
   claude: {
     key: 'claude',
@@ -909,6 +961,12 @@ const AGENTS = {
     description: 'OpenCode CLI',
     run: runOpencode,
     bin: 'opencode',
+  },
+  agy: {
+    key: 'agy',
+    label: 'Antigravity',
+    description: 'Antigravity CLI',
+    run: runAgy,
   },
   hermes: {
     key: 'hermes',

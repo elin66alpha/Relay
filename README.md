@@ -4,7 +4,7 @@
 
 **Run AI coding agents on your machine. Control them from any screen.**
 
-A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, and Hermes.
+A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, Antigravity, and Hermes.
 
 ![Flutter client](https://img.shields.io/badge/client-Flutter-02569B?logo=flutter&logoColor=white)
 ![Node.js backend](https://img.shields.io/badge/backend-Node.js_22%2B-339933?logo=node.js&logoColor=white)
@@ -77,7 +77,7 @@ default 55%) for both themes.
 flowchart LR
     C["Flutter client<br/>Phone · Web · Desktop"]
     R["Relay backend<br/>Node.js on your machine"]
-    A["Persistent agent sessions<br/>Claude · Codex · Cursor · OpenCode · Hermes"]
+    A["Persistent agent sessions<br/>Claude · Codex · Cursor · OpenCode · Antigravity · Hermes"]
     F["Projects and files"]
     T["Resumable PTY shell"]
 
@@ -101,7 +101,8 @@ can run concurrently without sharing a global backend directory.
 | 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
 | 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, and Fast mode for Claude/Codex/Cursor. The model page lists main models first; older Claude/Codex models and Cursor models outside its plan sit on a second page. OpenCode lists what the host's OpenCode offers, including providers configured there; Hermes shows its configured model. |
 | 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
-| 📊 | **Quota workflows** | Claude/Codex/Cursor usage views, plus one queued prompt for the next detected Claude or Codex five-hour reset. |
+| 📊 | **Quota workflows** | Claude/Codex/Cursor/Antigravity usage views, plus one queued prompt for the next detected Claude or Codex five-hour reset. |
+| 🤖 | **Personal agents over MCP** | `mcp/` is a dependency-free stdio MCP server: a bot signs in with a credential JSON and its password, like the app, and can chat with every agent, switch workdir, model and effort, read quota, manage sessions, Swarms and files, and use the terminal. See [Relay MCP](docs/handbook.md#relay-mcp). |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
 | 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
 
@@ -117,6 +118,12 @@ Install Node.js 22+ and at least one supported CLI on Linux, macOS, or Windows.
 Claude, Codex, and Cursor must already be logged in on that host (`agent login`
 for Cursor); OpenCode and Hermes use the provider configuration managed there,
 and Relay lists the models that configuration provides.
+
+Antigravity requires a host-installed `agy` with `agy acp --process-per-session`
+support, signed in on the host with `agy acp --login`. Restart the backend
+and recheck agent status to select it. Model and reasoning effort have separate
+controls. Its subscription quota shows every model pool; start a conversation
+first if no running CLI quota service is available.
 
 Windows x64 users can download `relay-backend-windows-x64-v<VERSION>.zip` from
 the [latest release](https://github.com/elin66alpha/Relay/releases/latest), extract
@@ -170,6 +177,11 @@ Home shows the current machine, current workspace, and up to three recent
 workspaces. Tap the machine for CLI status checks, device tokens, and Enter SSH.
 In the Android and iOS apps, swipe right anywhere in a chat to open the drawer.
 Use File system → Set as work path to select the project before sending a task.
+Tap the current workspace on Home or the chat title to open File system; tap a
+different recent workspace to switch to it. In the file browser, the path bar
+stays visible: tap a parent segment to jump there, or use `..`, the up arrow, or
+a right swipe on the file list to go up one directory. When browsing elsewhere,
+tap the work-path chip to return to the active project.
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the

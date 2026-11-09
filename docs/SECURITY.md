@@ -125,6 +125,7 @@ can access. It always rejects these current sensitive locations:
 - `~/.ssh`;
 - Claude Code's `.credentials.json`, Codex's `auth.json`, and Cursor's
   `auth.json` (`~/.config/cursor/` on Linux);
+- Antigravity's `~/.gemini/antigravity-cli/antigravity-oauth-token`;
 - `server/cursor-config/`, Relay's own Cursor config and session transcripts.
 
 The same policy applies to listing, upload, download, and siblings whose names

@@ -18,6 +18,7 @@ test('release version check catches mismatches in each published version', (t) =
   };
   write('server/package.json', '{"version":"1.2.3"}');
   write('server/package-lock.json', '{"version":"1.2.3","packages":{"":{"version":"1.2.3"}}}');
+  write('mcp/package.json', '{"version":"1.2.3"}');
   write('app/shell/pubspec.yaml', 'version: 1.2.3+5\n');
   write('app/core/lib/features/settings/app_settings_screen.dart', "const _applicationVersion = '1.2.3';");
   write('docs/CHANGELOG.md', '## 1.2.3 - today\n');
