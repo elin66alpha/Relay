@@ -444,7 +444,8 @@ navigation on 2026-11-09.
 
 | Milestone | Completion criteria | Status |
 |---|---|---|
-| 0.1.11 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.11"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; Antigravity appears in agent controls and quota views with host credentials protected | in progress |
+| 0.1.11 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.11"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; Antigravity appears in agent controls and quota views with host credentials protected | done (released 2026-11-10) |
+| 0.1.12 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.12"; the dependency updates deferred from 0.1.11 land on the 0.1.12 branch with CI green: Firebase and flutter_secure_storage majors (was #39), Express 5 and dotenv majors (was #40; Express 5 rejects the `app.get('*')` Web fallback route), and the moderate `glob`/`minimatch` advisories | in progress |
 
 ## Changes
 
