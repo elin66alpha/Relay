@@ -54,6 +54,33 @@ void main() {
       <String>['hello from /b'],
     );
   });
+
+  test('resuming the app pulls history other devices added', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    WorkdirStore.resetCacheForTest();
+    final _WorkdirBackendClient backend = _WorkdirBackendClient();
+    final BotChatController controller = BotChatController(
+      backendClient: backend,
+      quotaController: QuotaController(backendClient: backend),
+    );
+    addTearDown(controller.disposeController);
+
+    await controller.loadFor(defaultCliAgents.first, _machine);
+    controller.connectEvents();
+    await pumpEventQueue();
+    expect(
+      controller.messages.map((ChatMessage m) => m.content),
+      <String>['hello from /a'],
+    );
+
+    backend.reply = 'answered elsewhere';
+    await controller.onAppResumed();
+
+    expect(
+      controller.messages.map((ChatMessage m) => m.content),
+      <String>['hello from /a', 'answered elsewhere'],
+    );
+  });
 }
 
 final MachineCredential _machine = MachineCredential(
@@ -68,6 +95,7 @@ final MachineCredential _machine = MachineCredential(
 class _WorkdirBackendClient extends BackendClient {
   String _dir = '/a';
   Completer<void>? historyGate;
+  String? reply;
   final List<StreamController<List<int>>> _bodies =
       <StreamController<List<int>>>[];
 
@@ -136,6 +164,13 @@ class _WorkdirBackendClient extends BackendClient {
           content: 'hello from $_dir',
           createdAt: DateTime.utc(2026),
         ),
+        if (reply != null)
+          ChatMessage(
+            id: 'reply$_dir',
+            role: ChatRole.assistant,
+            content: reply!,
+            createdAt: DateTime.utc(2026),
+          ),
       ],
       contextWindow: _dir == '/a' ? 200000 : null,
     );

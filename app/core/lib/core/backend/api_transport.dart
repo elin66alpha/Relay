@@ -160,6 +160,14 @@ class ApiTransport {
     } on FormatException {
       // Keep raw body.
     }
+    // Express's default 404 page: the backend predates this route.
+    if (status == 404 && RegExp(r'<pre>Cannot [A-Z]+ ').hasMatch(body)) {
+      return BackendException(
+        'backend does not support this request',
+        status: status,
+        code: 'BACKEND_ROUTE_MISSING',
+      );
+    }
     if (message.isEmpty) message = 'HTTP $status';
     return BackendException(message, status: status);
   }

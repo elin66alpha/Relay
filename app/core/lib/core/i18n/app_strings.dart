@@ -609,6 +609,10 @@ class AppStrings {
     }
   }
 
+  String get backendTooOld => isZh
+      ? '后端版本过旧，不支持此功能。请将该机器上的 Relay 后端升级到最新版本。'
+      : 'The backend is too old for this feature. Update Relay on that machine to the latest version.';
+
   String deleteMachine(String name) => isZh ? '删除 $name？' : 'Delete $name?';
   String get deleteMachineBody => isZh
       ? '删除后需要重新扫描这台机器的凭证二维码。'

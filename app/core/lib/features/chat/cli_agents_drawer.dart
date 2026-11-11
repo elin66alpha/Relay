@@ -173,12 +173,6 @@ class CliAgentsDrawer extends StatelessWidget {
               title: Text(context.l10n.backHome),
               selected: chatController.machine == null,
               onTap: () {
-                if (chatController.isThinking) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
-                  );
-                  return;
-                }
                 chatController.goHome();
                 if (closeOnAction) Navigator.of(context).pop();
               },

@@ -75,6 +75,21 @@ void main() {
       expect(friendlyErrorText(strings, BackendException('plain')), 'plain');
     });
 
+    test('maps an Express 404 page to the backend-too-old message', () {
+      final BackendException err = ApiTransport().exceptionFor(
+        404,
+        '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<title>Error</title>\n</head>\n<body>\n'
+        '<pre>Cannot POST /api/fs/mkdir</pre>\n</body>\n</html>\n',
+      );
+      expect(err.code, 'BACKEND_ROUTE_MISSING');
+      expect(friendlyErrorText(strings, err), strings.backendTooOld);
+      expect(
+        ApiTransport().exceptionFor(404, '{"error":"path not found"}').code,
+        isNull,
+      );
+    });
+
     test('falls back to toString for arbitrary errors', () {
       expect(
         friendlyErrorText(strings, StateError('boom')),

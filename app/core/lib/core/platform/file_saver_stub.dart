@@ -66,10 +66,14 @@ Future<DownloadSaveResult> saveDownloadStream({
 
 Future<Directory> _targetDirectory() async {
   Directory? dir;
-  try {
-    dir = await getDownloadsDirectory();
-  } catch (_) {
-    dir = null;
+  // iOS forbids creating the sandbox Downloads folder; Documents is what the
+  // Files app shows (UIFileSharingEnabled in Info.plist).
+  if (defaultTargetPlatform != TargetPlatform.iOS) {
+    try {
+      dir = await getDownloadsDirectory();
+    } catch (_) {
+      dir = null;
+    }
   }
   dir ??= await getApplicationDocumentsDirectory();
   if (!await dir.exists()) {
