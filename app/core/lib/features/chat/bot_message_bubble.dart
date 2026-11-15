@@ -118,6 +118,7 @@ class BotMessageBubble extends StatelessWidget {
     required this.agentKey,
     required this.agentLabel,
     this.highlightQuery,
+    this.onTapLink,
   });
 
   final ChatMessage message;
@@ -142,6 +143,9 @@ class BotMessageBubble extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onCancelQueued;
   final void Function(String option) onOptionSelected;
+
+  /// See [MessageText.onTapLink].
+  final void Function(String href)? onTapLink;
 
   @override
   Widget build(BuildContext context) {
@@ -219,6 +223,7 @@ class BotMessageBubble extends StatelessWidget {
             color: textColor,
             formatInlineEmphasis: !streaming,
             highlightQuery: highlightQuery,
+            onTapLink: onTapLink,
             trailing: actions,
           )
         else if (message.content.isNotEmpty)
@@ -235,6 +240,7 @@ class BotMessageBubble extends StatelessWidget {
                     color: textColor,
                     formatInlineEmphasis: true,
                     highlightQuery: highlightQuery,
+                    onTapLink: onTapLink,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -243,6 +249,7 @@ class BotMessageBubble extends StatelessWidget {
                   color: textColor,
                   formatInlineEmphasis: true,
                   highlightQuery: highlightQuery,
+                  onTapLink: onTapLink,
                 ),
               ],
             )
@@ -252,6 +259,7 @@ class BotMessageBubble extends StatelessWidget {
               color: textColor,
               formatInlineEmphasis: !isUser && !streaming,
               highlightQuery: highlightQuery,
+              onTapLink: onTapLink,
             ),
         if (optionPrompt != null)
           OptionButtons(

@@ -32,6 +32,7 @@ module.exports = function createMetaRouter(ctx) {
     activeRequests,
     agentRequiredError,
     bearerToken,
+    browserManager,
     buildDiagnostics,
     clearModelDiscoveryCache,
     describeAgent,
@@ -310,6 +311,7 @@ module.exports = function createMetaRouter(ctx) {
       return res.status(404).json({ error: 'token not found' });
     }
     terminalManager?.closeSession(revoked.id);
+    browserManager?.closeSession(revoked.id);
     res.json({
       token: {
         id: revoked.id || '',

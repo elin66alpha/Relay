@@ -50,6 +50,7 @@ const {
   tokenRecordForToken,
 } = require('./lib/tokens');
 const { createTerminalManager } = require('./lib/terminal-manager');
+const { createBrowserManager } = require('./lib/browser-manager');
 const { buildUsageReport } = require('./lib/usage');
 const { describeAgent, CLI } = require('./lib/agent-options');
 const { getSettings, setSettings, deleteSettings } = require('./lib/agent-settings');
@@ -120,6 +121,7 @@ const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
 const createGroupRouter = require('./routes/group');
 const createTerminalRouter = require('./routes/terminal');
+const createBrowserRouter = require('./routes/browser');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -158,6 +160,9 @@ const CORS_ALLOW_ORIGIN = String(process.env.CORS_ALLOW_ORIGIN || '*').trim() ||
 
 const app = express();
 const terminalManager = createTerminalManager({
+  isTokenActive: isTokenIdAllowed,
+});
+const browserManager = createBrowserManager({
   isTokenActive: isTokenIdAllowed,
 });
 // cloudflared connects from localhost and forwards the real client IP in
@@ -556,6 +561,7 @@ const routeContext = {
   agentTurnDependencies,
   backgroundTurnHandler,
   bearerToken,
+  browserManager,
   broadcastScope,
   buildDiagnostics,
   buildUsageReport,
@@ -645,6 +651,7 @@ app.use(createGroupRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 app.use(createTerminalRouter(routeContext));
+app.use(createBrowserRouter(routeContext));
 
 if (SERVE_WEB) {
   app.use(express.static(WEB_BUILD_DIR, {
@@ -689,13 +696,16 @@ function exitCodeForSignal(signal) {
 
 process.on('exit', flushHistoryForShutdown);
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
+  process.once(signal, async () => {
+    server.close();
     terminalManager.closeAll();
+    const browsersClosed = browserManager.closeAll();
     // Live agent sessions are children of this process; close them explicitly
     // so a restart never leaves orphaned CLI processes holding memory.
     // shutdownPools never rejects: each pool's failure is caught inside it.
     shutdownPools();
     flushHistoryForShutdown();
+    await browsersClosed;
     process.exit(exitCodeForSignal(signal));
   });
 }
@@ -768,4 +778,4 @@ const server = app.listen(PORT, HOST, () => {
     startClaudeQuotaKeepalive();
   }
 });
-terminalManager.attachServer(server);
+terminalManager.attachServer(server, browserManager.handleUpgrade);

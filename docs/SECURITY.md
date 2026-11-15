@@ -113,6 +113,23 @@ valid device token therefore permits arbitrary command execution as that user.
 Use a dedicated non-root account, revoke lost-device tokens immediately, and do
 not expose Relay without TLS.
 
+## Browser
+
+**Drawer → Browser** runs a headless Chrome, Chromium, or Edge on the backend
+host as the backend OS user. It is authorized exactly like the terminal: a
+bearer-authenticated request returns a random ticket that expires after 30
+seconds and is redeemed once at `/api/browser/connect`; revoking the device
+token closes the browser. Relay drives the browser over
+`--remote-debugging-pipe`, so it opens no DevTools port that other local users
+or processes could connect to.
+
+The address bar opens only loopback addresses, but pages may navigate
+anywhere the host can reach, so the browser adds no capability beyond the
+terminal: anyone with a valid device token can already run commands as that
+user. Each browser uses a fresh temporary profile under the system temporary
+directory, deleted when the browser closes; cookies and storage from pages do
+not persist and are not written under `server/`.
+
 ## File API protections
 
 By default, the file browser accepts absolute paths anywhere the backend user
@@ -167,8 +184,9 @@ For a backend reachable beyond localhost:
 - keep the backend port private and forward only the TLS endpoint;
 - disable proxy buffering for SSE/chat routes and set timeouts above the maximum
   agent turn duration;
-- forward WebSocket upgrades for `/api/terminal/connect` and use an idle timeout
-  suitable for interactive shells;
+- forward WebSocket upgrades for `/api/terminal/connect` and
+  `/api/browser/connect` and use an idle timeout suitable for interactive
+  shells;
 - protect backend backups, because history and session files contain raw
   unredacted conversation content.
 

@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.12 - 2026-11-15
+
+### Added
+
+- **Browser for localhost** in the drawer: view and interact with pages served on
+  the backend host's `localhost` (`localhost`, `127.0.0.1`, `[::1]`, or a port)
+  via headless Chrome, Chromium, or Edge (`RELAY_BROWSER`) streamed over a
+  single-use WebSocket ticket. Adapts layout and touch/mouse input to the
+  client device, includes a soft-keyboard input bar, auto-accepts JavaScript
+  dialogs as notices, and keeps the session for 10 minutes after leaving.
+- **Tappable links in solo chat**: Markdown file links (including `:line` or
+  `#Lline` suffixes) open the file preview or File System for directories, and
+  web links (`http`, `https`, `mailto`) open in the system browser after a
+  confirmation dialog showing the full URL.
+- **Markdown and image previews** in File System: Markdown files up to 20,000
+  characters render by default (without loading embedded images) with a toggle
+  to view source; supported images (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB
+  and 40 MP) open in a zoomable viewer.
+- **Background replies for Codex and Antigravity**: Codex child-agent
+  completion replies and Antigravity (`agy`) background turns (timers,
+  subagents, or background commands) now appear in solo chat and support Stop.
+
+### Fixed
+
+- Show a clear message when a connected backend is older than the client and
+  lacks a requested route (such as creating a folder) instead of raw HTML 404
+  text.
+- iOS downloads now save to the app's Documents folder and appear in
+  Files → On My iPhone → Relay.
+- Returning Home from the drawer no longer blocks while an agent turn is running;
+  the turn continues on the backend.
+- Resuming the app from the background reconnects the event stream and pulls
+  history once so turns finished from another client appear automatically.
+
 ## 0.1.11 - 2026-11-09
 
 ### Added

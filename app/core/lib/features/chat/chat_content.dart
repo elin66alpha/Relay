@@ -27,6 +27,7 @@ class SegmentedContent extends StatefulWidget {
     required this.formatInlineEmphasis,
     this.highlightQuery,
     this.trailing,
+    this.onTapLink,
     super.key,
   });
 
@@ -37,6 +38,9 @@ class SegmentedContent extends StatefulWidget {
   /// See [MessageText.highlightQuery].
   final String? highlightQuery;
   final Widget? trailing;
+
+  /// See [MessageText.onTapLink].
+  final void Function(String href)? onTapLink;
 
   @override
   State<SegmentedContent> createState() => _SegmentedContentState();
@@ -55,6 +59,7 @@ class _SegmentedContentState extends State<SegmentedContent> {
           color: widget.color,
           formatInlineEmphasis: widget.formatInlineEmphasis,
           highlightQuery: widget.highlightQuery,
+          onTapLink: widget.onTapLink,
         ),
         if (segment.createdAt != null || trailing != null)
           Padding(
@@ -163,6 +168,7 @@ class MessageText extends StatefulWidget {
     required this.color,
     required this.formatInlineEmphasis,
     this.highlightQuery,
+    this.onTapLink,
     super.key,
   });
 
@@ -173,6 +179,9 @@ class MessageText extends StatefulWidget {
   /// Term to mark inside this message while a "search chats" hit is being
   /// revealed. Null in the normal case, which renders without any marking.
   final String? highlightQuery;
+
+  /// Called with a tapped Markdown link's raw target; null leaves links inert.
+  final void Function(String href)? onTapLink;
 
   @override
   State<MessageText> createState() => _MessageTextState();
@@ -193,7 +202,8 @@ class _MessageTextState extends State<MessageText> {
     if (oldWidget.text != widget.text ||
         oldWidget.color != widget.color ||
         oldWidget.formatInlineEmphasis != widget.formatInlineEmphasis ||
-        oldWidget.highlightQuery != widget.highlightQuery) {
+        oldWidget.highlightQuery != widget.highlightQuery ||
+        oldWidget.onTapLink != widget.onTapLink) {
       _cached = null;
     }
   }
@@ -230,7 +240,12 @@ class _MessageTextState extends State<MessageText> {
       data: _normalizeAgentMarkdown(widget.text),
       selectable: false,
       softLineBreak: true,
-      styleSheet: _markdownStyleSheet(context, widget.color, style),
+      styleSheet: relayMarkdownStyleSheet(widget.color, style),
+      onTapLink: widget.onTapLink == null
+          ? null
+          : (String text, String? href, String title) {
+              if (href != null) widget.onTapLink!(href);
+            },
       // The search term is marked by parsing it as its own inline element, so
       // the surrounding markdown still renders normally around it.
       inlineSyntaxes:
@@ -318,75 +333,6 @@ class _SearchHitBuilder extends MarkdownElementBuilder {
       ),
     );
   }
-}
-
-MarkdownStyleSheet _markdownStyleSheet(
-  BuildContext context,
-  Color color,
-  TextStyle base,
-) {
-  // Tints of the text colour rather than scheme surfaces, so code reads the
-  // same on an agent panel and on a tinted system reply in either theme.
-  final Color codeBackground = color.withValues(alpha: 0.05);
-  final Color borderColor = color.withValues(alpha: 0.14);
-  return MarkdownStyleSheet(
-    p: base,
-    pPadding: EdgeInsets.zero,
-    strong: base.copyWith(fontWeight: FontWeight.w700),
-    em: base.copyWith(fontStyle: FontStyle.italic),
-    h1: base.copyWith(
-      fontSize: 21,
-      fontWeight: FontWeight.w800,
-      height: 1.25,
-    ),
-    h1Padding: const EdgeInsets.only(top: 4, bottom: 6),
-    h2: base.copyWith(
-      fontSize: 19,
-      fontWeight: FontWeight.w800,
-      height: 1.28,
-    ),
-    h2Padding: const EdgeInsets.only(top: 4, bottom: 5),
-    h3: base.copyWith(
-      fontSize: 17,
-      fontWeight: FontWeight.w700,
-      height: 1.30,
-    ),
-    h3Padding: const EdgeInsets.only(top: 3, bottom: 4),
-    h4: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
-    h4Padding: const EdgeInsets.only(top: 3, bottom: 3),
-    h5: base.copyWith(fontWeight: FontWeight.w700),
-    h5Padding: const EdgeInsets.only(top: 2, bottom: 2),
-    h6: base.copyWith(fontWeight: FontWeight.w700),
-    h6Padding: const EdgeInsets.only(top: 2, bottom: 2),
-    blockSpacing: 8,
-    listIndent: 22,
-    listBullet: base,
-    code: AppTheme.mono(color).copyWith(
-      fontSize: 13.5,
-      height: base.height,
-      backgroundColor: color.withValues(alpha: 0.08),
-    ),
-    // CodeBlock pads its own header and body.
-    codeblockPadding: EdgeInsets.zero,
-    codeblockDecoration: BoxDecoration(
-      color: codeBackground,
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: borderColor),
-    ),
-    blockquote: base.copyWith(color: color.withValues(alpha: 0.78)),
-    blockquotePadding: const EdgeInsets.only(left: 10),
-    blockquoteDecoration: BoxDecoration(
-      border: Border(
-        left: BorderSide(
-          color: color.withValues(alpha: 0.45),
-          width: 3,
-        ),
-      ),
-    ),
-    horizontalRuleDecoration: BoxDecoration(
-      border: Border(top: BorderSide(color: borderColor)),
-    ),
-  );
 }
 
 String _normalizeAgentMarkdown(String raw) {

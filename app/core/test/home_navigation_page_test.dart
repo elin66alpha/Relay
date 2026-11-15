@@ -40,8 +40,25 @@ void main() {
       ),
     );
     await tester.pump();
-    backend.requests[0].complete(<String>['/a/project']);
+    backend.requests[0].complete(<String>[
+      '/a/project',
+      '/a/second',
+      '/a/third',
+      '/a/fourth',
+      '/a/fifth',
+      '/a/sixth',
+    ]);
     await tester.pumpAndSettle();
+    for (final dir in <String>[
+      'project',
+      'second',
+      'third',
+      'fourth',
+      'fifth',
+    ]) {
+      expect(find.text('/a/$dir'), findsOneWidget);
+    }
+    expect(find.text('/a/sixth'), findsNothing);
     final oldTile = tester.widget<ListTile>(
       find.widgetWithText(ListTile, '/a/project'),
     );

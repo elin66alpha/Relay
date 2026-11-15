@@ -224,6 +224,13 @@ class AppStrings {
       isZh ? '无法预览此文件。' : 'Cannot preview this file.';
   String get filePreviewTruncated =>
       isZh ? '仅显示前 512 KiB。' : 'Only the first 512 KiB is shown.';
+  String get viewSource => isZh ? '查看源码' : 'View source';
+  String get viewRenderedMarkdown => isZh ? '渲染预览' : 'Rendered preview';
+  String get openLinkTitle => isZh ? '在浏览器中打开？' : 'Open in browser?';
+  String get openLink => isZh ? '打开' : 'Open';
+  String get cannotOpenLink => isZh ? '无法打开此链接。' : 'Cannot open this link.';
+  String get linkedFileNotFound =>
+      isZh ? '文件不存在或无权访问。' : 'The file does not exist or is not accessible.';
   String get dragDropUpload => isZh
       ? 'Web 端可以把文件拖到此页上传。'
       : 'On web, drag files onto this page to upload.';
@@ -447,6 +454,24 @@ class AppStrings {
       isZh ? '这个终端已在另一个窗口中打开。' : 'This terminal was opened in another window.';
   String get sshTerminalConnectionFailed =>
       isZh ? '无法连接 SSH 终端。' : 'Could not connect to the SSH terminal.';
+  String get browser => isZh ? '浏览器' : 'Browser';
+  String get browserAddressHint =>
+      isZh ? 'localhost:3000 或端口号' : 'localhost:3000 or a port';
+  String get browserStarting =>
+      isZh ? '正在启动后端机器上的浏览器…' : 'Starting the browser on the backend machine…';
+  String get browserLocalhostOnly => isZh
+      ? '只能打开 localhost 或 127.0.0.1 上的地址。'
+      : 'Only localhost and 127.0.0.1 addresses can be opened.';
+  String browserDialog(String message) =>
+      isZh ? '页面弹窗（已自动确认）：$message' : 'Page dialog (accepted): $message';
+  String get browserReplaced =>
+      isZh ? '这个浏览器已在另一个窗口中打开。' : 'This browser was opened in another window.';
+  String get browserExited =>
+      isZh ? '后端机器上的浏览器已退出。' : 'The browser on the backend machine exited.';
+  String get browserBack => isZh ? '后退' : 'Back';
+  String get browserReload => isZh ? '刷新页面' : 'Reload';
+  String get browserKeyboard => isZh ? '键盘输入' : 'Keyboard input';
+  String get browserTypeHint => isZh ? '输入到页面' : 'Type into the page';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
   String get importOrChooseMachine =>
       isZh ? '请导入或选择一台机器' : 'Import or choose a machine';

@@ -28,11 +28,14 @@ dependencies:
   xterm: ^4.0.0
   web_socket_channel: ^3.0.3
   re_highlight: ^0.0.3
+  url_launcher: ^6.3.3
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  url_launcher_platform_interface: ^2.3.2
 
 flutter:
   uses-material-design: true

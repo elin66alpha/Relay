@@ -11,6 +11,9 @@ const {
   agyContextFromTrajectory,
   fetchAgyUsage,
   readAgyContext,
+  readAgyTrajectory,
+  answerAgyInteraction,
+  cancelAgyInvocation,
   markExpiredQuotas,
 } = require('../lib/usage');
 
@@ -248,4 +251,66 @@ test('Antigravity context reads the latest step from GetCascadeTrajectory', asyn
   });
   assert.deepEqual(calls, [[40003, 'GetCascadeTrajectory']]);
   assert.equal(missing, null);
+});
+
+test('readAgyTrajectory prefers a cached port and answers or cancels interactions', async () => {
+  const sessionId = '11111111-2222-3333-4444-555555555555';
+  const rpcCalls = [];
+  const found = await readAgyTrajectory(sessionId, {
+    port: 40009,
+    readPorts: () => assert.fail('should not scan logs when cached port answers'),
+    callServer: async (port, method, body) => {
+      rpcCalls.push([port, method, body]);
+      return {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        trajectory: { trajectoryId: 'traj-1', steps: [{}, {}] },
+      };
+    },
+  });
+  assert.equal(found.port, 40009);
+  assert.equal(found.body.trajectory.steps.length, 2);
+
+  await answerAgyInteraction(
+    40009,
+    sessionId,
+    {
+      trajectoryId: 'traj-1',
+      stepIndex: 3,
+      requestedInteraction: { runCommand: { commandLine: 'rm -rf /tmp/x' } },
+    },
+    false,
+    {
+      callServer: async (port, method, body) => {
+        rpcCalls.push([port, method, body]);
+        return {};
+      },
+    },
+  );
+  assert.deepEqual(rpcCalls.slice(1), [
+    [
+      40009,
+      'HandleCascadeUserInteraction',
+      {
+        cascadeId: sessionId,
+        interaction: {
+          trajectoryId: 'traj-1',
+          stepIndex: 3,
+          runCommand: { confirm: false },
+        },
+      },
+    ],
+    [
+      40009,
+      'CancelCascadeInvocation',
+      { cascadeId: sessionId, killBackgroundTasks: false },
+    ],
+  ]);
+
+  const cancelled = await cancelAgyInvocation(40009, sessionId, {
+    callServer: async (port, method, body) => {
+      rpcCalls.push([port, method, body]);
+      return {};
+    },
+  });
+  assert.equal(cancelled, true);
 });

@@ -154,6 +154,35 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.1.12',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.public_rounded,
+        title: '内置浏览器看本机网页',
+        body:
+            '左侧栏新增“浏览器”，不用配置端口转发，就能直接打开并操作后端机器 localhost 上的网页。手机端按竖屏触控布局，电脑端按桌面鼠标布局，支持文字输入条、后退刷新，离开后还会保留 10 分钟。',
+      ),
+      _Highlight(
+        icon: Icons.preview_rounded,
+        title: '聊天链接直达与图片/Markdown 预览',
+        body:
+            '在单聊回复里点文件路径链接可直接预览文件或打开目录，点网址会先弹窗确认完整地址再打开。文件浏览器现在支持渲染 Markdown（可切换源码）和缩放查看常见图片。',
+      ),
+      _Highlight(
+        icon: Icons.notifications_active_outlined,
+        title: 'Codex 与 Antigravity 后台回复显示',
+        body:
+            'Codex 子智能体完成工作或 Antigravity 在后台被定时任务、命令唤醒并写出回复时，单聊里会自动出现对应消息，同样支持“停止”按钮中断。',
+      ),
+    ],
+    changes: <String>[
+      '连接旧版本后端且缺少新接口（如新建文件夹）时，会直接提示后端版本过旧，不再显示原始 HTML 错误页。',
+      'iOS 下载的文件会保存到应用“文稿”目录，可在“文件 → 我的 iPhone → Relay”中找到。',
+      '智能体正在回复时也可以直接从侧边栏返回首页，任务会继续在后端运行。',
+      'App 从后台切回前台时会自动重连事件流并同步一次历史记录，其他设备刚聊完的内容无需手动刷新即可看到。',
+    ],
+  ),
+  _Release(
     version: '0.1.11',
     highlights: <_Highlight>[
       _Highlight(
@@ -270,6 +299,35 @@ const List<_Release> _zhReleases = <_Release>[
 ];
 
 const List<_Release> _enReleases = <_Release>[
+  _Release(
+    version: '0.1.12',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.public_rounded,
+        title: 'Browser for localhost pages',
+        body:
+            'Open Browser from the drawer to view and use pages served on the backend host’s localhost without port forwarding. Phones get mobile layout and touch input, desktops get mouse and wheel input, and your page stays open for 10 minutes after leaving.',
+      ),
+      _Highlight(
+        icon: Icons.preview_rounded,
+        title: 'Tappable chat links and richer file previews',
+        body:
+            'Tap file links in solo-chat replies to preview files or open folders, and confirm web links before opening them in your browser. File System now renders Markdown (with a source toggle) and opens images in a zoomable viewer.',
+      ),
+      _Highlight(
+        icon: Icons.notifications_active_outlined,
+        title: 'Background replies for Codex and Antigravity',
+        body:
+            'Codex child-agent completion replies and Antigravity background turns (woken by timers, subagents, or commands) now appear in solo chat and can be stopped with Stop.',
+      ),
+    ],
+    changes: <String>[
+      'Connecting to an older backend that lacks a route (such as New Folder) now explains that the backend is too old instead of showing raw HTML.',
+      'iOS downloads save to Documents and appear in Files → On My iPhone → Relay.',
+      'Returning Home from the drawer no longer waits when an agent is busy; the turn keeps running on the backend.',
+      'Resuming the app reconnects events and refreshes history once so turns finished on another client appear automatically.',
+    ],
+  ),
   _Release(
     version: '0.1.11',
     highlights: <_Highlight>[

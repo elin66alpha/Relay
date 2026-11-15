@@ -41,6 +41,26 @@ function threadOptions(req) {
 }
 
 function createCodexDriver(rpc) {
+  function replayPending(turn) {
+    const held = turn.pendingMessages;
+    delete turn.pendingMessages;
+    for (const message of held) rpc.replayMessage(message);
+  }
+
+  function trackBackgroundTasks(entry, item) {
+    if (item.type === 'subAgentActivity' && item.agentThreadId) {
+      if (['started', 'interacted', 'completed', 'interrupted'].includes(item.kind)) {
+        rpc.backgroundTaskChanged(
+          entry, item.agentThreadId, ['started', 'interacted'].includes(item.kind),
+        );
+      }
+    } else if (item.type === 'collabAgentToolCall') {
+      for (const [id, state] of Object.entries(item.agentsStates || {})) {
+        rpc.backgroundTaskChanged(entry, id, ['pendingInit', 'running'].includes(state.status));
+      }
+    }
+  }
+
   // Only the turn/start response carries the id, so a turn cancelled before it
   // arrives has nothing to interrupt yet — interrupt() is called again from
   // there. Without that, cancelling early would leave codex running the turn
@@ -96,6 +116,9 @@ function createCodexDriver(rpc) {
     },
 
     startTurn(entry, req, turn) {
+      // A native wake can race this request. Its notifications cannot be
+      // assigned until turn/start says whether the user's input was folded in.
+      turn.pendingMessages = [];
       const params = {
         threadId: entry.sessionId,
         input: [{ type: 'text', text: String(req.prompt) }],
@@ -110,8 +133,15 @@ function createCodexDriver(rpc) {
           // Only the id: completion arrives as a notification.
           turn.turnId = result && result.turn && result.turn.id;
           if (turn.cancelled) interrupt(entry, turn);
+          if (entry.turn === turn) replayPending(turn);
+          else delete turn.pendingMessages;
         },
-        (err) => turn.fail(err),
+        (err) => {
+          const active = entry.turn === turn;
+          turn.fail(err);
+          if (active) replayPending(turn);
+          else delete turn.pendingMessages;
+        },
       );
     },
 
@@ -136,7 +166,9 @@ function createCodexDriver(rpc) {
           return;
         }
         const entry = rpc.sessionFor(params.threadId);
-        const turn = entry && entry.turn;
+        const turn = entry && [entry.turn, entry.background].find((candidate) =>
+          candidate && (!params.turnId || !candidate.turnId || candidate.turnId === params.turnId),
+        );
         let approve;
         try {
           approve = !!(
@@ -152,7 +184,23 @@ function createCodexDriver(rpc) {
       }
 
       const entry = rpc.sessionFor(params.threadId);
-      const turn = entry && entry.turn;
+      if (!entry) return;
+      // Child completion belongs to the turn that spawned it, even after that
+      // turn ended. Track it before filtering traffic by the current turn id.
+      if (msg.method === 'item/completed') trackBackgroundTasks(entry, params.item || {});
+      const foreground = entry.turn;
+      if (foreground && foreground.pendingMessages) {
+        foreground.pendingMessages.push(msg);
+        return;
+      }
+      const turnId = params.turnId || (params.turn && params.turn.id);
+      const turn = [foreground, entry.background].find((candidate) =>
+        candidate && (!turnId || candidate.turnId === turnId),
+      );
+      if (msg.method === 'turn/started') {
+        if (!turn) rpc.startBackgroundTurn(entry, turnId);
+        return;
+      }
       if (!turn) return;
       switch (msg.method) {
         case 'item/agentMessage/delta':
@@ -161,9 +209,12 @@ function createCodexDriver(rpc) {
           turn.emitted = true;
           turn.onMessage({ type: 'delta', text: params.delta, itemId: params.itemId });
           return;
-        case 'item/completed':
-          turn.onMessage({ type: 'item', item: params.item || {} });
+        case 'item/completed': {
+          const item = params.item || {};
+          if (item.type === 'agentMessage' && item.text) turn.emitted = true;
+          turn.onMessage({ type: 'item', item });
           return;
+        }
         case 'thread/tokenUsage/updated': {
           // `last` is the latest model request: the whole conversation it sent
           // plus what it wrote, i.e. what the context holds now.

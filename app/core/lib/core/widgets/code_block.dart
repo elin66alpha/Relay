@@ -70,9 +70,78 @@ final Highlight _highlighter = Highlight()
     'yaml': langYaml,
   });
 
-// Highlighting is synchronous on the UI isolate; past this size a block stays
-// plain so a huge paste or log dump cannot stall a frame.
-const int _maxHighlightedChars = 20000;
+/// Character cap past which code blocks skip synchronous syntax highlighting
+/// and large Markdown previews open in source view so frames do not stall.
+const int maxHighlightedChars = 20000;
+
+/// Shared Markdown stylesheet for chat messages and Markdown file previews.
+MarkdownStyleSheet relayMarkdownStyleSheet(
+  Color color,
+  TextStyle base,
+) {
+  // Tints of the text colour rather than scheme surfaces, so code reads the
+  // same on an agent panel, tinted system reply, and file preview in either theme.
+  final Color codeBackground = color.withValues(alpha: 0.05);
+  final Color borderColor = color.withValues(alpha: 0.14);
+  return MarkdownStyleSheet(
+    p: base,
+    pPadding: EdgeInsets.zero,
+    strong: base.copyWith(fontWeight: FontWeight.w700),
+    em: base.copyWith(fontStyle: FontStyle.italic),
+    h1: base.copyWith(
+      fontSize: 21,
+      fontWeight: FontWeight.w800,
+      height: 1.25,
+    ),
+    h1Padding: const EdgeInsets.only(top: 4, bottom: 6),
+    h2: base.copyWith(
+      fontSize: 19,
+      fontWeight: FontWeight.w800,
+      height: 1.28,
+    ),
+    h2Padding: const EdgeInsets.only(top: 4, bottom: 5),
+    h3: base.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w700,
+      height: 1.30,
+    ),
+    h3Padding: const EdgeInsets.only(top: 3, bottom: 4),
+    h4: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+    h4Padding: const EdgeInsets.only(top: 3, bottom: 3),
+    h5: base.copyWith(fontWeight: FontWeight.w700),
+    h5Padding: const EdgeInsets.only(top: 2, bottom: 2),
+    h6: base.copyWith(fontWeight: FontWeight.w700),
+    h6Padding: const EdgeInsets.only(top: 2, bottom: 2),
+    blockSpacing: 8,
+    listIndent: 22,
+    listBullet: base,
+    code: AppTheme.mono(color).copyWith(
+      fontSize: 13.5,
+      height: base.height,
+      backgroundColor: color.withValues(alpha: 0.08),
+    ),
+    // CodeBlock pads its own header and body.
+    codeblockPadding: EdgeInsets.zero,
+    codeblockDecoration: BoxDecoration(
+      color: codeBackground,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: borderColor),
+    ),
+    blockquote: base.copyWith(color: color.withValues(alpha: 0.78)),
+    blockquotePadding: const EdgeInsets.only(left: 10),
+    blockquoteDecoration: BoxDecoration(
+      border: Border(
+        left: BorderSide(
+          color: color.withValues(alpha: 0.45),
+          width: 3,
+        ),
+      ),
+    ),
+    horizontalRuleDecoration: BoxDecoration(
+      border: Border(top: BorderSide(color: borderColor)),
+    ),
+  );
+}
 
 /// Renders fenced code blocks as [CodeBlock]s. Registered for `pre`, so the
 /// markdown builder still wraps the result in the style sheet's
@@ -149,7 +218,7 @@ class _CodeBlockState extends State<CodeBlock> {
     final String? language = widget.language;
     TextSpan span = TextSpan(text: widget.code, style: base);
     if (language != null &&
-        widget.code.length <= _maxHighlightedChars &&
+        widget.code.length <= maxHighlightedChars &&
         _highlighter.getLanguage(language) != null) {
       final TextSpanRenderer renderer = TextSpanRenderer(
         null,

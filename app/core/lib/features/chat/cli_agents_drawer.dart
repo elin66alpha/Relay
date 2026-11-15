@@ -10,6 +10,7 @@ import '../../core/settings/app_settings_controller.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../../core/widgets/agent_icon.dart';
+import '../browser/browser_screen.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -175,6 +176,19 @@ class CliAgentsDrawer extends StatelessWidget {
               onTap: () {
                 chatController.goHome();
                 if (closeOnAction) Navigator.of(context).pop();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.public_rounded),
+              title: Text(context.l10n.browser),
+              onTap: () {
+                if (closeOnAction) Navigator.of(context).pop();
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        BrowserScreen(backend: chatController.backend),
+                  ),
+                );
               },
             ),
             ListTile(

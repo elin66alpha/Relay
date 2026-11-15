@@ -132,6 +132,24 @@ class BackendClient {
     );
   }
 
+  Future<Uri> browserWebSocketUri() async {
+    final MachineCredential credential = await _requireCredential();
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/browser/ticket',
+      timeout: const Duration(seconds: 15),
+    );
+    final Object? ticket = decoded is Map ? decoded['ticket'] : null;
+    if (ticket is! String || ticket.trim().isEmpty) {
+      throw BackendException('Invalid browser ticket response.');
+    }
+    final Uri endpoint = _uri(credential, '/api/browser/connect');
+    return endpoint.replace(
+      scheme: endpoint.scheme == 'https' ? 'wss' : 'ws',
+      queryParameters: <String, String>{'ticket': ticket.trim()},
+    );
+  }
+
   Future<BackendStatus> status({
     Duration timeout = const Duration(seconds: 8),
   }) async {

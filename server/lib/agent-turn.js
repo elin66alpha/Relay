@@ -139,7 +139,7 @@ async function runAgentTurn(options) {
     historyMetadata = {},
     initialProgressLines = [],
     notifyTaskCompletion,
-    // Where a turn the agent later runs on its own is delivered (Claude only).
+    // Where a turn the agent later runs on its own is delivered.
     onBackgroundTurn,
     onAfterDone,
     onAfterError,
@@ -664,7 +664,7 @@ function createTaskCompletionNotifier({ hasPresence, notifyAll }) {
   };
 }
 
-// Where a turn Claude runs on its own lands: a reply of its own in the
+// Where a turn an agent runs on its own lands: a reply of its own in the
 // conversation, with no user message before it, queued on the scope like any
 // other turn so a message sent meanwhile waits for it, as it does in the CLI.
 // Stop cancels it like any turn, and a session deleted meanwhile drops it.

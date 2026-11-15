@@ -18,6 +18,7 @@ In:
 - Swarms: multi-agent group chat with mention-driven waves (max hops `RELAY_SWARM_MAX_HOPS`).
 - Filesystem browse/upload/download under a sensitive-path denylist.
 - SSH-style PTY terminal via single-use WebSocket ticket.
+- Browser for pages on the backend's own localhost: a headless Chrome on the host streamed as frames, with touch/mouse/keyboard input sent back, via single-use WebSocket ticket.
 - Quota/usage reporting, scheduled quota messages, keepalive; Web Push + FCM notifications.
 - Linux/macOS/Windows backend install adapters; credential QR/file onboarding.
 - Relay MCP (`mcp/`): a stdio MCP server through which a personal agent does what the app does (except wallpaper), signed in with the same encrypted credential JSON and password.
@@ -47,7 +48,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | Module | Responsibility | Interface | Depends on |
 |---|---|---|---|
 | server/server.js | config, middleware, auth, scope queue, SSE fan-out, workdir presence, route context wiring, static Web; holds no feature logic | HTTP on PORT | lib/*, routes/* |
-| server/routes/* | HTTP API per area (meta, push, fs, chat, group, sessions, quota, terminal); group.js also orchestrates Swarm waves | factory(routeContext) -> express.Router | routeContext for anything with state or I/O; Node built-ins and argument-only lib/* helpers required directly |
+| server/routes/* | HTTP API per area (meta, push, fs, chat, group, sessions, quota, terminal, browser); group.js also orchestrates Swarm waves | factory(routeContext) -> express.Router | routeContext for anything with state or I/O; Node built-ins and argument-only lib/* helpers required directly |
 | server/lib/agents.js | process-runner boundary | runAgent(agent, prompt, onEvent, {workdir, settings, sessionKey}); onEvent receives progress, delta, segment, and `context` ({used, size}) events; purgeSession | session pools, agent-options, model-discovery, cli-paths, json-store, workdir |
 | server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK, session-slots, bounded-integer |
 | server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers. The ACP driver authenticates after initialize only when the caller passes authMethod, sends clientMeta, applies ordered config options, and lists models (listModels) when the caller passes those options; a command may add env | pool API, driver | child_process, session-slots, bounded-integer |
@@ -60,19 +61,20 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server/lib/machine-info.js | CPU model, memory and GPU names (probed once), used/total of every local disk (Linux /proc/mounts block devices, macOS / and /Volumes, Windows drive letters), live mainboard/SSD/CPU/GPU temperatures (each the average of its sensors) from Linux hwmon and nvidia-smi; GET /api/machine | machineInfo | os, fs, child_process (lspci, system_profiler, powershell, nvidia-smi) |
 | server/lib/credential-file.js | encrypted relay.credentials.v1 payload for QR/file onboarding | encryptCredential | crypto |
 | server/lib/agent-options.js / agent-settings.js | option validation and representation / persisted per-session settings | describeAgent, normalizeSettings, getSettings/setSettings | model-discovery, json-store |
-| server/lib/agent-turn.js | one solo turn, background Claude turns and the task-completion notification | runAgentTurn, responders, createBackgroundTurnHandler, createTaskCompletionNotifier | agents, history, sse |
+| server/lib/agent-turn.js | one solo turn, background Claude/Codex/Antigravity turns and the task-completion notification | runAgentTurn, responders, createBackgroundTurnHandler, createTaskCompletionNotifier | agents, history, sse |
 | server/lib/group-turn.js | Swarm prompt building | parseMentions, deltaSince, buildGroupPrompt | none |
 | server/lib/context-windows.js | last context window size each agent + model reported, so a conversation without a reply can still show its limit | recordContextWindow(agent, model, size), contextWindowFor(agent, model); GET /api/history returns it as `contextWindow` | json-store |
 | server/lib/history.js, chat-sessions.js, groups.js, tokens.js | persistence | per-module load/save | json-store (history: own writer: background flush writes scope by scope in chunks; a file that exists but cannot be loaded is renamed to `<file>.corrupt-<time>` before history starts empty) |
 | server/lib/filesystem.js, workdir.js | path policy, streamed uploads under a byte cap, directory zip downloads | resolve/list/prepare, streamUploadToFile, sendDirectoryZip | tokens, fcm, cli-paths (denylist paths from their owners) |
 | server/lib/usage.js, quota-*.js | quota reporting, schedules and sending them at a reset, keepalive | buildUsageReport, schedule API, createQuotaScheduleRunner | json-store, cli-paths |
 | server/lib/notify.js, push.js, fcm.js | notifications | notifyAll | subscription-store |
-| server/lib/terminal-manager.js | resumable PTY per token | createTerminalManager | node-pty, bounded-integer |
+| server/lib/terminal-manager.js | resumable PTY per token; owns the server's WebSocket upgrade listener | createTerminalManager; attachServer(server, otherUpgrade) hands other paths to otherUpgrade before a 404 | node-pty, bounded-integer |
+| server/lib/browser-manager.js | one headless Chrome/Chromium/Edge per token over `--remote-debugging-pipe`: JPEG screencast out, validated input in, loopback-only address bar | createBrowserManager (createTicket, handleUpgrade, attachClient, closeSession(tokenId), closeAll), findBrowser, launchPage (AbortSignal, closed promise), loopbackUrl | child_process, ws, cli-paths, bounded-integer |
 | app/core/lib/core/backend | authenticated transport, SSE codec, API client | ApiTransport, BackendClient | http |
 | app/core/lib/core/{models,storage,credentials,notifications,platform,widgets,i18n,theme,util,settings,download} | data models, cached stores, credential decode, platform adapters, shared widgets (agent icon, code block, wallpaper and acrylic surfaces), strings, theme and status colours, helpers, app settings and one device-local wallpaper (original file on native, bounded inline copy on Web), download progress | classes; AppSettingsController wallpaper/saveWallpaper; platform prepareWallpaper/storeWallpaperImage/loadWallpaperImage | core only |
 | app/core/lib/features/chat | the main screen: solo chat, Swarm, and the drawer that opens every other screen | BotChatController, GroupChatController, screens | other lib/features, lib/core |
 | app/core/lib/features/quota | quota state (QuotaController, one instance created in app/shell's main.dart and shared by the strip, usage and scheduler screens) and its screens | QuotaController, screens | lib/core |
-| app/core/lib/features/{cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
+| app/core/lib/features/{browser,cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, ssh) |
 | app/shell/lib/main.dart | creates the shared controllers and starts the app | main() | app/core |
 | scripts/install/{linux,macos,windows} | install/service adapters | setup/start/stop/status/uninstall | server/scripts, PM2/launchd/Windows |
 | mcp/index.js | stdio entry: decrypts the credential once, newline-delimited JSON-RPC loop; env `RELAY_CREDENTIAL` (JSON or path), `RELAY_CREDENTIAL_PASSPHRASE`, optional `RELAY_WORKDIR`, `RELAY_MCP_NAME` | stdin/stdout | mcp/lib/* |
@@ -137,13 +139,36 @@ architecture change (see Changes).
     - `acp-session-pool.js` — the ACP driver (opencode, hermes, cursor, agy). Settings apply
       over the protocol (`acpSessionOptions`) with no restart. Capabilities from
       `initialize` gate optional calls: hermes has no `session/close`, so an
-      evicted session is simply dropped.
+      evicted session is simply dropped. Because `agy acp` closes its update
+      stream at the end of `session/prompt`, `agyPool` watches the worker's
+      `LanguageServerService` trajectory (`GetCascadeTrajectory`) while idle to
+      stream background turns woken by timers, subagents, or background commands
+      through the same history/SSE/Stop handler as Claude and Codex, answers
+      waiting interactions (`HandleCascadeUserInteraction`) or cancellations
+      (`CancelCascadeInvocation`), and filters out background steps that `agy`
+      replays at the start of the next user `session/prompt`. A user turn waits
+      again for background work after applying settings, before replacing turn
+      callbacks. Pending interaction replies recheck turn ownership before
+      emitting more events; a failed prompt resumes idle watching. Trajectory
+      discovery failures back off for at least five seconds.
     - `codex-session-pool.js` — the codex app-server driver. `turn/start`
       returns as soon as the turn is *accepted*; the turn is settled by the
       later `turn/completed` notification. Everything except the sandbox applies
       per turn (`codexSessionOptions`), and the sandbox is what the runner
       passes as `fixedKey` so a change reopens the thread — still resuming the
       same conversation, without respawning the process.
+      Relay enables `multi_agent_v2` and `wake_on_agent_messages` only in its
+      app-server process, so child-agent mail can wake an idle root thread
+      (verified with Codex 0.169.0; wake is an upstream experimental feature).
+      Unsolicited `turn/started` opens a background turn, surfaced in solo chat
+      through the same history/SSE/Stop handler as Claude. Notifications wait
+      for the `turn/start` response before being assigned by turn id, since
+      user input can either join an automatic turn or start a separate one.
+      `subAgentActivity` tracks child work before turn-id filtering: its
+      completion still names the original parent turn. That work prevents
+      idle close, bounded by the turn timeout since its last activity when a
+      completion is missing; the hard session cap still prefers idle sessions
+      without child work. Ordinary background shell exits do not wake Codex.
   - Relay answers the agents' approval requests from the configured tier,
     because there is no approval UI to route them to. The runner's policy
     answers yes or no; translating that into each protocol's vocabulary is the
@@ -287,6 +312,9 @@ architecture change (see Changes).
   Reuse it instead of duplicating base URL, bearer token, device headers, or
   error handling.
 - Credential decryption and large history decoding stay off the UI isolate.
+  File preview classification, image validation and NUL scanning share the
+  text decoder's `compute` path; ICO previews check embedded PNG/DIB dimensions
+  against the same pixel cap as other images.
 - `MachineCredentialsStore`, `DeviceIdStore`, and `WorkdirStore` use static
   caches because multiple instances exist. Every new write path must invalidate
   the corresponding cache.
@@ -318,6 +346,22 @@ architecture change (see Changes).
   the backend OS user and is not constrained by the file API denylist. Keep its
   bundled `RelayTerminalMono` family as xterm's primary font: using generic
   `monospace` can produce overly wide character cells in Chromium.
+- The Browser follows the terminal's ticket model and owner (one per token
+  record, replaced by a newer viewer, kept 10 minutes after the viewer leaves).
+  Chrome is driven over `--remote-debugging-pipe`, never a debugging port,
+  because a loopback port would let any local user drive it. The viewport is
+  the picture's own logical size, so pointer positions are sent unscaled;
+  Android/iOS (native or Web) set `mobile` for touch events and mobile layout.
+  Frames are acked only after they are written to the viewer's socket, so a
+  slow link or no viewer pauses rendering instead of queueing frames. Chrome's
+  `OverscrollHistoryNavigation` stays disabled: a horizontal drag the page is
+  slow to claim otherwise navigates back. Only the address bar is limited to
+  loopback hosts; page navigation is not, since sign-in and CDNs need it.
+  Token revocation closes its browser and invalidates its tickets immediately.
+  Closing synchronously aborts startup or kills the browser; CDP requests time
+  out after 10 seconds. Backend shutdown waits at most three seconds for browser
+  exit and temporary-profile cleanup, including retries for locked files, and
+  rejects new browser tickets and viewers as soon as shutdown starts.
 
 ### Client packaging
 
@@ -330,6 +374,7 @@ architecture change (see Changes).
 | Feature | Module | Status |
 |---|---|---|
 | Solo chat + sessions | routes/chat, routes/sessions, agent-turn, features/chat | active |
+| Chat links (solo chat only: Markdown links to web addresses open the system browser after a confirmation showing the full URL; file links, workdir-relative or absolute, open the file preview or browser; other schemes and plain-text paths stay inert) | features/chat chat_links, features/filesystem | active |
 | Session rename (every session except Main) | routes/sessions, chat-sessions, features/chat drawer | active |
 | Message Copy (all settled replies) and Edit (user messages: text back into the composer, nothing rewritten) | features/chat | active |
 | Per-session agent controls (model/effort/permission/fast) | agent-options, agent-settings, chat/agent_controls | active |
@@ -337,14 +382,15 @@ architecture change (see Changes).
 | Live OpenCode models (`opencode models`: free models plus providers configured on the host) and a Hermes model page showing the host's configured model | agents (refreshAgentModels), model-discovery, agent-options | active |
 | Cursor agent over ACP (design under Invariants, "Agents and controls") | agents, acp-session-pool, stdio-agent-pool, agent-options, agent-status, model-discovery, usage, routes/meta, cli_agent, chat/agent_controls, chat/context_meter | active |
 | Antigravity (`agy`) over ACP with isolated session workers, streaming and resume; separate model/effort controls, context usage meter (`GetCascadeTrajectory`), host OAuth, approval tiers and subscription quota (`RetrieveUserQuotaSummary` + headless `/usage` fallback) | agents, acp-session-pool, stdio-agent-pool, agent-options, model-discovery, agent-status, cli-paths, filesystem, usage, cli_agent, agent_icon, features/chat/context_meter, features/quota | active |
-| Background Claude turns | claude-session-pool, agent-turn (createBackgroundTurnHandler) | active |
+| Background Claude and Antigravity turns, and Codex child-agent completion replies | claude-session-pool, acp-session-pool, codex-session-pool, stdio-agent-pool, agents, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
 | Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
-| Workspace navigation (Home current directory and chat title open the file browser; selecting a different recent directory switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
-| File preview (read-only, first 512 KiB of UTF-8 text, highlighted) | features/filesystem, core/widgets/code_block | active |
+| Workspace navigation (Home shows up to five recent workspaces; File System shows up to five in one compact, horizontally scrolling row, and selecting a tag switches the active workspace and displayed directory; Home current directory and chat title open the file browser; selecting a different recent directory on Home switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
+| File preview (read-only, first 512 KiB of UTF-8 text, highlighted, rendered Markdown without embedded images and source-first past 20k chars with toggle; images up to 20 MiB / 40 MP) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
+| Browser (drawer, between Back to Home and File System): a page on the backend's localhost rendered by headless Chrome and streamed as JPEG frames; touch (phones) or mouse (desktop) input, a text bar for soft keyboards, auto-accepted dialogs shown as notices; `RELAY_BROWSER` overrides the browser path | routes/browser, browser-manager, terminal-manager (upgrade), core/backend, features/browser, features/chat drawer | active |
 | Quota + schedules + keepalive | usage, quota-*, features/quota | active |
 | Notifications (Web Push, FCM) | notify, push, fcm, core/notifications | active |
 | Device-local wallpaper with acrylic surfaces (behavior under Verification) | core/settings, core/widgets, features/settings, features/chat | active |
@@ -385,7 +431,8 @@ navigation on 2026-11-09.
 - An empty chat with a wallpaper displays neither an agent icon nor "Start chatting" text; removing the image restores solid surfaces and that placeholder.
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
-- `npm --prefix server test` -> "# fail 0"
+- `npm --prefix server test` -> "# fail 0"; includes browser startup/shutdown and token-revocation cleanup, ACP settings/background serialization, cancellation during interactions, prompt-failure recovery and trajectory-discovery backoff.
+- `(cd server && node --test test/codex-session-pool.test.js test/agents.test.js test/agent-turn.test.js)` -> "# fail 0"; covers automatic Codex turns, child-work idle retention, turn-id isolation, cancellation, completed-item text and background reply delivery.
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
 - `npm --prefix mcp test` -> "# fail 0"; `server/node_modules/.bin/eslint -c server/eslint.config.js mcp` -> exit 0
 - (Backend running, a credential made with `npm --prefix server run credential -- --label <bot>`) `RELAY_CREDENTIAL=<json> RELAY_CREDENTIAL_PASSPHRASE=<password> node mcp/index.js` answers `tools/list` with 17 tools; `relay_status` lists the agents, `relay_terminal` with `echo ok` returns `ok`, and a `relay_chat` that outlasts `waitSeconds` returns `running` and then `done` from `relay_task`.
@@ -393,6 +440,8 @@ navigation on 2026-11-09.
 - On Windows, `scripts/release/build_windows_setup.ps1 -OutputPath build/setup/Setup.exe` -> GUI compiles with the system .NET Framework compiler.
 - Windows release bundle: `Setup.exe` and `setup.cmd` provide install/reinstall, CLI selection, Web on/off, all three network modes, status, token create/delete/list/re-show and uninstall with retained backend state; Web and API share Node.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
+- (Chrome, Chromium or Edge on the host) `(cd server && node --test test/browser-manager.test.js)` -> "# fail 0" with no test skipped: a real headless browser moves a slider by touch drag and clicks by mouse.
+- (Backend host serving a page on `localhost:<port>`) Drawer → Browser on a phone outside the backend's network: typing `<port>` opens the page laid out at phone width; dragging a slider moves it without scrolling or going back, dragging elsewhere scrolls, and the keyboard bar types into a focused field (Chinese IME included). Submitting while disconnected keeps the typed text for reconnection. On desktop the page fills the window at desktop layout, hover effects follow the mouse, and the wheel scrolls. `example.com` in the address bar shows "Only localhost and 127.0.0.1 addresses can be opened."; leaving and reopening within 10 minutes shows the same page.
 - `(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)` -> exit 0, `app/shell/build/web/index.html` exists; `app/shell/build/web/assets/FontManifest.json` lists `packages/relay_core/RelayTerminalMono`
 - `(cd app/shell && flutter build linux --release --no-pub)` -> exit 0, `app/shell/build/linux/x64/release/bundle/relay` exists on Ubuntu with GTK and libsecret development files installed
 - `./scripts/release/package_linux_desktop.sh` on Ubuntu 22.04 after the Linux build -> an amd64 `.deb` and checksum in `build/release/`, with the desktop launcher and hicolor icons; installation adds Relay to the applications menu.
@@ -404,10 +453,12 @@ navigation on 2026-11-09.
 - Drawer → Home works while an agent turn is running, even when every agent is busy; the turn keeps running on the backend and shows again on return. Covered by `app/core/test/chat_cancel_test.dart`.
 - iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`).
 - Home: tapping the current workspace opens File System; tapping a recent workspace selects it. While refreshing, directory actions are disabled; switching machines clears recent directories immediately and late responses from earlier refreshes cannot replace the list or enable a previous machine's directory action.
+- Home and File System show at most five workspaces in backend recency order. File System keeps them in one compact horizontally scrolling row above the breadcrumbs, with folder-name labels and full-path tooltips; tapping a tag switches the active workdir and displays its directory, while navigating through folders or breadcrumbs only browses. An unavailable recent-workspace list does not prevent file browsing. Covered by `app/core/test/home_navigation_page_test.dart` and `app/core/test/file_system_screen_test.dart`.
 - Solo chat: tapping the chat title opens File System through BackendClient and the set-workdir callback.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
+- Solo chat links: tapping a workdir-relative file link with a `:3` line suffix in a finished reply opens that file's preview; `file:` links accept an empty host or `localhost` and ignore URI query/fragment metadata; a directory link opens File System there; a missing file shows "The file does not exist or is not accessible."; `[x](https://…)` shows "Open in browser?" with the full URL and launches only on Open; `javascript:` links do nothing. Coverage: `app/core/test/chat_links_test.dart`.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
-- File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents; a file containing a NUL byte shows "Cannot preview this file."; past 512 KiB it shows "Only the first 512 KiB is shown."
+- File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents (Markdown files up to 20,000 characters render by default without loading embedded images and toggle to source; larger Markdown opens as source) and tapping a supported image (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB and 40 million pixels) renders a zoomable preview; a non-image file containing a NUL byte or an oversized/malformed image shows "Cannot preview this file."; past 512 KiB text shows "Only the first 512 KiB is shown."
 - File browser on iOS: Download saves to the app's Documents folder, shown in Files → On My iPhone → Relay. Against a backend older than the client, New Folder reports that the backend is too old instead of an HTML page.
 - File browser: Windows UNC breadcrumbs keep the server and share as one absolute root; after an initial workdir request fails, Refresh retries it without leaving the screen. Regression coverage lives in `app/core/test/file_system_screen_test.dart` and `app/core/test/home_navigation_page_test.dart` (including delayed responses across machine switches).
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.
@@ -464,12 +515,13 @@ one summary line.
 - 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
 - 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
+- 2026-11-15: added server/lib/browser-manager.js and features/browser; terminal-manager's upgrade listener hands paths it does not own to the browser manager. Reason: viewing a dev page on the backend's localhost from outside its network needs a host-side browser over Relay's existing authenticated connection, without port forwarding (path rewriting, HMR sockets, same-origin access to the Relay Web client) or new dependencies.
 - 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review
 
 Last review: 2026-10-29
-Features since last review: 1
+Features since last review: 3
 Last result: Intent OK, Structure OK, Entropy OK, Test value Problem, Documentation OK, Operability OK, Evolution OK, Performance OK; 3 open findings (no test checks that Cursor's process starts with Relay's CURSOR_CONFIG_DIR; history.js background writes never recover after one failed write; json-store overwrites a file it cannot load).
 
 ## Deviations
