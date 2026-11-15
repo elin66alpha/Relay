@@ -1,6 +1,7 @@
 'use strict';
 
-require('dotenv').config();
+// dotenv 17+ logs every load unless told to be quiet.
+require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
@@ -239,6 +240,12 @@ app.use(
 );
 
 app.use(express.json({ limit: '16mb' }));
+// Express 5 leaves req.body undefined when no JSON body was parsed; routes read
+// fields from it directly, as they could under Express 4.
+app.use((req, _res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', CORS_ALLOW_ORIGIN);
   if (CORS_ALLOW_ORIGIN !== '*') res.setHeader('Vary', 'Origin');
@@ -675,7 +682,8 @@ if (SERVE_WEB) {
       res.setHeader('Cache-Control', 'no-cache');
     },
   }));
-  app.get('*', (req, res) => {
+  // Express 5 needs a named wildcard; a bare '*' throws at registration.
+  app.get('/{*splat}', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'not found' });
     }
