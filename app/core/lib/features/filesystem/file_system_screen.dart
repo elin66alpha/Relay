@@ -262,26 +262,22 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   }
 
   Future<void> _pickUpload() async {
-    final FilePickerResult? result = await FilePicker.pickFiles(
-      allowMultiple: true,
-      withData: kIsWeb,
-      withReadStream: !kIsWeb,
-    );
-    if (result == null) return;
+    final List<PlatformFile> picked = await FilePicker.pickFiles();
+    if (picked.isEmpty) return;
     final List<_UploadFile> files = <_UploadFile>[];
-    for (final PlatformFile file in result.files) {
+    for (final PlatformFile file in picked) {
       if (kIsWeb) {
-        final Uint8List? bytes = file.bytes;
-        if (bytes == null) continue;
-        files.add(_UploadFile.bytes(name: file.name, data: bytes));
+        files.add(
+          _UploadFile.bytes(name: file.name, data: await file.readAsBytes()),
+        );
       } else {
-        final Stream<List<int>>? bytes = file.readStream;
-        if (bytes == null) continue;
+        final int? length = await file.length();
+        if (length == null) continue;
         files.add(
           _UploadFile.stream(
             name: file.name,
-            data: bytes,
-            length: file.size,
+            data: file.readAsByteStream(),
+            length: length,
           ),
         );
       }

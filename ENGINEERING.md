@@ -40,10 +40,10 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server | the Node.js backend, its tests, its Node tools (`scripts/`) and, on a deployed host, its generated state |
 | mcp | `relay-mcp`, a dependency-free stdio MCP server that drives a backend over its HTTP API |
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend |
-| scripts/release | release bundle builders, version/documentation checks, Windows setup checks and local Android signing for a release draft |
+| scripts/release | release bundle builders, version/documentation checks, Windows setup checks and a local Android signing fallback for a release draft |
 | scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
-| .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft |
+| .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft that also builds the signed Android APK from Actions Secrets |
 
 | Module | Responsibility | Interface | Depends on |
 |---|---|---|---|
@@ -475,7 +475,7 @@ navigation on 2026-11-09.
 - (Ubuntu desktop with an unlocked GNOME Keyring) a test machine credential survives an app restart and is removed when deleted.
 - `(cd app/shell && flutter build apk --debug --no-pub)` -> exit 0 without a release signing key
 - CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client, an unsigned iOS client and the macOS client.
-- `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `scripts/release/add_signed_android.sh` expects (`expected_cert`)
+- `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `.github/workflows/release.yml` and `scripts/release/add_signed_android.sh` expect (`expected_cert`)
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer → Home works while an agent turn is running, even when every agent is busy; the turn keeps running on the backend and shows again on return. Covered by `app/core/test/chat_cancel_test.dart`.
 - iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`).
@@ -533,8 +533,7 @@ navigation on 2026-11-09.
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18); session-slots, sse and bounded-integer extracted from the session pools and streams so their policies could not drift (2026-10-18).
-- 2026-10-25: ACP pool gained an optional authenticate step so Cursor joins the existing session pool. Reason: Cursor's CLI rejects a session until `cursor_login`.
+- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18); session-slots, sse and bounded-integer extracted from the session pools and streams so their policies could not drift (2026-10-18); ACP pool gained an optional authenticate step so Cursor joins the existing session pool (2026-10-25).
 - 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
 - 2026-10-26: added server/lib/cli-paths.js; agents.js and model-discovery.js share its CLI lookup, and filesystem.js takes Cursor's paths from it. Reason: the two lookups could disagree on whether a CLI is installed, and the path policy loaded the whole process runner for one constant.
 - 2026-10-26: chat screens split by responsibility, and routes take state and I/O from routeContext while requiring built-ins directly. Reason: the chat files mixed five or six concerns and were the change hotspots, and routes had no rule for where a dependency comes from.
@@ -543,6 +542,7 @@ one summary line.
 - 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
 - 2026-11-15: added server/lib/browser-manager.js and features/browser; terminal-manager's upgrade listener hands paths it does not own to the browser manager. Reason: viewing a dev page on the backend's localhost from outside its network needs a host-side browser over Relay's existing authenticated connection, without port forwarding (path rewriting, HMR sockets, same-origin access to the Relay Web client) or new dependencies.
 - 2026-11-15: added server/lib/peer-client.js; routes/group runs remote Swarm members on another Relay backend through its existing HTTP API, with the peer credential supplied by the app per request. Reason: a Swarm needs agents from several machines without changing the other backend, adding a pairing flow, or storing another machine's token.
+- 2026-11-15: the release workflow builds and signs the Android APK from GitHub Actions Secrets; `scripts/release/add_signed_android.sh` remains a local fallback. Reason: every release asset, including the APK, now comes from one verified workflow run on the release commit; the workflow still checks the release certificate before uploading.
 - 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review

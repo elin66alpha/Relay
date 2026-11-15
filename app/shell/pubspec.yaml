@@ -16,5 +16,11 @@ dependencies:
 dev_dependencies:
   flutter_lints: ^6.0.0
 
+dependency_overrides:
+  # flutter_secure_storage 10 allows only darwin 0.3.x, whose reads miss
+  # keychain items written before 0.3.0 (fixed in 0.4.1-0.4.3). Stay on 10
+  # until Android data has migrated off the ciphers that 11 removes.
+  flutter_secure_storage_darwin: ^0.4.3
+
 flutter:
   uses-material-design: true

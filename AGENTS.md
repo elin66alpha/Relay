@@ -90,5 +90,7 @@ Relay's Cursor config (`cursor-config/`), groups, quota state/schedules, usage c
 not fixtures. Keep them, along with any referenced FCM service-account JSON,
 out of patches and release archives. `server/models-extra.json` is also a local
 override, not a shared catalog. The Android release keystore and
-`app/shell/android/key.properties` are signing secrets: never commit or upload
-them; `app/shell/android/key.properties.example` is the template.
+`app/shell/android/key.properties` are signing secrets: never commit them or
+upload them anywhere except the repository's `ANDROID_*` GitHub Actions Secrets
+that the release workflow reads; `app/shell/android/key.properties.example` is
+the template.

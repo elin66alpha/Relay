@@ -194,7 +194,10 @@ certificate SHA-256
 downloaded APK with `apksigner verify --print-certs`; one signed by another
 certificate is not an official build. Releases up to 0.1.7 were signed with a
 debug certificate. The keystore and `app/shell/android/key.properties` stay
-outside version control.
+outside version control. The release workflow reads the keystore and its
+passwords from the repository's GitHub Actions Secrets, writes them to the
+runner only for the build, and refuses an APK whose certificate differs from the
+one above.
 
 ## Production requirements
 

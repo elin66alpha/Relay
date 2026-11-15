@@ -8,7 +8,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_secure_storage: ^11.2.0
+  flutter_secure_storage: ^10.3.1
   shared_preferences: ^2.5.6
   http: ^1.2.0
   cryptography: ^2.7.0
@@ -18,7 +18,7 @@ dependencies:
   zxing2: ^0.2.4
   file_picker: ^13.3.3
   path_provider: ^2.1.6
-  web: ^1.1.2
+  web: ^1.1.1
   flutter_markdown_plus: ^1.0.12
   # Already pulled in by flutter_markdown_plus; declared directly so chat
   # rendering can add its own inline syntax (the search-hit marker).
@@ -36,6 +36,12 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   url_launcher_platform_interface: ^2.3.2
+
+dependency_overrides:
+  # flutter_secure_storage 10 allows only darwin 0.3.x, whose reads miss
+  # keychain items written before 0.3.0 (fixed in 0.4.1-0.4.3). Stay on 10
+  # until Android data has migrated off the ciphers that 11 removes.
+  flutter_secure_storage_darwin: ^0.4.3
 
 flutter:
   uses-material-design: true

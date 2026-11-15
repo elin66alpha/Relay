@@ -543,17 +543,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Future<void> _importTemplate() async {
     final AppStrings strings = context.l10n;
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-        withData: true,
-      );
-      if (result == null || result.files.isEmpty) return;
-      final Uint8List? bytes = result.files.single.bytes;
-      if (bytes == null) {
-        _showSnack(strings.swarmTemplateInvalid);
-        return;
-      }
+      final PlatformFile? file = await FilePicker.pickFile();
+      if (file == null) return;
+      final Uint8List bytes = await file.readAsBytes();
       final SwarmTemplate template = parseSwarmTemplate(utf8.decode(bytes));
       final ChatGroup? created = await _controller.createGroup(
         template.name,

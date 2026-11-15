@@ -136,16 +136,13 @@ class _InputBarState extends State<ChatInputBar> {
     _closeActions();
     setState(() => _isUploading = true);
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
-        allowMultiple: true,
-        withData: kIsWeb,
-        withReadStream: !kIsWeb,
-      );
-      if (result == null || !mounted) return;
-      for (final PlatformFile file in result.files) {
+      final List<PlatformFile> files = await FilePicker.pickFiles();
+      if (!mounted) return;
+      for (final PlatformFile file in files) {
         if (!mounted) return;
-        if (kIsWeb ? file.bytes == null : file.readStream == null) continue;
-        final int length = kIsWeb ? file.bytes!.length : file.size;
+        final int? length = await file.length();
+        if (!mounted) return;
+        if (length == null) continue;
         if (length > _maxUploadBytes) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -165,13 +162,13 @@ class _InputBarState extends State<ChatInputBar> {
             ? await widget.backend.uploadFile(
                 path: '.relay/uploads',
                 name: name,
-                bytes: file.bytes!,
+                bytes: await file.readAsBytes(),
                 createDirectory: true,
               )
             : await widget.backend.uploadFileStream(
                 path: '.relay/uploads',
                 name: name,
-                bytes: file.readStream!,
+                bytes: file.readAsByteStream(),
                 length: length,
                 createDirectory: true,
               );

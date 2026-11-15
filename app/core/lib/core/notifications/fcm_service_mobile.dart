@@ -60,6 +60,9 @@ class FcmService {
         return true;
       }
 
+      // The backend sends to FCM registration tokens; FID registration is a
+      // separate migration, so keep the deprecated token API for now.
+      // ignore: deprecated_member_use
       final String? token = await FirebaseMessaging.instance.getToken();
       if (token == null || token.isEmpty) return false;
       await backendClient.registerFcmToken(
@@ -82,6 +85,7 @@ class FcmService {
     if (token == null || token.isEmpty) return;
     try {
       await backendClient.unregisterFcmToken(token);
+      // ignore: deprecated_member_use
       await FirebaseMessaging.instance.deleteToken();
       _registeredToken = null;
     } catch (_) {
@@ -109,6 +113,7 @@ class FcmService {
 
   void _listenForTokenRefresh(BackendClient backendClient) {
     if (_tokenRefreshSub != null) return;
+    // ignore: deprecated_member_use
     _tokenRefreshSub = FirebaseMessaging.instance.onTokenRefresh.listen(
       (String token) {
         if (token.isEmpty) return;
