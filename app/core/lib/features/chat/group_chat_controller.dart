@@ -7,6 +7,7 @@ import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/group.dart';
+import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/util/error_text.dart';
 
@@ -16,9 +17,16 @@ import '../../core/util/error_text.dart';
 /// this device's and other devices' activity. Replies are not streamed: a
 /// member shows as working until it finishes, then the transcript is reloaded
 /// to show its whole reply.
+///
+/// [machines] lists this device's machine credentials. Requests that reach a
+/// swarm's remote members carry the credentials of those members' machines;
+/// a member whose machine is not among them cannot run from this device.
 class GroupChatController extends ChangeNotifier {
-  GroupChatController({BackendClient? backendClient})
-      : _client = backendClient ?? BackendClient();
+  GroupChatController({
+    BackendClient? backendClient,
+    List<MachineCredential> Function()? machines,
+  })  : _client = backendClient ?? BackendClient(),
+        _machines = machines ?? (() => const <MachineCredential>[]);
 
   static const String _streamingKey = 'streaming';
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
@@ -26,6 +34,7 @@ class GroupChatController extends ChangeNotifier {
   static const String _agentLabelKey = 'agentLabel';
 
   final BackendClient _client;
+  final List<MachineCredential> Function() _machines;
   final Random _random = Random();
   AppLanguage _language = AppLanguage.en;
   AppStrings get _strings => AppStrings(_language);
@@ -59,6 +68,14 @@ class GroupChatController extends ChangeNotifier {
   bool get loadingGroups => _loadingGroups;
   bool get sending => _activeRequestId != null;
   String? get error => _error;
+
+  List<MachineCredential> _peersFor(Iterable<String> members) =>
+      peerCredentialsFor(members, _machines());
+
+  /// Whether this device can run [member]: always for a member on this
+  /// machine, and for a remote one only with its machine's credential.
+  bool isMemberLinked(String member) =>
+      memberPeerId(member) == null || _peersFor(<String>[member]).isNotEmpty;
 
   String? _initialGroupId;
 
@@ -121,6 +138,7 @@ class GroupChatController extends ChangeNotifier {
         members,
         workdir: workdir,
         configs: configs,
+        peers: _peersFor(members),
       );
       final ChatGroup created = _groups.firstWhere(
         (ChatGroup g) => g.name == name,
@@ -149,6 +167,7 @@ class GroupChatController extends ChangeNotifier {
         group.id,
         members,
         configs: configs,
+        peers: _peersFor(<String>{...group.members, ...members}),
       );
       _selected = _groups.firstWhere(
         (ChatGroup g) => g.id == group.id,
@@ -166,7 +185,10 @@ class GroupChatController extends ChangeNotifier {
   Future<void> deleteGroup(ChatGroup group) async {
     _error = null;
     try {
-      _groups = await _client.deleteGroup(group.id);
+      _groups = await _client.deleteGroup(
+        group.id,
+        peers: _peersFor(group.members),
+      );
       if (_selected?.id == group.id) {
         _selected = _groups.isNotEmpty ? _groups.first : null;
         _messages.clear();
@@ -184,7 +206,7 @@ class GroupChatController extends ChangeNotifier {
     if (group == null) return;
     _error = null;
     try {
-      await _client.clearGroup(group.id);
+      await _client.clearGroup(group.id, peers: _peersFor(group.members));
       _messages.clear();
       _safeNotify();
     } on BackendException catch (err) {
@@ -219,6 +241,7 @@ class GroupChatController extends ChangeNotifier {
         groupId: group.id,
         prompt: text,
         requestId: requestId,
+        peers: _peersFor(group.members),
       );
       sent = true;
     } on BackendException catch (err) {

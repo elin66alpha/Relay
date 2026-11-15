@@ -297,7 +297,7 @@ Tools (each returns JSON text; long text is paged with `offset`/`maxChars`):
 | `relay_sessions` | list, create, activate, rename, delete, clear |
 | `relay_workdir` | get, set (optionally create), recent |
 | `relay_files` | browse, mkdir, read text (binary files report size only), write text |
-| `relay_swarms`, `relay_swarm_chat` | list, create, members, delete, clear, history; send a round |
+| `relay_swarms`, `relay_swarm_chat` | list, create, members, delete, clear, history; send a round (members on other machines cannot run from MCP) |
 | `relay_usage`, `relay_quota_schedules` | quota report; list, create, cancel scheduled messages |
 | `relay_machine` | hardware/disks/temperatures or the diagnostics report |
 | `relay_terminal` | type into this credential's own PTY and read the output |
@@ -566,6 +566,48 @@ resumable session; changing it would address a different conversation.
 Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
+
+The create and edit form groups agents by machine: this machine first, then
+every other machine in Manage credentials, listing that machine's usable agents
+(a machine the app cannot reach shows why). Tap an agent to add it and tap a
+member to configure it. The name is optional (`Swarm N` by default).
+
+#### Members on other machines
+
+A member can be an agent on another Relay backend. The Swarm, its transcript
+and its rounds stay on the backend that hosts it (A); a turn for a remote
+member is sent to the other backend (B) through B's ordinary API
+(`GET /api/agents`, `GET`/`POST /api/sessions`, `POST /api/sessions/active`,
+`POST /api/chat` over SSE, `POST /api/chat/cancel`, and on removal
+`POST /api/sessions/delete` or `POST /api/session/clear`), so B needs no change
+and may run an older version.
+
+- A remote member key is `<peerId>:<agentKey>`, where `peerId` is the first 12
+  hex digits of the SHA-256 of B's normalized `baseUrl`. The same agent can be
+  a member on several machines; labels add the machine name, as in
+  `Claude Code (Studio)`, and `@<peerId>:<agentKey>` summons it.
+- Adding one checks that B is reachable and has the agent, then creates a
+  dedicated session on B named `Swarm: <swarm name>` in the chosen work
+  directory on B (by default the one the app remembers for B). Because creating
+  a session and running a turn both make it B's active session, A restores B's
+  previous active session afterwards.
+- B's own model, effort and permission for that session apply; the Swarm sets
+  only nickname, prompt and the work directory on B, which is fixed once added.
+- The app sends B's credential with each request that reaches B's members. A
+  never stores it (see [Security](SECURITY.md#swarm-members-on-other-machines)).
+  A member whose machine is not in this device's credentials is marked "This
+  device is not connected to that machine", and if summoned its turn ends with
+  `PEER_NOT_LINKED` while the other members run.
+- An unreachable B, a refused credential or a timeout ends that member's turn
+  with `PEER_UNREACHABLE` or `PEER_UNAUTHORIZED`. Adding a member fails without
+  creating anything with those codes or `PEER_UNKNOWN_AGENT`.
+- Stop cancels the remote turn on B with the same request id.
+- Deleting the Swarm or removing the member deletes its session on B, and
+  clearing the Swarm clears it, when the request carries B's credential; that
+  never blocks the change on A.
+
+B sees these turns as turns from the app's device. If no device has the work
+directory open on B, B sends its own task notifications for them.
 
 ### Quota and notifications
 

@@ -8,6 +8,7 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/models/agent_options.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/group.dart';
+import '../../core/models/machine_credential.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../cli_agents/agent_status_lights.dart';
 import 'work_tree_picker_dialog.dart';
@@ -98,11 +99,13 @@ class MemberPersonaDialog extends StatefulWidget {
   const MemberPersonaDialog({
     super.key,
     required this.agentKey,
+    required this.label,
     required this.initialNickname,
     required this.initialPrompt,
   });
 
   final String agentKey;
+  final String label;
   final String initialNickname;
   final String initialPrompt;
 
@@ -130,11 +133,11 @@ class _MemberPersonaDialogState extends State<MemberPersonaDialog> {
       title: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          AgentIcon(agentKey: widget.agentKey, size: 24),
+          AgentIcon(agentKey: memberAgentKey(widget.agentKey), size: 24),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              strings.editMemberTitle(cliAgentByKey(widget.agentKey).label),
+              strings.editMemberTitle(widget.label),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -146,26 +149,7 @@ class _MemberPersonaDialogState extends State<MemberPersonaDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            TextField(
-              controller: _nickname,
-              decoration: InputDecoration(
-                labelText: strings.memberNickname,
-                hintText: strings.memberNicknameHint,
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _prompt,
-              minLines: 3,
-              maxLines: 8,
-              decoration: InputDecoration(
-                labelText: strings.memberPrompt,
-                hintText: strings.memberPromptHint,
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
+            _PersonaFields(nickname: _nickname, prompt: _prompt),
           ],
         ),
       ),
@@ -188,50 +172,140 @@ class _MemberPersonaDialogState extends State<MemberPersonaDialog> {
   }
 }
 
-/// Create / edit a swarm: name, work tree, members, and — per selected member —
-/// model / effort / permission. Existing members load their catalogs when the
-/// dialog opens; other catalogs are fetched lazily when an agent is selected.
+class _PersonaFields extends StatelessWidget {
+  const _PersonaFields({required this.nickname, required this.prompt});
+
+  final TextEditingController nickname;
+  final TextEditingController prompt;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        TextField(
+          controller: nickname,
+          decoration: InputDecoration(
+            labelText: strings.memberNickname,
+            hintText: strings.memberNicknameHint,
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: prompt,
+          minLines: 3,
+          maxLines: 8,
+          decoration: InputDecoration(
+            labelText: strings.memberPrompt,
+            hintText: strings.memberPromptHint,
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// The effort list can depend on the selected model, so model is resolved
+// first; ids the catalog no longer offers fall back to the backend default.
+void _normalizeConfig(AgentOptionsCatalog catalog, Map<String, String> config) {
+  final String? modelId = catalog.supportsGroup('model')
+      ? catalog.resolveSelection('model', config['model'])
+      : null;
+  if (modelId == null) {
+    config.remove('model');
+  } else {
+    config['model'] = modelId;
+  }
+  for (final String group in <String>['effort', 'permission']) {
+    if (!catalog.supportsGroup(group)) {
+      config.remove(group);
+      continue;
+    }
+    final String? resolved = catalog.resolveSelection(
+      group,
+      config[group],
+      modelId: modelId,
+    );
+    if (resolved == null) {
+      config.remove(group);
+    } else {
+      config[group] = resolved;
+    }
+  }
+}
+
+/// Another machine from Manage Credentials, as the form offers it: its usable
+/// agents and the work directory this device remembers for it.
+class _Machine {
+  _Machine(this.credential, this.client)
+      : peerId = peerIdForBaseUrl(credential.baseUrl);
+
+  final MachineCredential credential;
+  final BackendClient client;
+  final String peerId;
+  List<CliAgent>? agents;
+  String workdir = '';
+  String? error;
+
+  String memberKey(String agentKey) => '$peerId:$agentKey';
+}
+
+/// Create / edit a swarm: pick agents, grouped by machine (this machine first,
+/// then every other machine in Manage Credentials). Tapping a selected agent
+/// opens its settings: model / effort / permission and the swarm's work tree on
+/// this machine; on another machine, the work directory there, since that
+/// machine's own settings apply. Nickname and prompt are offered for both.
 class SwarmFormDialog extends StatefulWidget {
   const SwarmFormDialog({
     super.key,
     required this.title,
     required this.agents,
     required this.backend,
+    required this.localMachineName,
+    required this.machines,
     required this.initialName,
     required this.initialMembers,
     required this.initialWorkdir,
     required this.initialConfigs,
+    required this.initialPeers,
     required this.nameEditable,
     required this.workTreeEditable,
+    this.machineBackend,
   });
 
   final String title;
   final List<CliAgent> agents;
   final BackendClient backend;
+  final String localMachineName;
+
+  /// Every other machine this device has a credential for.
+  final List<MachineCredential> machines;
   final String initialName;
   final List<String> initialMembers;
   final String initialWorkdir;
   final Map<String, Map<String, String>> initialConfigs;
+  final Map<String, SwarmPeer> initialPeers;
   final bool nameEditable;
   final bool workTreeEditable;
+
+  /// The client for another machine; a test replaces it.
+  final BackendClient Function(MachineCredential machine)? machineBackend;
 
   @override
   State<SwarmFormDialog> createState() => _SwarmFormDialogState();
 }
 
 class _SwarmFormDialogState extends State<SwarmFormDialog> {
-  static const List<String> _groupOrder = <String>[
-    'model',
-    'effort',
-    'permission',
-  ];
-
   late final TextEditingController _nameController = TextEditingController(
     text: widget.initialName,
   );
   late final Set<String> _selected = <String>{...widget.initialMembers};
   late String _workdir = widget.initialWorkdir;
-  // Selected option ids per agent, seeded from the swarm being edited.
   late final Map<String, Map<String, String>> _configs =
       <String, Map<String, String>>{
     for (final MapEntry<String, Map<String, String>> e
@@ -240,169 +314,150 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
   };
   final Map<String, AgentOptionsCatalog> _catalogs =
       <String, AgentOptionsCatalog>{};
-  final Set<String> _loading = <String>{};
-  // Per-member swarm-scoped nickname / prompt fields, lazily created and seeded
-  // from the swarm being edited. Kept as controllers (not inline initialValue) so
-  // their text survives the setState rebuilds that toggling other members causes.
-  final Map<String, TextEditingController> _nicknameControllers =
-      <String, TextEditingController>{};
-  final Map<String, TextEditingController> _promptControllers =
-      <String, TextEditingController>{};
+  late final List<_Machine> _machines = <_Machine>[
+    for (final MachineCredential machine in widget.machines)
+      _Machine(
+        machine,
+        (widget.machineBackend ??
+            (MachineCredential m) => BackendClient(machine: m))(machine),
+      ),
+  ];
   String? _validationError;
 
   @override
   void initState() {
     super.initState();
-    for (final String agentKey in widget.initialMembers) {
-      unawaited(_ensureCatalog(agentKey));
-    }
-  }
-
-  TextEditingController _personaController(
-    Map<String, TextEditingController> map,
-    String agentKey,
-    String field,
-  ) {
-    return map.putIfAbsent(
-      agentKey,
-      () => TextEditingController(text: _configs[agentKey]?[field] ?? ''),
-    );
-  }
-
-  void _onPersonaChanged(String agentKey, String field, String value) {
-    final Map<String, String> config =
-        _configs.putIfAbsent(agentKey, () => <String, String>{});
-    if (value.trim().isEmpty) {
-      config.remove(field);
-    } else {
-      config[field] = value;
+    for (final _Machine machine in _machines) {
+      unawaited(_loadMachine(machine));
     }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    for (final TextEditingController c in _nicknameControllers.values) {
-      c.dispose();
-    }
-    for (final TextEditingController c in _promptControllers.values) {
-      c.dispose();
+    for (final _Machine machine in _machines) {
+      machine.client.close();
     }
     super.dispose();
   }
 
-  Future<void> _toggleMember(String agentKey, bool on) async {
-    final CliAgent agent = widget.agents.firstWhere(
-      (CliAgent item) => item.key == agentKey,
-      orElse: () => cliAgentByKey(agentKey),
-    );
-    if (on && !isCliAgentSelectable(agent)) {
-      setState(() {
-        _validationError = agentUnavailableMessage(context.l10n, agent);
-      });
-      return;
+  Future<void> _loadMachine(_Machine machine) async {
+    try {
+      final List<CliAgent> agents = await machine.client.fetchAgents();
+      machine.agents = agents.where(isCliAgentSelectable).toList();
+    } on BackendException catch (err) {
+      machine.error = err.message;
     }
-    setState(() {
-      if (on) {
-        _selected.add(agentKey);
-      } else {
-        _selected.remove(agentKey);
+    if (machine.agents != null) {
+      try {
+        machine.workdir = (await machine.client.workdir()).dir;
+      } on BackendException {
+        // The member then starts in that machine's default work directory.
       }
-    });
-    if (on) await _ensureCatalog(agentKey);
+    }
+    if (mounted) setState(() {});
   }
 
-  // Fetch (once) the agent's option catalog and reconcile every selection. The
-  // effort list can depend on the selected model, so model is resolved first.
+  // Fetch (once) a local agent's option catalog. A catalog that fails to load
+  // leaves the member on backend defaults; it can still be added.
   Future<void> _ensureCatalog(String agentKey) async {
-    if (_catalogs.containsKey(agentKey) || _loading.contains(agentKey)) return;
-    setState(() => _loading.add(agentKey));
+    if (_catalogs.containsKey(agentKey)) return;
     try {
       final AgentOptionsCatalog catalog =
           await widget.backend.fetchAgentOptions(agentKey);
       if (!mounted) return;
       setState(() {
         _catalogs[agentKey] = catalog;
-        final Map<String, String> config = _configs.putIfAbsent(
-          agentKey,
-          () => <String, String>{},
+        _normalizeConfig(
+          catalog,
+          _configs.putIfAbsent(agentKey, () => <String, String>{}),
         );
-        _normalizeConfig(catalog, config);
       });
     } on BackendException {
-      // A catalog that fails to load just leaves the agent on backend defaults;
-      // the member is still added.
-    } finally {
-      if (mounted) setState(() => _loading.remove(agentKey));
+      // Kept on backend defaults.
     }
   }
 
-  void _normalizeConfig(
-    AgentOptionsCatalog catalog,
-    Map<String, String> config,
-  ) {
-    final String? modelId = catalog.supportsGroup('model')
-        ? catalog.resolveSelection('model', config['model'])
-        : null;
-    if (modelId == null) {
-      config.remove('model');
-    } else {
-      config['model'] = modelId;
+  void _addLocal(CliAgent agent) {
+    if (!isCliAgentSelectable(agent)) {
+      setState(() {
+        _validationError = agentUnavailableMessage(context.l10n, agent);
+      });
+      return;
     }
-
-    for (final String group in <String>['effort', 'permission']) {
-      if (!catalog.supportsGroup(group)) {
-        config.remove(group);
-        continue;
-      }
-      final String? resolved = catalog.resolveSelection(
-        group,
-        config[group],
-        modelId: modelId,
-      );
-      if (resolved == null) {
-        config.remove(group);
-      } else {
-        config[group] = resolved;
-      }
-    }
-  }
-
-  List<AgentOption> _optionsForGroup(
-    AgentOptionsCatalog catalog,
-    Map<String, String> config,
-    String group,
-  ) {
-    final String? modelId = catalog.resolveSelection(
-      'model',
-      config['model'],
-    );
-    return catalog.optionsFor(group, modelId: modelId);
-  }
-
-  void _onOptionChanged(
-    String agentKey,
-    String group,
-    String id,
-    AgentOptionsCatalog catalog,
-  ) {
     setState(() {
-      final Map<String, String> config = _configs.putIfAbsent(
-        agentKey,
-        () => <String, String>{},
-      );
-      config[group] = id;
-      _normalizeConfig(catalog, config);
+      _validationError = null;
+      _selected.add(agent.key);
+    });
+    unawaited(_ensureCatalog(agent.key));
+  }
+
+  void _addRemote(_Machine machine, CliAgent agent) {
+    final String key = machine.memberKey(agent.key);
+    setState(() {
+      _validationError = null;
+      _selected.add(key);
+      if (machine.workdir.isNotEmpty) {
+        _configs
+            .putIfAbsent(key, () => <String, String>{})
+            .putIfAbsent('workdir', () => machine.workdir);
+      }
     });
   }
 
-  Future<void> _pickWorkTree() async {
-    final String? picked = await showDialog<String>(
+  _Machine? _machineOf(String member) {
+    final String? peerId = memberPeerId(member);
+    for (final _Machine machine in _machines) {
+      if (machine.peerId == peerId) return machine;
+    }
+    return null;
+  }
+
+  String _memberLabel(String member) {
+    final String agentLabel = cliAgentByKey(memberAgentKey(member)).label;
+    final String? peerId = memberPeerId(member);
+    if (peerId == null) return agentLabel;
+    final String machineName = _machineOf(member)?.credential.displayName ??
+        widget.initialPeers[peerId]?.name ??
+        peerId;
+    return '$agentLabel ($machineName)';
+  }
+
+  Future<void> _editMember(String member) async {
+    final bool remote = memberPeerId(member) != null;
+    if (!remote) await _ensureCatalog(member);
+    if (!mounted) return;
+    final _Machine? machine = _machineOf(member);
+    final _MemberEdit? result = await showDialog<_MemberEdit>(
       context: context,
-      builder: (BuildContext context) =>
-          WorkTreePickerDialog(backend: widget.backend, start: _workdir),
+      builder: (BuildContext context) => _MemberEditDialog(
+        member: member,
+        label: _memberLabel(member),
+        catalog: remote ? null : _catalogs[member],
+        initialConfig: _configs[member] ?? const <String, String>{},
+        workdir: remote ? (_configs[member]?['workdir'] ?? '') : _workdir,
+        // A remote member's session lives in one work directory on its
+        // machine, and the swarm's work tree is fixed once created.
+        workdirEditable: remote
+            ? machine != null && !widget.initialMembers.contains(member)
+            : widget.workTreeEditable,
+        pickerBackend: remote ? machine?.client : widget.backend,
+      ),
     );
-    if (picked != null) setState(() => _workdir = picked);
+    if (result == null) return;
+    setState(() {
+      final Map<String, String> config = result.config;
+      if (remote) {
+        if (result.workdir.isEmpty) {
+          config.remove('workdir');
+        } else {
+          config['workdir'] = result.workdir;
+        }
+      } else {
+        _workdir = result.workdir;
+      }
+      _configs[member] = config;
+    });
   }
 
   void _submit() {
@@ -411,25 +466,28 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
       setState(() => _validationError = strings.selectMembers);
       return;
     }
-    // Preserve the agent display order for the roster, and keep configs only for
-    // members that are actually selected.
-    final List<String> members = widget.agents
-        .map((CliAgent a) => a.key)
-        .where(_selected.contains)
-        .toList(growable: false);
-    for (final String key in members) {
-      final AgentOptionsCatalog? catalog = _catalogs[key];
-      final Map<String, String>? config = _configs[key];
-      if (catalog != null && config != null) {
-        _normalizeConfig(catalog, config);
-      }
+    // This machine's agents first, then each other machine's, in the order
+    // they are listed; members of machines this device cannot see stay last.
+    final List<String> order = <String>[
+      for (final CliAgent agent in widget.agents) agent.key,
+      for (final _Machine machine in _machines)
+        for (final CliAgent agent in machine.agents ?? const <CliAgent>[])
+          machine.memberKey(agent.key),
+      ...widget.initialMembers,
+    ];
+    final List<String> members = <String>[];
+    for (final String key in order) {
+      if (_selected.contains(key) && !members.contains(key)) members.add(key);
     }
     final Map<String, Map<String, String>> configs =
-        <String, Map<String, String>>{
-      for (final String key in members)
-        if (_configs[key] != null && _configs[key]!.isNotEmpty)
-          key: <String, String>{..._configs[key]!},
-    };
+        <String, Map<String, String>>{};
+    for (final String key in members) {
+      final Map<String, String>? config = _configs[key];
+      if (config == null) continue;
+      final AgentOptionsCatalog? catalog = _catalogs[key];
+      if (catalog != null) _normalizeConfig(catalog, config);
+      if (config.isNotEmpty) configs[key] = <String, String>{...config};
+    }
     Navigator.of(context).pop(
       SwarmForm(
         name: _nameController.text.trim(),
@@ -444,55 +502,93 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     final ThemeData theme = Theme.of(context);
+    final Set<String> visiblePeers =
+        _machines.map((_Machine m) => m.peerId).toSet();
+    final List<String> unlinked = widget.initialMembers
+        .where(
+          (String m) =>
+              memberPeerId(m) != null &&
+              !visiblePeers.contains(memberPeerId(m)),
+        )
+        .toList();
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
-        width: 420,
+        width: 460,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              if (widget.nameEditable)
+              if (widget.nameEditable) ...<Widget>[
                 TextField(
                   controller: _nameController,
-                  decoration: InputDecoration(labelText: strings.groupName),
-                ),
-              if (widget.workTreeEditable) ...<Widget>[
-                const SizedBox(height: 12),
-                Text(strings.swarmWorkTree, style: theme.textTheme.labelLarge),
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(
-                    _workdir.isEmpty ? strings.swarmWorkTreeDefault : _workdir,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  decoration: InputDecoration(
+                    labelText: strings.groupName,
+                    hintText: strings.swarmNameOptional,
                   ),
-                  trailing: _workdir.isEmpty
-                      ? TextButton(
-                          onPressed: _pickWorkTree,
-                          child: Text(strings.browse),
-                        )
-                      : IconButton(
-                          tooltip: strings.swarmWorkTreeDefault,
-                          icon: const Icon(Icons.close),
-                          onPressed: () => setState(() => _workdir = ''),
-                        ),
-                  onTap: _pickWorkTree,
                 ),
+                const SizedBox(height: 12),
               ],
-              const SizedBox(height: 12),
-              Text(strings.groupMembers, style: theme.textTheme.labelLarge),
               Text(
-                strings.swarmConfigureMembersHint,
+                strings.swarmPickMembersHint,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
               ),
-              for (final CliAgent agent in widget.agents)
-                _buildMemberTile(strings, theme, agent),
+              _MachineSection(
+                title: strings.swarmThisMachine(widget.localMachineName),
+                icon: Icons.computer_outlined,
+                children: <Widget>[
+                  for (final CliAgent agent in widget.agents)
+                    _memberChip(
+                      strings,
+                      member: agent.key,
+                      agentKey: agent.key,
+                      usable: isCliAgentSelectable(agent),
+                      onAdd: () => _addLocal(agent),
+                    ),
+                ],
+              ),
+              for (final _Machine machine in _machines)
+                _MachineSection(
+                  title: machine.credential.displayName,
+                  icon: Icons.dns_outlined,
+                  status: machine.error != null
+                      ? strings.swarmMachineUnavailable(machine.error!)
+                      : machine.agents == null
+                          ? null
+                          : machine.agents!.isEmpty
+                              ? strings.swarmMachineNoAgents
+                              : null,
+                  loading: machine.agents == null && machine.error == null,
+                  children: <Widget>[
+                    for (final CliAgent agent
+                        in machine.agents ?? const <CliAgent>[])
+                      _memberChip(
+                        strings,
+                        member: machine.memberKey(agent.key),
+                        agentKey: agent.key,
+                        usable: true,
+                        onAdd: () => _addRemote(machine, agent),
+                      ),
+                  ],
+                ),
+              if (unlinked.isNotEmpty)
+                _MachineSection(
+                  title: strings.swarmMemberNotLinked,
+                  icon: Icons.link_off,
+                  children: <Widget>[
+                    for (final String member in unlinked)
+                      _memberChip(
+                        strings,
+                        member: member,
+                        agentKey: memberAgentKey(member),
+                        usable: true,
+                        onAdd: () => setState(() => _selected.add(member)),
+                      ),
+                  ],
+                ),
               if (_validationError != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -518,123 +614,286 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
     );
   }
 
-  Widget _buildMemberTile(AppStrings strings, ThemeData theme, CliAgent agent) {
-    final bool on = _selected.contains(agent.key);
-    final AgentOptionsCatalog? catalog = _catalogs[agent.key];
-    final Map<String, String> config =
-        _configs[agent.key] ?? const <String, String>{};
-    final bool usable = isCliAgentSelectable(agent);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        CheckboxListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          value: on,
-          title: Text(
-            agent.label,
-            style: usable
-                ? null
-                : TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          subtitle:
-              usable ? null : Text(agentUnavailableMessage(strings, agent)),
-          secondary: AgentStatusLights(agent: agent, compact: true),
-          onChanged: (bool? value) => _toggleMember(agent.key, value == true),
-        ),
-        if (on)
-          Padding(
-            padding: const EdgeInsets.only(left: 16, bottom: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                if (_loading.contains(agent.key))
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                else if (catalog != null)
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 4,
-                    children: <Widget>[
-                      for (final String group in _groupOrder)
-                        if (catalog.supportsGroup(group) &&
-                            _optionsForGroup(catalog, config, group).isNotEmpty)
-                          _buildOptionDropdown(
-                            strings,
-                            agent.key,
-                            group,
-                            catalog,
-                          ),
-                    ],
-                  ),
-                _buildPersonaFields(strings, agent.key),
-              ],
-            ),
-          ),
-      ],
+  // An agent tag: tapping an unselected one adds it, tapping a member opens
+  // its settings, and its delete icon removes it.
+  Widget _memberChip(
+    AppStrings strings, {
+    required String member,
+    required String agentKey,
+    required bool usable,
+    required VoidCallback onAdd,
+  }) {
+    final bool on = _selected.contains(member);
+    final String? nickname = _configs[member]?['nickname'];
+    final String label = nickname != null && nickname.trim().isNotEmpty
+        ? nickname.trim()
+        : cliAgentByKey(agentKey).label;
+    return InputChip(
+      key: ValueKey<String>('swarm-member-$member'),
+      avatar: AgentIcon(agentKey: agentKey, size: 18),
+      label: Text(label),
+      selected: on,
+      showCheckmark: false,
+      onPressed: on ? () => _editMember(member) : onAdd,
+      onDeleted: on ? () => setState(() => _selected.remove(member)) : null,
+      deleteButtonTooltipMessage: strings.delete,
+      labelStyle: usable
+          ? null
+          : TextStyle(color: Theme.of(context).colorScheme.outline),
     );
   }
+}
 
-  // The swarm-scoped nickname + work/prompt for one member. Independent of the
-  // option catalog, so they show even while it loads or fails.
-  Widget _buildPersonaFields(AppStrings strings, String agentKey) {
+class _MachineSection extends StatelessWidget {
+  const _MachineSection({
+    required this.title,
+    required this.icon,
+    required this.children,
+    this.status,
+    this.loading = false,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+  final String? status;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          TextField(
-            controller:
-                _personaController(_nicknameControllers, agentKey, 'nickname'),
-            onChanged: (String value) =>
-                _onPersonaChanged(agentKey, 'nickname', value),
-            decoration: InputDecoration(
-              labelText: strings.memberNickname,
-              hintText: strings.memberNicknameHint,
-              isDense: true,
-            ),
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 18, color: theme.colorScheme.outline),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelLarge,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          TextField(
-            controller:
-                _personaController(_promptControllers, agentKey, 'prompt'),
-            onChanged: (String value) =>
-                _onPersonaChanged(agentKey, 'prompt', value),
-            minLines: 2,
-            maxLines: 5,
-            decoration: InputDecoration(
-              labelText: strings.memberPrompt,
-              hintText: strings.memberPromptHint,
-              border: const OutlineInputBorder(),
-              isDense: true,
+          const SizedBox(height: 6),
+          if (loading)
+            const SizedBox(
+              height: 16,
+              width: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (status != null)
+            Text(
+              status!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          if (children.isNotEmpty)
+            Wrap(spacing: 8, runSpacing: 4, children: children),
+        ],
+      ),
+    );
+  }
+}
+
+class _MemberEdit {
+  const _MemberEdit({required this.config, required this.workdir});
+
+  final Map<String, String> config;
+  final String workdir;
+}
+
+/// One member's settings. A member on this machine has model / effort /
+/// permission ([catalog]) and the swarm's work tree, which all of this
+/// machine's members share; a remote member has the work directory on its
+/// machine. Both have nickname and prompt.
+class _MemberEditDialog extends StatefulWidget {
+  const _MemberEditDialog({
+    required this.member,
+    required this.label,
+    required this.catalog,
+    required this.initialConfig,
+    required this.workdir,
+    required this.workdirEditable,
+    required this.pickerBackend,
+  });
+
+  final String member;
+  final String label;
+  final AgentOptionsCatalog? catalog;
+  final Map<String, String> initialConfig;
+  final String workdir;
+  final bool workdirEditable;
+  final BackendClient? pickerBackend;
+
+  @override
+  State<_MemberEditDialog> createState() => _MemberEditDialogState();
+}
+
+class _MemberEditDialogState extends State<_MemberEditDialog> {
+  static const List<String> _groupOrder = <String>[
+    'model',
+    'effort',
+    'permission',
+  ];
+
+  late final Map<String, String> _config = <String, String>{
+    ...widget.initialConfig,
+  };
+  late final TextEditingController _nickname =
+      TextEditingController(text: _config['nickname'] ?? '');
+  late final TextEditingController _prompt =
+      TextEditingController(text: _config['prompt'] ?? '');
+  late String _workdir = widget.workdir;
+
+  bool get _remote => memberPeerId(widget.member) != null;
+
+  @override
+  void dispose() {
+    _nickname.dispose();
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickWorkdir() async {
+    final BackendClient? backend = widget.pickerBackend;
+    if (backend == null || !widget.workdirEditable) return;
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) =>
+          WorkTreePickerDialog(backend: backend, start: _workdir),
+    );
+    if (picked != null) setState(() => _workdir = picked);
+  }
+
+  void _save() {
+    for (final MapEntry<String, TextEditingController> field
+        in <String, TextEditingController>{
+      'nickname': _nickname,
+      'prompt': _prompt,
+    }.entries) {
+      final String value = field.value.text.trim();
+      if (value.isEmpty) {
+        _config.remove(field.key);
+      } else {
+        _config[field.key] = value;
+      }
+    }
+    Navigator.of(context).pop(
+      _MemberEdit(config: _config, workdir: _workdir.trim()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ThemeData theme = Theme.of(context);
+    final AgentOptionsCatalog? catalog = widget.catalog;
+    return AlertDialog(
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          AgentIcon(agentKey: memberAgentKey(widget.member), size: 24),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              strings.editMemberTitle(widget.label),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
       ),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (catalog != null)
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: <Widget>[
+                    for (final String group in _groupOrder)
+                      if (catalog.supportsGroup(group) &&
+                          catalog
+                              .optionsFor(
+                                group,
+                                modelId: catalog.resolveSelection(
+                                  'model',
+                                  _config['model'],
+                                ),
+                              )
+                              .isNotEmpty)
+                        _buildOptionDropdown(strings, group, catalog),
+                  ],
+                ),
+              if (_remote)
+                Text(
+                  strings.swarmRemoteSettingsHint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+              const SizedBox(height: 8),
+              _PersonaFields(nickname: _nickname, prompt: _prompt),
+              const SizedBox(height: 12),
+              Text(
+                _remote ? strings.swarmMemberWorkdir : strings.swarmWorkTree,
+                style: theme.textTheme.labelLarge,
+              ),
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(
+                  _workdir.isEmpty
+                      ? (_remote
+                          ? strings.swarmMemberWorkdirDefault
+                          : strings.swarmWorkTreeDefault)
+                      : _workdir,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: _remote ? null : Text(strings.swarmWorkTreeShared),
+                trailing: widget.workdirEditable && widget.pickerBackend != null
+                    ? TextButton(
+                        onPressed: _pickWorkdir,
+                        child: Text(strings.browse),
+                      )
+                    : null,
+                onTap: _pickWorkdir,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(onPressed: _save, child: Text(strings.ok)),
+      ],
     );
   }
 
   Widget _buildOptionDropdown(
     AppStrings strings,
-    String agentKey,
     String group,
     AgentOptionsCatalog catalog,
   ) {
-    final Map<String, String> config =
-        _configs[agentKey] ?? const <String, String>{};
-    final String? modelId = catalog.resolveSelection(
-      'model',
-      config['model'],
-    );
+    final String? modelId = catalog.resolveSelection('model', _config['model']);
     final String? value = catalog.resolveSelection(
       group,
-      config[group],
+      _config[group],
       modelId: modelId,
     );
     // Swarms offer only first-page models; a member already on a grouped one
@@ -654,7 +913,10 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
         isExpanded: true,
         onChanged: (String? id) {
           if (id == null) return;
-          _onOptionChanged(agentKey, group, id, catalog);
+          setState(() {
+            _config[group] = id;
+            _normalizeConfig(catalog, _config);
+          });
         },
         items: <DropdownMenuItem<String>>[
           for (final AgentOption option in options)

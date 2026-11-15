@@ -157,7 +157,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '用蜂群分工协作',
     body:
-        '创建蜂群时选择工作树，配置成员昵称、角色提示、模型（只列主力模型）和权限；创建后工作树不可更改。蜂群列表属于当前工作区，但成员在蜂群选定的工作树里执行。\n发送“@成员名 请检查这段代码”来指定回答者；同时提及多名成员可让他们并行处理。成员回复里的 @提及也可继续召唤队友，默认最多追加三轮，具体上限由部署配置决定。可将成员配置导出为 JSON 模板复用。',
+        '创建蜂群时按机器点选 agent 标签：第一组是本机，其余是“管理凭证”里的其他机器。再点一次成员可设置昵称、角色提示、模型（只列主力模型）、权限和工作树；其他机器上的成员沿用那台机器的模型和权限，只设置昵称、提示和那台机器上的工作目录。创建后工作树不可更改。蜂群列表属于当前工作区，但成员在蜂群选定的工作树里执行。只有保存了那台机器凭证的设备才能召唤它上面的成员。\n发送“@成员名 请检查这段代码”来指定回答者；同时提及多名成员可让他们并行处理。成员回复里的 @提及也可继续召唤队友，默认最多追加三轮，具体上限由部署配置决定。可将成员配置导出为 JSON 模板复用。',
   ),
   _GettingStartedStep(
     title: '浏览、上传和下载文件',
@@ -210,7 +210,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Divide work with a Swarm',
     body:
-        'When creating a Swarm, select its work tree and configure member nicknames, role prompts, models (main models only), and permissions. Its work tree cannot be changed later. The Swarm is listed under the current workspace, while members execute in its selected work tree.\nMention @member-name to choose who answers. Mention several members to run them in parallel. Members can summon teammates through mentions in their replies, with up to three additional waves by default, depending on deployment settings. Export the member configuration as a reusable JSON template.',
+        'When creating a Swarm, tap agent tags grouped by machine: this machine first, then the other machines in Manage credentials. Tap a member again to set its nickname, role prompt, model (main models only), permission, and work tree; a member on another machine keeps that machine\'s model and permission and sets only its nickname, prompt, and work directory there. The work tree cannot be changed later. Only a device that holds the other machine\'s credential can summon its members. The Swarm is listed under the current workspace, while members execute in its selected work tree.\nMention @member-name to choose who answers. Mention several members to run them in parallel. Members can summon teammates through mentions in their replies, with up to three additional waves by default, depending on deployment settings. Export the member configuration as a reusable JSON template.',
   ),
   _GettingStartedStep(
     title: 'Browse, upload, and download files',

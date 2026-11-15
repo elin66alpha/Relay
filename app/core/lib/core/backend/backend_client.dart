@@ -71,11 +71,13 @@ class BackendClient {
     DeviceIdStore? deviceIdStore,
     WorkdirStore? workdirStore,
     http.Client? httpClient,
+    MachineCredential? machine,
   }) : _transport = ApiTransport(
           credentialsStore: credentialsStore,
           deviceIdStore: deviceIdStore,
           workdirStore: workdirStore,
           httpClient: httpClient,
+          machine: machine,
         );
 
   final ApiTransport _transport;
@@ -664,12 +666,29 @@ class BackendClient {
     return _groupsFrom(await _requestJson('GET', '/api/groups'));
   }
 
+  // The machines a swarm's remote members run on. The backend uses each token
+  // only while handling this one request and never stores it.
+  Map<String, Object?> _peersBody(List<MachineCredential> peers) {
+    return <String, Object?>{
+      if (peers.isNotEmpty)
+        'peers': <Map<String, String>>[
+          for (final MachineCredential peer in peers)
+            <String, String>{
+              'name': peer.displayName,
+              'baseUrl': peer.baseUrl,
+              'token': peer.token,
+            },
+        ],
+    };
+  }
+
   Future<List<ChatGroup>> createGroup(
     String name,
     List<String> members, {
     String workdir = '',
     Map<String, Map<String, String>> configs =
         const <String, Map<String, String>>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
   }) async {
     final Object? decoded = await _requestJson(
       'POST',
@@ -679,7 +698,9 @@ class BackendClient {
         'members': members,
         if (workdir.isNotEmpty) 'workdir': workdir,
         if (configs.isNotEmpty) 'configs': configs,
+        ..._peersBody(peers),
       },
+      timeout: const Duration(seconds: 60),
     );
     return _groupsFrom(decoded);
   }
@@ -689,6 +710,7 @@ class BackendClient {
     List<String> members, {
     Map<String, Map<String, String>> configs =
         const <String, Map<String, String>>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
   }) async {
     final Object? decoded = await _requestJson(
       'POST',
@@ -697,16 +719,22 @@ class BackendClient {
         'groupId': groupId,
         'members': members,
         if (configs.isNotEmpty) 'configs': configs,
+        ..._peersBody(peers),
       },
+      timeout: const Duration(seconds: 60),
     );
     return _groupsFrom(decoded);
   }
 
-  Future<List<ChatGroup>> deleteGroup(String groupId) async {
+  Future<List<ChatGroup>> deleteGroup(
+    String groupId, {
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
     final Object? decoded = await _requestJson(
       'POST',
       '/api/groups/delete',
-      body: <String, Object?>{'groupId': groupId},
+      body: <String, Object?>{'groupId': groupId, ..._peersBody(peers)},
+      timeout: const Duration(seconds: 60),
     );
     return _groupsFrom(decoded);
   }
@@ -741,6 +769,7 @@ class BackendClient {
     required String groupId,
     required String prompt,
     required String requestId,
+    List<MachineCredential> peers = const <MachineCredential>[],
   }) async {
     await _requestJson(
       'POST',
@@ -749,6 +778,7 @@ class BackendClient {
         'groupId': groupId,
         'prompt': prompt,
         'requestId': requestId,
+        ..._peersBody(peers),
       },
       timeout: const Duration(minutes: 65),
     );
@@ -762,11 +792,15 @@ class BackendClient {
     );
   }
 
-  Future<void> clearGroup(String groupId) async {
+  Future<void> clearGroup(
+    String groupId, {
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
     await _requestJson(
       'POST',
       '/api/group/clear',
-      body: <String, Object?>{'groupId': groupId},
+      body: <String, Object?>{'groupId': groupId, ..._peersBody(peers)},
+      timeout: const Duration(seconds: 60),
     );
   }
 

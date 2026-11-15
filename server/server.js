@@ -73,6 +73,7 @@ const {
   touchGroup,
   deleteGroup,
 } = require('./lib/groups');
+const { createPeerClient } = require('./lib/peer-client');
 const {
   readHistory,
   upsertHistoryMessage,
@@ -570,6 +571,7 @@ const routeContext = {
   clearModelDiscoveryCache,
   createAbsoluteDirectory,
   createGroup,
+  createPeerClient,
   deleteGroup,
   purgeSession,
   contextWindowFor,

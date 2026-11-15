@@ -15,7 +15,7 @@ an authenticated HTTP/SSE backend.
 
 In:
 - Solo chat per workdir + agent + session (max 8 sessions, Main undeletable), per-session agent controls.
-- Swarms: multi-agent group chat with mention-driven waves (max hops `RELAY_SWARM_MAX_HOPS`).
+- Swarms: multi-agent group chat with mention-driven waves (max hops `RELAY_SWARM_MAX_HOPS`); members may run on another Relay backend the app holds a credential for.
 - Filesystem browse/upload/download under a sensitive-path denylist.
 - SSH-style PTY terminal via single-use WebSocket ticket.
 - Browser for pages on the backend's own localhost: a headless Chrome on the host streamed as frames, with touch/mouse/keyboard input sent back, via single-use WebSocket ticket.
@@ -63,6 +63,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server/lib/agent-options.js / agent-settings.js | option validation and representation / persisted per-session settings | describeAgent, normalizeSettings, getSettings/setSettings | model-discovery, json-store |
 | server/lib/agent-turn.js | one solo turn, background Claude/Codex/Antigravity turns and the task-completion notification | runAgentTurn, responders, createBackgroundTurnHandler, createTaskCompletionNotifier | agents, history, sse |
 | server/lib/group-turn.js | Swarm prompt building | parseMentions, deltaSince, buildGroupPrompt | none |
+| server/lib/peer-client.js | another Relay backend's HTTP API for remote Swarm members: agents, sessions (restoring the peer's active session), one SSE turn in the runAgent contract, cancel; the peer token lives only in the client's closure | createPeerClient (via routeContext), normalizeBaseUrl, peerIdFor, splitMemberKey, PeerError | fetch (Node built-in) |
 | server/lib/context-windows.js | last context window size each agent + model reported, so a conversation without a reply can still show its limit | recordContextWindow(agent, model, size), contextWindowFor(agent, model); GET /api/history returns it as `contextWindow` | json-store |
 | server/lib/history.js, chat-sessions.js, groups.js, tokens.js | persistence | per-module load/save | json-store (history: own writer: background flush writes scope by scope in chunks; a file that exists but cannot be loaded is renamed to `<file>.corrupt-<time>` before history starts empty) |
 | server/lib/filesystem.js, workdir.js | path policy, streamed uploads under a byte cap, directory zip downloads | resolve/list/prepare, streamUploadToFile, sendDirectoryZip | tokens, fcm, cli-paths (denylist paths from their owners) |
@@ -303,7 +304,9 @@ architecture change (see Changes).
   from history (`<requestId>:assistant`, or ids prefixed by the requestId in a
   Swarm), so polling survives MCP restarts and dropped connections.
 - Not mapped: wallpaper, push/FCM registration, multi-machine switching (one
-  MCP entry per backend), token management, and the app's local screens.
+  MCP entry per backend), token management, the app's local screens, and
+  Swarm members on other machines (MCP holds no other machine's credential to
+  send, so their turns end with `PEER_NOT_LINKED`).
 
 ### Client boundaries
 
@@ -339,6 +342,27 @@ architecture change (see Changes).
   complete; Swarm replies are not streamed.
 - Swarm configuration is stored under the workspace that lists it, while its
   chosen work tree is the directory members actually use.
+- A Swarm member is a local agent key or a remote member `<peerId>:<agentKey>`
+  on another Relay backend (B); `peerId` is the first 12 hex digits of the
+  SHA-256 of B's normalized `baseUrl`, not the credential's machine id, which
+  is random per generated credential. The Swarm record keeps `peers`
+  (`name`, `baseUrl`) and each remote member's B `workdir` and dedicated
+  `sessionId`; a peer no member references is dropped. A remote turn is the
+  same runAgentTurn with only `runAgent` replaced by B's `/api/chat`, so
+  history, events, mentions, Stop and notifications need no second path.
+  Remote members use B's own model/effort/permission. B is used only through
+  its existing API, so B needs no change and may be older.
+- B's token never reaches A's disk: the app sends `peers: [{ baseUrl, token }]`
+  in each Swarm request that reaches B, and A keeps it in memory for that
+  request only — not in `groups.json`, history, events, responses, errors or
+  logs (guarded by `server/test/group-peer.test.js`). Holding B's credential is
+  what authorizes a device to run B's members; there is no other pairing. A
+  member without a credential in the request ends its turn with
+  `PEER_NOT_LINKED`; unreachable/refused peers end it with `PEER_UNREACHABLE`/
+  `PEER_UNAUTHORIZED`; the other members still run.
+- Creating a session or running a turn makes it B's active session, so the peer
+  client restores B's previous active session afterwards, keeping B's own user
+  where they were.
 - The SSH terminal exchanges the bearer credential for a short-lived,
   single-use WebSocket ticket. Never put the bearer token in a socket URL,
   because URLs can expose it through access logs. A token record owns one
@@ -385,6 +409,7 @@ architecture change (see Changes).
 | Background Claude and Antigravity turns, and Codex child-agent completion replies | claude-session-pool, acp-session-pool, codex-session-pool, stdio-agent-pool, agents, agent-turn (createBackgroundTurnHandler) | active |
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
+| Swarm members on other machines (form groups agents by machine from Manage credentials; remote members show their machine name; the app sends the peer credential per request) | routes/group, groups, peer-client, core/backend, core/models/group, chat/swarm_form_dialog, chat/group_chat_* | active |
 | Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry) | routes/fs, filesystem, features/filesystem | active |
 | Workspace navigation (Home shows up to five recent workspaces; File System shows up to five in one compact, horizontally scrolling row, and selecting a tag switches the active workspace and displayed directory; Home current directory and chat title open the file browser; selecting a different recent directory on Home switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted, rendered Markdown without embedded images and source-first past 20k chars with toggle; images up to 20 MiB / 40 MP) | features/filesystem, core/widgets/code_block | active |
@@ -434,6 +459,8 @@ navigation on 2026-11-09.
 - `npm --prefix server test` -> "# fail 0"; includes browser startup/shutdown and token-revocation cleanup, ACP settings/background serialization, cancellation during interactions, prompt-failure recovery and trajectory-discovery backoff.
 - `(cd server && node --test test/codex-session-pool.test.js test/agents.test.js test/agent-turn.test.js)` -> "# fail 0"; covers automatic Codex turns, child-work idle retention, turn-id isolation, cancellation, completed-item text and background reply delivery.
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
+- `(cd server && node --test test/group-peer.test.js)` -> "# fail 0"; covers a remote member's turn, cancel forwarded to the peer, PEER_NOT_LINKED / PEER_UNAUTHORIZED / PEER_UNREACHABLE with the other members unaffected, mentions in both directions, nothing created on a failed add, and the peer token absent from state, history, events, responses and logs.
+- (Two backends A and B, the app holding both credentials) New swarm on A lists B's usable agents under B's name; adding B's Claude creates a "Swarm: <name>" session on B while B keeps its previous active session; `@<B's Claude>` replies in A's transcript labelled "Claude Code (<B name>)"; Stop during that reply stops it on B; on a device without B's credential the member chip shows "This device is not connected to that machine".
 - `npm --prefix mcp test` -> "# fail 0"; `server/node_modules/.bin/eslint -c server/eslint.config.js mcp` -> exit 0
 - (Backend running, a credential made with `npm --prefix server run credential -- --label <bot>`) `RELAY_CREDENTIAL=<json> RELAY_CREDENTIAL_PASSPHRASE=<password> node mcp/index.js` answers `tools/list` with 17 tools; `relay_status` lists the agents, `relay_terminal` with `echo ok` returns `ok`, and a `relay_chat` that outlasts `waitSeconds` returns `running` and then `done` from `relay_task`.
 - On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes.
@@ -506,8 +533,7 @@ navigation on 2026-11-09.
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18).
-- 2026-10-18: extracted session-slots, sse and bounded-integer from the session pools and streams. Reason: duplicated cap/eviction/idle policies and helpers could drift.
+- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18); session-slots, sse and bounded-integer extracted from the session pools and streams so their policies could not drift (2026-10-18).
 - 2026-10-25: ACP pool gained an optional authenticate step so Cursor joins the existing session pool. Reason: Cursor's CLI rejects a session until `cursor_login`.
 - 2026-10-25: Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR (server/cursor-config/), with its catalog kept by model-discovery (state file reported-models.json). Reason: Cursor applies a model to its whole process and persists every choice as the host CLI's default, and its ACP server accepts none of the `agent --list-models` ids.
 - 2026-10-26: added server/lib/cli-paths.js; agents.js and model-discovery.js share its CLI lookup, and filesystem.js takes Cursor's paths from it. Reason: the two lookups could disagree on whether a CLI is installed, and the path policy loaded the whole process runner for one constant.
@@ -516,12 +542,13 @@ one summary line.
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
 - 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
 - 2026-11-15: added server/lib/browser-manager.js and features/browser; terminal-manager's upgrade listener hands paths it does not own to the browser manager. Reason: viewing a dev page on the backend's localhost from outside its network needs a host-side browser over Relay's existing authenticated connection, without port forwarding (path rewriting, HMR sockets, same-origin access to the Relay Web client) or new dependencies.
+- 2026-11-15: added server/lib/peer-client.js; routes/group runs remote Swarm members on another Relay backend through its existing HTTP API, with the peer credential supplied by the app per request. Reason: a Swarm needs agents from several machines without changing the other backend, adding a pairing flow, or storing another machine's token.
 - 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 
 ## Review
 
 Last review: 2026-10-29
-Features since last review: 3
+Features since last review: 4
 Last result: Intent OK, Structure OK, Entropy OK, Test value Problem, Documentation OK, Operability OK, Evolution OK, Performance OK; 3 open findings (no test checks that Cursor's process starts with Relay's CURSOR_CONFIG_DIR; history.js background writes never recover after one failed write; json-store overwrites a file it cannot load).
 
 ## Deviations

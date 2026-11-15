@@ -59,9 +59,28 @@ class AppStrings {
   String get swarmWorkTreeDefault =>
       isZh ? '默认（当前工作区）' : 'Default (current workspace)';
   String get swarmChooseWorkTree => isZh ? '选择工作目录' : 'Choose work tree';
-  String get swarmConfigureMembersHint => isZh
-      ? '为每个成员选择模型、思考深度与权限'
-      : 'Pick a model, reasoning effort, and permission per member';
+  String get swarmNameOptional =>
+      isZh ? '可不填，自动命名' : 'Optional — named automatically';
+  String get swarmPickMembersHint => isZh
+      ? '点选 agent 加入蜂群；再点成员可设置它'
+      : 'Tap an agent to add it; tap a member again to configure it';
+  String swarmThisMachine(String name) =>
+      isZh ? '本机 · $name' : 'This machine · $name';
+  String swarmMachineUnavailable(String reason) =>
+      isZh ? '不可用：$reason' : 'Unavailable: $reason';
+  String get swarmMachineNoAgents =>
+      isZh ? '这台机器没有可用的 agent' : 'No usable agents on this machine';
+  String get swarmMemberNotLinked =>
+      isZh ? '此设备未连接该机器' : 'This device is not connected to that machine';
+  String get swarmRemoteSettingsHint => isZh
+      ? '模型、思考深度与权限沿用该机器上的设置'
+      : "Model, effort, and permission follow that machine's own settings";
+  String get swarmMemberWorkdir =>
+      isZh ? '该机器上的工作目录' : 'Work directory on that machine';
+  String get swarmMemberWorkdirDefault =>
+      isZh ? '默认（该机器的默认目录）' : "Default (that machine's default)";
+  String get swarmWorkTreeShared =>
+      isZh ? '本机所有成员共用' : "Shared by this machine's members";
   String get memberNickname => isZh ? '昵称（仅本蜂群）' : 'Nickname (this swarm)';
   String get memberNicknameHint =>
       isZh ? '留空则用默认名称' : 'Leave blank to use the default name';

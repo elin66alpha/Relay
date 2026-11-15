@@ -50,6 +50,30 @@ revoke previously issued device tokens. The app's **Machine details** page lists
 token ids, device metadata, and last-use time so each old token can be revoked
 and then deleted deliberately.
 
+## Swarm members on other machines
+
+A Swarm member can run on another Relay backend (B) that the app holds a
+credential for in Manage credentials. B is unchanged: the backend running the
+Swarm (A) calls B's ordinary API as the app would. To do that, the app puts B's
+`baseUrl` and bearer token in the body of each Swarm request that reaches B's
+members (create, members, chat, clear, delete), over the same authenticated
+connection the app already uses for A.
+
+- A keeps B's token in memory only for that one request. It is not written to
+  `groups.json`, history, settings or logs, and it is not sent back in any
+  response, SSE event or error message; `server/test/group-peer.test.js`
+  checks this. `groups.json` records only B's name, `baseUrl`, and the member's
+  workdir and dedicated session id on B.
+- Whoever controls A can use that token while the request runs, and the token
+  is B's full device token: driving a member on B means acting with every
+  permission that agent and its permission tier have on B, plus everything
+  else the token allows (file API, terminal). Link machines only to a backend
+  you trust as much as the device holding the credential.
+- Only a device that holds B's credential can run B's members. A device or
+  `relay-mcp` without it gets `PEER_NOT_LINKED` for those members.
+- A uses B's credential over the `baseUrl` stored in it, so the same rules as
+  any client apply: use `https://` for anything outside a trusted network.
+
 ## API protections
 
 Every HTTP `/api/*` endpoint requires `Authorization: Bearer <token>`. Until at

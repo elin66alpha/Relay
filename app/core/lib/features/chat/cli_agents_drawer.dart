@@ -162,6 +162,7 @@ class CliAgentsDrawer extends StatelessWidget {
                   SwarmDrawerSection(
                     agentsController: agentsController,
                     settingsController: settingsController,
+                    machinesController: machinesController,
                     chatController: chatController,
                     closeOnAction: closeOnAction,
                   ),
@@ -544,6 +545,7 @@ class SwarmDrawerSection extends StatefulWidget {
   const SwarmDrawerSection({
     required this.agentsController,
     required this.settingsController,
+    required this.machinesController,
     required this.chatController,
     required this.closeOnAction,
     super.key,
@@ -551,6 +553,7 @@ class SwarmDrawerSection extends StatefulWidget {
 
   final CliAgentsController agentsController;
   final AppSettingsController settingsController;
+  final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final bool closeOnAction;
 
@@ -605,6 +608,7 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
         builder: (_) => GroupChatScreen(
           agentsController: widget.agentsController,
           settingsController: widget.settingsController,
+          machinesController: widget.machinesController,
           initialGroupId: groupId,
         ),
       ),
