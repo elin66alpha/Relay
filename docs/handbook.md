@@ -826,21 +826,22 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend, Ubuntu desktop, Windows, macOS and iOS bundles, verifies their
-contents and checksums, and creates a draft for that exact commit. It refuses
-an existing version tag. The draft is marked incomplete until the Android APK
-is signed locally; signing keys must not be uploaded to GitHub.
-From a terminal, the same workflow starts with
+`main`. It builds the source backend, Ubuntu desktop, Windows, macOS, unsigned
+iOS and signed Android APK bundles (the Android keystore and passwords come from
+GitHub Actions Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`), verifies their contents,
+certificates and checksums, and creates a draft for that exact commit. It refuses
+an existing version tag. From a terminal, the same workflow starts with
 `gh workflow run release.yml --ref main`.
 
-On the machine holding the Relay Android release key, check out the draft's
-commit, set `ANDROID_HOME` and authenticate the GitHub CLI, then run
-`./scripts/release/add_signed_android.sh`. It verifies
-the draft and source commit, signs in a clean temporary checkout, checks the
-APK's version and release certificate, verifies the other downloads, uploads
-the APK and replaces `SHA256SUMS`. The signing configuration must use an
-absolute keystore path. The clean checkout excludes local
-`google-services.json`, so the public APK has no Firebase configuration;
+If you prefer to sign or re-sign the Android APK locally on the machine holding
+the Relay Android release key, check out the draft's commit, set `ANDROID_HOME`
+and authenticate the GitHub CLI, then run `./scripts/release/add_signed_android.sh`.
+It verifies the draft and source commit, signs in a clean temporary checkout,
+checks the APK's version and release certificate, verifies the other downloads,
+uploads the APK and replaces `SHA256SUMS`. The signing configuration must use an
+absolute keystore path. Both the Actions build and clean local checkout exclude
+local `google-services.json`, so the public APK has no Firebase configuration;
 deployments using Android FCM must build their own configured client. Review
 the completed draft on GitHub before publishing it.
 For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the

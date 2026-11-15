@@ -165,10 +165,91 @@ jobs:
             build/release/relay-macos-v*.zip
           if-no-files-found: error
 
+  android-client:
+    name: Android APK
+    needs: validate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+        working-directory: app/shell
+      - name: Configure Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_PATH: ${{ runner.temp }}/relay-release.jks
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || { echo 'Missing required secret: ANDROID_KEYSTORE_BASE64' >&2; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n' | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          node -e '
+            const fs = require("node:fs");
+            const props = [
+              ["storeFile", process.env.KEYSTORE_PATH],
+              ["storePassword", process.env.ANDROID_STORE_PASSWORD],
+              ["keyAlias", process.env.ANDROID_KEY_ALIAS],
+              ["keyPassword", process.env.ANDROID_KEY_PASSWORD],
+            ];
+            for (const [k, v] of props) {
+              if (!v) { console.error("Missing required secret for " + k); process.exit(1); }
+            }
+            const esc = (s) => String(s).replace(/\\/g, "\\\\");
+            fs.writeFileSync(
+              "app/shell/android/key.properties",
+              props.map(([k, v]) => `${k}=${esc(v)}`).join("\n") + "\n",
+              { mode: 0o600 },
+            );
+          '
+      - name: Build and verify Release APK
+        run: |
+          set -euo pipefail
+          (cd app/shell && flutter build apk --release --no-pub)
+          version="$(node -p "require('./server/package.json').version")"
+          build_number="$(sed -n 's/^version: [^+]*+\([0-9]*\).*/\1/p' app/shell/pubspec.yaml)"
+          apk="app/shell/build/app/outputs/flutter-apk/app-release.apk"
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          [ -n "$sdk" ] && [ -d "$sdk/build-tools" ] || { echo 'Android SDK build-tools not found.' >&2; exit 1; }
+          signer="$(find "$sdk/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          aapt="$(find "$sdk/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          [ -n "$signer" ] && [ -n "$aapt" ] || { echo 'apksigner and aapt are required.' >&2; exit 1; }
+          expected_cert=3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
+          "$signer" verify --print-certs "$apk" | grep -Fqi "Signer #1 certificate SHA-256 digest: $expected_cert" || {
+            echo 'The APK was not signed with the Relay release certificate.' >&2; exit 1;
+          }
+          "$aapt" dump badging "$apk" | grep -Fq "package: name='dev.relay.app' versionCode='$build_number' versionName='$version'" || {
+            echo 'The APK package or version does not match this release.' >&2; exit 1;
+          }
+          mkdir -p build/release
+          cp "$apk" "build/release/relay-android-v$version.apk"
+      - name: Clean up signing files
+        if: always()
+        run: rm -f app/shell/android/key.properties "${{ runner.temp }}/relay-release.jks"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-client
+          path: build/release/relay-android-v*.apk
+          if-no-files-found: error
+
   draft:
     name: Create draft
     if: github.event_name == 'workflow_dispatch'
-    needs: [source-bundle, windows-bundles, linux-desktop, apple-clients]
+    needs: [source-bundle, windows-bundles, linux-desktop, apple-clients, android-client]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -197,14 +278,10 @@ jobs:
           sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
             "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
             "relay-desktop_${version}_amd64.deb" "relay-macos-$tag.zip" \
-            "relay-ios-unsigned-$tag.ipa" > SHA256SUMS
+            "relay-ios-unsigned-$tag.ipa" "relay-android-$tag.apk" > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ../..
-          {
-            echo '> Android APK is pending local signing. Do not publish this draft yet.'
-            echo
-            awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md
-          } > build/release/notes.md
+          awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md > build/release/notes.md
           gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Relay $version" \
             --notes-file build/release/notes.md build/release/install.sh \
             "build/release/relay-backend-setup-$tag.tar.gz" \
@@ -212,4 +289,5 @@ jobs:
             "build/release/relay-backend-windows-x64-$tag.zip" \
             "build/release/relay-desktop_${version}_amd64.deb" \
             "build/release/relay-macos-$tag.zip" \
-            "build/release/relay-ios-unsigned-$tag.ipa" build/release/SHA256SUMS
+            "build/release/relay-ios-unsigned-$tag.ipa" \
+            "build/release/relay-android-$tag.apk" build/release/SHA256SUMS
