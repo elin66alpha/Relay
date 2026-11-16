@@ -42,7 +42,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend; the linux and macos scripts forward to unix |
 | scripts/install/unix | the one Linux/macOS implementation: install.sh, the setup menu, service scripts and the per-platform adapters in lib/ |
 | scripts/release | release bundle builders, version/documentation checks, Windows setup checks and a local Android signing fallback for a release draft |
-| scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
+| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
 | .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft that also builds the signed Android APK from Actions Secrets |
 
@@ -443,7 +443,8 @@ navigation on 2026-11-09.
 - `node scripts/release/check_versions.js`, `node scripts/release/check_docs.js` and `node --test scripts/release/*.test.js` -> exit 0
 - `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
-- `node scripts/dev/readme_screenshots.js <wallpaper image> --mobile-zh` (Web build present) -> nine Chinese demo screenshots (home, chat, empty chat, Swarm, files, machine details, quota usage, settings and credentials) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings.
+- `node scripts/dev/readme_screenshots.js docs/farrari.png` (Web build present) -> fourteen English/Chinese README screenshots (home and chat at 1440×960; mobile chat, Swarm, files, localhost browser and image preview at 800×1640) in `docs/screenshots/`, using an isolated demo backend and localhost dashboard with the Ferrari wallpaper.
+- `node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh` (Web build present) -> eleven Chinese demo screenshots (home, chat, empty chat, Swarm, files, browser, image preview, machine details, quota usage, settings and credentials) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings; quota capture waits for all usage queries to finish.
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.
@@ -532,7 +533,8 @@ navigation on 2026-11-09.
 | Milestone | Completion criteria | Status |
 |---|---|---|
 | 0.1.11 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.11"; the What's new entries (English and Chinese) hold 1-3 highlights plus short other-change lines; Antigravity appears in agent controls and quota views with host credentials protected | done (released 2026-11-10) |
-| 0.1.12 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.12"; the dependency updates deferred from 0.1.11 land on the 0.1.12 branch with CI green: Firebase and flutter_secure_storage majors (was #39; flutter_secure_storage stops at 10 so Android data migrates before 11 removes the old ciphers), Express 5 and dotenv majors (was #40; Express 5 rejects the `app.get('*')` Web fallback route), and the moderate advisories `npm audit fix` resolves (the remaining `glob`/`minimatch` one comes through firebase-admin → google-gax → rimraf 5 and waits for upstream) | in progress |
+| 0.1.12 | `node scripts/release/check_versions.js` prints "Release versions match: 0.1.12"; the dependency updates deferred from 0.1.11 land on the 0.1.12 branch with CI green: Firebase and flutter_secure_storage majors (was #39; flutter_secure_storage stops at 10 so Android data migrates before 11 removes the old ciphers), Express 5 and dotenv majors (was #40; Express 5 rejects the `app.get('*')` Web fallback route), and the moderate advisories `npm audit fix` resolves (the remaining `glob`/`minimatch` one comes through firebase-admin → google-gax → rimraf 5 and waits for upstream) | done (released 2026-11-16) |
+| 0.1.13 | Windows file browser drive switcher. Today the browser starts on the C: drive (`%USERPROFILE%\Relay`), `C:\` has no parent and the app has no drive list or path entry, so another drive is reachable only through `RELAY_DEFAULT_DIR`, a chat link or a recent workspace, although the backend already lists any absolute path. Done when: on a Windows backend the directory listing reports the existing drive roots (open file access only; an isolated install reports none), the first breadcrumb or Up from a drive root offers them, choosing `D:\` lists it and can make it the work directory, a backend without the field still browses as before, and server plus Flutter tests cover the listing, the switcher and the isolated case | planned |
 
 ## Changes
 
