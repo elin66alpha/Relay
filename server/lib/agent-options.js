@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { discoverModels, groupAgyModels } = require('./model-discovery');
+const { getWorkspaceRoot } = require('./workdir');
 
 // Static fallback model catalog. The live list normally comes from
 // model-discovery (which reads what the installed CLI actually ships, newest
@@ -205,6 +206,24 @@ const PERMISSIONS = {
     },
   ],
 };
+
+// The tier of each agent that approves everything or runs unsandboxed. An
+// isolated install (RELAY_WORKSPACE_ROOT) does not offer it, and a stored
+// choice of it falls back to the agent's first remaining tier.
+const UNCONFINED_PERMISSION = {
+  agy: 'bypass',
+  claude: 'bypass',
+  codex: 'full-access',
+  opencode: 'bypass',
+  hermes: 'yolo',
+  cursor: 'bypass',
+};
+
+function permissionsFor(agentKey) {
+  const tiers = PERMISSIONS[agentKey] || [];
+  if (!getWorkspaceRoot()) return tiers;
+  return tiers.filter((tier) => tier.id !== UNCONFINED_PERMISSION[agentKey]);
+}
 
 // CLI invocation + how to query/update each binary.
 const CLI = {
@@ -435,6 +454,10 @@ function defaultsForModels(agentKey, models) {
   const effort = effortDefaultFor(agentKey, defaultModel, efforts);
   if (effort) defaults.effort = effort.id;
   else delete defaults.effort;
+  const tiers = permissionsFor(agentKey);
+  if (tiers.length && !tiers.some((tier) => tier.id === defaults.permission)) {
+    defaults.permission = tiers[0].id;
+  }
   return defaults;
 }
 
@@ -445,7 +468,7 @@ function groupsFor(agentKey, settings) {
   return {
     model: models,
     effort: effortOptionsFor(agentKey, selectedModel),
-    permission: PERMISSIONS[agentKey] || [],
+    permission: permissionsFor(agentKey),
     fast: FAST_MODES[agentKey] || [],
     defaults,
     selectedModel,

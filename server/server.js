@@ -26,6 +26,9 @@ const {
   getDefaultWorkdir,
   resolveRequestWorkdir,
   validateWorkdir,
+  getWorkspaceRoot,
+  assertInsideWorkspace,
+  ensureWorkdirExists,
 } = require('./lib/workdir');
 const {
   createAbsoluteDirectory,
@@ -124,6 +127,25 @@ const createMetaRouter = require('./routes/meta');
 const createGroupRouter = require('./routes/group');
 const createTerminalRouter = require('./routes/terminal');
 const createBrowserRouter = require('./routes/browser');
+
+// An isolated install confines workdirs, the file API and agent tiers to this
+// directory (see lib/workdir.js). A value that is not absolute stops startup.
+const WORKSPACE_ROOT = getWorkspaceRoot();
+if (WORKSPACE_ROOT) ensureWorkdirExists(WORKSPACE_ROOT);
+// Workspaces used before the install was isolated stay in history; list only
+// the ones a device can still switch to.
+function reachableRecentWorkdirs(limit) {
+  const dirs = recentWorkdirs(limit);
+  if (!WORKSPACE_ROOT) return dirs;
+  return dirs.filter((dir) => {
+    try {
+      assertInsideWorkspace(dir);
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  });
+}
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -616,7 +638,8 @@ const routeContext = {
   push,
   pushCategoriesFromBody,
   readHistory,
-  recentWorkdirs,
+  recentWorkdirs: reachableRecentWorkdirs,
+  workspaceRoot: WORKSPACE_ROOT,
   renameChatSession,
   requestWorkdir,
   resolveAbsoluteUploadTarget,
@@ -740,6 +763,7 @@ const server = app.listen(PORT, HOST, () => {
   }
   warnIfPlaintextTokenExposure();
   console.log(`default workdir: ${getDefaultWorkdir()}`);
+  if (WORKSPACE_ROOT) console.log(`isolated workspace root: ${WORKSPACE_ROOT}`);
   const staleHistoryCount = finalizeAllStaleStreamingHistory();
   if (staleHistoryCount > 0) {
     flushHistory();

@@ -11,6 +11,7 @@ const definitions = [
   ['codex', 'Codex', 'codex login --device-auth'],
   ['cursor', 'Cursor', 'agent login'],
   ['opencode', 'OpenCode', 'opencode auth login'],
+  ['agy', 'Antigravity', 'agy acp --login'],
   ['hermes', 'Hermes', 'hermes setup'],
 ];
 console.log(JSON.stringify({

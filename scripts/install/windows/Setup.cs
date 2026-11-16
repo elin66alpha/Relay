@@ -26,16 +26,18 @@ internal sealed class RelaySetup : Form
     readonly TextBox password = new TextBox { Width = 280, UseSystemPasswordChar = true };
     readonly TextBox confirm = new TextBox { Width = 280, UseSystemPasswordChar = true };
     readonly CheckBox web = new CheckBox { Text = "Serve the bundled Web client at the backend address", AutoSize = true, Checked = true };
+    readonly RadioButton openFiles = new RadioButton { Text = "Open: agents and the file browser reach every file this Windows user can", AutoSize = true, Checked = true };
+    readonly RadioButton isolatedFiles = new RadioButton { Text = "Isolated: workspaces and the file browser stay inside the workspace folder below", AutoSize = true };
     readonly CheckBox overwrite = new CheckBox { Text = "Replace an existing Cloudflare DNS record if necessary", AutoSize = true };
-    readonly CheckedListBox agents = new CheckedListBox { Height = 125, Width = 760, CheckOnClick = true, HorizontalScrollbar = true };
+    readonly CheckedListBox agents = new CheckedListBox { Height = 145, Width = 760, CheckOnClick = true, HorizontalScrollbar = true };
     readonly DataGridView tokens = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, RowHeadersVisible = false };
     readonly Label summary = new Label { AutoSize = true, MaximumSize = new Size(730, 0), Text = "Click Refresh status to read this installation." };
     readonly CheckBox removeWeb = new CheckBox { Text = "Remove the bundled Web client", AutoSize = true, Checked = true };
     readonly CheckBox deleteTunnel = new CheckBox { Text = "Delete this named tunnel from my Cloudflare account", AutoSize = true };
     readonly CheckBox removeCloudflared = new CheckBox { Text = "Remove cloudflared downloaded by this bundle", AutoSize = true };
     readonly List<Button> buttons = new List<Button>();
-    readonly string[] keys = { "claude", "codex", "cursor", "opencode", "hermes" };
-    readonly string[] names = { "Claude Code", "Codex", "Cursor", "OpenCode", "Hermes" };
+    readonly string[] keys = { "claude", "codex", "cursor", "opencode", "agy", "hermes" };
+    readonly string[] names = { "Claude Code", "Codex", "Cursor", "OpenCode", "Antigravity", "Hermes" };
     static readonly string[] requiredFiles = {
         @"scripts\install\windows\setup-action.ps1", @"scripts\install\windows\lib\setup.ps1",
         @"scripts\install\windows\lib\common.ps1", @"server\server.js", @"server\package.json",
@@ -43,6 +45,10 @@ internal sealed class RelaySetup : Form
     };
     bool busy;
     bool loaded;
+    // Installed once (a device token exists or the backend runs): Install would
+    // refuse or add a second setup, so only Reinstall stays available.
+    bool installed;
+    Button installButton;
     string currentUrl = "";
 
     [STAThread]
@@ -75,18 +81,23 @@ internal sealed class RelaySetup : Form
         install.Controls.Add(agents);
         Note(install, "Select missing CLIs to download from their official publishers. Sign in yourself afterward; existing CLI accounts stay on this host.");
         Heading(install, "3. Web client"); install.Controls.Add(web);
-        Heading(install, "4. Network");
+        Heading(install, "4. File access");
+        // Their own panel: radio buttons group by parent.
+        var access = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+        access.Controls.Add(openFiles); access.Controls.Add(isolatedFiles); install.Controls.Add(access);
+        Note(install, "Isolated workspace folder: " + Path.Combine(root, "workspace") + ". Agents lose their full-auto permission tier and requests outside it are refused. This is not an operating-system sandbox: agent CLIs and the SSH terminal still run as this Windows user.");
+        Heading(install, "5. Network");
         network.Items.AddRange(new object[] { "Direct address / no tunnel", "Named Cloudflare Tunnel / stable hostname", "Cloudflare Quick Tunnel / temporary URL" });
         network.SelectedIndex = 2;
         Row(install, "Backend port", port); Row(install, "Network mode", network);
         Row(install, "Direct public URL", url); Row(install, "Cloudflare hostname", hostname);
         Row(install, "Tunnel name", tunnelName); install.Controls.Add(overwrite);
         Note(install, "Tunnel modes install cloudflared if missing. Named tunnels open a Cloudflare browser login. Quick Tunnel addresses can change after restart. Direct access needs a reachable port; use HTTPS for public access.");
-        Heading(install, "5. Device credential");
+        Heading(install, "6. Device credential");
         Row(install, "Device label", label); Row(install, "New QR password (6+ characters)", password); Row(install, "Confirm password", confirm);
         Note(install, "Import the encrypted .relay.json or .relay.png from server/credentials. Reinstall keeps tokens, chats and settings and creates a new device credential.");
         var installButtons = new FlowLayoutPanel { AutoSize = true };
-        Button(installButtons, "Install", async delegate { await Install(false); });
+        installButton = Button(installButtons, "Install", async delegate { await Install(false); });
         Button(installButtons, "Reinstall (keep data)", async delegate { if (Ask("Stop Relay and reconfigure this installation? Tokens, chats and settings will be kept.")) await Install(true); });
         Button(installButtons, "Install selected CLIs", async delegate { await Run("agents", Request()); });
         install.Controls.Add(installButtons);
@@ -100,7 +111,10 @@ internal sealed class RelaySetup : Form
         Button(serviceButtons, "Start", async delegate { await Run("start", Request()); });
         Button(serviceButtons, "Stop", async delegate { await Run("stop", Request()); });
         Button(serviceButtons, "Open Web client", delegate { Open(currentUrl); });
-        Button(serviceButtons, "Open logs", delegate { Open(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Relay", "logs")); });
+        Button(serviceButtons, "Open logs", delegate {
+            try { Directory.CreateDirectory(LogDirectory()); } catch (Exception) { }
+            Open(LogDirectory());
+        });
         services.Controls.Add(serviceButtons);
         Note(services, "Services run as this Windows user. Setup registers a task at login. Keep this installation folder fixed so the task can find it.");
         Heading(services, "Uninstall all Relay services");
@@ -151,10 +165,11 @@ internal sealed class RelaySetup : Form
         row.Controls.Add(new Label { Text = text, Width = 270, Height = 30, TextAlign = ContentAlignment.MiddleLeft });
         row.Controls.Add(input); parent.Controls.Add(row);
     }
-    void Button(Control parent, string text, EventHandler handler)
+    Button Button(Control parent, string text, EventHandler handler)
     {
         var button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(90, 34), Margin = new Padding(0, 6, 8, 6) };
         button.Click += handler; parent.Controls.Add(button); buttons.Add(button);
+        return button;
     }
     bool Ask(string text) { return MessageBox.Show(this, text, Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes; }
     void Open(string target)
@@ -174,7 +189,8 @@ internal sealed class RelaySetup : Form
             { "port", (int)port.Value }, { "networkMode", new[] { "none", "cloudflare", "quick" }[network.SelectedIndex] },
             { "url", url.Text.Trim() }, { "hostname", hostname.Text.Trim() }, { "tunnelName", tunnelName.Text.Trim() },
             { "serveWeb", web.Checked }, { "agents", selected }, { "passphrase", password.Text },
-            { "label", label.Text.Trim() }, { "overwriteDns", overwrite.Checked }
+            { "label", label.Text.Trim() }, { "overwriteDns", overwrite.Checked },
+            { "isolated", isolatedFiles.Checked }
         };
     }
     bool PasswordValid()
@@ -183,7 +199,11 @@ internal sealed class RelaySetup : Form
         MessageBox.Show(this, "Enter matching credential passwords of at least 6 characters on Install / Reinstall.", Text);
         tabs.SelectedIndex = 0; password.Focus(); return false;
     }
-    async Task Install(bool reinstall) { if (PasswordValid()) await Run(reinstall ? "reinstall" : "install", Request()); }
+    async Task Install(bool reinstall)
+    {
+        if (!reinstall && installed) { MessageBox.Show(this, "Relay is already installed here. Use Reinstall (keep data) to reconfigure it.", Text); return; }
+        if (PasswordValid()) await Run(reinstall ? "reinstall" : "install", Request());
+    }
     string SelectedToken()
     {
         if (tokens.SelectedRows.Count > 0) return Convert.ToString(tokens.SelectedRows[0].Cells[0].Value);
@@ -196,7 +216,29 @@ internal sealed class RelaySetup : Form
         if (String.IsNullOrWhiteSpace(currentUrl)) { MessageBox.Show(this, "Install Relay or refresh its status first.", Text); return; }
         await Run(show ? "show-token" : "create-token", request);
     }
-    void Append(string line) { if (!String.IsNullOrEmpty(line)) log.AppendText(line + Environment.NewLine); }
+    // Everything the window shows is also kept in <installation>\logs\setup.log,
+    // which survives closing Setup.exe. Passwords travel over stdin only and
+    // never appear in this output.
+    string LogDirectory() { return Path.Combine(root, "logs"); }
+    string SetupLog() { return Path.Combine(LogDirectory(), "setup.log"); }
+    void Append(string line)
+    {
+        if (String.IsNullOrEmpty(line)) return;
+        log.AppendText(line + Environment.NewLine);
+        try { File.AppendAllText(SetupLog(), line + Environment.NewLine, new UTF8Encoding(false)); }
+        catch (Exception) { }
+    }
+    void StartSetupLog(string action)
+    {
+        try {
+            Directory.CreateDirectory(LogDirectory());
+            var file = new FileInfo(SetupLog());
+            if (file.Exists && file.Length > 1024 * 1024) {
+                File.Copy(file.FullName, file.FullName + ".1", true); file.Delete();
+            }
+            File.AppendAllText(SetupLog(), Environment.NewLine + "==== " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + action + " ====" + Environment.NewLine, new UTF8Encoding(false));
+        } catch (Exception) { }
+    }
     void ShowQr()
     {
         var directory = Path.Combine(root, "server", "credentials");
@@ -215,14 +257,18 @@ internal sealed class RelaySetup : Form
     {
         var data = json.Deserialize<Dictionary<string, object>>(value);
         currentUrl = Convert.ToString(data["url"]);
-        summary.Text = String.Format("Backend: {0}    Tunnel: {1}\nAddress: {2}\nMode: {3}    Port: {4}\nWeb client: {5}\nLogs: {6}",
+        var workspace = data.ContainsKey("workspaceRoot") ? Convert.ToString(data["workspaceRoot"]) : "";
+        summary.Text = String.Format("Backend: {0}    Tunnel: {1}\nAddress: {2}\nMode: {3}    Port: {4}\nWeb client: {5}\nFile access: {7}\nLogs: {6}",
             (bool)data["backendRunning"] ? "running" : "stopped", (bool)data["tunnelRunning"] ? "running" : "stopped", currentUrl,
-            data["networkMode"], data["port"], !(bool)data["webAvailable"] ? "not present" : (bool)data["serveWeb"] ? "enabled" : "disabled", data["logs"]);
+            data["networkMode"], data["port"], !(bool)data["webAvailable"] ? "not present" : (bool)data["serveWeb"] ? "enabled" : "disabled", data["logs"],
+            workspace.Length > 0 ? "isolated to " + workspace : "open");
         var array = (ArrayList)data["agents"];
         for (int i = 0; i < array.Count; i++) {
             var agent = (Dictionary<string, object>)array[i];
             agents.Items[i] = agent["label"] + " - " + (!(bool)agent["installed"] ? "not installed" : (bool)agent["authed"] ? "ready" : "installed, sign in/configure on this host") + " | " + agent["login"];
         }
+        installed = (bool)data["backendRunning"] || ((ArrayList)data["tokens"]).Count > 0;
+        installButton.Enabled = !busy && !installed;
         tokens.Rows.Clear();
         foreach (Dictionary<string, object> token in (ArrayList)data["tokens"]) {
             tokens.Rows.Add(token["id"], token["label"], (bool)token["revoked"] ? "revoked" : "active", token.ContainsKey("lastUsedAt") ? token["lastUsedAt"] : "never");
@@ -234,6 +280,7 @@ internal sealed class RelaySetup : Form
             var mode = Convert.ToString(data["networkMode"]);
             if (mode == "none" || mode == "cloudflare" || mode == "quick") network.SelectedIndex = Array.IndexOf(new[] { "none", "cloudflare", "quick" }, mode);
             web.Checked = (bool)data["serveWeb"] && (bool)data["webAvailable"];
+            isolatedFiles.Checked = workspace.Length > 0; openFiles.Checked = workspace.Length == 0;
             var savedTunnel = Convert.ToString(data["tunnelName"]); if (savedTunnel.Length > 0) tunnelName.Text = savedTunnel;
             Uri address; if (Uri.TryCreate(currentUrl, UriKind.Absolute, out address)) hostname.Text = address.Host;
         }
@@ -243,7 +290,7 @@ internal sealed class RelaySetup : Form
     {
         if (busy) return;
         busy = true; foreach (var button in buttons) button.Enabled = false;
-        state.Text = "Running: " + action; request["action"] = action;
+        state.Text = "Running: " + action; request["action"] = action; StartSetupLog(action);
         string result = null;
         try {
             var worker = Path.Combine(root, "scripts", "install", "windows", "setup-action.ps1");
@@ -261,17 +308,27 @@ internal sealed class RelaySetup : Form
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
             };
             int exitCode = await Task.Run(delegate {
-                using (var process = new Process { StartInfo = start }) {
+                using (var process = new Process { StartInfo = start })
+                using (var outputDone = new System.Threading.ManualResetEvent(false))
+                using (var errorDone = new System.Threading.ManualResetEvent(false)) {
                     process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) {
-                        if (e.Data == null) return;
+                        if (e.Data == null) { outputDone.Set(); return; }
                         if (e.Data.StartsWith("RELAY_RESULT:", StringComparison.Ordinal)) result = e.Data.Substring(13);
                         else BeginInvoke((Action)delegate { Append(e.Data); });
                     };
-                    process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) BeginInvoke((Action)delegate { Append(e.Data); }); };
+                    process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) {
+                        if (e.Data == null) { errorDone.Set(); return; }
+                        BeginInvoke((Action)delegate { Append(e.Data); });
+                    };
                     process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
                     byte[] payload = new UTF8Encoding(false).GetBytes(json.Serialize(request));
                     process.StandardInput.BaseStream.Write(payload, 0, payload.Length); process.StandardInput.Close();
-                    process.WaitForExit(); return process.ExitCode;
+                    // WaitForExit() without a timeout also waits for end of file on both
+                    // pipes, which never comes if a started service inherited them.
+                    process.WaitForExit(int.MaxValue);
+                    // Output already written is read within milliseconds of exit.
+                    System.Threading.WaitHandle.WaitAll(new System.Threading.WaitHandle[] { outputDone, errorDone }, 2000);
+                    return process.ExitCode;
                 }
             });
             if (exitCode != 0) throw new InvalidOperationException("Operation failed. See the output below for details, correct the issue and retry.");
@@ -282,6 +339,6 @@ internal sealed class RelaySetup : Form
                 Append("Encrypted credential files are in " + Path.Combine(root, "server", "credentials"));
             }
         } catch (Exception error) { state.Text = "Failed: " + action; Append(error.Message); MessageBox.Show(this, error.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        finally { request.Remove("passphrase"); busy = false; foreach (var button in buttons) button.Enabled = true; }
+        finally { request.Remove("passphrase"); busy = false; foreach (var button in buttons) button.Enabled = true; installButton.Enabled = !installed; }
     }
 }

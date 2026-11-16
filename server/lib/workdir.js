@@ -22,6 +22,67 @@ class WorkdirError extends Error {
   }
 }
 
+// Windows paths compare without case, so `d:\relay` and `D:\Relay` are one place.
+function comparable(value) {
+  return process.platform === 'win32' ? value.toLowerCase() : value;
+}
+
+function isInsideDir(parent, child) {
+  const base = comparable(parent);
+  const target = comparable(child);
+  return target === base || target.startsWith(base.endsWith(path.sep) ? base : `${base}${path.sep}`);
+}
+
+// Isolated installs set RELAY_WORKSPACE_ROOT: every work directory, the file
+// API and the agents' permission tiers are then confined to that directory.
+// Unset means the open mode, where any absolute path can be a workdir. Read on
+// each call (no file access) so one process can be tested in both modes. A
+// value that is not an absolute path throws instead of silently running open.
+function getWorkspaceRoot() {
+  const raw = String(process.env.RELAY_WORKSPACE_ROOT || '').trim();
+  if (!raw) return null;
+  if (!path.isAbsolute(raw)) {
+    throw new WorkdirError('RELAY_WORKSPACE_ROOT must be an absolute path', {
+      code: 'WORKSPACE_ROOT_INVALID',
+      status: 500,
+      dir: raw,
+    });
+  }
+  return path.resolve(raw);
+}
+
+function outsideWorkspaceError(dir) {
+  return new WorkdirError('workdir is outside the isolated workspace', {
+    code: 'WORKDIR_OUTSIDE_WORKSPACE',
+    status: 403,
+    dir,
+  });
+}
+
+// The deepest existing ancestor decides where a path really is, so a link or
+// junction inside the workspace cannot lead a workdir out of it.
+function realLocation(dir) {
+  let existing = dir;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return dir;
+    existing = parent;
+  }
+  return path.resolve(fs.realpathSync(existing), path.relative(existing, dir));
+}
+
+// Throws unless `dir` (already absolute) is inside the workspace root. A no-op
+// in open mode. Also the last check before an agent process gets a cwd.
+function assertInsideWorkspace(dir) {
+  const root = getWorkspaceRoot();
+  if (!root) return dir;
+  const resolved = path.resolve(dir);
+  if (!isInsideDir(root, resolved)) throw outsideWorkspaceError(resolved);
+  const realRoot = fs.existsSync(root) ? fs.realpathSync(root) : root;
+  if (!isInsideDir(realRoot, realLocation(resolved))) throw outsideWorkspaceError(resolved);
+  return dir;
+}
+
 function expandWorkdir(value) {
   const raw = String(value || '').trim();
   if (!raw) return path.join(os.homedir(), 'Relay');
@@ -51,12 +112,24 @@ function resolveWorkdir(value) {
       dir: resolved,
     });
   }
-  return resolved;
+  return assertInsideWorkspace(resolved);
 }
 
 // The path a brand-new device (one that has not chosen a workdir yet) starts
-// from. Comes from RELAY_DEFAULT_DIR when set, otherwise ~/Relay.
+// from. Comes from RELAY_DEFAULT_DIR when set, otherwise ~/Relay. An isolated
+// install starts at its workspace root unless RELAY_DEFAULT_DIR is inside it.
 function getDefaultWorkdir() {
+  const root = getWorkspaceRoot();
+  if (root) {
+    if (process.env.RELAY_DEFAULT_DIR) {
+      try {
+        return resolveWorkdir(process.env.RELAY_DEFAULT_DIR);
+      } catch (_err) {
+        // Outside the workspace: fall back to the root below.
+      }
+    }
+    return root;
+  }
   return process.env.RELAY_DEFAULT_DIR
     ? resolveWorkdir(process.env.RELAY_DEFAULT_DIR)
     : resolveWorkdir(expandWorkdir(''));
@@ -123,6 +196,9 @@ function validateWorkdir(value, { create = false } = {}) {
 
 module.exports = {
   WorkdirError,
+  isInsideDir,
+  getWorkspaceRoot,
+  assertInsideWorkspace,
   resolveWorkdir,
   getDefaultWorkdir,
   ensureWorkdirExists,

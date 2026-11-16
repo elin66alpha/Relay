@@ -7,7 +7,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-test('a Linux upgrade checks Node before touching an existing installation', { skip: process.platform !== 'linux' }, (t) => {
+const crypto = require('node:crypto');
+
+const installer = path.join(__dirname, '../install/unix/install.sh');
+
+function writeExecutable(file, body) {
+  fs.writeFileSync(file, `#!/bin/sh\n${body}`, { mode: 0o755 });
+}
+
+test('an upgrade checks Node before touching an existing installation', { skip: process.platform === 'win32' }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-upgrade-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, 'bin');
@@ -17,9 +25,10 @@ test('a Linux upgrade checks Node before touching an existing installation', { s
   fs.mkdirSync(path.join(install, 'server'), { recursive: true });
   fs.writeFileSync(path.join(install, 'server', 'server.js'), 'original');
   fs.writeFileSync(path.join(install, 'server', '.env'), 'fixture');
-  fs.writeFileSync(path.join(bin, 'node'), '#!/bin/sh\nprintf "18\\n"\n', { mode: 0o755 });
-  fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\ntouch "$RELAY_TEST_CURL_MARKER"\nexit 1\n', { mode: 0o755 });
-  const run = (version) => spawnSync('bash', [path.join(__dirname, '../install/linux/install.sh')], {
+  writeExecutable(path.join(bin, 'uname'), 'echo Linux\n');
+  writeExecutable(path.join(bin, 'node'), 'printf "18\\n"\n');
+  writeExecutable(path.join(bin, 'curl'), 'touch "$RELAY_TEST_CURL_MARKER"\nexit 1\n');
+  const run = (version) => spawnSync('bash', [installer], {
     encoding: 'utf8',
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELAY_DIR: install, RELAY_VERSION: version, RELAY_TEST_CURL_MARKER: marker },
   });
@@ -31,4 +40,56 @@ test('a Linux upgrade checks Node before touching an existing installation', { s
 
   run('0.1.9');
   assert.equal(fs.existsSync(marker), true, 'older releases retain their original runtime requirement');
+});
+
+test('a macOS upgrade keeps server/.env and restarts the backend LaunchAgent', { skip: process.platform === 'win32' }, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-upgrade-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const release = path.join(root, 'release');
+  const install = path.join(root, 'install');
+  const calls = path.join(root, 'calls');
+  const version = '0.1.12';
+  const name = `relay-backend-setup-v${version}.tar.gz`;
+  for (const dir of [bin, release, path.join(root, 'bundle', 'relay', 'server'), path.join(install, 'server')]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(path.join(root, 'bundle', 'relay', 'server', 'server.js'), 'new');
+  const tar = spawnSync('tar', ['-czf', path.join(release, name), '-C', path.join(root, 'bundle'), 'relay']);
+  assert.equal(tar.status, 0);
+  const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(release, name))).digest('hex');
+  fs.writeFileSync(path.join(release, 'SHA256SUMS'), `${digest}  ${name}\n`);
+  fs.writeFileSync(path.join(install, 'server', 'server.js'), 'old');
+  fs.writeFileSync(path.join(install, 'server', '.env'), 'PORT=9999\n');
+
+  writeExecutable(path.join(bin, 'uname'), 'echo Darwin\n');
+  // Serves release assets from the fixture directory: curl ... URL -o FILE.
+  writeExecutable(path.join(bin, 'curl'), [
+    'out=""; url=""',
+    'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; http*) url="$1"; shift ;; *) shift ;; esac; done',
+    'cp "$RELAY_TEST_RELEASE/${url##*/}" "$out"',
+    '',
+  ].join('\n'));
+  writeExecutable(path.join(bin, 'npm'), 'echo "npm $*" >>"$RELAY_TEST_CALLS"\n');
+  writeExecutable(path.join(bin, 'launchctl'), 'echo "launchctl $*" >>"$RELAY_TEST_CALLS"\n');
+
+  const result = spawnSync('bash', [installer], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      RELAY_DIR: install,
+      RELAY_VERSION: version,
+      RELAY_TEST_RELEASE: release,
+      RELAY_TEST_CALLS: calls,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Upgraded to 0\.1\.12/);
+  assert.match(result.stdout, /scripts\/install\/macos\/setup\.sh/);
+  assert.equal(fs.readFileSync(path.join(install, 'server', 'server.js'), 'utf8'), 'new');
+  assert.equal(fs.readFileSync(path.join(install, 'server', '.env'), 'utf8'), 'PORT=9999\n');
+  const log = fs.readFileSync(calls, 'utf8');
+  assert.match(log, /^npm install$/m);
+  assert.match(log, /^launchctl kickstart -k gui\/\d+\/dev\.relay\.app\.backend$/m);
 });

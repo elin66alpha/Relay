@@ -25,7 +25,7 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
    the Device tokens tab and scan it. The password is not stored.
 5. Sign in/configure your selected CLI yourself in a terminal:
    Claude Code: claude; Codex: codex login --device-auth; Cursor: agent login;
-   OpenCode: opencode auth login; Hermes: hermes setup.
+   OpenCode: opencode auth login; Antigravity: agy acp --login; Hermes: hermes setup.
    Setup uses the publishers' official Windows installers; it does not log in.
 6. When Web is enabled, open the backend address in a browser and import the
    same encrypted credential. The API still requires authentication.
@@ -82,8 +82,10 @@ Console commands from the extracted directory / 解压目录的命令：
 ~~~
 
 Setup registers a current-user login Scheduled Task, not a system service.
-Only one managed Relay installation per Windows user is supported. Logs and
-PID files are in %LOCALAPPDATA%\Relay\logs and %LOCALAPPDATA%\Relay\runtime.
+Only one managed Relay installation per Windows user is supported. Logs are in
+logs\ inside the extracted directory: setup.log keeps everything Setup.exe
+showed, and backend/tunnel .out/.err logs hold service output. PID files are in
+%LOCALAPPDATA%\Relay\runtime.
 Uninstall removes services and, by default, Web; the GUI also offers deleting
 the named Cloudflare tunnel and the bundle-owned cloudflared. Backend
 configuration, tokens, encrypted credentials, chats, settings and logs remain.
@@ -91,7 +93,8 @@ Shared host runtimes and agent CLIs remain. Extract the bundle again to
 restore Web after uninstall.
 
 安装会创建当前用户登录计划任务，不是系统服务。每个 Windows 用户支持一个受管理的
-Relay 实例。日志和 PID 位于 %LOCALAPPDATA%\Relay\logs 和
+Relay 实例。日志位于解压目录下的 logs\：setup.log 保存 Setup.exe 显示过的全部输出，
+backend/tunnel 的 .out/.err 日志保存服务输出。PID 文件位于
 %LOCALAPPDATA%\Relay\runtime。卸载移除服务并默认删除 Web；图形界面还可选择删除
 正式 Cloudflare 隧道和本包下载的 cloudflared。后端配置、设备令牌、加密凭证、
 聊天、设置和日志保留，共用的主机运行时和 CLI 也会保留；卸载后重新解压可恢复 Web。

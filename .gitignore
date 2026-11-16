@@ -55,6 +55,10 @@ app.*.map.json
 /SHA256SUMS
 
 # Relay backend local state and secrets
+# Windows setup and service logs, written next to the installation.
+/logs/
+# The isolated file access choice's workspace: the agents' files, not sources.
+/workspace/
 /server/.env
 /server/tokens.json
 /server/chat-history*.json

@@ -706,3 +706,44 @@ test('POST /api/fs/mkdir creates a folder and enforces path, name, duplicate, an
     (err) => err.status === 403 && err.code === 'FS_PATH_RESTRICTED',
   );
 });
+
+// --- RELAY_WORKSPACE_ROOT ----------------------------------------------------
+
+test('an isolated install confines the file API to its workspace', async () => {
+  const base = scratchCase();
+  const workspace = path.join(base, 'workspace');
+  const outside = path.join(base, 'outside');
+  fs.mkdirSync(path.join(workspace, 'project'), { recursive: true });
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'secret');
+  const prev = process.env.RELAY_WORKSPACE_ROOT;
+  process.env.RELAY_WORKSPACE_ROOT = workspace;
+  try {
+    const filesystem = loadFilesystem();
+    const top = await filesystem.listAbsoluteDirectory(workspace);
+    assert.equal(top.parentPath, null);
+    const inner = await filesystem.listAbsoluteDirectory(path.join(workspace, 'project'));
+    assert.equal(inner.parentPath, workspace);
+
+    for (const target of [outside, base]) {
+      const err = await rejects(() => filesystem.listAbsoluteDirectory(target));
+      assert.equal(err.code, 'FS_PATH_OUTSIDE_ROOTS', target);
+    }
+    const download = await rejects(() =>
+      filesystem.prepareDownloadAbsolute(path.join(outside, 'secret.txt')),
+    );
+    assert.equal(download.code, 'FS_PATH_OUTSIDE_ROOTS');
+    assert.throws(
+      () => filesystem.resolveAbsoluteUploadTarget(outside, 'x.txt'),
+      (err) => err.code === 'FS_PATH_OUTSIDE_ROOTS',
+    );
+    assert.throws(
+      () => filesystem.createAbsoluteDirectory(outside, 'made'),
+      (err) => err.code === 'FS_PATH_OUTSIDE_ROOTS',
+    );
+    assert.equal(fs.existsSync(path.join(outside, 'made')), false);
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_WORKSPACE_ROOT;
+    else process.env.RELAY_WORKSPACE_ROOT = prev;
+  }
+});

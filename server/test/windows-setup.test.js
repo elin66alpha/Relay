@@ -27,7 +27,7 @@ test('Windows setup status lists device summaries without bearer or CLI credenti
     assert.equal(result.status, 0, result.stderr);
     assert.ok(!result.stdout.includes('fixture-secret'));
     const status = JSON.parse(result.stdout);
-    assert.deepEqual(status.agents.map((agent) => agent.key), ['claude', 'codex', 'cursor', 'opencode', 'hermes']);
+    assert.deepEqual(status.agents.map((agent) => agent.key), ['claude', 'codex', 'cursor', 'opencode', 'agy', 'hermes']);
     assert.equal(status.tokens[0].id, 'fixture-id');
     assert.equal(status.tokens[0].label, 'Fixture device');
     assert.ok(!Object.hasOwn(status.tokens[0], 'token'));

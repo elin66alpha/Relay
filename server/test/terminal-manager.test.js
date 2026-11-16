@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
   createTerminalManager,
@@ -168,4 +170,27 @@ test('shell command uses a login shell and supports Windows', () => {
     file: 'cmd.exe',
     args: [],
   });
+});
+
+test('an isolated install opens the shell in its workspace root', () => {
+  const prev = process.env.RELAY_WORKSPACE_ROOT;
+  const root = path.resolve(os.tmpdir(), 'relay-isolated-workspace');
+  process.env.RELAY_WORKSPACE_ROOT = root;
+  try {
+    const pty = fakePtyModule();
+    const manager = createTerminalManager({
+      pty,
+      randomTicket: () => 'ticket-isolated',
+      env: { HOME: '/home/relay', SHELL: '/bin/bash', PATH: '/usr/bin' },
+      platform: 'linux',
+    });
+    const ticket = manager.consumeTicket(
+      manager.createTicket({ tokenId: 'token-1', cols: 90, rows: 30 }).ticket,
+    );
+    manager.attachClient(ticket, new FakeClient());
+    assert.equal(pty.processes[0].spawn.options.cwd, root);
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_WORKSPACE_ROOT;
+    else process.env.RELAY_WORKSPACE_ROOT = prev;
+  }
 });

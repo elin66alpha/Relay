@@ -183,3 +183,35 @@ test('fast mode is explicit and limited to Claude Code and Codex', () => {
   assert.equal(codexSessionOptions({ fast: 'off' }).serviceTier, 'default');
   assert.equal(normalizeSettings('opencode', { fast: 'on' }).fast, undefined);
 });
+
+test('an isolated install offers no tier that approves everything or runs unsandboxed', () => {
+  const prev = process.env.RELAY_WORKSPACE_ROOT;
+  process.env.RELAY_WORKSPACE_ROOT = path.resolve(__dirname);
+  try {
+    const expected = {
+      claude: ['acceptEdits', 'plan'],
+      codex: ['workspace-write', 'read-only'],
+      cursor: ['plan', 'ask'],
+      opencode: ['ask'],
+      agy: ['cautious'],
+      hermes: ['cautious'],
+    };
+    for (const [agent, tiers] of Object.entries(expected)) {
+      const described = describeAgent(agent);
+      assert.deepEqual(described.permission.map((tier) => tier.id), tiers, agent);
+      assert.equal(described.defaults.permission, tiers[0], agent);
+    }
+    // A choice stored before the install was isolated falls back to a confined tier.
+    assert.equal(normalizeSettings('claude', { permission: 'bypass' }).permission, 'acceptEdits');
+    assert.equal(claudeSdkOptions({ permission: 'bypass' }).permissionMode, 'acceptEdits');
+    assert.equal(codexSessionOptions({ permission: 'full-access' }).sandbox, 'workspace-write');
+    assert.equal(codexSessionOptions({ permission: 'bypass' }).approve, false);
+    for (const [agent, permission] of [['opencode', 'bypass'], ['hermes', 'yolo'], ['cursor', 'bypass'], ['agy', 'bypass']]) {
+      assert.equal(acpSessionOptions(agent, { permission }).approve, false, agent);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_WORKSPACE_ROOT;
+    else process.env.RELAY_WORKSPACE_ROOT = prev;
+  }
+  assert.ok(describeAgent('claude').permission.some((tier) => tier.id === 'bypass'));
+});

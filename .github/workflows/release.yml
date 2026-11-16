@@ -62,7 +62,7 @@ jobs:
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: ./scripts/release/package_backend.sh
-      - run: cp scripts/install/linux/install.sh build/release/install.sh
+      - run: cp scripts/install/unix/install.sh build/release/install.sh
       - uses: actions/upload-artifact@v7
         with:
           name: source-bundle

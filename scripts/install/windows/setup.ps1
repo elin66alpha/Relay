@@ -18,11 +18,17 @@ function Read-AgentChoices {
 function Read-InstallOptions {
   $agents = @(Read-AgentChoices)
   $serve = (Read-Host 'Serve the bundled Web client at the backend address? [Y/n]') -notmatch '^[Nn]'
+  Write-Host '1) Open: agents and the file browser reach every file this Windows user can'
+  Write-Host "2) Isolated: workspaces and the file browser stay inside $(Join-Path $Script:RootDir 'workspace')"
+  $current = if (Get-EnvValue 'RELAY_WORKSPACE_ROOT') { '2' } else { '1' }
+  $access = Read-Host "File access [$current]"
+  if (-not $access) { $access = $current }
+  if ($access -notin @('1', '2')) { Write-Fail 'Invalid file access choice.' }
   $value = Read-Host "Backend port [$(Get-BackendPort)]"
   if (-not $value) { $value = Get-BackendPort }
   Write-Host '1) Direct address   2) Named Cloudflare Tunnel   3) Quick Tunnel'
   $mode = Read-Host 'Network mode [3]'
-  $options = @{ Port = [int]$value; ServeWeb = $serve; Agents = $agents }
+  $options = @{ Port = [int]$value; ServeWeb = $serve; Agents = $agents; Isolated = ($access -eq '2') }
   switch ($mode) {
     '1' { $options.NetworkMode = 'none'; $options.PublicUrl = Read-Host 'Public HTTP(S) address' }
     '2' {

@@ -4,7 +4,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const { getDefaultWorkdir } = require('./workdir');
+const { getDefaultWorkdir, assertInsideWorkspace } = require('./workdir');
 const {
   claudeSdkOptions,
   acpSessionOptions,
@@ -1134,6 +1134,9 @@ async function runAgent(agentKey, prompt, onEvent, options = {}) {
     throw new Error(`Unknown agent: ${agentKey}`);
   }
   const sessionKey = options.sessionKey || agent.key;
+  // Stored scopes (a Swarm's work tree, a scheduled message) can predate an
+  // isolated install; no agent process starts outside its workspace.
+  assertInsideWorkspace(options.workdir || getDefaultWorkdir());
   return agent.run(
     prompt,
     onEvent,

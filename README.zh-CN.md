@@ -125,8 +125,9 @@ Web 与 API 共用同一个 Node.js 服务。安装向导支持选装 agent CLI�
 `relay-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
 和 Ubuntu 客户端。
 
-在 Linux 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的校验和
-核对后运行安装脚本：
+在 Linux 和 macOS 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的
+校验和核对后运行安装脚本；缺少的系统软件会在你确认后安装（Debian/Ubuntu 用 apt-get，macOS
+用 Homebrew）：
 
 ```bash
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash

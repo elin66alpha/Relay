@@ -4,7 +4,9 @@
 
 Relay uses the same Node.js server and HTTP/SSE API on every backend host. The
 scripts in `scripts/install/` only adapt dependency setup, process management, logs, and optional
-Cloudflare Tunnel startup to each operating system.
+Cloudflare Tunnel startup to each operating system. Linux and macOS share one
+implementation in `scripts/install/unix/`, so both ask the same questions in the
+same order; only the package manager and service manager differ.
 
 ## Requirements
 
@@ -23,16 +25,21 @@ Cloudflare Tunnel startup to each operating system.
   is missing or older than 22, and `cloudflared` from Cloudflare's release
   `.deb` when a tunnel mode needs it. Run it as the user who will run Relay,
   not with `sudo`.
+- On macOS, setup does the same with Homebrew after one confirmation: the
+  current Node.js when it is missing or older than 22, `zip`, and `cloudflared`
+  for a tunnel mode. Without Homebrew it names what to install. If the terminal's
+  PTY module has to compile, it opens the Xcode Command Line Tools installer.
 - Before upgrading an existing Relay installation to 0.1.10 or later, update
   Node.js to 22 or newer. The one-line installer checks this before replacing
   files and leaves the existing installation untouched if it is too old.
 
 ## Install
 
-On Linux, one command downloads the latest release, verifies it against the
-release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the prompt, or
-`RELAY_DIR`) and runs setup. Running it again upgrades the code in place,
-keeps `server/.env`, tokens, chats and settings, and restarts the backend.
+On Linux and macOS, one command downloads the latest release, verifies it
+against the release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the
+prompt, or `RELAY_DIR`) and runs that system's setup. Running it again upgrades
+the code in place, keeps `server/.env`, tokens, chats and settings, and restarts
+the backend (the PM2 process on Linux, the LaunchAgent on macOS).
 `RELAY_VERSION=<VERSION>` installs a specific release.
 
 ```bash
@@ -52,7 +59,7 @@ configures the selected network mode, starts the service, and runs the
 credential generator. Import the generated `.relay.png` or `.relay.json` in the
 app and enter the passphrase you chose.
 
-On Linux, `setup.sh` opens a menu: install, reinstall (keeps tokens, chats and
+On Linux and macOS, `setup.sh` opens the same menu: install, reinstall (keeps tokens, chats and
 settings), uninstall, service status (address, tunnel hostnames, Web client,
 agent install and sign-in state, tokens), install agent CLIs, and create,
 delete, list or re-show a device token. Installing agent CLIs lists Claude Code,
@@ -62,18 +69,29 @@ pick with each CLI's official installer (`npm install -g @openai/codex` for
 Codex), and prints their login commands; Relay never signs a CLI in. Install
 runs the same step. Re-showing reuses the token and asks for a new QR password, since
 the old one is not stored. Install and reinstall ask whether to serve the Web
-client at the backend address (default yes).
+client at the backend address (default yes), and then for file access:
+
+- **Open** (the default): agents and the file browser reach every file the
+  backend user can.
+- **Isolated**: work directories, the file browser and SSH's starting directory
+  stay inside `workspace/` in the installation directory (for the one-line
+  install, `~/relay/workspace`), and agents lose their full-auto / unsandboxed
+  permission tier. Setup writes the directory to `RELAY_WORKSPACE_ROOT` in
+  `server/.env`. This is Relay's own path policy, not an operating-system
+  sandbox: agent CLIs and the terminal still run as the backend user.
+
+Rerunning install or reinstall offers the current choice as the default; the
+service status shows it as `File access`. Uninstall keeps `workspace/` and its
+files.
 
 The source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
 the compiled Web client, in `app/shell/build/web`; the backend serves it at `/`
 unless `server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
 device token. The Windows backend ZIP includes the same compiled Web client:
 
-- Linux and Windows setup ask whether to serve it; uninstall removes it while
-  retaining backend state. Windows serves Web and API in one Node.js process,
+- Linux, macOS and Windows setup ask whether to serve it; uninstall removes it
+  while retaining backend state. Windows serves Web and API in one Node.js process,
   without a separate Web server.
-- macOS setup serves a bundled Web client automatically; set
-  `RELAY_SERVE_WEB=0` in `server/.env` and restart to turn it off.
 - A source checkout has it only after `flutter build web`.
 
 ### Network modes
@@ -128,9 +146,15 @@ compiler (for example the Debian/Ubuntu `build-essential` package). Install
 ./scripts/install/macos/uninstall.sh
 ```
 
-LaunchAgents are installed under `~/Library/LaunchAgents`. Logs are under
-`~/Library/Logs/Relay/` as `backend.*.log` and `tunnel.*.log`. The generated
-service PATH includes common Homebrew and per-user binary locations.
+These are the Linux scripts with launchd in place of PM2: the backend and,
+for tunnel modes, the tunnel run as the LaunchAgents `dev.relay.app.backend`
+and `dev.relay.app.tunnel` under `~/Library/LaunchAgents`, start at login, and
+restart when they exit. Logs are under `~/Library/Logs/Relay/` as
+`backend.*.log` and `tunnel.*.log`. The generated service PATH includes common
+Homebrew and per-user binary locations. `uninstall.sh` removes the LaunchAgents
+and the Web client, offers to delete the named Cloudflare Tunnel, and asks
+before removing a Homebrew `cloudflared` or Node.js. It leaves backend data,
+tokens, and credentials in place.
 
 ### Windows
 
@@ -153,7 +177,8 @@ same service adapters below. The Scheduled Task starts at this user's login.
 .\scripts\install\windows\uninstall.ps1
 ```
 
-Logs and PID files live under `%LOCALAPPDATA%\Relay\logs\` and
+Logs live in `logs\` inside the Relay directory (`setup.log` from Setup.exe,
+plus backend and tunnel `.out`/`.err` logs); PID files live under
 `%LOCALAPPDATA%\Relay\runtime\`. If PowerShell blocks the setup script, allow it
 for the current shell only:
 
