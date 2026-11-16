@@ -243,7 +243,10 @@ jobs:
           aapt="$(find "$sdk/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           [ -n "$signer" ] && [ -n "$aapt" ] || { echo 'apksigner and aapt are required.' >&2; exit 1; }
           certificate="$("$signer" verify --print-certs "$apk")"
-          grep -Fqi "Signer #1 certificate SHA-256 digest: $EXPECTED_ANDROID_CERT" <<< "$certificate" || {
+          # apksigner prints "Signer #1 certificate ..." in older build-tools and
+          # "V2 Signer: certificate ..." in 37+; every signer must be the release key.
+          digests="$(sed -n 's/^.*[Cc]ertificate SHA-256 digest: *\([0-9A-Fa-f]*\).*$/\1/p' <<< "$certificate" | tr 'A-F' 'a-f' | sort -u)"
+          [ "$digests" = "$EXPECTED_ANDROID_CERT" ] || {
             echo "Using apksigner: $signer" >&2
             echo "$certificate" >&2
             echo 'The APK was not signed with the Relay release certificate.' >&2

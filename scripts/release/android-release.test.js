@@ -59,21 +59,42 @@ case "$1 $2" in
 esac
 `, 0o755);
   const cert = '3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f';
-  write('sdk/build-tools/35.0.0/apksigner', '#!/bin/sh\necho "Signer #1 certificate SHA-256 digest: $RELAY_TEST_CERT"\n', 0o755);
+  // build-tools 37+ prints "V2 Signer: ..."; older versions print "Signer #1 ...".
+  // RELAY_TEST_EXTRA_CERT adds a second signer, which must also be rejected.
+  write('sdk/build-tools/35.0.0/apksigner', `#!/bin/sh
+if [ -n "$RELAY_TEST_OLD_APKSIGNER" ]; then
+  echo "Signer #1 certificate SHA-256 digest: $RELAY_TEST_CERT"
+else
+  echo "V2 Signer: certificate DN: CN=k"
+  echo "V2 Signer: certificate SHA-256 digest: $RELAY_TEST_CERT"
+  echo "V2 Signer: certificate SHA-1 digest: 4d8975ad57fc79b206f4a06961c003ead420148e"
+fi
+[ -z "$RELAY_TEST_EXTRA_CERT" ] || echo "Signer #2 certificate SHA-256 digest: $RELAY_TEST_EXTRA_CERT"
+`, 0o755);
   write('sdk/build-tools/35.0.0/aapt', '#!/bin/sh\necho "package: name=\x27dev.relay.app\x27 versionCode=\x275\x27 versionName=\x271.2.3\x27"\n', 0o755);
   fs.mkdirSync(path.join(root, 'uploads'));
-  const run = (certificate) => spawnSync('bash', [path.join(root, 'scripts/release/add_signed_android.sh')], {
+  const run = (certificate, extra = {}) => spawnSync('bash', [path.join(root, 'scripts/release/add_signed_android.sh')], {
     encoding: 'utf8',
     env: {
       ...process.env, PATH: `${path.join(root, 'bin')}:${process.env.PATH}`,
       ANDROID_HOME: path.join(root, 'sdk'), RELAY_TEST_FIXTURES: path.join(root, 'fixtures'),
-      RELAY_TEST_UPLOADS: path.join(root, 'uploads'), RELAY_TEST_CERT: certificate,
+      RELAY_TEST_UPLOADS: path.join(root, 'uploads'), RELAY_TEST_CERT: certificate, ...extra,
     },
   });
-  const rejected = run('wrong-certificate');
-  assert.notEqual(rejected.status, 0);
-  assert.match(rejected.stderr, /not signed with the Relay release certificate/);
-  assert.deepEqual(fs.readdirSync(path.join(root, 'uploads')), []);
+  for (const [certificate, extra] of [
+    ['wrong-certificate', {}],
+    ['a'.repeat(64), {}],
+    [cert, { RELAY_TEST_EXTRA_CERT: 'b'.repeat(64) }],
+  ]) {
+    const rejected = run(certificate, extra);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /not signed with the Relay release certificate/);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'uploads')), []);
+  }
+
+  const older = run(cert, { RELAY_TEST_OLD_APKSIGNER: '1' });
+  assert.equal(older.status, 0, older.stderr);
+  for (const file of fs.readdirSync(path.join(root, 'uploads'))) fs.rmSync(path.join(root, 'uploads', file));
 
   const accepted = run(cert);
   assert.equal(accepted.status, 0, accepted.stderr);
