@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:relay_core/core/i18n/app_strings.dart';
@@ -15,6 +16,8 @@ import 'package:relay_core/core/widgets/chat_wallpaper.dart';
 import 'package:relay_core/features/settings/wallpaper_screen.dart';
 import 'package:relay_core/features/settings/app_settings_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_file_picker.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -396,16 +399,11 @@ void main() {
   testWidgets(
       'choosing an image shows a loading spinner until the picker finishes',
       (WidgetTester tester) async {
-    const MethodChannel picker =
-        MethodChannel('miguelruivo.flutter.plugins.filepicker');
-    final Completer<List<Map<String, Object?>>?> picked =
-        Completer<List<Map<String, Object?>>?>();
-    tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(picker, (MethodCall call) => picked.future);
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(picker, null),
-    );
+    final Completer<List<PlatformFile>> picked =
+        Completer<List<PlatformFile>>();
+    final FakeFilePicker picker =
+        FakeFilePicker.install((FileType type) => picked.future);
+    addTearDown(picker.restore);
     final AppSettingsController settings = AppSettingsController();
     addTearDown(settings.dispose);
     await tester.pumpWidget(
@@ -420,7 +418,7 @@ void main() {
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('Processing wallpaper…'), findsOneWidget);
-    picked.complete(null);
+    picked.complete(<PlatformFile>[]);
     await tester.pumpAndSettle();
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(settings.wallpaper.bytes, isNull);

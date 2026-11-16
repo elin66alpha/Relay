@@ -22,6 +22,16 @@
   completion replies and Antigravity (`agy`) background turns (timers,
   subagents, or background commands) now appear in solo chat and support Stop.
 
+### Changed
+
+- The macOS desktop client now requires macOS 11 or later (Firebase 5).
+- The Android APK is built and signed by the release workflow from GitHub
+  Actions Secrets, with the same release certificate as before.
+- Dependencies: Express 5, dotenv 18, web-push 4, Firebase 5 / Firebase
+  Messaging 17, file_picker 13, and flutter_secure_storage 10, which migrates
+  existing Android data to its new ciphers. flutter_secure_storage 11 waits
+  for a later release so that migration can run first.
+
 ### Fixed
 
 - Show a clear message when a connected backend is older than the client and
