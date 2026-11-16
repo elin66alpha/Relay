@@ -170,6 +170,8 @@ jobs:
     needs: validate
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_ANDROID_CERT: 3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -216,6 +218,18 @@ jobs:
               { mode: 0o600 },
             );
           '
+          if ! entry_info="$(keytool -J-Duser.language=en -list -v -keystore "$KEYSTORE_PATH" -storepass:env ANDROID_STORE_PASSWORD -alias "$ANDROID_KEY_ALIAS")"; then
+            echo 'Failed to read ANDROID_KEY_ALIAS from ANDROID_KEYSTORE_BASE64. Keystore SHA-256 digests:' >&2
+            keytool -J-Duser.language=en -list -v -keystore "$KEYSTORE_PATH" -storepass:env ANDROID_STORE_PASSWORD 2>/dev/null | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' >&2 || true
+            exit 1
+          fi
+          cert_sha="$(printf '%s\n' "$entry_info" | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | tr -d ':' | tr '[:upper:]' '[:lower:]' | head -n 1)"
+          if [ "$cert_sha" != "$EXPECTED_ANDROID_CERT" ]; then
+            echo "Configured ANDROID_KEY_ALIAS certificate SHA-256 ($cert_sha) does not match expected Relay release certificate ($EXPECTED_ANDROID_CERT)." >&2
+            echo 'Keystore SHA-256 digests:' >&2
+            keytool -J-Duser.language=en -list -v -keystore "$KEYSTORE_PATH" -storepass:env ANDROID_STORE_PASSWORD 2>/dev/null | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' >&2 || true
+            exit 1
+          fi
       - name: Build and verify Release APK
         run: |
           set -euo pipefail
@@ -228,12 +242,17 @@ jobs:
           signer="$(find "$sdk/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           aapt="$(find "$sdk/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           [ -n "$signer" ] && [ -n "$aapt" ] || { echo 'apksigner and aapt are required.' >&2; exit 1; }
-          expected_cert=3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
-          "$signer" verify --print-certs "$apk" | grep -Fqi "Signer #1 certificate SHA-256 digest: $expected_cert" || {
-            echo 'The APK was not signed with the Relay release certificate.' >&2; exit 1;
+          certificate="$("$signer" verify --print-certs "$apk")"
+          grep -Fqi "Signer #1 certificate SHA-256 digest: $EXPECTED_ANDROID_CERT" <<< "$certificate" || {
+            echo "Using apksigner: $signer" >&2
+            echo "$certificate" >&2
+            echo 'The APK was not signed with the Relay release certificate.' >&2
+            exit 1
           }
-          "$aapt" dump badging "$apk" | grep -Fq "package: name='dev.relay.app' versionCode='$build_number' versionName='$version'" || {
-            echo 'The APK package or version does not match this release.' >&2; exit 1;
+          apk_info="$("$aapt" dump badging "$apk")"
+          grep -Fq "package: name='dev.relay.app' versionCode='$build_number' versionName='$version'" <<< "$apk_info" || {
+            echo 'The APK package or version does not match this release.' >&2
+            exit 1
           }
           mkdir -p build/release
           cp "$apk" "build/release/relay-android-v$version.apk"
