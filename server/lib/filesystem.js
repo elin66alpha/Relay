@@ -15,6 +15,7 @@ const {
 const { TOKENS_FILE } = require('./tokens');
 const { SERVICE_ACCOUNT_FILE } = require('./fcm');
 const { CURSOR_CONFIG_DIR, cursorAuthFile, agyAuthFile } = require('./cli-paths');
+const { storageDisks } = require('./machine-info');
 
 class FilesystemError extends Error {
   constructor(message, { status = 400, code = 'FS_ERROR' } = {}) {
@@ -216,39 +217,35 @@ function sortEntries(entries) {
   });
 }
 
-// --- Windows drive roots --------------------------------------------------------
+// --- drive roots ----------------------------------------------------------------
 //
-// C:\ has no parent, so a Windows client needs the drive list to reach D:\.
-// Only open file access offers it: an isolated install reports none, and
-// RELAY_FS_ROOTS keeps only drive roots it allows. A disconnected network drive
-// can stall its probe for many seconds, so one probe runs at a time, its answer
-// is reused for DRIVE_CACHE_MS, and a listing waits at most DRIVE_WAIT_MS for it
-// before answering with the previous list.
-const DRIVE_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+// The browser climbs with parentPath, so it reaches only what lies under the
+// top it started from: C:\ has no parent, and a Unix disk mounted under
+// /Volumes or /media sits folders below `/` where nothing points to it.
+// `drives` names the disks the machine page shows (machine-info's
+// storageDisks), with `/` always among them on Unix, so a client can jump
+// between them. Only open file access offers it: an isolated install reports
+// none, and RELAY_FS_ROOTS keeps only the roots it allows. A disconnected
+// network drive can stall its probe for many seconds, so one probe runs at a
+// time, its answer is reused for DRIVE_CACHE_MS, and a listing waits at most
+// DRIVE_WAIT_MS for it before answering with the previous list.
 const DRIVE_CACHE_MS = 30_000;
 const DRIVE_WAIT_MS = 1500;
 const driveProbe = { at: 0, pending: null, roots: [] };
 
-async function probeDriveRoots(exists) {
-  const found = await Promise.all(
-    DRIVE_LETTERS.map(async (letter) => {
-      const root = `${letter}:\\`;
-      return (await exists(root)) ? root : null;
-    }),
-  );
-  return found.filter(Boolean);
+async function probeDriveRoots(platform, listMounts) {
+  const roots = await listMounts();
+  if (platform !== 'win32' && !roots.includes('/')) roots.push('/');
+  return roots.sort((a, b) => a.localeCompare(b));
 }
 
-function rootExists(root) {
-  return fs.promises.access(root).then(
-    () => true,
-    () => false,
-  );
+async function diskMounts() {
+  return (await storageDisks()).map((disk) => disk.mount);
 }
 
-function cachedDriveRoots() {
+function cachedDriveRoots(platform) {
   if (!driveProbe.pending && Date.now() - driveProbe.at > DRIVE_CACHE_MS) {
-    driveProbe.pending = probeDriveRoots(rootExists).then((roots) => {
+    driveProbe.pending = probeDriveRoots(platform, diskMounts).then((roots) => {
       Object.assign(driveProbe, { at: Date.now(), pending: null, roots });
       return roots;
     });
@@ -261,10 +258,13 @@ function cachedDriveRoots() {
   return Promise.race([driveProbe.pending, timeout]).finally(() => clearTimeout(timer));
 }
 
-// `platform` and `exists` let tests describe a Windows host from any OS.
-async function driveRoots({ platform = process.platform, exists } = {}) {
-  if (platform !== 'win32' || getWorkspaceRoot()) return [];
-  const roots = exists ? await probeDriveRoots(exists) : await cachedDriveRoots();
+// `platform` and `listMounts` let tests describe any host from any OS; without
+// `listMounts` the probe is real and cached.
+async function driveRoots({ platform = process.platform, listMounts } = {}) {
+  if (getWorkspaceRoot()) return [];
+  const roots = listMounts
+    ? await probeDriveRoots(platform, listMounts)
+    : await cachedDriveRoots(platform);
   return roots.filter((root) => {
     try {
       assertPathAllowed(root);
@@ -321,7 +321,7 @@ async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } 
     path: target,
     absolutePath: target,
     parentPath: target === top ? null : path.dirname(target),
-    // Drive roots the client may switch to; empty outside open Windows hosts.
+    // Roots the client may switch to; empty on an isolated install.
     drives: await driveRoots(),
     entries,
   };

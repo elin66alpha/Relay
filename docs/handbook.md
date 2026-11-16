@@ -392,7 +392,10 @@ tag switches the active workdir and displays that directory in the browser.
 The file browser keeps its breadcrumb bar above the scrolling list. Select an
 ancestor segment to jump to it, or use the up arrow, `..` row, or a right swipe
 on the list to visit the parent. Windows UNC paths retain the server and share
-as a single root. Navigating through folders or breadcrumbs does not change the
+as a single root. When the backend has more than one disk, the first segment
+shows a ▾ and opens a menu of them: the drive letters on Windows, `/` plus each
+mounted disk on macOS and Linux (the disks the machine page lists). An isolated
+install offers none. Navigating through folders or breadcrumbs does not change the
 active workdir: use **Set as work path** to select a new project, or the
 work-path chip to return to the current one.
 The current workdir is also marked when it appears in a directory listing.

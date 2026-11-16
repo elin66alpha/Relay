@@ -748,18 +748,20 @@ test('an isolated install confines the file API to its workspace', async () => {
   }
 });
 
-// --- Windows drive roots -------------------------------------------------------
+// --- drive roots -----------------------------------------------------------------
 
-// A Windows host with C: and D: (A: is an empty floppy letter), from any OS.
-const windowsHost = {
-  platform: 'win32',
-  exists: async (root) => ['C:\\', 'D:\\'].includes(root),
-};
+// Hosts from any OS, as the disk mounts machine-info would report for them.
+const mounts = (...list) => async () => [...list];
+const windowsHost = { platform: 'win32', listMounts: mounts('D:\\', 'C:\\') };
+const linuxHost = { platform: 'linux', listMounts: mounts('/', '/media/alice/USB', '/boot') };
 
-test('an open Windows backend reports its drive roots in letter order', async () => {
+test('an open backend reports its disks in order, `/` always on Unix', async () => {
   const { driveRoots } = loadFilesystem();
   assert.deepEqual(await driveRoots(windowsHost), ['C:\\', 'D:\\']);
-  assert.deepEqual(await driveRoots({ ...windowsHost, platform: 'linux' }), []);
+  assert.deepEqual(await driveRoots(linuxHost), ['/', '/boot', '/media/alice/USB']);
+  // A container whose `/` is an overlay, not a disk, can still reach it.
+  const container = { platform: 'linux', listMounts: mounts('/data') };
+  assert.deepEqual(await driveRoots(container), ['/', '/data']);
 });
 
 test('an isolated backend reports no drive roots', async () => {
@@ -768,6 +770,7 @@ test('an isolated backend reports no drive roots', async () => {
   try {
     const filesystem = loadFilesystem();
     assert.deepEqual(await filesystem.driveRoots(windowsHost), []);
+    assert.deepEqual(await filesystem.driveRoots(linuxHost), []);
     const listing = await filesystem.listAbsoluteDirectory(process.env.RELAY_WORKSPACE_ROOT);
     assert.deepEqual(listing.drives, []);
   } finally {
@@ -779,13 +782,20 @@ test('an isolated backend reports no drive roots', async () => {
 test('RELAY_FS_ROOTS keeps only the drive roots it allows', async () => {
   const { driveRoots } = loadFilesystem({ roots: 'C:\\' });
   assert.deepEqual(await driveRoots(windowsHost), ['C:\\']);
+  const unix = loadFilesystem({ roots: '/media' });
+  assert.deepEqual(await unix.driveRoots(linuxHost), ['/media/alice/USB']);
 });
 
 test('a stalled drive probe does not hold up the listing', { skip: process.platform !== 'win32' }, async (t) => {
   let answerStalled;
-  t.mock.method(fs.promises, 'access', (root) => {
+  const online = ['C:\\', 'Z:\\'];
+  t.mock.method(fs.promises, 'realpath', async (root) => {
+    if (online.includes(root)) return root;
+    throw new Error('ENOENT');
+  });
+  t.mock.method(fs.promises, 'statfs', (root) => {
     if (root === 'Z:\\') return new Promise((resolve) => { answerStalled = resolve; });
-    return root === 'C:\\' ? Promise.resolve() : Promise.reject(new Error('ENOENT'));
+    return Promise.resolve({ blocks: 10, bfree: 1, bsize: 1 });
   });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { driveRoots } = loadFilesystem();
@@ -793,10 +803,11 @@ test('a stalled drive probe does not hold up the listing', { skip: process.platf
   // Z: (a disconnected network drive) never answers: the caller gets the
   // previous list, here none, after the wait instead of hanging.
   const first = driveRoots();
+  await new Promise(setImmediate);
   t.mock.timers.tick(1500);
   assert.deepEqual(await first, []);
 
-  answerStalled();
+  answerStalled({ blocks: 10, bfree: 1, bsize: 1 });
   await new Promise(setImmediate);
   assert.deepEqual(await driveRoots(), ['C:\\', 'Z:\\']);
 });
@@ -821,6 +832,6 @@ test('GET /api/workdir/browse carries the drive list', async (t) => {
     // The listed directory's own drive is always among them.
     assert.ok(listing.drives.includes(path.parse(dir).root.toUpperCase()), listing.drives);
   } else {
-    assert.deepEqual(listing.drives, []);
+    assert.equal(listing.drives[0], '/');
   }
 });

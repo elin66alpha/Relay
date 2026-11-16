@@ -4,12 +4,15 @@
 
 ### Added
 
-- `GET /api/workdir/browse` reports `drives`, the drive roots of a Windows
-  backend with open file access (`["C:\\", "D:\\"]`), so a client can leave
-  `C:\` for another drive. Isolated installs, drive roots outside
-  `RELAY_FS_ROOTS` and non-Windows backends report none. A disconnected network
-  drive cannot hold up a listing: probes run once per 30 seconds and a listing
-  waits at most 1.5 seconds for one.
+- The file browser switches between disks: when the backend has more than
+  one, the first breadcrumb opens a menu of them. On Windows these are the
+  drive letters, so `D:\` is reachable without leaving `C:\` through a chat
+  link; on macOS and Linux they are `/` plus each mounted disk (`/Volumes/…`,
+  `/media/…`). `GET /api/workdir/browse` reports them as `drives`, the same
+  disks the machine page lists. Isolated installs and roots outside
+  `RELAY_FS_ROOTS` report none, and an older backend without the field browses
+  as before. A disconnected network drive cannot hold up a listing: probes run
+  once per 30 seconds and a listing waits at most 1.5 seconds for one.
 
 ### Changed
 

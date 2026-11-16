@@ -65,6 +65,7 @@ class FsListing {
     required this.absolutePath,
     required this.entries,
     this.parentPath,
+    this.drives = const <String>[],
   });
 
   factory FsListing.fromJson(Map<String, Object?> json) {
@@ -76,6 +77,9 @@ class FsListing {
       path: json['path'] as String? ?? '',
       absolutePath: json['absolutePath'] as String? ?? '',
       parentPath: json['parentPath'] as String?,
+      drives: json['drives'] is List
+          ? (json['drives'] as List).whereType<String>().toList(growable: false)
+          : const <String>[],
       entries: rawEntries
           .whereType<Map>()
           .map((Map entry) => FsEntry.fromJson(entry.cast<String, Object?>()))
@@ -88,6 +92,10 @@ class FsListing {
   final String absolutePath;
   final String? parentPath;
   final List<FsEntry> entries;
+
+  /// Roots the browser can jump between: drive letters on Windows, `/` plus
+  /// mounted volumes on Unix. Empty on an isolated or older backend.
+  final List<String> drives;
 }
 
 /// An in-progress file download: response metadata plus the live byte stream.

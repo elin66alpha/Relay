@@ -450,6 +450,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                       _BreadcrumbBar(
                         path: activePath,
                         canGoUp: listing?.parentPath != null,
+                        drives: listing?.drives ?? const <String>[],
                         atWorkPath: atWorkPath,
                         busy: _isLoading || _isBusy,
                         onParent: listing?.parentPath == null
@@ -698,6 +699,7 @@ class _BreadcrumbBar extends StatelessWidget {
   const _BreadcrumbBar({
     required this.path,
     required this.canGoUp,
+    required this.drives,
     required this.atWorkPath,
     required this.busy,
     required this.onParent,
@@ -706,6 +708,9 @@ class _BreadcrumbBar extends StatelessWidget {
 
   final String path;
   final bool canGoUp;
+
+  /// With more than one, the first crumb opens a menu to switch between them.
+  final List<String> drives;
   final bool atWorkPath;
   final bool busy;
   final VoidCallback? onParent;
@@ -748,13 +753,43 @@ class _BreadcrumbBar extends StatelessWidget {
                             size: 16,
                             color: theme.colorScheme.outline,
                           ),
-                        _BreadcrumbChip(
-                          label: crumbs[i].label,
-                          current: i == crumbs.length - 1,
-                          onTap: busy || !canGoUp || i == crumbs.length - 1
-                              ? null
-                              : () => onNavigate(crumbs[i].path),
-                        ),
+                        if (i == 0 && drives.length > 1)
+                          PopupMenuButton<String>(
+                            enabled: !busy,
+                            onSelected: onNavigate,
+                            itemBuilder: (BuildContext context) =>
+                                <PopupMenuEntry<String>>[
+                              for (final String drive in drives)
+                                PopupMenuItem<String>(
+                                  value: drive,
+                                  child: Text(drive),
+                                ),
+                            ],
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                _BreadcrumbChip(
+                                  label: crumbs[i].label,
+                                  current: i == crumbs.length - 1,
+                                ),
+                                Icon(
+                                  Icons.arrow_drop_down,
+                                  size: 18,
+                                  color: busy
+                                      ? theme.colorScheme.outline
+                                      : theme.colorScheme.primary,
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          _BreadcrumbChip(
+                            label: crumbs[i].label,
+                            current: i == crumbs.length - 1,
+                            onTap: busy || !canGoUp || i == crumbs.length - 1
+                                ? null
+                                : () => onNavigate(crumbs[i].path),
+                          ),
                       ],
                     ],
                   ),
