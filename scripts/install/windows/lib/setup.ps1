@@ -65,7 +65,24 @@ function Install-RelayAgentClis {
     $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
     Write-Info "$($state.label) login/configuration command: $($state.login)"
   }
-  Write-Info 'Sign in to agent CLIs yourself in a terminal. Relay never signs an agent in.'
+  Sync-RelayUserPath
+  Write-Info 'Sign in to agent CLIs yourself in a terminal (Open terminal in Setup has them on PATH). Relay never signs an agent in.'
+}
+
+# A PowerShell window with the backend's PATH (bundled Node, every agent CLI
+# folder) and the sign-in command of each CLI, for signing in on this host.
+function Open-RelayTerminal {
+  $lines = @('Relay agent terminal: the agent CLIs and Relay''s Node are on PATH here.', 'Sign in or configure each CLI you use:')
+  foreach ($agent in (Get-RelayDetails).agents) {
+    $state = if (-not $agent.installed) { 'not installed' } elseif ($agent.authed) { 'ready' } else { 'needs sign-in' }
+    $lines += "  $($agent.label) ($state): $($agent.login)"
+  }
+  $script = ($lines | ForEach-Object { "Write-Host '" + ($_ -replace "'", "''") + "'" }) -join '; '
+  # -EncodedCommand: Start-Process would split an unquoted -Command on spaces.
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+  Start-Process -FilePath (Get-Command 'powershell.exe').Source -WorkingDirectory $env:USERPROFILE `
+    -ArgumentList @('-NoExit', '-NoLogo', '-EncodedCommand', $encoded)
+  Write-Info 'Opened a terminal with the agent CLIs on PATH.'
 }
 
 function Ensure-Cloudflared {
@@ -207,6 +224,7 @@ function Uninstall-RelayBackend {
   param([bool]$RemoveWeb = $true, [switch]$DeleteTunnel, [switch]$RemoveCloudflared)
   Stop-RelayServices
   Unregister-RelayStartup
+  Remove-RelayUserPath
   if ($RemoveWeb) { Remove-RelayWeb }
   $name = Get-EnvValue 'RELAY_TUNNEL_NAME'
   if ($DeleteTunnel -and $name -and (Test-Command cloudflared)) {

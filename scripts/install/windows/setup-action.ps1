@@ -24,6 +24,7 @@ try {
       Install-RelayBackend @options
     }
     'agents' { Install-RelayAgentClis -Agents ([string[]]$request.agents) }
+    'terminal' { Open-RelayTerminal }
     'start' { Require-Node; Ensure-EnvFile; Start-RelayServices }
     'stop' { Stop-RelayServices }
     'uninstall' { Uninstall-RelayBackend -RemoveWeb ([bool]$request.removeWeb) -DeleteTunnel:([bool]$request.deleteTunnel) -RemoveCloudflared:([bool]$request.removeCloudflared) }

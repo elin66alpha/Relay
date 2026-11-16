@@ -26,6 +26,9 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 5. Sign in/configure your selected CLI yourself in a terminal:
    Claude Code: claude; Codex: codex login --device-auth; Cursor: agent login;
    OpenCode: opencode auth login; Antigravity: agy acp --login; Hermes: hermes setup.
+   Setup adds the folders holding these CLIs (and the bundled Node when the
+   host has none) to your user PATH, so terminals opened afterwards find them.
+   **Open terminal (sign in CLIs)** opens one now and lists each command.
    Setup uses the publishers' official Windows installers; it does not log in.
 6. When Web is enabled, open the backend address in a browser and import the
    same encrypted credential. The API still requires authentication.
@@ -41,7 +44,9 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 4. 设置至少六位的凭证密码，在 Relay 导入 server/credentials/ 中的 .relay.json
    或 .relay.png，或在设备令牌页查看二维码并扫码。密码不会保存。
 5. 在终端自行运行上面的 CLI 登录或配置命令；安装器使用官方 Windows 安装方式，
-   不会代替你登录。
+   不会代替你登录。安装器会把这些 CLI 所在目录（主机没有 Node 时还有包内 Node）
+   加入用户 PATH，之后新开的终端可直接调用；“Open terminal (sign in CLIs)”
+   会立即打开一个终端并列出各条命令。
 6. 开启 Web 后，在浏览器打开后端地址，导入相同凭证；API 仍需要认证。
 
 For local testing choose Direct and http://127.0.0.1:8787. Other devices need

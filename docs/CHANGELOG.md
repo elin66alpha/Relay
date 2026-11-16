@@ -2,6 +2,24 @@
 
 ## 0.1.13 - Unreleased
 
+### Added
+
+- `GET /api/workdir/browse` reports `drives`, the drive roots of a Windows
+  backend with open file access (`["C:\\", "D:\\"]`), so a client can leave
+  `C:\` for another drive. Isolated installs, drive roots outside
+  `RELAY_FS_ROOTS` and non-Windows backends report none. A disconnected network
+  drive cannot hold up a listing: probes run once per 30 seconds and a listing
+  waits at most 1.5 seconds for one.
+
+### Changed
+
+- Windows Setup makes the agent CLIs it finds callable from any new terminal:
+  it appends their folders (such as `%APPDATA%\npm`, where Codex and OpenCode
+  install) to the user PATH, plus the bundled Node when the host has none,
+  since npm's command shims need `node`. Uninstall removes only those entries.
+  **Open terminal (sign in CLIs)** in Setup.exe, or `t` in `setup.cmd`, opens a
+  PowerShell with the backend's PATH and lists each CLI's sign-in command.
+
 ### Fixed
 
 - Windows setup no longer corrupts `server\.env`: Windows PowerShell 5.1 read
@@ -10,8 +28,7 @@
   file grew to megabytes. To repair an affected `.env`, replace its overlong
   `#` comment lines with the matching lines from `.env.example`; setting
   values were never changed.
-- The Windows backend runs on the bundle's own `runtime
-ode` again; a Node.js
+- The Windows backend runs on the bundle's own `runtime\node` again; a Node.js
   on the user PATH had taken precedence over it.
 - A quota source whose CLI is not signed in (for example Claude Code with no
   `claude login`) is queried at most once per backoff window and its failure

@@ -6,9 +6,16 @@ $Script:ServerDir = Join-Path $Script:RootDir 'server'
 $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 
+# Per-user folders the agent CLI installers and `npm --global` write commands to.
+$Script:AgentCliDirs = @(
+  (Join-Path $env:USERPROFILE '.local\bin'),
+  (Join-Path $env:USERPROFILE '.opencode\bin'),
+  (Join-Path $env:LOCALAPPDATA 'agy\bin'),
+  (Join-Path $env:APPDATA 'npm')
+)
 # Installers update the user PATH after this process has already started.
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-$env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$env:USERPROFILE\.local\bin;$env:USERPROFILE\.opencode\bin;$env:LOCALAPPDATA\agy\bin;$env:APPDATA\npm;$userPath;$env:PATH"
+$env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$($Script:AgentCliDirs -join ';');$userPath;$env:PATH"
 # Release bundles carry their own runtime; source checkouts still use PATH.
 # It goes first, ahead of the user PATH, so a host Node of another major
 # version cannot run the backend against the bundle's native node-pty build.
@@ -29,6 +36,8 @@ $Script:RuntimeDir = Join-Path $Script:AppDataDir 'runtime'
 $Script:BackendPidFile = Join-Path $Script:RuntimeDir 'backend.pid'
 $Script:TunnelPidFile = Join-Path $Script:RuntimeDir 'tunnel.pid'
 $Script:StartupTaskName = if ($env:RELAY_WINDOWS_TASK_NAME) { $env:RELAY_WINDOWS_TASK_NAME } else { 'Relay Backend' }
+# User PATH entries Setup added, so a later sync or uninstall removes only them.
+$Script:UserPathRecord = Join-Path $Script:AppDataDir 'user-path.json'
 
 function Write-Info {
   param([string]$Message)
@@ -456,4 +465,112 @@ function Show-RelayStatus {
   Write-Host "Backend: $backendStatus"
   Write-Host "Tunnel:  $tunnelStatus"
   Write-Host "Logs:    $Script:LogDir"
+}
+
+# --- user PATH ----------------------------------------------------------------
+#
+# Relay's own processes find the agent CLIs through the folders added to PATH
+# above, but a terminal the user opens does not, so signing a CLI in was hard.
+# Setup appends to the user PATH every folder in $Script:AgentCliDirs that holds
+# an agent CLI, plus the bundled Node when the host has none (npm's .cmd shims
+# run `node`). Entries the user already had are never touched; the ones Setup
+# added are recorded, re-evaluated on each sync and removed on uninstall.
+
+$Script:AgentCliNames = @('claude', 'codex', 'agent', 'cursor-agent', 'opencode', 'agy', 'hermes')
+
+function Get-UserPathRaw {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+  if (-not $key) { return '' }
+  try {
+    # Keep %VARIABLES% unexpanded so rewriting the value does not freeze them.
+    return [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+  } finally { $key.Close() }
+}
+
+function Set-UserPathRaw {
+  param([string]$Value)
+  $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+  try { $key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]::ExpandString) } finally { $key.Close() }
+  # Setting a user variable through .NET broadcasts WM_SETTINGCHANGE, so
+  # terminals opened from Explorer or the Start menu pick up the new PATH.
+  [Environment]::SetEnvironmentVariable('RELAY_PATH_REFRESH', '1', 'User')
+  [Environment]::SetEnvironmentVariable('RELAY_PATH_REFRESH', $null, 'User')
+}
+
+function Get-PathKey {
+  param([string]$Entry)
+  return [Environment]::ExpandEnvironmentVariables($Entry).Trim().TrimEnd('\').ToLowerInvariant()
+}
+
+function Test-AgentCliDir {
+  param([string]$Dir)
+  foreach ($name in $Script:AgentCliNames) {
+    foreach ($ext in @('.exe', '.cmd', '.bat')) {
+      if (Test-Path -LiteralPath (Join-Path $Dir "$name$ext") -PathType Leaf) { return $true }
+    }
+  }
+  return $false
+}
+
+# Whether a Node outside this bundle is on the machine PATH or the given user entries.
+function Test-HostNode {
+  param([string[]]$UserEntries)
+  $machine = @([Environment]::GetEnvironmentVariable('PATH', 'Machine') -split ';')
+  foreach ($entry in @($machine + $UserEntries)) {
+    if (-not $entry) { continue }
+    $dir = [Environment]::ExpandEnvironmentVariables($entry)
+    if ((Get-PathKey $dir) -eq (Get-PathKey $Script:BundledNodeDir)) { continue }
+    if (Test-Path -LiteralPath (Join-Path $dir 'node.exe') -PathType Leaf) { return $true }
+  }
+  return $false
+}
+
+function Read-UserPathRecord {
+  if (-not (Test-Path -LiteralPath $Script:UserPathRecord)) { return @() }
+  try { return @((Get-Content -LiteralPath $Script:UserPathRecord -Raw -Encoding UTF8 | ConvertFrom-Json) | Where-Object { $_ }) }
+  catch { return @() }
+}
+
+function Write-UserPathRecord {
+  param([string[]]$Entries)
+  if (-not $Entries -or $Entries.Count -eq 0) {
+    Remove-Item -LiteralPath $Script:UserPathRecord -Force -ErrorAction SilentlyContinue
+    return
+  }
+  Write-Utf8NoBom -Path $Script:UserPathRecord -Lines @(ConvertTo-Json -InputObject @($Entries) -Compress)
+}
+
+# The user PATH entries left after removing what Setup added earlier.
+function Get-UserPathWithoutRelay {
+  $recorded = @(Read-UserPathRecord | ForEach-Object { Get-PathKey $_ })
+  return @((Get-UserPathRaw) -split ';' | Where-Object { $_ -and ($recorded -notcontains (Get-PathKey $_)) })
+}
+
+function Sync-RelayUserPath {
+  $raw = Get-UserPathRaw
+  $before = @($raw -split ';' | Where-Object { $_ } | ForEach-Object { Get-PathKey $_ })
+  $kept = Get-UserPathWithoutRelay
+  $keys = @($kept | ForEach-Object { Get-PathKey $_ })
+  $wanted = @($Script:AgentCliDirs | Where-Object { Test-AgentCliDir $_ })
+  if ((Test-Path -LiteralPath (Join-Path $Script:BundledNodeDir 'node.exe') -PathType Leaf) -and -not (Test-HostNode $kept)) {
+    $wanted += $Script:BundledNodeDir
+  }
+  $added = @($wanted | Where-Object { $keys -notcontains (Get-PathKey $_) })
+  $next = (@($kept) + $added) -join ';'
+  if ($next -ne $raw) { Set-UserPathRaw $next }
+  Write-UserPathRecord $added
+  $new = @($added | Where-Object { $before -notcontains (Get-PathKey $_) })
+  if ($new.Count -gt 0) {
+    Write-Info "Added to your user PATH for new terminals: $($new -join '; ')"
+  }
+}
+
+function Remove-RelayUserPath {
+  $raw = Get-UserPathRaw
+  $next = (Get-UserPathWithoutRelay) -join ';'
+  if ($next -ne $raw) {
+    Set-UserPathRaw $next
+    Write-Info 'Removed the folders Setup had added to your user PATH.'
+  }
+  Write-UserPathRecord @()
 }

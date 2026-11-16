@@ -100,6 +100,7 @@ internal sealed class RelaySetup : Form
         installButton = Button(installButtons, "Install", async delegate { await Install(false); });
         Button(installButtons, "Reinstall (keep data)", async delegate { if (Ask("Stop Relay and reconfigure this installation? Tokens, chats and settings will be kept.")) await Install(true); });
         Button(installButtons, "Install selected CLIs", async delegate { await Run("agents", Request()); });
+        Button(installButtons, "Open terminal (sign in CLIs)", async delegate { await Run("terminal", Request()); });
         install.Controls.Add(installButtons);
         network.SelectedIndexChanged += delegate { NetworkFields(); };
         NetworkFields();

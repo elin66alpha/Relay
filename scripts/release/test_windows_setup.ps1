@@ -28,6 +28,11 @@ function Ensure-NamedTunnel { param([string]$Name); return 'fixture-tunnel-id' }
 function Wait-ForTunnelUrl { return 'https://fresh-fixture.trycloudflare.com' }
 function cloudflared { $script:dnsArgs = @($args); $global:LASTEXITCODE = 0 }
 function Invoke-RelayCredential { param([string[]]$Arguments, [string]$Passphrase); $script:credentialArgs = $Arguments; if ($Passphrase -ne 'fixture-password') { throw 'Password was not passed securely.' } }
+# The user PATH lives in memory here; the test never writes the registry.
+$script:userPath = '%USERPROFILE%\existing;C:\Tools'; $script:userPathWrites = 0; $script:hostNode = $false
+function Get-UserPathRaw { return $script:userPath }
+function Set-UserPathRaw { param([string]$Value); $script:userPath = $Value; $script:userPathWrites++ }
+function Test-HostNode { param([string[]]$UserEntries); return $script:hostNode }
 function Assert-That { param([bool]$Condition, [string]$Message); if (-not $Condition) { throw $Message } }
 function Expect-Failure { param([scriptblock]$Operation); $failed = $false; try { & $Operation } catch { $failed = $true }; Assert-That $failed 'Expected validation failure.' }
 try {
@@ -61,7 +66,31 @@ try {
   Expect-Failure { Set-EnvValue 'PORT' "123`nBAD=1" }
   Assert-That ((Get-Content -LiteralPath $Script:EnvFile -Raw) -eq $before) 'Invalid input must not change configuration.'
   Assert-That (([IO.File]::ReadAllLines($Script:EnvFile, [Text.Encoding]::UTF8))[0] -eq $unicodeComment) 'Repeated reinstalls must not re-encode .env.'
+  # New terminals must find the agent CLIs: folders holding one, plus the
+  # bundled Node when the host has none, are appended to the user PATH.
+  $original = $script:userPath
+  $npmDir = Join-Path $scratch 'npm'; $emptyDir = Join-Path $scratch 'empty'; $localBin = Join-Path $scratch 'local bin'
+  New-Item -ItemType Directory -Path $npmDir, $emptyDir, $localBin -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $npmDir 'codex.cmd'), ''); [IO.File]::WriteAllText((Join-Path $localBin 'claude.exe'), '')
+  $Script:AgentCliDirs = @($localBin, $emptyDir, $npmDir)
+  $Script:BundledNodeDir = Join-Path $scratch 'runtime\node'
+  New-Item -ItemType Directory -Path $Script:BundledNodeDir -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $Script:BundledNodeDir 'node.exe'), '')
+  $Script:UserPathRecord = Join-Path $scratch 'user-path.json'
+  $script:userPath = "$original;$localBin\"
+  $original = $script:userPath
+  Sync-RelayUserPath
+  Assert-That ($script:userPath -eq "$original;$npmDir;$($Script:BundledNodeDir)") "CLI folders and bundled Node must be appended once, got: $($script:userPath)"
+  Assert-That ($script:userPath.StartsWith('%USERPROFILE%\existing;')) 'Unexpanded user PATH entries must stay unexpanded.'
+  $writes = $script:userPathWrites
+  Sync-RelayUserPath
+  Assert-That ($script:userPathWrites -eq $writes) 'An unchanged sync must not rewrite the user PATH.'
+  $script:hostNode = $true
+  Sync-RelayUserPath
+  Assert-That ($script:userPath -eq "$original;$npmDir") 'A host Node makes the bundled one unnecessary.'
   Uninstall-RelayBackend
+  Assert-That ($script:userPath -eq $original) 'Uninstall must remove only the PATH entries Setup added.'
+  Assert-That (-not (Test-Path -LiteralPath $Script:UserPathRecord)) 'Uninstall must clear the PATH record.'
   Assert-That (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web'))) 'Uninstall removes Web.'
   Assert-That ((Get-Content -LiteralPath (Join-Path $Script:ServerDir 'tokens.json') -Raw) -eq 'retained fixture') 'Uninstall must keep device tokens.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Uninstall must keep custom configuration.'
@@ -75,7 +104,7 @@ try {
   [IO.File]::WriteAllText((Join-Path $fakeNodeDir 'node.exe'), '')
   $firstPath = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $fakeLib 'common.ps1')'; (`$env:PATH -split ';')[0]"
   Assert-That ($firstPath -eq $fakeNodeDir) "Bundled Node must lead PATH, got: $firstPath"
-  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, uninstall, retained state and incomplete bundles.'
+  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, user PATH sync, uninstall, retained state and incomplete bundles.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($scratch)
   $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

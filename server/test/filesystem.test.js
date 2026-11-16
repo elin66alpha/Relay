@@ -747,3 +747,80 @@ test('an isolated install confines the file API to its workspace', async () => {
     else process.env.RELAY_WORKSPACE_ROOT = prev;
   }
 });
+
+// --- Windows drive roots -------------------------------------------------------
+
+// A Windows host with C: and D: (A: is an empty floppy letter), from any OS.
+const windowsHost = {
+  platform: 'win32',
+  exists: async (root) => ['C:\\', 'D:\\'].includes(root),
+};
+
+test('an open Windows backend reports its drive roots in letter order', async () => {
+  const { driveRoots } = loadFilesystem();
+  assert.deepEqual(await driveRoots(windowsHost), ['C:\\', 'D:\\']);
+  assert.deepEqual(await driveRoots({ ...windowsHost, platform: 'linux' }), []);
+});
+
+test('an isolated backend reports no drive roots', async () => {
+  const prev = process.env.RELAY_WORKSPACE_ROOT;
+  process.env.RELAY_WORKSPACE_ROOT = scratchCase();
+  try {
+    const filesystem = loadFilesystem();
+    assert.deepEqual(await filesystem.driveRoots(windowsHost), []);
+    const listing = await filesystem.listAbsoluteDirectory(process.env.RELAY_WORKSPACE_ROOT);
+    assert.deepEqual(listing.drives, []);
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_WORKSPACE_ROOT;
+    else process.env.RELAY_WORKSPACE_ROOT = prev;
+  }
+});
+
+test('RELAY_FS_ROOTS keeps only the drive roots it allows', async () => {
+  const { driveRoots } = loadFilesystem({ roots: 'C:\\' });
+  assert.deepEqual(await driveRoots(windowsHost), ['C:\\']);
+});
+
+test('a stalled drive probe does not hold up the listing', { skip: process.platform !== 'win32' }, async (t) => {
+  let answerStalled;
+  t.mock.method(fs.promises, 'access', (root) => {
+    if (root === 'Z:\\') return new Promise((resolve) => { answerStalled = resolve; });
+    return root === 'C:\\' ? Promise.resolve() : Promise.reject(new Error('ENOENT'));
+  });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { driveRoots } = loadFilesystem();
+
+  // Z: (a disconnected network drive) never answers: the caller gets the
+  // previous list, here none, after the wait instead of hanging.
+  const first = driveRoots();
+  t.mock.timers.tick(1500);
+  assert.deepEqual(await first, []);
+
+  answerStalled();
+  await new Promise(setImmediate);
+  assert.deepEqual(await driveRoots(), ['C:\\', 'Z:\\']);
+});
+
+test('GET /api/workdir/browse carries the drive list', async (t) => {
+  const dir = scratchCase();
+  const app = express();
+  app.use(createFsRouter({ ...loadFilesystem(), eventWorkdir: () => dir }));
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/workdir/browse?path=${encodeURIComponent(dir)}`,
+  );
+  assert.equal(response.status, 200);
+  const listing = await response.json();
+  if (process.platform === 'win32') {
+    // The listed directory's own drive is always among them.
+    assert.ok(listing.drives.includes(path.parse(dir).root.toUpperCase()), listing.drives);
+  } else {
+    assert.deepEqual(listing.drives, []);
+  }
+});

@@ -216,6 +216,65 @@ function sortEntries(entries) {
   });
 }
 
+// --- Windows drive roots --------------------------------------------------------
+//
+// C:\ has no parent, so a Windows client needs the drive list to reach D:\.
+// Only open file access offers it: an isolated install reports none, and
+// RELAY_FS_ROOTS keeps only drive roots it allows. A disconnected network drive
+// can stall its probe for many seconds, so one probe runs at a time, its answer
+// is reused for DRIVE_CACHE_MS, and a listing waits at most DRIVE_WAIT_MS for it
+// before answering with the previous list.
+const DRIVE_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+const DRIVE_CACHE_MS = 30_000;
+const DRIVE_WAIT_MS = 1500;
+const driveProbe = { at: 0, pending: null, roots: [] };
+
+async function probeDriveRoots(exists) {
+  const found = await Promise.all(
+    DRIVE_LETTERS.map(async (letter) => {
+      const root = `${letter}:\\`;
+      return (await exists(root)) ? root : null;
+    }),
+  );
+  return found.filter(Boolean);
+}
+
+function rootExists(root) {
+  return fs.promises.access(root).then(
+    () => true,
+    () => false,
+  );
+}
+
+function cachedDriveRoots() {
+  if (!driveProbe.pending && Date.now() - driveProbe.at > DRIVE_CACHE_MS) {
+    driveProbe.pending = probeDriveRoots(rootExists).then((roots) => {
+      Object.assign(driveProbe, { at: Date.now(), pending: null, roots });
+      return roots;
+    });
+  }
+  if (!driveProbe.pending) return Promise.resolve(driveProbe.roots);
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(driveProbe.roots), DRIVE_WAIT_MS);
+  });
+  return Promise.race([driveProbe.pending, timeout]).finally(() => clearTimeout(timer));
+}
+
+// `platform` and `exists` let tests describe a Windows host from any OS.
+async function driveRoots({ platform = process.platform, exists } = {}) {
+  if (platform !== 'win32' || getWorkspaceRoot()) return [];
+  const roots = exists ? await probeDriveRoots(exists) : await cachedDriveRoots();
+  return roots.filter((root) => {
+    try {
+      assertPathAllowed(root);
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  });
+}
+
 async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } = {}) {
   const raw = String(value || '').trim();
   if (raw && !path.isAbsolute(raw)) {
@@ -262,6 +321,8 @@ async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } 
     path: target,
     absolutePath: target,
     parentPath: target === top ? null : path.dirname(target),
+    // Drive roots the client may switch to; empty outside open Windows hosts.
+    drives: await driveRoots(),
     entries,
   };
 }
@@ -768,6 +829,7 @@ function sendDirectoryZip(download, res, maxBytes) {
 
 module.exports = {
   createAbsoluteDirectory,
+  driveRoots,
   listAbsoluteDirectory,
   prepareDownload,
   prepareDownloadAbsolute,

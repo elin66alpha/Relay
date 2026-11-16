@@ -135,7 +135,9 @@ Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.j
 生产依赖、Web 前端和 `Setup.exe`。将整个 ZIP 解压到固定、可写的目录，双击
 `Setup.exe`，或运行 `.\setup.cmd` 打开命令行菜单。两种入口共用安装、重装、卸载、
 状态查询、CLI 安装和设备令牌管理功能。Web 默认开启；隧道模式缺少 `cloudflared`
-时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。包内 `README.md`
+时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。安装器会把装有
+agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 Node 时再加上包内 Node，
+之后新开的终端即可直接调用；Setup.exe 的 “Open terminal (sign in CLIs)” 按钮（命令行菜单 `t`）可立即打开一个。卸载只移除安装器添加的条目。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
 `.\uninstall.cmd` 是下面相同服务脚本的入口。计划任务在当前用户登录时启动。
 

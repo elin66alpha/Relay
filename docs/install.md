@@ -165,7 +165,11 @@ Extract the whole ZIP to a permanent writable directory and double-click
 reinstall, uninstall, status, agent CLI installation and device token management,
 using shared operations. Web defaults on. Missing `cloudflared` is downloaded
 for tunnel modes. The five CLIs can be selected for installation with official
-Windows installers; sign in/configure them yourself afterward.
+Windows installers; sign in/configure them yourself afterward. Setup appends
+the folders holding an agent CLI (such as `%APPDATA%\npm`) to your user PATH,
+plus the bundled Node when the host has none, so new terminals find them;
+"Open terminal" (menu `t`) opens one right away. Uninstall removes only the
+entries Setup added.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
 same service adapters below. The Scheduled Task starts at this user's login.

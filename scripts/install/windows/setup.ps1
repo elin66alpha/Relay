@@ -61,10 +61,11 @@ while ($true) {
 7) Delete a token
 8) List tokens
 9) Show a token's credential QR again
+t) Open a terminal with the agent CLIs on PATH (to sign in)
 0) Exit
 '@
   try {
-    switch (Read-Host 'Choose [0-9]') {
+    switch (Read-Host 'Choose [0-9, t]') {
       { $_ -in @('1', '2') } {
         $reinstall = $_ -eq '2'
         if ($reinstall -and (Read-Host 'Stop and reconfigure Relay, keeping its data? [y/N]') -notmatch '^[Yy]') { break }
@@ -97,6 +98,7 @@ while ($true) {
         $id = Read-Host 'Token ID'
         if ($id) { Invoke-RelayCredential -Arguments @('--show', $id, '--url', (Get-EnvValue 'PUBLIC_BASE_URL')) }
       }
+      't' { Open-RelayTerminal }
       '0' { return }
       default { Write-Warn 'Invalid choice.' }
     }
