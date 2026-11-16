@@ -60,7 +60,10 @@ ln -s "$root/app/shell/android/key.properties" "$tmp/source/app/shell/android/ke
 apk="$tmp/source/app/shell/build/app/outputs/flutter-apk/app-release.apk"
 expected_cert=3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
 certificate="$("$signer" verify --print-certs "$apk")"
-grep -Fqi "Signer #1 certificate SHA-256 digest: $expected_cert" <<< "$certificate" || {
+# apksigner prints "Signer #1 certificate ..." in older build-tools and
+# "V2 Signer: certificate ..." in 37+; every signer must be the release key.
+digests="$(sed -n 's/^.*[Cc]ertificate SHA-256 digest: *\([0-9A-Fa-f]*\).*$/\1/p' <<< "$certificate" | tr 'A-F' 'a-f' | sort -u)"
+[ "$digests" = "$expected_cert" ] || {
   echo 'The APK was not signed with the Relay release certificate.' >&2; exit 1;
 }
 apk_info="$("$aapt" dump badging "$apk")"
