@@ -684,7 +684,8 @@ On Linux, `node-pty` compiles a native addon during `npm install`; install
 Python 3, `make`, and a C++ compiler first (for example `build-essential` on
 Debian/Ubuntu; `./scripts/install/linux/setup.sh` installs them there when
 missing). macOS and Windows use the package's supported prebuilt binaries
-when available. Unix hosts also need `zip` for directory downloads.
+when available; when one does not fit, macOS setup opens the Xcode Command
+Line Tools installer. Unix hosts also need `zip` for directory downloads.
 
 `server/package.json` allows node-pty's install scripts through npm 12's
 `allowScripts` policy, so `npm install` and `npm ci` build it without manual
@@ -851,7 +852,7 @@ with `gh workflow run ios.yml --ref main`.
 A GitHub release `v<VERSION>` carries:
 
 - `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
-- `install.sh` — `scripts/install/linux/install.sh`, the Linux one-line installer
+- `install.sh` — `scripts/install/unix/install.sh`, the Linux and macOS one-line installer
   (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
   It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
   them;

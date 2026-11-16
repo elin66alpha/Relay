@@ -13,14 +13,16 @@ if (Test-Path -LiteralPath (Join-Path $bundledNodeDir 'node.exe')) {
 }
 # Installers update the user PATH after this process has already started.
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-$env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$env:USERPROFILE\.local\bin;$env:USERPROFILE\.opencode\bin;$env:APPDATA\npm;$userPath;$env:PATH"
+$env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$env:USERPROFILE\.local\bin;$env:USERPROFILE\.opencode\bin;$env:LOCALAPPDATA\agy\bin;$env:APPDATA\npm;$userPath;$env:PATH"
 
 $Script:AppDataDir = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA 'Relay'
 } else {
   Join-Path $env:USERPROFILE 'AppData\Local\Relay'
 }
-$Script:LogDir = Join-Path $Script:AppDataDir 'logs'
+# Logs sit with the installation, next to server\.env and the credentials, so
+# they are found where Relay was extracted. PID files stay per user.
+$Script:LogDir = Join-Path $Script:RootDir 'logs'
 $Script:RuntimeDir = Join-Path $Script:AppDataDir 'runtime'
 $Script:BackendPidFile = Join-Path $Script:RuntimeDir 'backend.pid'
 $Script:TunnelPidFile = Join-Path $Script:RuntimeDir 'tunnel.pid'
@@ -402,11 +404,19 @@ function Register-RelayStartup {
   $script = Join-Path $Script:WindowsDir 'start.ps1'
   $powershell = (Get-Command 'powershell.exe').Source
   $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`""
-  $trigger = New-ScheduledTaskTrigger -AtLogOn
   $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  # A logon trigger for any user needs administrator rights ("Access is denied");
+  # one limited to the current user does not.
+  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start Relay backend for the current user.' -Force | Out-Null
+  try {
+    Register-ScheduledTask -TaskName $Script:StartupTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start Relay backend for the current user.' -Force -ErrorAction Stop | Out-Null
+  } catch {
+    # Starting at logon is a convenience; the backend still starts now.
+    Write-Warn "Could not register the startup task ($($_.Exception.Message)). Relay will not start at logon; run start.cmd after signing in."
+    return
+  }
   Write-Info "Startup task registered: $Script:StartupTaskName"
 }
 

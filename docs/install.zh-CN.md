@@ -3,7 +3,8 @@
 [English](install.md) · [生产部署手册](handbook.md#production-deployment)
 
 Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 HTTP/SSE API。`scripts/install/`
-下的脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。
+下的脚本只负责各平台的依赖安装、进程管理、日志和可选 Cloudflare Tunnel。Linux 和 macOS
+共用 `scripts/install/unix/` 中的同一套实现，问题和顺序完全一样，只有包管理器和服务管理器不同。
 
 ## 前置要求
 
@@ -18,14 +19,18 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
   Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 22
   时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
   安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
+- 在 macOS 上，安装脚本确认一次后用 Homebrew 做同样的事：Node.js 缺失或低于 22 时安装
+  当前版本，以及 `zip`，选择隧道模式时安装 `cloudflared`。没有 Homebrew 时会列出需要
+  安装的软件。终端的 PTY 依赖需要编译时，会打开 Xcode Command Line Tools 安装程序。
 - 将现有 Relay 升级到 0.1.10 或更新版本前，请先把 Node.js 更新到 22 或更新版本。
   一键安装脚本会在替换文件前检查；版本过低时不会改动现有安装。
 
 ## 安装
 
-在 Linux 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到 `~/relay`
-（运行时可改，或用 `RELAY_DIR` 指定），然后运行安装脚本。再次运行即原地升级代码，保留
-`server/.env`、令牌、聊天和设置，并重启后端。`RELAY_VERSION=<版本>` 可安装指定版本。
+在 Linux 和 macOS 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到
+`~/relay`（运行时可改，或用 `RELAY_DIR` 指定），然后运行该系统的安装脚本。再次运行即原地
+升级代码，保留 `server/.env`、令牌、聊天和设置，并重启后端（Linux 上是 PM2 进程，macOS
+上是 LaunchAgent）。`RELAY_VERSION=<版本>` 可安装指定版本。
 
 ```bash
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
@@ -42,23 +47,30 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 安装脚本会按需创建 `server/.env`、安装服务端依赖、配置网络模式、启动服务并生成加密
 凭证。然后在 app 中导入生成的 `.relay.png` 或 `.relay.json`，输入生成时设置的密码。
 
-在 Linux 上，`setup.sh` 会打开一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
+在 Linux 和 macOS 上，`setup.sh` 会打开同一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
 查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌）、安装 agent
 CLI，以及新建、删除、列出或重新展示设备令牌。安装 agent CLI 会列出 Claude Code、Codex、
 Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PATH、`~/.local/bin`、
 `~/.opencode/bin`），用各 CLI 的官方安装方式安装你选的几个（Codex 用
 `npm install -g @openai/codex`），并打印登录命令；Relay 不会替 CLI 登录。安装流程里也
 有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
-不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供）。
+不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供），然后询问文件访问方式：
+
+- **开放**（默认）：agent 和文件浏览器能访问后端用户可访问的所有文件。
+- **隔离**：工作目录、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/` 中
+  （一行命令安装时为 `~/relay/workspace`），agent 也不再提供完全自动 / 不受沙箱限制的权限
+  档位。安装脚本把该目录写入 `server/.env` 的 `RELAY_WORKSPACE_ROOT`。这是 Relay 自己的路径
+  策略，不是操作系统级沙箱：agent CLI 和终端仍以后端用户身份运行。
+
+再次安装或重新安装时默认沿用当前选择；服务信息中以 `File access` 显示。卸载会保留
+`workspace/` 及其中的文件。
 
 源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `app/shell/build/web` 中自带编译好的
 Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
 下的接口始终需要设备令牌。Windows 后端 ZIP 也包含相同的 Web 前端：
 
-- Linux 和 Windows 安装会询问是否提供 Web 前端；卸载会删除它，同时保留后端状态。
+- Linux、macOS 和 Windows 安装会询问是否提供 Web 前端；卸载会删除它，同时保留后端状态。
   Windows 的 Web 与 API 共用一个 Node.js 进程，不需要额外的 Web 服务器。
-- macOS 安装会直接提供包内的 Web 前端；要关闭，在 `server/.env` 中设置
-  `RELAY_SERVE_WEB=0` 后重启后端。
 - 源码仓库需要先运行 `flutter build web` 才有。
 
 ### 网络模式
@@ -109,8 +121,13 @@ Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js�
 ./scripts/install/macos/uninstall.sh
 ```
 
-LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 下，文件名为
-`backend.*.log` 和 `tunnel.*.log`。生成的服务 PATH 已包含常见 Homebrew 和用户 bin 路径。
+它们就是 Linux 的那组脚本，只是用 launchd 代替 PM2：后端以及隧道模式下的隧道分别以
+LaunchAgent `dev.relay.app.backend` 和 `dev.relay.app.tunnel` 运行，位于
+`~/Library/LaunchAgents`，登录时启动，退出后自动重启。日志在 `~/Library/Logs/Relay/` 下，
+文件名为 `backend.*.log` 和 `tunnel.*.log`。生成的服务 PATH 已包含常见 Homebrew 和用户
+bin 路径。`uninstall.sh` 会删除 LaunchAgent 和 Web 前端，询问是否删除正式 Cloudflare
+Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.js；后端数据、令牌和凭证
+保留不动。
 
 ### Windows
 
@@ -129,8 +146,9 @@ LaunchAgent 位于 `~/Library/LaunchAgents`。日志在 `~/Library/Logs/Relay/` 
 .\scripts\install\windows\uninstall.ps1
 ```
 
-日志和 PID 文件位于 `%LOCALAPPDATA%\Relay\logs\` 与
-`%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell 阻止脚本执行，只为当前会话临时放开：
+日志位于 Relay 目录下的 `logs\`（Setup.exe 的 `setup.log`，以及后端和隧道的
+`.out`/`.err` 日志）；PID 文件位于 `%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell
+阻止脚本执行，只为当前会话临时放开：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass

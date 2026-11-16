@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const os = require('os');
 const { boundedInteger } = require('./bounded-integer');
+const { getWorkspaceRoot } = require('./workdir');
 
 const DEFAULT_IDLE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
@@ -154,7 +155,9 @@ function createTerminalManager(options = {}) {
         name: 'xterm-256color',
         cols: ticket.cols,
         rows: ticket.rows,
-        cwd: env.HOME || os.homedir(),
+        // An isolated install opens the shell in its workspace. The shell is
+        // the person's own and is not confined to it.
+        cwd: getWorkspaceRoot() || env.HOME || os.homedir(),
         env: {
           ...env,
           TERM: 'xterm-256color',

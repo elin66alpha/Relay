@@ -28,7 +28,7 @@ TAR="$(mktemp)"
 trap 'rm -f "$TAR"' EXIT
 # shellcheck disable=SC2046 # one argument per tracked path
 git archive --format=tar --prefix="$NAME/" -o "$TAR" HEAD $(git ls-tree -r --name-only HEAD |
-  grep -E '^(LICENSE|README(\.zh-CN)?\.md|docs/(CHANGELOG|SECURITY|handbook|install(\.zh-CN)?)\.md|scripts/install/(linux|macos)/(lib/)?[^/]+\.sh|scripts/install/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
+  grep -E '^(LICENSE|README(\.zh-CN)?\.md|docs/(CHANGELOG|SECURITY|handbook|install(\.zh-CN)?)\.md|scripts/install/(linux|macos|unix)/(lib/)?[^/]+\.sh|scripts/install/windows/(lib/)?[^/]+\.ps1|server/(server\.js|ecosystem\.config\.js|package(-lock)?\.json|\.env\.example|\.gitignore)|server/(lib|routes|scripts)/.*\.js)$')
 tar --append -f "$TAR" --transform "s,^app/,$NAME/app/," app/shell/build/web
 gzip -9 -c "$TAR" >"$ARCHIVE"
 (cd "$OUT_DIR" && sha256sum "$NAME.tar.gz" >"$NAME.tar.gz.sha256")

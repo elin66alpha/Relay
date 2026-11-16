@@ -2,6 +2,11 @@ name: Prepare release draft
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_backend_only:
+        description: Only build the Windows backend bundle as an artifact (any branch, no draft)
+        type: boolean
+        default: false
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -26,7 +31,7 @@ jobs:
           fetch-depth: 0
       - run: node scripts/release/check_versions.js
       - name: Require tested main commit and unused tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.windows_backend_only
         run: |
           set -euo pipefail
           [ "$GITHUB_REF" = refs/heads/main ] || { echo 'Run this workflow on main.' >&2; exit 1; }
@@ -36,6 +41,7 @@ jobs:
             --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
 
   source-bundle:
+    if: ${{ !inputs.windows_backend_only }}
     name: Backend setup bundle
     needs: validate
     runs-on: ubuntu-latest
@@ -56,7 +62,7 @@ jobs:
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: ./scripts/release/package_backend.sh
-      - run: cp scripts/install/linux/install.sh build/release/install.sh
+      - run: cp scripts/install/unix/install.sh build/release/install.sh
       - uses: actions/upload-artifact@v7
         with:
           name: source-bundle
@@ -83,8 +89,10 @@ jobs:
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: flutter build windows --release --no-pub
+        if: ${{ !inputs.windows_backend_only }}
         working-directory: app/shell
       - name: Package Windows desktop client
+        if: ${{ !inputs.windows_backend_only }}
         shell: pwsh
         run: |
           $version = node -p "require('./server/package.json').version"
@@ -102,6 +110,7 @@ jobs:
           if-no-files-found: error
 
   linux-desktop:
+    if: ${{ !inputs.windows_backend_only }}
     name: Ubuntu desktop package
     needs: validate
     runs-on: ubuntu-22.04
@@ -131,6 +140,7 @@ jobs:
           if-no-files-found: error
 
   apple-clients:
+    if: ${{ !inputs.windows_backend_only }}
     name: iOS and macOS clients
     needs: validate
     runs-on: macos-latest
@@ -168,7 +178,7 @@ jobs:
   android-client:
     name: Android APK
     needs: validate
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.windows_backend_only
     runs-on: ubuntu-latest
     env:
       EXPECTED_ANDROID_CERT: 3e4dea3f6cd50fd30b25a168ba9eb2c14a14ecb8f786ffcb4e3c1836275a720f
@@ -270,7 +280,7 @@ jobs:
 
   draft:
     name: Create draft
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.windows_backend_only
     needs: [source-bundle, windows-bundles, linux-desktop, apple-clients, android-client]
     runs-on: ubuntu-latest
     permissions:

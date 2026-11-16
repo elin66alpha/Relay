@@ -509,3 +509,17 @@ test('Antigravity background turns open on text, include wakeup notices, and sup
   await assert.rejects(stopPromise, AgentCancelledError);
   assert.equal(interrupted, 1);
 });
+
+test('an isolated install starts no agent outside its workspace', async () => {
+  const prev = process.env.RELAY_WORKSPACE_ROOT;
+  process.env.RELAY_WORKSPACE_ROOT = path.join(os.tmpdir(), 'relay-isolated-workspace');
+  try {
+    await assert.rejects(
+      runAgent('claude', 'hello', () => {}, { workdir: path.join(os.tmpdir(), 'elsewhere') }),
+      (err) => err.code === 'WORKDIR_OUTSIDE_WORKSPACE',
+    );
+  } finally {
+    if (prev === undefined) delete process.env.RELAY_WORKSPACE_ROOT;
+    else process.env.RELAY_WORKSPACE_ROOT = prev;
+  }
+});

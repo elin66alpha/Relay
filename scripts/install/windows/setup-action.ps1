@@ -18,6 +18,7 @@ try {
         Agents = [string[]]$request.agents; Passphrase = [string]$request.passphrase
         Label = [string]$request.label; Reinstall = ($request.action -eq 'reinstall')
         OverwriteDns = [bool]$request.overwriteDns
+        Isolated = [bool]$request.isolated
       }
       if ($options.Passphrase.Length -lt 6) { throw 'Password must have at least 6 characters.' }
       Install-RelayBackend @options

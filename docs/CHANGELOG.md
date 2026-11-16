@@ -21,9 +21,24 @@
 - **Background replies for Codex and Antigravity**: Codex child-agent
   completion replies and Antigravity (`agy`) background turns (timers,
   subagents, or background commands) now appear in solo chat and support Stop.
+- **Same backend setup on macOS as on Linux**: the one-line `install.sh`
+  command installs and upgrades a macOS backend too, and macOS setup now has
+  Linux's menu (reinstall, uninstall, status, agent CLIs, tokens) and its six
+  install steps, including installing missing Node.js, `zip` and `cloudflared`
+  with Homebrew and asking whether to serve the Web client. Both run
+  `scripts/install/unix/`; the `linux/` and `macos/` commands are unchanged,
+  and macOS keeps its LaunchAgents.
+- **File access choice in Linux and macOS setup**, as on Windows: a new step
+  asks for Open (every file the backend user can reach) or Isolated (work
+  directories, the file browser and agents stay inside `<install>/workspace`,
+  written as `RELAY_WORKSPACE_ROOT`). Status shows the choice.
+- Windows Setup.exe can install Antigravity (`agy`) with Google's official
+  Windows installer, alongside the other agent CLIs.
 
 ### Changed
 
+- Linux Quick Tunnel setup points cloudflared at `127.0.0.1` instead of
+  `localhost`, as macOS already did, so it reaches the backend's IPv4 bind.
 - The macOS desktop client now requires macOS 11 or later (Firebase 5).
 - The Android APK is built and signed by the release workflow from GitHub
   Actions Secrets, with the same release certificate as before.
@@ -43,6 +58,23 @@
   the turn continues on the backend.
 - Resuming the app from the background reconnects the event stream and pulls
   history once so turns finished from another client appear automatically.
+- Windows backend: Setup.exe in a partly extracted bundle now names the missing
+  file and asks for a complete extraction instead of failing with
+  `Cannot find module ...windows-setup.js`. The ZIP now stores Setup.exe last
+  and uses standard `/` entry paths.
+- Windows backend: installing without administrator rights no longer stops at
+  Step 4/5 with `Access is denied`; the logon task is limited to the current
+  user, and if it still cannot be registered, setup warns and continues.
+- Windows backend: Setup.exe no longer stays on "Running" after Install,
+  Reinstall or Start finishes. The started backend inherited Setup.exe's output
+  pipes, so Setup.exe waited for them to close forever.
+- Windows backend: once Relay is installed (a device token exists or the
+  backend is running), Setup.exe disables Install and points to Reinstall
+  instead of failing with "Relay is already running".
+- Windows backend: logs now live in `logs\` inside the extracted directory.
+  Setup.exe saves everything it shows to `logs\setup.log`, so a failed install
+  leaves a record; backend and tunnel output moved there from
+  `%LOCALAPPDATA%\Relay\logs`, which is left untouched.
 
 ## 0.1.11 - 2026-11-09
 

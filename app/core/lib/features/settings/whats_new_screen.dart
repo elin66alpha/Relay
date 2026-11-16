@@ -180,6 +180,8 @@ const List<_Release> _zhReleases = <_Release>[
       'iOS 下载的文件会保存到应用“文稿”目录，可在“文件 → 我的 iPhone → Relay”中找到。',
       '智能体正在回复时也可以直接从侧边栏返回首页，任务会继续在后端运行。',
       'App 从后台切回前台时会自动重连事件流并同步一次历史记录，其他设备刚聊完的内容无需手动刷新即可看到。',
+      'Linux 和 macOS 安装时也可以选择“隔离”文件访问：agent 和文件浏览器只能使用安装目录下的 workspace 文件夹。',
+      'macOS 后端的安装与 Linux 完全一致：同一行 install.sh 命令安装和升级，同样的菜单和六个安装步骤，缺少的软件用 Homebrew 补齐。',
     ],
   ),
   _Release(
@@ -326,6 +328,8 @@ const List<_Release> _enReleases = <_Release>[
       'iOS downloads save to Documents and appear in Files → On My iPhone → Relay.',
       'Returning Home from the drawer no longer waits when an agent is busy; the turn keeps running on the backend.',
       'Resuming the app reconnects events and refreshes history once so turns finished on another client appear automatically.',
+      'Linux and macOS setup can also isolate file access: agents and the file browser then stay inside the workspace folder of the installation.',
+      'macOS backend setup now matches Linux: the same one-line install.sh to install and upgrade, the same menu and six steps, with Homebrew installing what is missing.',
     ],
   ),
   _Release(

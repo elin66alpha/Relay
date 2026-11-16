@@ -33,12 +33,20 @@ try {
   Assert-That ((Get-EnvValue 'HOST') -eq '0.0.0.0') 'Direct mode binding.'
   Assert-That ((Get-EnvValue 'RELAY_SERVE_WEB') -eq '1') 'Web should be enabled.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Existing configuration must survive.'
+  Assert-That ((Get-EnvValue 'RELAY_WORKSPACE_ROOT') -eq '') 'File access is open unless isolation is chosen.'
   Assert-That ($script:registered -eq 1 -and $script:started -eq 1) 'Register and start services.'
   [IO.File]::WriteAllText((Join-Path $Script:ServerDir 'tokens.json'), 'retained fixture')
   Install-RelayBackend -Reinstall -NetworkMode quick -ServeWeb $false -Passphrase 'fixture-password'
   Assert-That ($script:forceDeps -and $script:stopped -eq 1) 'Reinstall must stop services and reinstall dependencies.'
   Assert-That ((Get-EnvValue 'PUBLIC_BASE_URL') -eq 'https://fresh-fixture.trycloudflare.com') 'Quick mode must use the new URL.'
   Assert-That ((Get-EnvValue 'HOST') -eq '127.0.0.1') 'Tunnel should bind loopback.'
+  Install-RelayBackend -Reinstall -NetworkMode quick -Isolated $true -Passphrase 'fixture-password'
+  $workspace = Join-Path $Script:RootDir 'workspace'
+  Assert-That ((Get-EnvValue 'RELAY_WORKSPACE_ROOT') -eq $workspace) 'Isolation must confine file access to the bundle workspace.'
+  Assert-That (Test-Path -LiteralPath $workspace -PathType Container) 'Isolation must create the workspace folder.'
+  Install-RelayBackend -Reinstall -NetworkMode quick -Passphrase 'fixture-password'
+  Assert-That ((Get-EnvValue 'RELAY_WORKSPACE_ROOT') -eq '') 'Reinstalling as open must lift isolation.'
+  Assert-That (Test-Path -LiteralPath $workspace -PathType Container) 'Lifting isolation must keep the workspace files.'
   Install-RelayBackend -Reinstall -NetworkMode cloudflare -Hostname 'agent.example.com' -TunnelName 'relay-fixture' -Passphrase 'fixture-password'
   $config = Join-Path $Script:ServerDir 'cloudflared-config\relay-fixture.yml'
   Assert-That ((Get-EnvValue 'CLOUDFLARED_ARGS').Contains('"' + $config + '"')) 'Tunnel config paths with spaces must stay quoted.'
@@ -53,7 +61,9 @@ try {
   Assert-That (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web'))) 'Uninstall removes Web.'
   Assert-That ((Get-Content -LiteralPath (Join-Path $Script:ServerDir 'tokens.json') -Raw) -eq 'retained fixture') 'Uninstall must keep device tokens.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Uninstall must keep custom configuration.'
-  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, reinstall, input validation, uninstall and retained state.'
+  $incomplete = ''; try { Get-RelayDetails | Out-Null } catch { $incomplete = $_.Exception.Message }
+  Assert-That ($incomplete -like '*bundle is incomplete*windows-setup.js*') 'A partly extracted bundle must name the missing status bridge.'
+  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, uninstall, retained state and incomplete bundles.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($scratch)
   $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

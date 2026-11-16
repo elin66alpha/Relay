@@ -136,16 +136,18 @@ to the selected CLIs yourself on the host. The asset
 `relay-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
 the Android, iOS, macOS and Ubuntu clients.
 
-On Linux, one command downloads the latest release into `~/relay` (or a
-directory you choose), checks it against the release checksums, and runs setup:
+On Linux and macOS, one command downloads the latest release into `~/relay` (or
+a directory you choose), checks it against the release checksums, and runs
+setup, which installs missing system software after you confirm (apt-get on
+Debian/Ubuntu, Homebrew on macOS):
 
 ```bash
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
 ```
 
-Setup can also install any of the five agent CLIs that are missing, then prints
-each one's login command. Running the command again upgrades the backend in
-place, keeping tokens, chats and settings.
+Setup can also install any of the five agent CLIs that are missing, then
+prints each one's login command. Running the command again upgrades the backend
+in place, keeping tokens, chats and settings.
 
 From a copy of the repository, run the setup command for your backend OS from
 its root:

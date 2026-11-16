@@ -42,6 +42,7 @@ module.exports = function createMetaRouter(ctx) {
     getAgent,
     getAgentStatuses,
     getDefaultWorkdir,
+    workspaceRoot,
     getSettings,
     inspectCodexAccount,
     listAgents,
@@ -345,6 +346,8 @@ module.exports = function createMetaRouter(ctx) {
       defaultAgent: DEFAULT_AGENT,
       workdir: eventWorkdir(req),
       defaultWorkdir: getDefaultWorkdir(),
+      // Set on an isolated install: workdirs and the file API stay inside it.
+      workspaceRoot: workspaceRoot || null,
       systemUptime: formatUptime(os.uptime()),
       processUptime: formatUptime(process.uptime()),
       agentTimeoutMs: TIMEOUT_MS,

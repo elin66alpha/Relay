@@ -12,7 +12,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 ## First run / 首次使用
 
 1. Extract the entire ZIP to a permanent writable directory. Keep Setup.exe,
-   server/, app/ (the Web client), scripts/ and runtime/ together. Do not run inside the ZIP.
+   server/, app/ (the Web client), scripts/ and runtime/ together. Do not run inside the ZIP,
+   and wait until extraction finishes; Setup.exe is the last file written.
 2. Double-click **Setup.exe**. Windows 10/11's .NET Framework and PowerShell run
    the installer; no extra GUI runtime is downloaded.
 3. Follow the five steps: included runtime/dependencies, optional agent CLIs,
@@ -24,13 +25,14 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
    the Device tokens tab and scan it. The password is not stored.
 5. Sign in/configure your selected CLI yourself in a terminal:
    Claude Code: claude; Codex: codex login --device-auth; Cursor: agent login;
-   OpenCode: opencode auth login; Hermes: hermes setup.
+   OpenCode: opencode auth login; Antigravity: agy acp --login; Hermes: hermes setup.
    Setup uses the publishers' official Windows installers; it does not log in.
 6. When Web is enabled, open the backend address in a browser and import the
    same encrypted credential. The API still requires authentication.
 
 1. 将整个 ZIP 解压到固定、可写的目录，保持 Setup.exe、server/、app/（Web 前端）、
-   scripts/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行。
+   scripts/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行；请等解压完成再运行，
+   Setup.exe 是最后写出的文件。
 2. 双击 **Setup.exe**，使用 Windows 10/11 自带的 .NET Framework 和 PowerShell，
    无需另外下载界面运行时。
 3. 按五步完成：运行时和依赖、可选 CLI、Web 开关（默认开启）、网络、设备凭证。
@@ -80,8 +82,10 @@ Console commands from the extracted directory / 解压目录的命令：
 ~~~
 
 Setup registers a current-user login Scheduled Task, not a system service.
-Only one managed Relay installation per Windows user is supported. Logs and
-PID files are in %LOCALAPPDATA%\Relay\logs and %LOCALAPPDATA%\Relay\runtime.
+Only one managed Relay installation per Windows user is supported. Logs are in
+logs\ inside the extracted directory: setup.log keeps everything Setup.exe
+showed, and backend/tunnel .out/.err logs hold service output. PID files are in
+%LOCALAPPDATA%\Relay\runtime.
 Uninstall removes services and, by default, Web; the GUI also offers deleting
 the named Cloudflare tunnel and the bundle-owned cloudflared. Backend
 configuration, tokens, encrypted credentials, chats, settings and logs remain.
@@ -89,7 +93,8 @@ Shared host runtimes and agent CLIs remain. Extract the bundle again to
 restore Web after uninstall.
 
 安装会创建当前用户登录计划任务，不是系统服务。每个 Windows 用户支持一个受管理的
-Relay 实例。日志和 PID 位于 %LOCALAPPDATA%\Relay\logs 和
+Relay 实例。日志位于解压目录下的 logs\：setup.log 保存 Setup.exe 显示过的全部输出，
+backend/tunnel 的 .out/.err 日志保存服务输出。PID 文件位于
 %LOCALAPPDATA%\Relay\runtime。卸载移除服务并默认删除 Web；图形界面还可选择删除
 正式 Cloudflare 隧道和本包下载的 cloudflared。后端配置、设备令牌、加密凭证、
 聊天、设置和日志保留，共用的主机运行时和 CLI 也会保留；卸载后重新解压可恢复 Web。

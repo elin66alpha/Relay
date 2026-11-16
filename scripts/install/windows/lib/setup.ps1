@@ -3,7 +3,11 @@
 
 function Get-RelayDetails {
   Require-Node
-  $text = & node (Join-Path $Script:ServerDir 'scripts\windows-setup.js')
+  $bridge = Join-Path $Script:ServerDir 'scripts\windows-setup.js'
+  if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
+    Write-Fail "The backend bundle is incomplete; missing $bridge. Extract the entire ZIP again and wait for extraction to finish."
+  }
+  $text = & node $bridge
   if ($LASTEXITCODE -ne 0) { Write-Fail 'Could not read backend status.' }
   $details = ($text -join "`n") | ConvertFrom-Json
   return [ordered]@{
@@ -15,6 +19,7 @@ function Get-RelayDetails {
     tunnelName = (Get-EnvValue 'RELAY_TUNNEL_NAME')
     webAvailable = (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web\index.html'))
     serveWeb = ((Get-EnvValue 'RELAY_SERVE_WEB') -ne '0')
+    workspaceRoot = (Get-EnvValue 'RELAY_WORKSPACE_ROOT')
     logs = $Script:LogDir
     agents = @($details.agents)
     tokens = @($details.tokens)
@@ -24,7 +29,7 @@ function Get-RelayDetails {
 function Install-RelayAgentClis {
   param([string[]]$Agents = @())
   foreach ($agent in $Agents) {
-    if ($agent -notin @('claude', 'codex', 'cursor', 'opencode', 'hermes')) {
+    if ($agent -notin @('claude', 'codex', 'cursor', 'opencode', 'agy', 'hermes')) {
       Write-Fail "Unknown agent: $agent"
     }
     $state = (Get-RelayDetails).agents | Where-Object { $_.key -eq $agent }
@@ -41,6 +46,7 @@ function Install-RelayAgentClis {
           $url = switch ($agent) {
             'claude' { 'https://claude.ai/install.ps1' }
             'cursor' { 'https://cursor.com/install?win32=true' }
+            'agy' { 'https://antigravity.google/cli/install.ps1' }
             'hermes' { 'https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1' }
           }
           $download = Join-Path ([IO.Path]::GetTempPath()) ("relay-agent-" + [guid]::NewGuid().ToString('N') + '.ps1')
@@ -99,7 +105,9 @@ function Install-RelayBackend {
     [string]$PublicUrl = '', [string]$Hostname = '', [string]$TunnelName = '',
     [bool]$ServeWeb = $true, [string[]]$Agents = @(),
     [string]$Passphrase = '', [string]$Label = '',
-    [switch]$Reinstall, [switch]$OverwriteDns
+    [switch]$Reinstall, [switch]$OverwriteDns,
+    # Confine workdirs, the file API and agent tiers to <bundle>\workspace.
+    [bool]$Isolated = $false
   )
   if ($Port -lt 1 -or $Port -gt 65535) { Write-Fail 'Port must be between 1 and 65535.' }
   if ($Passphrase -and $Passphrase.Length -lt 6) { Write-Fail 'Credential password must have at least 6 characters.' }
@@ -121,18 +129,28 @@ function Install-RelayBackend {
   if ((Test-PidFile $Script:BackendPidFile) -and -not $Reinstall) {
     Write-Fail 'Relay is already running. Choose Reinstall to keep its data and reconfigure it.'
   }
-  Write-Info 'Step 1/5 - System software and server dependencies'
+  Write-Info 'Step 1/6 - System software and server dependencies'
   Require-Node
   Ensure-EnvFile
   if ($Reinstall) { Stop-RelayServices }
   Install-ServerDeps -Force:$Reinstall
-  Write-Info 'Step 2/5 - Agent CLIs'
+  Write-Info 'Step 2/6 - Agent CLIs'
   Install-RelayAgentClis -Agents $Agents
-  Write-Info 'Step 3/5 - Web client'
+  Write-Info 'Step 3/6 - Web client'
   $available = Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web\index.html')
   if ($ServeWeb -and -not $available) { Write-Fail 'Web client missing. Extract a complete release bundle or build Web first.' }
   Set-EnvValue 'RELAY_SERVE_WEB' $(if ($ServeWeb) { '1' } else { '0' })
-  Write-Info 'Step 4/5 - Network mode'
+  Write-Info 'Step 4/6 - File access'
+  if ($Isolated) {
+    $workspace = Join-Path $Script:RootDir 'workspace'
+    New-Item -ItemType Directory -Force -Path $workspace | Out-Null
+    Set-EnvValue 'RELAY_WORKSPACE_ROOT' $workspace
+    Write-Info "Isolated: workspaces and the file browser stay inside $workspace"
+  } else {
+    Set-EnvValue 'RELAY_WORKSPACE_ROOT' ''
+    Write-Info 'Open: agents and the file browser reach every file this Windows user can.'
+  }
+  Write-Info 'Step 5/6 - Network mode'
   Set-EnvValue 'PORT' ([string]$Port)
   Set-EnvValue 'RELAY_TUNNEL_MODE' $NetworkMode
   Set-EnvValue 'RELAY_TUNNEL_NAME' $TunnelName
@@ -170,7 +188,7 @@ function Install-RelayBackend {
     if (-not $PublicUrl) { Write-Fail 'No Quick Tunnel URL detected. Check the tunnel logs and retry.' }
     Set-EnvValue 'PUBLIC_BASE_URL' $PublicUrl
   }
-  Write-Info 'Step 5/5 - Device credential'
+  Write-Info 'Step 6/6 - Device credential'
   $credentialArgs = @('--url', $PublicUrl)
   if ($Label) { $credentialArgs += @('--label', $Label) }
   Invoke-RelayCredential -Arguments $credentialArgs -Passphrase $Passphrase

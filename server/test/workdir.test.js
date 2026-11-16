@@ -13,6 +13,8 @@ const {
   resolveRequestWorkdir,
   inspectWorkdir,
   validateWorkdir,
+  getWorkspaceRoot,
+  assertInsideWorkspace,
 } = require('../lib/workdir');
 
 function scratchDir() {
@@ -174,4 +176,95 @@ test('validateWorkdir rejects a path that points at a file', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- RELAY_WORKSPACE_ROOT: an isolated install -------------------------------
+
+function withWorkspaceRoot(root, fn) {
+  const prev = {
+    root: process.env.RELAY_WORKSPACE_ROOT,
+    dir: process.env.RELAY_DEFAULT_DIR,
+  };
+  process.env.RELAY_WORKSPACE_ROOT = root;
+  delete process.env.RELAY_DEFAULT_DIR;
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of [
+      ['RELAY_WORKSPACE_ROOT', prev.root],
+      ['RELAY_DEFAULT_DIR', prev.dir],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('an isolated install accepts the workspace root and paths inside it', () => {
+  const root = fs.realpathSync(scratchDir());
+  withWorkspaceRoot(root, () => {
+    assert.equal(resolveWorkdir(root), root);
+    assert.equal(resolveWorkdir(path.join(root, 'project')), path.join(root, 'project'));
+    assert.equal(getDefaultWorkdir(), root);
+    assert.equal(validateWorkdir(path.join(root, 'new'), { create: true }).created, true);
+  });
+});
+
+test('an isolated install refuses workdirs outside the workspace', () => {
+  const root = fs.realpathSync(scratchDir());
+  const outside = fs.realpathSync(scratchDir());
+  withWorkspaceRoot(root, () => {
+    for (const dir of [outside, path.dirname(root), `${root}-sibling`, path.join(root, '..', 'x')]) {
+      const err = caught(() => resolveWorkdir(dir));
+      assert.equal(err.code, 'WORKDIR_OUTSIDE_WORKSPACE', dir);
+      assert.equal(err.status, 403);
+    }
+    assert.equal(caught(() => resolveRequestWorkdir(outside)).code, 'WORKDIR_OUTSIDE_WORKSPACE');
+    assert.equal(
+      caught(() => validateWorkdir(path.join(outside, 'new'), { create: true })).code,
+      'WORKDIR_OUTSIDE_WORKSPACE',
+    );
+    assert.equal(fs.existsSync(path.join(outside, 'new')), false);
+  });
+});
+
+test('an isolated install refuses a link that leads out of the workspace', (t) => {
+  const root = fs.realpathSync(scratchDir());
+  const outside = fs.realpathSync(scratchDir());
+  const link = path.join(root, 'link');
+  try {
+    fs.symlinkSync(outside, link, 'junction');
+  } catch (_err) {
+    t.skip('links are not available on this host');
+    return;
+  }
+  withWorkspaceRoot(root, () => {
+    assert.equal(caught(() => resolveWorkdir(link)).code, 'WORKDIR_OUTSIDE_WORKSPACE');
+    assert.equal(
+      caught(() => resolveWorkdir(path.join(link, 'deeper', 'new'))).code,
+      'WORKDIR_OUTSIDE_WORKSPACE',
+    );
+  });
+});
+
+test('an isolated install keeps RELAY_DEFAULT_DIR only inside the workspace', () => {
+  const root = fs.realpathSync(scratchDir());
+  withWorkspaceRoot(root, () => {
+    process.env.RELAY_DEFAULT_DIR = path.join(root, 'start');
+    assert.equal(getDefaultWorkdir(), path.join(root, 'start'));
+    process.env.RELAY_DEFAULT_DIR = os.tmpdir();
+    assert.equal(getDefaultWorkdir(), root);
+  });
+});
+
+test('a workspace root that is not absolute is an error, not open mode', () => {
+  withWorkspaceRoot('workspace', () => {
+    assert.equal(caught(() => getWorkspaceRoot()).code, 'WORKSPACE_ROOT_INVALID');
+    assert.equal(caught(() => resolveWorkdir(os.tmpdir())).code, 'WORKSPACE_ROOT_INVALID');
+  });
+});
+
+test('open mode leaves workdirs unrestricted', () => {
+  assert.equal(getWorkspaceRoot(), null);
+  assert.equal(assertInsideWorkspace(os.tmpdir()), os.tmpdir());
 });

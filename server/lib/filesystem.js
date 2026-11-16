@@ -6,7 +6,12 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 
-const { getDefaultWorkdir, ensureWorkdirExists } = require('./workdir');
+const {
+  getDefaultWorkdir,
+  ensureWorkdirExists,
+  getWorkspaceRoot,
+  isInsideDir,
+} = require('./workdir');
 const { TOKENS_FILE } = require('./tokens');
 const { SERVICE_ACCOUNT_FILE } = require('./fcm');
 const { CURSOR_CONFIG_DIR, cursorAuthFile, agyAuthFile } = require('./cli-paths');
@@ -33,6 +38,7 @@ function isInside(parent, child) {
 // refused, for download, upload, and listing alike. Everything else stays
 // reachable unless RELAY_FS_ROOTS narrows the API to an explicit allowlist
 // (comma-separated absolute paths); agent execution is not affected either way.
+// An isolated install (RELAY_WORKSPACE_ROOT) confines the API to its workspace.
 
 const SERVER_DIR = path.resolve(__dirname, '..');
 
@@ -80,7 +86,11 @@ function assertPathAllowed(target) {
       throw restrictedError();
     }
   }
-  if (FS_ROOTS.length && !FS_ROOTS.some((root) => isInside(root, resolved))) {
+  const workspaceRoot = getWorkspaceRoot();
+  if (
+    (workspaceRoot && !isInsideDir(workspaceRoot, resolved)) ||
+    (FS_ROOTS.length && !FS_ROOTS.some((root) => isInside(root, resolved)))
+  ) {
     throw new FilesystemError('path is outside the allowed roots', {
       status: 403,
       code: 'FS_PATH_OUTSIDE_ROOTS',
@@ -232,6 +242,9 @@ async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } 
   }
   assertPathAllowed(target);
   const root = path.parse(target).root;
+  // The workspace root of an isolated install has no reachable parent.
+  const workspaceRoot = getWorkspaceRoot();
+  const top = workspaceRoot && isInsideDir(target, workspaceRoot) ? target : root;
   const dirents = await visibleDirents(target, { showHidden });
   const entries = sortEntries(
     (
@@ -248,7 +261,7 @@ async function listAbsoluteDirectory(value, { showHidden = false, fallbackDir } 
     root,
     path: target,
     absolutePath: target,
-    parentPath: target === root ? null : path.dirname(target),
+    parentPath: target === top ? null : path.dirname(target),
     entries,
   };
 }
