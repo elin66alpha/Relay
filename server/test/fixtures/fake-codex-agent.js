@@ -35,8 +35,48 @@ const running = new Map();
 record(`spawn ${process.pid}`);
 
 function finishTurn(threadId, turnId, status) {
-  running.delete(threadId);
+  if (running.get(threadId) === turnId) running.delete(threadId);
   notify('turn/completed', { threadId, turn: { id: turnId, status } });
+}
+
+function startBackground(threadId, mode) {
+  const thread = threads.get(threadId);
+  if (!thread) return;
+  const turnId = `background-${++counter}`;
+  thread.backgroundTurnId = turnId;
+  running.set(threadId, turnId);
+  record(`background-start ${threadId} ${turnId}`);
+  notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress' } });
+  notify('item/completed', {
+    threadId,
+    turnId,
+    item: { id: 'background-command', type: 'commandExecution', command: ['echo', 'done'] },
+  });
+  if (mode === 'background-full') {
+    notify('item/completed', {
+      threadId,
+      turnId,
+      item: { id: 'background-message', type: 'agentMessage', text: 'background full reply' },
+    });
+  } else if (mode !== 'background-tools-hang') {
+    notify('item/agentMessage/delta', {
+      threadId,
+      turnId,
+      itemId: 'background-message',
+      delta: 'background reply',
+    });
+  }
+  notify('thread/tokenUsage/updated', {
+    threadId,
+    turnId,
+    tokenUsage: { last: { totalTokens: 4500 }, modelContextWindow: 258400 },
+  });
+  if (mode === 'background-hang' || mode === 'background-tools-hang') return;
+  setTimeout(() => {
+    if (running.get(threadId) !== turnId) return;
+    record(`background-completed ${threadId} ${turnId}`);
+    finishTurn(threadId, turnId, 'completed');
+  }, 150);
 }
 
 function handleTurnStart(msg) {
@@ -66,6 +106,7 @@ function handleTurnStart(msg) {
     });
     record(`accepted ${turnId}`);
     running.set(threadId, turnId);
+    notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress' } });
   };
 
   if (text === 'hang-slow') {
@@ -73,9 +114,73 @@ function handleTurnStart(msg) {
     setTimeout(accept, 150);
     return;
   }
+  if (text === 'background-before-accept' || text === 'background-before-reject') {
+    startBackground(threadId, 'background');
+    setTimeout(() => {
+      if (text === 'background-before-reject') {
+        record(`rejected ${turnId}`);
+        write({
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: { code: -32603, message: 'foreground rejected' },
+        });
+        return;
+      }
+      accept();
+      notify('item/agentMessage/delta', {
+        threadId,
+        turnId,
+        itemId: 'i1',
+        delta: `echo:${text}`,
+      });
+      finishTurn(threadId, turnId, 'completed');
+    }, 200);
+    return;
+  }
   accept();
 
   if (text === 'hang') return;
+  if (text === 'background-task') {
+    const item = {
+      id: 'child-started',
+      type: 'subAgentActivity',
+      kind: 'started',
+      agentThreadId: 'child-thread',
+      agentPath: '/root/worker',
+    };
+    notify('item/completed', { threadId, turnId, item });
+    finishTurn(threadId, turnId, 'completed');
+    setTimeout(() => {
+      if (!threads.has(threadId)) return;
+      record(`child-completed ${threadId} ${turnId}`);
+      notify('item/completed', {
+        threadId,
+        turnId,
+        item: { ...item, id: 'child-completed', kind: 'completed' },
+      });
+    }, 180);
+    return;
+  }
+  if (text === 'after-background') {
+    const staleId = threads.get(threadId).backgroundTurnId;
+    notify('item/agentMessage/delta', {
+      threadId,
+      turnId: staleId,
+      itemId: 'late-background-message',
+      delta: 'stale background text',
+    });
+    finishTurn(threadId, staleId, 'completed');
+    setTimeout(() => {
+      notify('item/agentMessage/delta', {
+        threadId,
+        turnId,
+        itemId: 'i1',
+        delta: `echo:${text}`,
+      });
+      finishTurn(threadId, turnId, 'completed');
+    }, 30);
+    return;
+  }
   if (text === 'die') {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'i1', delta: 'partial' });
     process.exit(3);
@@ -126,6 +231,9 @@ function handleTurnStart(msg) {
     },
   });
   finishTurn(threadId, turnId, 'completed');
+  if (['background', 'background-full', 'background-hang', 'background-tools-hang'].includes(text)) {
+    setTimeout(() => startBackground(threadId, text), 20);
+  }
 }
 
 function handle(msg) {

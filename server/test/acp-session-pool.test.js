@@ -452,3 +452,290 @@ test('a missing binary fails the turn instead of the server', async () => {
   await assert.rejects(send(pool, 'a', 'one'), /not installed/);
   await pool.shutdown();
 });
+
+test('trajectory watcher streams background turns, answers permissions, and filters ACP replay on the next turn', async () => {
+  const steps = [
+    { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+    {
+      type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      plannerResponse: { response: 'echo:one' },
+    },
+  ];
+  let cascadeStatus = 'CASCADE_RUN_STATUS_IDLE';
+  const interactions = [];
+  const cancellations = [];
+
+  const { pool, done } = makePool({
+    trajectory: {
+      pollMs: 15,
+      readTrajectory: async () => ({
+        port: 43123,
+        body: {
+          status: cascadeStatus,
+          trajectory: {
+            trajectoryId: 'traj-bg',
+            steps: steps.map((step) => structuredClone(step)),
+          },
+        },
+      }),
+      answerInteraction: async (port, sessionId, interaction, approve) => {
+        interactions.push({ port, sessionId, interaction, approve });
+        steps[interaction.stepIndex].status = 'CORTEX_STEP_STATUS_DONE';
+      },
+      cancelInvocation: async (port, sessionId) => {
+        cancellations.push({ port, sessionId });
+      },
+      contextFromTrajectory: () => ({ used: 14500, size: 256000 }),
+    },
+  });
+
+  const bgTurns = [];
+  await send(pool, 'a', 'one', {
+    onPermission: () => true,
+    onBackgroundTurn: ({ notices, interrupt }) => {
+      const updates = [];
+      let finished = false;
+      const turn = {
+        notices,
+        interrupt,
+        updates,
+         isFinished: () => finished,
+      };
+      bgTurns.push(turn);
+      return {
+        onMessage: (u) => updates.push(u),
+        finish: () => {
+          finished = true;
+        },
+        fail: () => {
+          finished = true;
+        },
+      };
+    },
+  });
+
+  // Append a background wakeup, a tool call + waiting interaction, and streamed text.
+  steps.push(
+    {
+      type: 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      systemMessage: {
+        message:
+          'Task id "/home/pc/.gemini/antigravity/brain/x/task-7" finished with result:\n<background_task_notification>',
+        priority: 'MESSAGE_PRIORITY_HIGH',
+      },
+    },
+    {
+      type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_RUNNING',
+      plannerResponse: {
+        messageId: 'bg-msg-1',
+        response: 'Background ',
+        toolCalls: [{ id: 'bg-tc-1', name: 'run_command' }],
+      },
+    },
+    {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      requestedInteraction: {
+        runCommand: { commandLine: 'echo ok' },
+      },
+    },
+  );
+  cascadeStatus = 'CASCADE_RUN_STATUS_RUNNING';
+
+  assert.ok(await waitFor(() => interactions.length === 1));
+  assert.equal(interactions[0].approve, true);
+  assert.equal(bgTurns.length, 1);
+  assert.deepEqual(bgTurns[0].notices, [
+    { summary: 'Task id task-7 finished with result' },
+  ]);
+
+  // Complete the planner response and settle the cascade back to IDLE.
+  steps[3].status = 'CORTEX_STEP_STATUS_DONE';
+  steps[3].plannerResponse.response = 'Background reply.';
+  cascadeStatus = 'CASCADE_RUN_STATUS_IDLE';
+
+  assert.ok(await waitFor(() => bgTurns[0].isFinished()));
+  assert.equal(textOf(bgTurns[0].updates), 'Background reply.');
+  assert.ok(
+    bgTurns[0].updates.some(
+      (u) =>
+        u.sessionUpdate === 'tool_call' &&
+        u.toolCallId === 'bg-tc-1' &&
+        u.title === 'run_command',
+    ),
+  );
+  assert.ok(
+    bgTurns[0].updates.some(
+      (u) => u.sessionUpdate === 'usage_update' && u.used === 14500,
+    ),
+  );
+
+  // On the next user turn, Antigravity's ACP server replays the background tool call
+  // and full planner response text from its stale stepsSeen index; the driver drops
+  // those duplicates and delivers only the new turn's output.
+  const nextUpdates = [];
+  await send(pool, 'a', 'replay-bg', {
+    onMessage: (u) => nextUpdates.push(u),
+  });
+  assert.equal(textOf(nextUpdates), 'echo:replay-bg');
+  assert.equal(
+    nextUpdates.some((u) => u.toolCallId === 'bg-tc-1'),
+    false,
+    'replayed background tool call was filtered out',
+  );
+  await done();
+});
+
+for (const cancel of [false, true]) {
+  test(`a user turn ${cancel ? 'can be cancelled while waiting for' : 'waits for'} background work started during settings`, async (t) => {
+    const steps = [];
+    let background;
+    let nextCallbackUsed = false;
+    const gateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-acp-model-'));
+    const gatePath = path.join(gateDir, 'ready');
+    t.after(() => fs.rmSync(gateDir, { recursive: true, force: true }));
+    const { pool, state, done } = makePool({
+      agentEnv: { FAKE_ACP_MODEL_GATE: gatePath },
+      trajectory: {
+        pollMs: 10,
+        readTrajectory: async () => ({ port: 43123, body: { trajectory: { steps } } }),
+      },
+    });
+    await send(pool, 'a', 'one', {
+      onBackgroundTurn: () => {
+        background = { updates: [], finished: false };
+        return {
+          onMessage: (u) => background.updates.push(u),
+          finish: () => { background.finished = true; },
+          fail: () => { background.finished = true; },
+        };
+      },
+    });
+    const controller = new AbortController();
+    const pending = send(pool, 'a', 'after-settings', {
+      modelId: 'delayed-model',
+      signal: controller.signal,
+      onBackgroundTurn: () => { nextCallbackUsed = true; },
+    });
+    assert.ok(await waitFor(() => state().some((line) => line.endsWith(' delayed-model'))));
+    steps.push({
+      status: 'CORTEX_STEP_STATUS_RUNNING',
+      plannerResponse: { response: 'Background ' },
+    });
+    assert.ok(await waitFor(() => background));
+    fs.writeFileSync(gatePath, '');
+    assert.ok(await waitFor(() => state().some((line) => line.startsWith('model-applied '))));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(state().some((line) => line.endsWith(' after-settings')), false);
+    if (cancel) {
+      controller.abort();
+      await assert.rejects(pending, (err) => err.code === 'AGENT_CANCELLED');
+      assert.equal(state().some((line) => line.endsWith(' after-settings')), false);
+    }
+    steps[0].status = 'CORTEX_STEP_STATUS_DONE';
+    steps[0].plannerResponse.response = 'Background reply.';
+    if (!cancel) await pending;
+    assert.ok(await waitFor(() => background.finished));
+    assert.equal(textOf(background.updates), 'Background reply.');
+    assert.equal(nextCallbackUsed, false, 'background keeps the previous turn callbacks');
+    await done();
+  });
+}
+
+test('cancelled background polling stops after an in-flight interaction answer', async () => {
+  const steps = [];
+  const updates = [];
+  let interrupt;
+  let finished = false;
+  let answered = 0;
+  let release;
+  const answer = new Promise((resolve) => { release = resolve; });
+  const { pool, done } = makePool({
+    trajectory: {
+      pollMs: 10,
+      readTrajectory: async () => ({ port: 43123, body: { trajectory: { steps } } }),
+      answerInteraction: async () => { answered += 1; await answer; },
+    },
+  });
+  await send(pool, 'a', 'one', {
+    onBackgroundTurn: (handle) => {
+      interrupt = handle.interrupt;
+      return {
+        onMessage: (u) => updates.push(u),
+        fail: () => { finished = true; },
+      };
+    },
+  });
+  const waiting = {
+    status: 'CORTEX_STEP_STATUS_WAITING',
+    requestedInteraction: { runCommand: { commandLine: 'echo ok' } },
+  };
+  steps.push(waiting, { plannerResponse: { response: 'late text' } }, waiting);
+  assert.ok(await waitFor(() => answered === 1));
+  interrupt();
+  assert.ok(await waitFor(() => finished));
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(answered, 1, 'does not answer another interaction after cancellation');
+  assert.equal(textOf(updates), '', 'does not dispatch later steps after cancellation');
+  await done();
+});
+
+test('a failed user prompt restores trajectory monitoring', async () => {
+  const steps = [];
+  let polls = 0;
+  let background = false;
+  const { pool, done } = makePool({
+    trajectory: {
+      pollMs: 10,
+      readTrajectory: async () => {
+        polls += 1;
+        return { port: 43123, body: { trajectory: { steps } } };
+      },
+    },
+  });
+  await send(pool, 'a', 'one');
+  await assert.rejects(send(pool, 'a', 'fail-prompt', {
+    onBackgroundTurn: () => { background = true; },
+  }), /prompt failed/);
+  const previousPolls = polls;
+  steps.push({ plannerResponse: { response: 'Background reply.' } });
+  assert.ok(await waitFor(() => polls > previousPolls && background));
+  await done();
+});
+
+test('trajectory discovery backs off after the language server cannot be found', async (t) => {
+  let polls = 0;
+  let pollStarted;
+  let releasePoll;
+  const started = new Promise((resolve) => { pollStarted = resolve; });
+  const stalled = new Promise((resolve) => { releasePoll = resolve; });
+  const { pool, done } = makePool({
+    trajectory: {
+      pollMs: 10,
+      readTrajectory: async () => {
+        polls += 1;
+        if (polls === 2) { pollStarted(); await stalled; }
+        return null;
+      },
+    },
+  });
+  await send(pool, 'a', 'one');
+  await started;
+  // Keep agent transport real; control only the watcher's subsequent timers.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  releasePoll();
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = polls;
+  t.mock.timers.tick(4999);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(polls, before);
+  t.mock.timers.tick(1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(polls, before + 1);
+  t.mock.timers.reset();
+  await done();
+});

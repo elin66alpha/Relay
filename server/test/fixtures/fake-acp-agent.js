@@ -66,6 +66,14 @@ function handlePrompt(msg) {
     hanging.set(sessionId, msg.id);
     return;
   }
+  if (text === 'fail-prompt') {
+    update(sessionId, {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'partial' },
+    });
+    write({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: 'prompt failed' } });
+    return;
+  }
   if (text === 'die') {
     update(sessionId, {
       sessionUpdate: 'agent_message_chunk',
@@ -142,6 +150,19 @@ function handlePrompt(msg) {
       content: { type: 'text', text: 'two' },
     });
     write({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
+    return;
+  }
+  if (text === 'replay-bg') {
+    update(sessionId, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'bg-tc-1',
+      title: 'run_command',
+    });
+    update(sessionId, {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Background reply.' },
+    });
+    finishPrompt(msg.id, sessionId, 'echo:replay-bg');
     return;
   }
   update(sessionId, { sessionUpdate: 'tool_call', title: 'ls', kind: 'read' });
@@ -251,6 +272,15 @@ function handle(msg) {
     }
     case 'session/set_model':
       record(`model ${msg.params.sessionId} ${msg.params.modelId}`);
+      if (msg.params.modelId === 'delayed-model') {
+        const timer = setInterval(() => {
+          if (!fs.existsSync(process.env.FAKE_ACP_MODEL_GATE)) return;
+          clearInterval(timer);
+          record(`model-applied ${msg.params.sessionId}`);
+          reply({});
+        }, 5);
+        return;
+      }
       reply({});
       return;
     case 'session/set_config_option':

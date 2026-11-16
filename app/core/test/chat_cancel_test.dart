@@ -63,6 +63,49 @@ void main() {
       );
     });
   }
+
+  test('going home during a turn leaves it running on the backend', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final _CancelBackend backend = _CancelBackend('CANCEL_FAILED');
+    final QuotaController quota = QuotaController(backendClient: backend);
+    final BotChatController controller = BotChatController(
+      backendClient: backend,
+      quotaController: quota,
+    );
+    addTearDown(controller.disposeController);
+    addTearDown(quota.dispose);
+    await controller.loadFor(
+      defaultCliAgents.first,
+      MachineCredential(
+        id: 'test-machine',
+        name: 'Test machine',
+        baseUrl: 'http://127.0.0.1:8787',
+        token: 'test-token',
+        createdAt: DateTime.utc(2026).toIso8601String(),
+      ),
+    );
+
+    final Future<void> turn = controller.sendUserText('hello');
+    await backend.started.future;
+    controller.goHome();
+
+    expect(controller.machine, isNull);
+    expect(controller.isThinking, isFalse);
+    expect(controller.messages, isEmpty);
+    expect(backend.cancelled, isFalse);
+    backend.reply.complete(
+      ChatReply(
+        requestId: backend.requestId!,
+        agentKey: 'claude',
+        agentLabel: 'Claude Code',
+        content: 'Finished in the background',
+      ),
+    );
+    await turn;
+    // The late reply must not reappear on the home screen.
+    expect(controller.machine, isNull);
+    expect(controller.messages, isEmpty);
+  });
 }
 
 class _CancelBackend extends BackendClient {
@@ -72,6 +115,7 @@ class _CancelBackend extends BackendClient {
   final Completer<void> started = Completer<void>();
   final Completer<ChatReply> reply = Completer<ChatReply>();
   String? requestId;
+  bool cancelled = false;
 
   @override
   Future<WorkdirInfo> workdir() async => const WorkdirInfo(dir: '/test');
@@ -123,6 +167,7 @@ class _CancelBackend extends BackendClient {
 
   @override
   Future<void> cancelMessage(String requestId) async {
+    cancelled = true;
     expect(requestId, this.requestId);
     throw BackendException('Could not stop the turn', code: errorCode);
   }

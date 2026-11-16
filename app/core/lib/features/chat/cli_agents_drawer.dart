@@ -10,6 +10,7 @@ import '../../core/settings/app_settings_controller.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../../core/widgets/agent_icon.dart';
+import '../browser/browser_screen.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -161,6 +162,7 @@ class CliAgentsDrawer extends StatelessWidget {
                   SwarmDrawerSection(
                     agentsController: agentsController,
                     settingsController: settingsController,
+                    machinesController: machinesController,
                     chatController: chatController,
                     closeOnAction: closeOnAction,
                   ),
@@ -173,14 +175,21 @@ class CliAgentsDrawer extends StatelessWidget {
               title: Text(context.l10n.backHome),
               selected: chatController.machine == null,
               onTap: () {
-                if (chatController.isThinking) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(context.l10n.agentBusyRetryLater)),
-                  );
-                  return;
-                }
                 chatController.goHome();
                 if (closeOnAction) Navigator.of(context).pop();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.public_rounded),
+              title: Text(context.l10n.browser),
+              onTap: () {
+                if (closeOnAction) Navigator.of(context).pop();
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        BrowserScreen(backend: chatController.backend),
+                  ),
+                );
               },
             ),
             ListTile(
@@ -536,6 +545,7 @@ class SwarmDrawerSection extends StatefulWidget {
   const SwarmDrawerSection({
     required this.agentsController,
     required this.settingsController,
+    required this.machinesController,
     required this.chatController,
     required this.closeOnAction,
     super.key,
@@ -543,6 +553,7 @@ class SwarmDrawerSection extends StatefulWidget {
 
   final CliAgentsController agentsController;
   final AppSettingsController settingsController;
+  final MachineCredentialsController machinesController;
   final BotChatController chatController;
   final bool closeOnAction;
 
@@ -597,6 +608,7 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
         builder: (_) => GroupChatScreen(
           agentsController: widget.agentsController,
           settingsController: widget.settingsController,
+          machinesController: widget.machinesController,
           initialGroupId: groupId,
         ),
       ),

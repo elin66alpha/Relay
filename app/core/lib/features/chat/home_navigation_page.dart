@@ -100,7 +100,7 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
       return;
     }
     setState(() {
-      _recentWorkdirs = recent.take(3).toList(growable: false);
+      _recentWorkdirs = recent.take(5).toList(growable: false);
       _loading = false;
     });
   }

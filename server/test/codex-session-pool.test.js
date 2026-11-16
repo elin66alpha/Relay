@@ -64,6 +64,22 @@ function textOf(events) {
     .join('');
 }
 
+function recordBackground() {
+  const turns = [];
+  return {
+    turns,
+    onBackgroundTurn({ interrupt }) {
+      const turn = { messages: [], interrupt, result: null, error: null };
+      turns.push(turn);
+      return {
+        onMessage: (event) => turn.messages.push(event),
+        finish: (result) => { turn.result = result; },
+        fail: (err) => { turn.error = err; },
+      };
+    },
+  };
+}
+
 async function waitFor(check, timeoutMs = 2000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -258,5 +274,163 @@ test('purge works with no live process, opening one just to delete', async () =>
   assert.ok(state().includes('delete th-old'));
   // And it does not leave the process behind afterwards.
   assert.equal(pool.stats().connected, false);
+  await done();
+});
+
+test('an idle background turn reaches its own thread without leaking into another', async () => {
+  const { pool, done } = makePool();
+  const background = recordBackground();
+  const initial = [];
+  await send(pool, 'a', 'background', {
+    onMessage: (event) => initial.push(event),
+    onBackgroundTurn: background.onBackgroundTurn,
+  });
+  assert.ok(await waitFor(() => background.turns.length === 1));
+  const other = [];
+  await send(pool, 'b', 'other', { onMessage: (event) => other.push(event) });
+  assert.ok(await waitFor(() => background.turns[0].result));
+
+  const turn = background.turns[0];
+  assert.equal(textOf(initial), 'echo:background');
+  assert.equal(textOf(other), 'echo:other');
+  assert.equal(textOf(turn.messages), 'background reply');
+  assert.deepEqual(turn.messages.filter((event) => event.type === 'context'), [
+    { type: 'context', used: 4500, size: 258400 },
+  ]);
+  assert.equal(turn.messages.find((event) => event.type === 'item').item.type, 'commandExecution');
+  assert.equal(turn.result.stopReason, 'completed');
+  await done();
+});
+
+test('a background agentMessage completed item reaches the listener with its full text', async () => {
+  const { pool, done } = makePool();
+  const background = recordBackground();
+  await send(pool, 'a', 'background-full', { onBackgroundTurn: background.onBackgroundTurn });
+  assert.ok(await waitFor(() => background.turns[0] && background.turns[0].result));
+  const messages = background.turns[0].messages;
+  assert.equal(textOf(messages), '');
+  assert.deepEqual(messages.find((event) => event.type === 'item' && event.item.type === 'agentMessage'), {
+    type: 'item',
+    item: { id: 'background-message', type: 'agentMessage', text: 'background full reply' },
+  });
+  await done();
+});
+
+test('a background turn can be interrupted and leaves the session usable', async () => {
+  const { pool, state, done } = makePool();
+  const background = recordBackground();
+  const first = await send(pool, 'a', 'background-hang', {
+    onBackgroundTurn: background.onBackgroundTurn,
+  });
+  assert.ok(await waitFor(() => background.turns.length === 1));
+  const turn = background.turns[0];
+  turn.interrupt();
+  assert.ok(await waitFor(() => turn.result || turn.error));
+  assert.ok(state().some((line) => line.startsWith(`interrupt ${first.sessionId} background-`)));
+  assert.equal(turn.error && turn.error.code, 'AGENT_CANCELLED');
+  const events = [];
+  const next = await send(pool, 'a', 'after-stop', { onMessage: (event) => events.push(event) });
+  assert.equal(next.sessionId, first.sessionId);
+  assert.equal(textOf(events), 'echo:after-stop');
+  await done();
+});
+
+test('a user turn waits for background completion and ignores its late events', async () => {
+  const { pool, state, done } = makePool();
+  const background = recordBackground();
+  await send(pool, 'a', 'background', { onBackgroundTurn: background.onBackgroundTurn });
+  assert.ok(await waitFor(() => background.turns.length === 1));
+  const events = [];
+  const next = send(pool, 'a', 'after-background', { onMessage: (event) => events.push(event) });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(!state().some((line) => line.includes(' after-background ')));
+  const result = await next;
+  assert.equal(result.result.stopReason, 'completed');
+  assert.equal(textOf(events), 'echo:after-background');
+  assert.equal(textOf(background.turns[0].messages), 'background reply');
+  const lines = state();
+  assert.ok(lines.findIndex((line) => line.startsWith('background-completed ')) <
+    lines.findIndex((line) => line.includes(' after-background ')));
+  await done();
+});
+
+test('background turns without a listener are consumed before the next user turn', async () => {
+  const { pool, state, done } = makePool();
+  await send(pool, 'a', 'background');
+  assert.ok(await waitFor(() => state().some((line) => line.startsWith('background-start '))));
+  // The response follows the background frames on stdout, so they are consumed.
+  await pool.readAccount();
+  const events = [];
+  const result = await send(pool, 'a', 'after-background', { onMessage: (event) => events.push(event) });
+  assert.equal(result.result.stopReason, 'completed');
+  assert.equal(textOf(events), 'echo:after-background');
+  await done();
+});
+
+test('running subagents keep an idle thread alive until completion from its old turn', async () => {
+  const { pool, state, done } = makePool({ idleMs: 30 });
+  const result = await send(pool, 'a', 'background-task');
+  const completed = `child-completed ${result.sessionId} `;
+  const unsubscribed = `unsubscribe ${result.sessionId}`;
+  assert.ok(await waitFor(() => state().some((line) => line.startsWith(completed) || line === unsubscribed)));
+  assert.ok(state().some((line) => line.startsWith(completed)), 'the child finished before idle eviction');
+  assert.ok(await waitFor(() => state().includes(unsubscribed)), 'completion releases idle protection');
+  const lines = state();
+  assert.ok(lines.findIndex((line) => line.startsWith(completed)) < lines.indexOf(unsubscribed));
+  await done();
+});
+
+test('a background turn before user acceptance stays separate from the pending user turn', async () => {
+  const { pool, state, done } = makePool();
+  const background = recordBackground();
+  const events = [];
+  const result = await send(pool, 'a', 'background-before-accept', {
+    onBackgroundTurn: background.onBackgroundTurn,
+    onMessage: (event) => events.push(event),
+  });
+  assert.equal(result.result.stopReason, 'completed');
+  assert.equal(textOf(events), 'echo:background-before-accept');
+  assert.equal(background.turns.length, 1);
+  assert.ok(await waitFor(() => background.turns[0].result));
+  assert.equal(textOf(background.turns[0].messages), 'background reply');
+  const lines = state();
+  assert.ok(lines.findIndex((line) => line.startsWith('background-completed ')) <
+    lines.findIndex((line) => line.startsWith('accepted ')));
+  await done();
+});
+
+test('a user turn waiting behind tool-only background work can be cancelled immediately', { timeout: 2000 }, async () => {
+  const { pool, state, done } = makePool();
+  const background = recordBackground();
+  await send(pool, 'a', 'background-tools-hang', { onBackgroundTurn: background.onBackgroundTurn });
+  assert.ok(await waitFor(() => background.turns.length === 1));
+  assert.equal(textOf(background.turns[0].messages), '');
+  const controller = new AbortController();
+  const waiting = send(pool, 'a', 'must-not-start', { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(waiting, (err) => err.code === 'AGENT_CANCELLED');
+  assert.ok(!state().some((line) => line.includes(' must-not-start ')));
+  assert.ok(!state().some((line) => line.startsWith('interrupt ')));
+  assert.equal(background.turns[0].result, null);
+  assert.equal(background.turns[0].error, null);
+  await done();
+});
+
+test('a rejected user start still delivers the independent background turn it received', async () => {
+  const { pool, state, done } = makePool();
+  const background = recordBackground();
+  const events = [];
+  await assert.rejects(send(pool, 'cold', 'background-before-reject', {
+    onBackgroundTurn: background.onBackgroundTurn,
+    onMessage: (event) => events.push(event),
+  }), /foreground rejected/);
+  assert.ok(await waitFor(() => background.turns[0] && background.turns[0].result));
+  assert.equal(background.turns.length, 1);
+  assert.equal(background.turns[0].result.stopReason, 'completed');
+  assert.equal(textOf(background.turns[0].messages), 'background reply');
+  assert.equal(textOf(events), '');
+  const lines = state();
+  assert.ok(lines.findIndex((line) => line.startsWith('background-completed ')) <
+    lines.findIndex((line) => line.startsWith('rejected ')));
   await done();
 });

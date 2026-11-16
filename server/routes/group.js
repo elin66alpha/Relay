@@ -10,6 +10,12 @@ const {
   buildGroupPrompt,
 } = require('../lib/group-turn');
 const { normalizeSettings } = require('../lib/agent-options');
+const {
+  PeerError,
+  normalizeBaseUrl,
+  peerIdFor,
+  splitMemberKey,
+} = require('../lib/peer-client');
 
 // Multi-agent group chat: one human, several agents, one canonical transcript.
 // The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once for
@@ -17,6 +23,9 @@ const { normalizeSettings } = require('../lib/agent-options');
 // transcript snapshot, each against its OWN resumable CLI session and unseen
 // transcript delta (see docs/handbook.md, "Swarms"). The canonical transcript
 // uses a dedicated scope agent key so it never mixes with solo conversations.
+// A remote member (`<peerId>:<agentKey>`) runs on another Relay backend: its
+// turn goes through the same runAgentTurn with runAgent replaced by a call to
+// that peer's /api/chat, using the credential the app sent with this request.
 const GROUP_SCOPE_PREFIX = 'group:';
 const HUMAN_AUTHOR = 'human';
 
@@ -78,6 +87,7 @@ module.exports = function createGroupRouter(ctx) {
     agentTurnDependencies,
     clearHistory,
     createGroup,
+    createPeerClient,
     deleteGroup,
     purgeSession,
     finalizeStaleStreamingHistory,
@@ -117,10 +127,126 @@ module.exports = function createGroupRouter(ctx) {
     }
     return null;
   };
-  const labelFor = (agentKey) => {
-    const agent = getAgent(agentKey);
-    return agent ? agent.label : agentKey;
+  // A member's default label; a remote member's names its machine, so the same
+  // agent on two machines reads apart.
+  const labelFor = (memberKey, peers = {}) => {
+    const remote = splitMemberKey(memberKey);
+    const agent = getAgent(remote ? remote.agentKey : memberKey);
+    const label = agent ? agent.label : remote ? remote.agentKey : memberKey;
+    if (!remote) return label;
+    const peer = peers[remote.peerId];
+    return `${label} (${peer ? peer.name : remote.peerId})`;
   };
+  // The agent a member's turn is attributed to. A remote member is described by
+  // its member key and label only; its peer owns everything else about it.
+  const memberAgentFor = (group, memberKey) => {
+    const remote = splitMemberKey(memberKey);
+    if (!remote) return getAgent(memberKey);
+    if (!group.peers[remote.peerId]) return null;
+    return { key: memberKey, label: labelFor(memberKey, group.peers) };
+  };
+
+  // The peer credentials the app sent with this request, keyed by peer id.
+  // They exist only for the life of the request.
+  function requestPeers(req) {
+    const out = new Map();
+    const list = Array.isArray(req.body && req.body.peers) ? req.body.peers : [];
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') continue;
+      const baseUrl = normalizeBaseUrl(raw.baseUrl);
+      const token = typeof raw.token === 'string' ? raw.token.trim() : '';
+      if (!baseUrl || !token || token.length > 4096) continue;
+      const name = typeof raw.name === 'string' ? raw.name.replace(/\s+/g, ' ').trim() : '';
+      out.set(peerIdFor(baseUrl), {
+        name: name.slice(0, 80) || new URL(baseUrl).host,
+        baseUrl,
+        token,
+      });
+    }
+    return out;
+  }
+
+  // A client for one peer, or null when this request carries no credential for
+  // it. It identifies itself to the peer with the app's own device headers.
+  function peerClientFor(req, credentials, peerId, record) {
+    const credential = credentials.get(peerId);
+    if (!credential) return null;
+    return createPeerClient({
+      name: (record && record.name) || credential.name,
+      baseUrl: credential.baseUrl,
+      token: credential.token,
+      deviceId: normalizeDeviceId(req.get('x-device-id')) || 'relay-swarm',
+      deviceName: String(req.get('x-device-name') || 'Relay Swarm').slice(0, 120),
+    });
+  }
+
+  function notLinkedError(peerName) {
+    return new PeerError(
+      `${peerName} is not connected on this device. Add its credential in Manage Credentials.`,
+      'PEER_NOT_LINKED',
+    );
+  }
+
+  function sendPeerError(res, err) {
+    if (!(err instanceof PeerError)) {
+      return res.status(500).json({ error: err.message || 'request failed' });
+    }
+    const status = ['PEER_NOT_LINKED', 'PEER_UNKNOWN_AGENT'].includes(err.code) ? 400 : 502;
+    return res.status(status).json({ error: err.message, code: err.code });
+  }
+
+  // Checks each new remote member against its peer (reachable, agent exists)
+  // and creates its dedicated session there, in the work tree the caller chose
+  // on that machine (the peer's default when none). Returns the configs and
+  // peer records to store, plus a rollback that deletes those sessions again;
+  // a failure rolls back itself, so no peer keeps a half-made member.
+  async function linkRemoteMembers(req, credentials, memberKeys, rawConfigs, swarmName) {
+    const configs = {};
+    const peers = {};
+    const created = [];
+    const rollback = () => Promise.all(created.map(({ client, agentKey, workdir, sessionId }) =>
+      client.deleteSession(agentKey, workdir, sessionId).catch(() => {})));
+    const agentsByPeer = new Map();
+    try {
+      for (const memberKey of memberKeys) {
+        const { peerId, agentKey } = splitMemberKey(memberKey);
+        const credential = credentials.get(peerId);
+        if (!credential) throw notLinkedError(peerId);
+        const client = peerClientFor(req, credentials, peerId);
+        if (!agentsByPeer.has(peerId)) agentsByPeer.set(peerId, await client.listAgents());
+        if (!agentsByPeer.get(peerId).some((agent) => agent && agent.key === agentKey)) {
+          throw new PeerError(
+            `${credential.name} has no agent "${agentKey}".`,
+            'PEER_UNKNOWN_AGENT',
+          );
+        }
+        const raw = rawConfigs && rawConfigs[memberKey];
+        const workdir = raw && typeof raw.workdir === 'string' ? raw.workdir.trim() : '';
+        const session = await client.createSession(agentKey, workdir, `Swarm: ${swarmName}`);
+        created.push({ client, agentKey, ...session });
+        configs[memberKey] = { workdir: session.workdir, sessionId: session.sessionId };
+        peers[peerId] = { name: credential.name, baseUrl: credential.baseUrl };
+      }
+    } catch (err) {
+      await rollback();
+      throw err;
+    }
+    return { configs, peers, rollback };
+  }
+
+  // Best-effort `delete` or `clear` of remote members' sessions on their peers.
+  // A member whose peer has no credential in this request, or whose peer fails,
+  // is skipped, so the local change never depends on another machine.
+  function forgetRemoteMembers(req, credentials, group, memberKeys, action) {
+    return Promise.all(memberKeys.map((memberKey) => {
+      const remote = splitMemberKey(memberKey);
+      const config = group.memberConfigs[memberKey] || {};
+      const client = remote && peerClientFor(req, credentials, remote.peerId);
+      if (!client || !config.sessionId) return null;
+      const call = action === 'clear' ? client.clearSession : client.deleteSession;
+      return call(remote.agentKey, config.workdir, config.sessionId).catch(() => {});
+    }));
+  }
 
   // The work tree a swarm runs in: its pinned `workdir`, falling back to the
   // workspace it was created in for swarms saved before work-tree selection.
@@ -153,12 +279,20 @@ module.exports = function createGroupRouter(ctx) {
   // agent (unknown ids fall back to defaults), plus the free-text swarm-scoped
   // `nickname` and `prompt` passed through (groups.js bounds their length). Only
   // current members are kept, so a config can never reference a dropped member.
-  function normalizeConfigs(rawConfigs, members) {
+  // A remote member runs with its peer's own settings, so it keeps only the
+  // persona plus the peer `workdir`/`sessionId` from `linked`, never the caller's.
+  function normalizeConfigs(rawConfigs, members, linked = {}) {
     const out = {};
-    if (!rawConfigs || typeof rawConfigs !== 'object') return out;
+    const configs = rawConfigs && typeof rawConfigs === 'object' ? rawConfigs : {};
     for (const memberKey of members) {
-      const raw = rawConfigs[memberKey];
-      if (raw && typeof raw === 'object') {
+      const raw = configs[memberKey];
+      if (splitMemberKey(memberKey)) {
+        const { workdir, sessionId } = linked[memberKey] || {};
+        const config = { workdir, sessionId };
+        if (raw && typeof raw.nickname === 'string') config.nickname = raw.nickname;
+        if (raw && typeof raw.prompt === 'string') config.prompt = raw.prompt;
+        out[memberKey] = config;
+      } else if (raw && typeof raw === 'object') {
         const config = normalizeSettings(memberKey, raw);
         if (typeof raw.nickname === 'string') config.nickname = raw.nickname;
         if (typeof raw.prompt === 'string') config.prompt = raw.prompt;
@@ -170,10 +304,13 @@ module.exports = function createGroupRouter(ctx) {
 
   // Members the caller asked for, narrowed to agents that actually exist on this
   // host. Unknown agent keys are dropped so a group can never reference a runner
-  // that isn't installed.
+  // that isn't installed. Remote members are checked against their peer when
+  // they are added (linkRemoteMembers).
   function knownMembers(rawMembers) {
     const list = Array.isArray(rawMembers) ? rawMembers : [];
-    return list.map((m) => String(m || '').trim()).filter((m) => m && getAgent(m));
+    return list
+      .map((m) => String(m || '').trim())
+      .filter((m) => m && (splitMemberKey(m) || getAgent(m)));
   }
 
   router.get('/api/groups', (req, res) => {
@@ -182,7 +319,7 @@ module.exports = function createGroupRouter(ctx) {
     return res.json({ workdir, groups: listGroups(workdir) });
   });
 
-  router.post('/api/groups', (req, res) => {
+  router.post('/api/groups', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const members = knownMembers(req.body.members);
@@ -193,11 +330,24 @@ module.exports = function createGroupRouter(ctx) {
     }
     const workTree = resolveWorkTree(res, req.body.workdir, workdir);
     if (workTree === null) return undefined;
-    const group = createGroup(workdir, req.body.name, members, {
+    // Named before creation because each remote member's session carries it.
+    const name = String(req.body.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) ||
+      `Swarm ${listGroups(workdir).length + 1}`;
+    let linked;
+    try {
+      linked = await linkRemoteMembers(
+        req, requestPeers(req), members.filter(splitMemberKey), req.body.configs, name,
+      );
+    } catch (err) {
+      return sendPeerError(res, err);
+    }
+    const group = createGroup(workdir, name, members, {
       workdir: workTree,
-      memberConfigs: normalizeConfigs(req.body.configs, members),
+      memberConfigs: normalizeConfigs(req.body.configs, members, linked.configs),
+      peers: linked.peers,
     });
     if (!group) {
+      await linked.rollback();
       return res
         .status(409)
         .json({ error: 'too many swarms in this workspace', code: 'GROUP_LIMIT' });
@@ -205,7 +355,7 @@ module.exports = function createGroupRouter(ctx) {
     return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
   });
 
-  router.post('/api/groups/members', (req, res) => {
+  router.post('/api/groups/members', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
@@ -215,12 +365,40 @@ module.exports = function createGroupRouter(ctx) {
         .status(400)
         .json({ error: 'at least one known agent member is required', code: 'GROUP_NO_MEMBERS' });
     }
-    const group = setGroupMembers(workdir, groupId, members, {
-      memberConfigs: normalizeConfigs(req.body.configs, members),
-    });
-    if (!group) {
+    const existing = getGroup(workdir, groupId);
+    if (!existing) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
+    const credentials = requestPeers(req);
+    let linked;
+    try {
+      linked = await linkRemoteMembers(
+        req,
+        credentials,
+        members.filter((key) => splitMemberKey(key) && !existing.members.includes(key)),
+        req.body.configs,
+        existing.name,
+      );
+    } catch (err) {
+      return sendPeerError(res, err);
+    }
+    const group = setGroupMembers(workdir, groupId, members, {
+      memberConfigs: normalizeConfigs(
+        req.body.configs, members, { ...existing.memberConfigs, ...linked.configs },
+      ),
+      peers: linked.peers,
+    });
+    if (!group) {
+      await linked.rollback();
+      return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
+    }
+    await forgetRemoteMembers(
+      req,
+      credentials,
+      existing,
+      existing.members.filter((key) => !members.includes(key)),
+      'delete',
+    );
     return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
   });
 
@@ -239,7 +417,8 @@ module.exports = function createGroupRouter(ctx) {
     }
     deleteGroup(workdir, group.id);
     clearHistory(scopeKey);
-    for (const memberKey of group.members) {
+    await forgetRemoteMembers(req, requestPeers(req), group, group.members, 'delete');
+    for (const memberKey of group.members.filter((key) => !splitMemberKey(key))) {
       await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
         agentKey: memberKey,
         workdir: runWorkdir,
@@ -284,7 +463,8 @@ module.exports = function createGroupRouter(ctx) {
       return res.status(409).json({ error: 'group has a running turn', code: 'GROUP_BUSY' });
     }
     clearHistory(scopeKey);
-    for (const memberKey of group.members) {
+    await forgetRemoteMembers(req, requestPeers(req), group, group.members, 'clear');
+    for (const memberKey of group.members.filter((key) => !splitMemberKey(key))) {
       await purgeSession(memberSessionKeyFor(runWorkdir, group.id, memberKey), {
         agentKey: memberKey,
         workdir: runWorkdir,
@@ -366,8 +546,9 @@ module.exports = function createGroupRouter(ctx) {
     const groupLabelFor = (agentKey) => {
       const nickname = group.memberConfigs[agentKey] &&
         group.memberConfigs[agentKey].nickname;
-      return (typeof nickname === 'string' && nickname) || labelFor(agentKey);
+      return (typeof nickname === 'string' && nickname) || labelFor(agentKey, group.peers);
     };
+    const credentials = requestPeers(req);
     const mentions = parseMentions(prompt, group.members, groupLabelFor);
     const abortController = new AbortController();
     const runState = {
@@ -443,7 +624,7 @@ module.exports = function createGroupRouter(ctx) {
       const snapshot = readHistory(scopeKey);
       return summons
         .map(({ memberKey, summonedBy }, index) => {
-          const memberAgent = getAgent(memberKey);
+          const memberAgent = memberAgentFor(group, memberKey);
           if (!memberAgent) return null;
           const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
           // Plan B: feed this member only what happened since it last spoke, each
@@ -516,6 +697,27 @@ module.exports = function createGroupRouter(ctx) {
         runAgent: (agentKey, p, onEvent, opts) =>
           base.runAgent(agentKey, p, onEvent, { ...opts, sessionKey: memberSessionKey }),
       };
+      const remote = splitMemberKey(memberKey);
+      if (remote) {
+        // A remote member runs with its peer's own settings, in the session
+        // created for it there.
+        const config = group.memberConfigs[memberKey] || {};
+        const peer = group.peers[remote.peerId];
+        const client = peerClientFor(req, credentials, remote.peerId, peer);
+        dependencies.getSettings = () => ({});
+        dependencies.runAgent = async (_agentKey, p, onEvent, opts) => {
+          if (!client) throw notLinkedError(peer.name);
+          return client.chat({
+            agent: remote.agentKey,
+            sessionId: config.sessionId,
+            workdir: config.workdir,
+            prompt: p,
+            requestId: turnRequestId,
+            signal: opts.signal,
+            onEvent,
+          });
+        };
+      }
       const result = await runAgentTurn({
         agent: memberAgent,
         agentKey: memberKey,

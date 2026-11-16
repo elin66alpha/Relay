@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:relay_core/core/backend/backend_client.dart';
@@ -25,6 +26,8 @@ import 'package:relay_core/features/cli_agents/cli_agents_controller.dart';
 import 'package:relay_core/features/machines/machine_credentials_controller.dart';
 import 'package:relay_core/features/quota/quota_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_file_picker.dart';
 
 const String _userText = 'Please check the build';
 const String _replyText = '**Build passed.**\n\nSee `build.log` for details.';
@@ -198,26 +201,13 @@ void main() {
   testWidgets('attachments upload during a turn without sending', (
     WidgetTester tester,
   ) async {
-    const MethodChannel picker = MethodChannel(
-      'miguelruivo.flutter.plugins.filepicker',
-    );
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(picker, (
-      MethodCall call,
-    ) async {
-      expect(call.method, 'any');
-      expect((call.arguments as Map)['allowMultipleSelection'], isTrue);
-      expect((call.arguments as Map)['withData'], isFalse);
-      return <Map<String, Object>>[
+    final FakeFilePicker picker = FakeFilePicker.install(
+      (FileType type) => <PlatformFile>[
         for (final String name in <String>['notes.txt', 'photo.png'])
-          <String, Object>{'name': name, 'path': '/picked/$name', 'size': 4},
-      ];
-    });
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        picker,
-        null,
-      ),
+          FakePickedFile(name, Uint8List(4)),
+      ],
     );
+    addTearDown(picker.restore);
     final _ChatBackendClient backend = _ChatBackendClient();
     final BotChatController chat = await _openChat(
       tester,

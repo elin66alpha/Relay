@@ -26,6 +26,7 @@ class ApiTransport {
     DeviceIdStore? deviceIdStore,
     WorkdirStore? workdirStore,
     http.Client? httpClient,
+    this.machine,
   })  : _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
         _workdirStore = workdirStore ?? WorkdirStore(),
@@ -35,6 +36,9 @@ class ApiTransport {
   final DeviceIdStore _deviceIdStore;
   final WorkdirStore _workdirStore;
   final http.Client httpClient;
+
+  /// The machine every request goes to; null means the active machine.
+  final MachineCredential? machine;
 
   Future<void> writeWorkdir(MachineCredential credential, String dir) =>
       _workdirStore.write(credential.id, dir);
@@ -110,7 +114,8 @@ class ApiTransport {
   }
 
   Future<MachineCredential> requireCredential() async {
-    final MachineCredential? credential = await _credentialsStore.readActive();
+    final MachineCredential? credential =
+        machine ?? await _credentialsStore.readActive();
     if (credential == null) {
       throw BackendException('Import a machine credential first.');
     }
@@ -159,6 +164,14 @@ class ApiTransport {
       }
     } on FormatException {
       // Keep raw body.
+    }
+    // Express's default 404 page: the backend predates this route.
+    if (status == 404 && RegExp(r'<pre>Cannot [A-Z]+ ').hasMatch(body)) {
+      return BackendException(
+        'backend does not support this request',
+        status: status,
+        code: 'BACKEND_ROUTE_MISSING',
+      );
     }
     if (message.isEmpty) message = 'HTTP $status';
     return BackendException(message, status: status);

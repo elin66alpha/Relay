@@ -9,7 +9,7 @@ class DeviceIdStore {
             const FlutterSecureStorage(
               // The data protection keychain needs an Apple team signature,
               // which the released macOS app does not have.
-              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+              mOptions: MacOsOptions(usesDataProtectionKeychain: false),
             ),
         _random = random ?? Random.secure();
 

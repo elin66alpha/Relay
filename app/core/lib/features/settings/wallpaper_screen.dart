@@ -86,24 +86,20 @@ class _WallpaperScreenState extends State<WallpaperScreen>
       _error = null;
     });
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
+      final PlatformFile? file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: <String>['jpg', 'jpeg', 'png', 'webp'],
-        withData: false,
-        withReadStream: true,
       );
-      if (result == null || !mounted) return;
+      if (file == null || !mounted) return;
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      final PlatformFile file = result.files.single;
       const int? limit = wallpaperImportLimit;
-      if (file.size <= 0 ||
-          (limit != null && file.size > limit) ||
-          file.readStream == null) {
+      final int? size = await file.length();
+      if (size == null || size <= 0 || (limit != null && size > limit)) {
         throw const FormatException('wallpaper size');
       }
       final BytesBuilder bytes = BytesBuilder(copy: false);
-      await for (final List<int> chunk in file.readStream!) {
+      await for (final List<int> chunk in file.readAsByteStream()) {
         if (!mounted) return;
         if (limit != null && bytes.length + chunk.length > limit) {
           throw const FormatException('wallpaper size');

@@ -9,6 +9,7 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/group.dart';
+import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
@@ -16,6 +17,7 @@ import '../../core/util/time_format.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import '../machines/machine_credentials_controller.dart';
 import 'chat_content.dart';
 import 'group_chat_controller.dart';
 import 'swarm_form_dialog.dart';
@@ -28,6 +30,7 @@ class GroupChatScreen extends StatefulWidget {
   const GroupChatScreen({
     required this.agentsController,
     required this.settingsController,
+    required this.machinesController,
     this.initialGroupId,
     super.key,
   });
@@ -37,6 +40,10 @@ class GroupChatScreen extends StatefulWidget {
 
   final CliAgentsController agentsController;
   final AppSettingsController settingsController;
+
+  /// This device's machine credentials: the other machines a swarm's members
+  /// can run on.
+  final MachineCredentialsController machinesController;
 
   /// When set, open directly into this swarm instead of the most-recent one.
   final String? initialGroupId;
@@ -54,8 +61,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = GroupChatController()
-      ..language = widget.settingsController.language;
+    _controller = GroupChatController(
+      machines: () => widget.machinesController.credentials,
+    )..language = widget.settingsController.language;
     _controller.addListener(_onChange);
     _controller.start(initialGroupId: widget.initialGroupId);
   }
@@ -90,6 +98,30 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     return _agents.firstWhere(
       (CliAgent agent) => agent.key == key,
       orElse: () => cliAgentByKey(key),
+    );
+  }
+
+  // A member's mention chip. A remote member's status is its machine's, so
+  // only a missing credential on this device keeps it from being summoned.
+  Widget _mentionChip(BuildContext context, ChatGroup group, String member) {
+    final AppStrings strings = context.l10n;
+    if (memberPeerId(member) != null) {
+      final bool linked = _controller.isMemberLinked(member);
+      return ActionChip(
+        avatar: linked ? null : const Icon(Icons.link_off, size: 16),
+        tooltip: linked ? null : strings.swarmMemberNotLinked,
+        label: Text('@${group.memberLabel(member)}'),
+        onPressed: linked
+            ? () => _insertMention(member)
+            : () => _showSnack(strings.swarmMemberNotLinked),
+      );
+    }
+    final CliAgent agent = _agentForKey(member);
+    return ActionChip(
+      label: Text('@${agent.label}'),
+      onPressed: isCliAgentSelectable(agent)
+          ? () => _insertMention(member)
+          : () => showAgentUnavailableSnack(context, agent),
     );
   }
 
@@ -291,16 +323,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: Builder(
-                        builder: (BuildContext context) {
-                          final CliAgent agent = _agentForKey(member);
-                          return ActionChip(
-                            label: Text('@${agent.label}'),
-                            onPressed: isCliAgentSelectable(agent)
-                                ? () => _insertMention(member)
-                                : () =>
-                                    showAgentUnavailableSnack(context, agent),
-                          );
-                        },
+                        builder: (BuildContext context) =>
+                            _mentionChip(context, group, member),
                       ),
                     ),
                 ],
@@ -435,6 +459,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       initialMembers: group.members,
       initialWorkdir: group.workdir,
       initialConfigs: group.memberConfigs,
+      initialPeers: group.peers,
       nameEditable: false,
       workTreeEditable: false,
     );
@@ -458,6 +483,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       context: context,
       builder: (BuildContext context) => MemberPersonaDialog(
         agentKey: agentKey,
+        label: group.memberLabel(agentKey),
         initialNickname: current['nickname'] ?? '',
         initialPrompt: current['prompt'] ?? '',
       ),
@@ -517,17 +543,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Future<void> _importTemplate() async {
     final AppStrings strings = context.l10n;
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-        withData: true,
-      );
-      if (result == null || result.files.isEmpty) return;
-      final Uint8List? bytes = result.files.single.bytes;
-      if (bytes == null) {
-        _showSnack(strings.swarmTemplateInvalid);
-        return;
-      }
+      final PlatformFile? file = await FilePicker.pickFile();
+      if (file == null) return;
+      final Uint8List bytes = await file.readAsBytes();
       final SwarmTemplate template = parseSwarmTemplate(utf8.decode(bytes));
       final ChatGroup? created = await _controller.createGroup(
         template.name,
@@ -551,15 +569,22 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     String initialWorkdir = '',
     Map<String, Map<String, String>> initialConfigs =
         const <String, Map<String, String>>{},
+    Map<String, SwarmPeer> initialPeers = const <String, SwarmPeer>{},
     bool nameEditable = true,
     bool workTreeEditable = true,
   }) {
+    final MachineCredential? current = widget.machinesController.activeMachine;
     return showDialog<SwarmForm>(
       context: context,
       builder: (BuildContext context) => SwarmFormDialog(
         title: title,
         agents: _agents,
         backend: _controller.backend,
+        localMachineName: current?.displayName ?? '',
+        machines: widget.machinesController.credentials
+            .where((MachineCredential m) => m.id != current?.id)
+            .toList(growable: false),
+        initialPeers: initialPeers,
         initialName: initialName,
         initialMembers: initialMembers,
         initialWorkdir: initialWorkdir,
@@ -654,6 +679,7 @@ class _MessageBubble extends StatelessWidget {
     if (nickname != null && nickname.trim().isNotEmpty) return nickname.trim();
     final Object? recorded = message.metadata['agentLabel'];
     if (recorded is String && recorded.trim().isNotEmpty) return recorded;
+    if (author != null && group != null) return group!.memberLabel(author);
     return groupAuthorLabel(author);
   }
 
@@ -748,7 +774,7 @@ class _MessageBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               ReplyHeader(
-                agentKey: author,
+                agentKey: author == null ? null : memberAgentKey(author),
                 label: label,
                 time: time,
                 onIconTap: canEdit ? () => onEditMember!(group!, author) : null,

@@ -50,6 +50,30 @@ revoke previously issued device tokens. The app's **Machine details** page lists
 token ids, device metadata, and last-use time so each old token can be revoked
 and then deleted deliberately.
 
+## Swarm members on other machines
+
+A Swarm member can run on another Relay backend (B) that the app holds a
+credential for in Manage credentials. B is unchanged: the backend running the
+Swarm (A) calls B's ordinary API as the app would. To do that, the app puts B's
+`baseUrl` and bearer token in the body of each Swarm request that reaches B's
+members (create, members, chat, clear, delete), over the same authenticated
+connection the app already uses for A.
+
+- A keeps B's token in memory only for that one request. It is not written to
+  `groups.json`, history, settings or logs, and it is not sent back in any
+  response, SSE event or error message; `server/test/group-peer.test.js`
+  checks this. `groups.json` records only B's name, `baseUrl`, and the member's
+  workdir and dedicated session id on B.
+- Whoever controls A can use that token while the request runs, and the token
+  is B's full device token: driving a member on B means acting with every
+  permission that agent and its permission tier have on B, plus everything
+  else the token allows (file API, terminal). Link machines only to a backend
+  you trust as much as the device holding the credential.
+- Only a device that holds B's credential can run B's members. A device or
+  `relay-mcp` without it gets `PEER_NOT_LINKED` for those members.
+- A uses B's credential over the `baseUrl` stored in it, so the same rules as
+  any client apply: use `https://` for anything outside a trusted network.
+
 ## API protections
 
 Every HTTP `/api/*` endpoint requires `Authorization: Bearer <token>`. Until at
@@ -113,6 +137,23 @@ valid device token therefore permits arbitrary command execution as that user.
 Use a dedicated non-root account, revoke lost-device tokens immediately, and do
 not expose Relay without TLS.
 
+## Browser
+
+**Drawer → Browser** runs a headless Chrome, Chromium, or Edge on the backend
+host as the backend OS user. It is authorized exactly like the terminal: a
+bearer-authenticated request returns a random ticket that expires after 30
+seconds and is redeemed once at `/api/browser/connect`; revoking the device
+token closes the browser. Relay drives the browser over
+`--remote-debugging-pipe`, so it opens no DevTools port that other local users
+or processes could connect to.
+
+The address bar opens only loopback addresses, but pages may navigate
+anywhere the host can reach, so the browser adds no capability beyond the
+terminal: anyone with a valid device token can already run commands as that
+user. Each browser uses a fresh temporary profile under the system temporary
+directory, deleted when the browser closes; cookies and storage from pages do
+not persist and are not written under `server/`.
+
 ## File API protections
 
 By default, the file browser accepts absolute paths anywhere the backend user
@@ -153,7 +194,10 @@ certificate SHA-256
 downloaded APK with `apksigner verify --print-certs`; one signed by another
 certificate is not an official build. Releases up to 0.1.7 were signed with a
 debug certificate. The keystore and `app/shell/android/key.properties` stay
-outside version control.
+outside version control. The release workflow reads the keystore and its
+passwords from the repository's GitHub Actions Secrets, writes them to the
+runner only for the build, and refuses an APK whose certificate differs from the
+one above.
 
 ## Production requirements
 
@@ -167,8 +211,9 @@ For a backend reachable beyond localhost:
 - keep the backend port private and forward only the TLS endpoint;
 - disable proxy buffering for SSE/chat routes and set timeouts above the maximum
   agent turn duration;
-- forward WebSocket upgrades for `/api/terminal/connect` and use an idle timeout
-  suitable for interactive shells;
+- forward WebSocket upgrades for `/api/terminal/connect` and
+  `/api/browser/connect` and use an idle timeout suitable for interactive
+  shells;
 - protect backend backups, because history and session files contain raw
   unredacted conversation content.
 

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_core/core/backend/backend_client.dart';
 import 'package:relay_core/core/models/chat_message.dart';
 import 'package:relay_core/core/models/group.dart';
+import 'package:relay_core/core/models/machine_credential.dart';
 import 'package:relay_core/features/chat/group_chat_controller.dart';
 
 void main() {
@@ -184,6 +185,40 @@ void main() {
     expect(backend.historyRequests, hasLength(3));
   });
 
+  test('a round carries only the credentials of its members\' machines',
+      () async {
+    const MachineCredential studio = MachineCredential(
+      id: 'studio',
+      name: 'Studio',
+      baseUrl: 'http://10.0.0.5:8787/',
+      token: 'studio-token',
+      createdAt: '',
+    );
+    const MachineCredential laptop = MachineCredential(
+      id: 'laptop',
+      name: 'Laptop',
+      baseUrl: 'http://10.0.0.6:8787',
+      token: 'laptop-token',
+      createdAt: '',
+    );
+    final GroupChatController linked = GroupChatController(
+      backendClient: backend,
+      machines: () => const <MachineCredential>[studio, laptop],
+    );
+    addTearDown(linked.dispose);
+    backend.history['mixed'] = <ChatMessage>[];
+    await linked.start(initialGroupId: 'mixed');
+
+    expect(linked.isMemberLinked('claude'), isTrue);
+    expect(linked.isMemberLinked('4e7eeaf61885:claude'), isTrue);
+    expect(linked.isMemberLinked('0123456789ab:codex'), isFalse);
+
+    final Future<bool> sending = linked.send('@4e7eeaf61885:claude go');
+    expect(backend.sentPeers.single, <MachineCredential>[studio]);
+    backend.round.complete();
+    expect(await sending, isTrue);
+  });
+
   test('reopening a swarm with a running round keeps Stop until it ends',
       () async {
     backend.history['builders'] = <ChatMessage>[];
@@ -214,6 +249,17 @@ const ChatGroup _reviewers = ChatGroup(
   name: 'Reviewers',
   members: <String>['codex'],
 );
+// Members on this machine, on Studio (10.0.0.5:8787) and on a machine this
+// device has no credential for.
+const ChatGroup _mixed = ChatGroup(
+  id: 'mixed',
+  name: 'Mixed',
+  members: <String>['claude', '4e7eeaf61885:claude', '0123456789ab:codex'],
+  peers: <String, SwarmPeer>{
+    '4e7eeaf61885': SwarmPeer(name: 'Studio', baseUrl: 'http://10.0.0.5:8787'),
+    '0123456789ab': SwarmPeer(name: 'Elsewhere', baseUrl: 'http://x.test'),
+  },
+);
 const ChatGroup _other = ChatGroup(
   id: 'other',
   name: 'Other workspace',
@@ -241,6 +287,7 @@ class _GroupBackendClient extends BackendClient {
   final List<String> historyRequests = <String>[];
   final Map<String, List<ChatMessage>> history = <String, List<ChatMessage>>{};
   final List<Map<String, String>> sent = <Map<String, String>>[];
+  final List<List<MachineCredential>> sentPeers = <List<MachineCredential>>[];
   final List<String> cancelled = <String>[];
   final Completer<void> round = Completer<void>();
   String? running;
@@ -261,7 +308,7 @@ class _GroupBackendClient extends BackendClient {
   Future<List<ChatGroup>> fetchGroups() async {
     groupWorkdirs.add(activeWorkdir);
     return activeWorkdir == '/work/a'
-        ? <ChatGroup>[_builders, _reviewers]
+        ? <ChatGroup>[_builders, _reviewers, _mixed]
         : <ChatGroup>[_other];
   }
 
@@ -269,7 +316,7 @@ class _GroupBackendClient extends BackendClient {
   Future<GroupHistory> fetchGroupHistory(String groupId) async {
     historyRequests.add('$activeWorkdir:$groupId');
     return GroupHistory(
-      group: <ChatGroup>[_builders, _reviewers, _other]
+      group: <ChatGroup>[_builders, _reviewers, _mixed, _other]
           .firstWhere((ChatGroup g) => g.id == groupId),
       messages: history[groupId] ??
           <ChatMessage>[
@@ -284,7 +331,9 @@ class _GroupBackendClient extends BackendClient {
     required String groupId,
     required String prompt,
     required String requestId,
+    List<MachineCredential> peers = const <MachineCredential>[],
   }) {
+    sentPeers.add(peers);
     sent.add(<String, String>{
       'groupId': groupId,
       'prompt': prompt,

@@ -299,7 +299,8 @@ function createTerminalManager(options = {}) {
     }
   }
 
-  function attachServer(server) {
+  // otherUpgrade(req, socket, head, url) -> true when it handled another path.
+  function attachServer(server, otherUpgrade) {
     const { WebSocketServer } = require('ws');
     webSocketServer = new WebSocketServer({
       noServer: true,
@@ -315,7 +316,9 @@ function createTerminalManager(options = {}) {
         return;
       }
       if (url.pathname !== '/api/terminal/connect') {
-        rejectUpgrade(socket, '404 Not Found');
+        if (!(otherUpgrade && otherUpgrade(req, socket, head, url))) {
+          rejectUpgrade(socket, '404 Not Found');
+        }
         return;
       }
       const ticket = consumeTicket(url.searchParams.get('ticket'));

@@ -96,12 +96,13 @@ can run concurrently without sharing a global backend directory.
 
 | | Capability | What it gives you |
 |---|---|---|
-| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. Replies Claude starts on its own, such as when a background task finishes, appear as messages of their own. |
+| 💬 | **Live, persistent chat** | Streaming replies, cancellation, named sessions (rename any except Main), cross-device history, search, and Markdown export. Copy messages or use Edit on your own message to put its text back in the draft. Tap a link in a reply to preview the workspace file it names, or to open a web address in your browser after confirming it. Automatic Claude and Antigravity replies, and Codex child-agent completion replies, appear as messages of their own. |
 | 📎 | **Chat attachments and context** | Attach files to upload them to the workspace and add their paths to the draft. Above the solo-chat composer, see context tokens as `<used> / <window>`; `?` means unknown. |
-| 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, and reusable JSON templates. |
+| 🐝 | **Multi-agent Swarms** | Shared transcripts, per-member roles and controls, parallel waves, bounded `@mention` handoffs, reusable JSON templates, and members on your other Relay machines. |
 | 🎛️ | **Agent controls** | Model, reasoning effort, permission tier, install/auth status, on-demand Codex credential verification, and Fast mode for Claude/Codex/Cursor. The model page lists main models first; older Claude/Codex models and Cursor models outside its plan sit on a second page. OpenCode lists what the host's OpenCode offers, including providers configured there; Hermes shows its configured model. |
-| 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
+| 📁 | **Files and terminal** | Allowed-path browsing, read-only UTF-8 text previews (first 512 KiB, syntax highlighting for supported code, rendered Markdown with source toggle) and image previews (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB), uploads, downloads, zipped folders, workdir switching, and one resumable PTY per device credential. |
 | 📊 | **Quota workflows** | Claude/Codex/Cursor/Antigravity usage views, plus one queued prompt for the next detected Claude or Codex five-hour reset. |
+| 🌐 | **Browser for localhost** | See and operate the page your agent is serving on the backend's `localhost` (a dashboard under development, say) from anywhere: a headless Chrome on the host streams it to the app and takes taps, drags, sliders and typing, laid out for a phone or a desktop. See [Browser](docs/handbook.md#browser). |
 | 🤖 | **Personal agents over MCP** | `mcp/` is a dependency-free stdio MCP server: a bot signs in with a credential JSON and its password, like the app, and can chat with every agent, switch workdir, model and effort, read quota, manage sessions, Swarms and files, and use the terminal. See [Relay MCP](docs/handbook.md#relay-mcp). |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
 | 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
@@ -173,7 +174,7 @@ device.
 ### 3. Pick a project and start working
 
 Choose the backend, set the workdir, and open an agent conversation or Swarm.
-Home shows the current machine, current workspace, and up to three recent
+Home shows the current machine, current workspace, and up to five recent
 workspaces. Tap the machine for CLI status checks, device tokens, and Enter SSH.
 In the Android and iOS apps, swipe right anywhere in a chat to open the drawer.
 Use File system → Set as work path to select the project before sending a task.
@@ -181,7 +182,9 @@ Tap the current workspace on Home or the chat title to open File system; tap a
 different recent workspace to switch to it. In the file browser, the path bar
 stays visible: tap a parent segment to jump there, or use `..`, the up arrow, or
 a right swipe on the file list to go up one directory. When browsing elsewhere,
-tap the work-path chip to return to the active project.
+tap the work-path chip to return to the active project. The top of the file
+browser shows up to five recent workspaces as compact, horizontally scrolling
+tags. Tap a tag to switch the active workspace and display that directory.
 Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
 and the mobile terminal key bar.
 For service commands, networking details, and platform notes, continue with the

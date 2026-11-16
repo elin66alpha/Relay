@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:image/image.dart' as img;
 
 import '../../core/backend/backend_client.dart';
 import '../../core/download/download_manager.dart';
@@ -25,11 +27,15 @@ class FileSystemScreen extends StatefulWidget {
   const FileSystemScreen({
     required this.backend,
     required this.onSetWorkdir,
+    this.initialPath,
     super.key,
   });
 
   final BackendClient backend;
   final Future<WorkdirInfo> Function(String) onSetWorkdir;
+
+  /// Absolute directory to open instead of the workdir, e.g. from a chat link.
+  final String? initialPath;
 
   @override
   State<FileSystemScreen> createState() => _FileSystemScreenState();
@@ -48,6 +54,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   String? _error;
   String? _operationText;
   String? _workPath;
+  List<String> _recentWorkdirs = const <String>[];
   late int _seenDownloadTick;
   bool _downloadActive = false;
 
@@ -59,6 +66,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     _downloads.addListener(_onDownloadChanged);
     _dropController = registerFileDrop(_uploadDroppedFiles);
     _loadInitial();
+    unawaited(_loadRecentWorkdirs());
   }
 
   @override
@@ -99,13 +107,25 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       final WorkdirInfo info = await widget.backend.workdir();
       if (!mounted) return;
       _workPath = info.dir;
-      await _browse(info.dir);
+      await _browse(widget.initialPath ?? info.dir);
     } catch (err) {
       if (!mounted) return;
       setState(() {
         _error = friendlyErrorText(context.l10n, err);
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _loadRecentWorkdirs() async {
+    try {
+      final List<String> recent = await widget.backend.recentWorkdirs();
+      if (!mounted) return;
+      setState(() {
+        _recentWorkdirs = recent.take(5).toList(growable: false);
+      });
+    } catch (_) {
+      // Recent shortcuts are optional and must not block file browsing.
     }
   }
 
@@ -139,34 +159,44 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     if (path.isNotEmpty) await _browse(path);
   }
 
-  Future<void> _setAsWorkPath() async {
-    final FsListing? listing = _listing;
-    if (listing == null) return;
-    final String target = listing.absolutePath;
-    if (_workPath == target) return;
+  Future<void> _selectRecentWorkdir(String target) async {
+    if (_isLoading || _isBusy) return;
+    setState(() => _isLoading = true);
+    try {
+      if (await _setWorkPath(target) && mounted) {
+        setState(() => _listing = null);
+        await _browse(_workPath!);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<bool> _setWorkPath(String target) async {
+    if (_workPath == target) return true;
     final String? previous = _workPath;
-    // Update the label immediately and keep the browser fully usable. The backend
-    // sync (events reconnect + conversation reload, which fetches history over the
-    // slow tunnel) runs in the background instead of freezing the file list.
+    // Switching chat context may be slow, so update the work-path label first.
     setState(() {
       _error = null;
       _workPath = target;
     });
     try {
       final WorkdirInfo info = await widget.onSetWorkdir(target);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _workPath = info.dir);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.l10n.workdirUpdated)),
       );
+      return true;
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _workPath = previous; // revert the optimistic update on failure
         _error = err is BackendException && err.code == 'WORKDIR_BUSY'
             ? context.l10n.workdirBusy
             : friendlyErrorText(context.l10n, err);
       });
+      return false;
     }
   }
 
@@ -232,26 +262,22 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   }
 
   Future<void> _pickUpload() async {
-    final FilePickerResult? result = await FilePicker.pickFiles(
-      allowMultiple: true,
-      withData: kIsWeb,
-      withReadStream: !kIsWeb,
-    );
-    if (result == null) return;
+    final List<PlatformFile> picked = await FilePicker.pickFiles();
+    if (picked.isEmpty) return;
     final List<_UploadFile> files = <_UploadFile>[];
-    for (final PlatformFile file in result.files) {
+    for (final PlatformFile file in picked) {
       if (kIsWeb) {
-        final Uint8List? bytes = file.bytes;
-        if (bytes == null) continue;
-        files.add(_UploadFile.bytes(name: file.name, data: bytes));
+        files.add(
+          _UploadFile.bytes(name: file.name, data: await file.readAsBytes()),
+        );
       } else {
-        final Stream<List<int>>? bytes = file.readStream;
-        if (bytes == null) continue;
+        final int? length = await file.length();
+        if (length == null) continue;
         files.add(
           _UploadFile.stream(
             name: file.name,
-            data: bytes,
-            length: file.size,
+            data: file.readAsByteStream(),
+            length: length,
           ),
         );
       }
@@ -357,7 +383,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => _FilePreviewScreen(
+        builder: (BuildContext context) => FilePreviewScreen(
           entry: entry,
           open: () => widget.backend.openFileDownload(entry.path),
           onDownload: () => _download(entry),
@@ -412,6 +438,15 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
+                      if (_recentWorkdirs.isNotEmpty) ...<Widget>[
+                        _RecentWorkspaces(
+                          workdirs: _recentWorkdirs,
+                          workPath: _workPath,
+                          busy: _isLoading || _isBusy,
+                          onNavigate: _selectRecentWorkdir,
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       _BreadcrumbBar(
                         path: activePath,
                         canGoUp: listing?.parentPath != null,
@@ -429,9 +464,12 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: <Widget>[
                           FilledButton.icon(
-                            onPressed: _isLoading || _isBusy || atWorkPath
+                            onPressed: _isLoading ||
+                                    _isBusy ||
+                                    listing == null ||
+                                    atWorkPath
                                 ? null
-                                : _setAsWorkPath,
+                                : () => _setWorkPath(listing.absolutePath),
                             icon: Icon(
                               atWorkPath
                                   ? Icons.check_rounded
@@ -552,6 +590,68 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _RecentWorkspaces extends StatelessWidget {
+  const _RecentWorkspaces({
+    required this.workdirs,
+    required this.workPath,
+    required this.busy,
+    required this.onNavigate,
+  });
+
+  final List<String> workdirs;
+  final String? workPath;
+  final bool busy;
+  final ValueChanged<String> onNavigate;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          context.l10n.recentWorkspaces,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: <Widget>[
+              for (final String dir in workdirs)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ActionChip(
+                    tooltip: dir,
+                    avatar: Icon(
+                      dir == workPath
+                          ? Icons.folder_open_rounded
+                          : Icons.folder_outlined,
+                      size: 16,
+                      color: dir == workPath ? theme.colorScheme.primary : null,
+                    ),
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 160),
+                      child: Text(
+                        splitPathBreadcrumbs(dir).lastOrNull?.label ?? dir,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium,
+                      ),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: busy ? null : () => onNavigate(dir),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -713,9 +813,98 @@ class _BreadcrumbChip extends StatelessWidget {
   }
 }
 
-String? _decodePreview((Uint8List, bool) input) {
+img.Decoder? _findPreviewImageDecoder(Uint8List bytes) {
+  if (bytes.isEmpty || !bytes.contains(0)) return null;
+  for (final img.Decoder decoder in <img.Decoder>[
+    img.PngDecoder(),
+    img.JpegDecoder(),
+    img.WebPDecoder(),
+    img.GifDecoder(),
+    img.BmpDecoder(),
+    img.IcoDecoder(),
+  ]) {
+    if (decoder is img.IcoDecoder &&
+        (bytes.length < 22 ||
+            bytes[0] != 0 ||
+            bytes[1] != 0 ||
+            bytes[2] != 1 ||
+            bytes[3] != 0 ||
+            (bytes[4] | (bytes[5] << 8)) == 0)) {
+      continue;
+    }
+    try {
+      if (decoder.isValidFile(bytes)) return decoder;
+    } catch (_) {
+      // Malformed headers simply mean this decoder does not match.
+    }
+  }
+  return null;
+}
+
+bool _isPreviewImageHeader(Uint8List bytes) =>
+    _findPreviewImageDecoder(bytes) != null;
+
+bool _validPreviewDimensions(int width, int height) =>
+    width > 0 &&
+    height > 0 &&
+    width <= _FilePreviewScreenState._maxImagePreviewPixels ~/ height;
+
+bool _isValidPreviewImage(Uint8List bytes) {
+  final img.Decoder? decoder = _findPreviewImageDecoder(bytes);
+  if (decoder == null) return false;
+  try {
+    final img.DecodeInfo? info = decoder.startDecode(bytes);
+    if (info == null) return false;
+    if (info is img.IcoInfo) {
+      return info.type == img.IcoType.ico &&
+          info.images.isNotEmpty &&
+          info.images.every(
+            (img.IcoInfoImage item) {
+              if (item.bytesSize <= 0 ||
+                  item.bytesOffset < 6 + info.images.length * 16 ||
+                  item.bytesOffset + item.bytesSize > bytes.length) {
+                return false;
+              }
+              final Uint8List embedded = Uint8List.sublistView(
+                bytes,
+                item.bytesOffset,
+                item.bytesOffset + item.bytesSize,
+              );
+              final img.PngDecoder png = img.PngDecoder();
+              if (png.isValidFile(embedded)) {
+                final img.DecodeInfo? info = png.startDecode(embedded);
+                return info != null &&
+                    _validPreviewDimensions(info.width, info.height);
+              }
+              if (embedded.length < 40) return false;
+              final ByteData dib = ByteData.sublistView(embedded);
+              final int headerSize = dib.getUint32(0, Endian.little);
+              // ICO embeds a DIB whose stored height also includes the mask.
+              return headerSize >= 40 &&
+                  headerSize <= embedded.length &&
+                  _validPreviewDimensions(
+                    dib.getInt32(4, Endian.little),
+                    dib.getInt32(8, Endian.little).abs() ~/ 2,
+                  );
+            },
+          );
+    }
+    return _validPreviewDimensions(info.width, info.height);
+  } catch (_) {
+    return false;
+  }
+}
+
+({bool image, String? text}) _decodePreview((Uint8List, bool) input) {
   final (Uint8List bytes, bool truncated) = input;
-  if (bytes.contains(0)) return null;
+  if (bytes.contains(0)) {
+    return (image: !truncated && _isValidPreviewImage(bytes), text: null);
+  }
+  return (image: false, text: _decodeTextPreview(input));
+}
+
+String? _decodeTextPreview((Uint8List, bool) input) {
+  final (Uint8List bytes, bool truncated) = input;
   int end = bytes.length;
   if (truncated) {
     // The size cap can split the last UTF-8 character; drop it.
@@ -732,11 +921,13 @@ String? _decodePreview((Uint8List, bool) input) {
   }
 }
 
-class _FilePreviewScreen extends StatefulWidget {
-  const _FilePreviewScreen({
+/// Read-only preview of one backend file; also opened from chat file links.
+class FilePreviewScreen extends StatefulWidget {
+  const FilePreviewScreen({
     required this.entry,
     required this.open,
     required this.onDownload,
+    super.key,
   });
 
   final FsEntry entry;
@@ -744,17 +935,21 @@ class _FilePreviewScreen extends StatefulWidget {
   final VoidCallback onDownload;
 
   @override
-  State<_FilePreviewScreen> createState() => _FilePreviewScreenState();
+  State<FilePreviewScreen> createState() => _FilePreviewScreenState();
 }
 
-class _FilePreviewScreenState extends State<_FilePreviewScreen> {
+class _FilePreviewScreenState extends State<FilePreviewScreen> {
   static const int _maxPreviewBytes = 512 * 1024;
+  static const int _maxImagePreviewBytes = 20 * 1024 * 1024;
+  static const int _maxImagePreviewPixels = 40 * 1000 * 1000;
 
   final DownloadManager _downloads = DownloadManager.instance;
   StreamIterator<List<int>>? _chunks;
   bool _isLoading = true;
   bool _truncated = false;
+  bool _showMarkdownSource = false;
   String? _text;
+  Uint8List? _imageBytes;
   String? _error;
 
   @override
@@ -779,11 +974,28 @@ class _FilePreviewScreenState extends State<_FilePreviewScreen> {
       }
       _chunks = chunks;
       final BytesBuilder bytes = BytesBuilder(copy: false);
+      final int totalSize = download.total ?? widget.entry.size;
+      int limit = _maxPreviewBytes;
+      bool checkedImageHeader = false;
       bool truncated = false;
       try {
-        while (bytes.length < _maxPreviewBytes && await chunks.moveNext()) {
+        while (bytes.length < limit && await chunks.moveNext()) {
           final List<int> chunk = chunks.current;
-          final int remaining = _maxPreviewBytes - bytes.length;
+          if (!checkedImageHeader &&
+              bytes.length + chunk.length >= _maxPreviewBytes) {
+            checkedImageHeader = true;
+            final BytesBuilder sample = BytesBuilder(copy: false)
+              ..add(bytes.toBytes())
+              ..add(
+                chunk.length > 4096 ? chunk.sublist(0, 4096) : chunk,
+              );
+            if (await compute(_isPreviewImageHeader, sample.takeBytes()) &&
+                totalSize <= _maxImagePreviewBytes) {
+              limit = _maxImagePreviewBytes;
+            }
+            if (!mounted) return;
+          }
+          final int remaining = limit - bytes.length;
           if (chunk.length > remaining) {
             bytes.add(chunk.sublist(0, remaining));
             truncated = true;
@@ -795,17 +1007,17 @@ class _FilePreviewScreenState extends State<_FilePreviewScreen> {
         await chunks.cancel();
       }
       if (!mounted) return;
-      truncated = truncated ||
-          (bytes.length == _maxPreviewBytes &&
-              (download.total ?? widget.entry.size) > _maxPreviewBytes);
-      final String? text = await compute(
-        _decodePreview,
-        (bytes.takeBytes(), truncated),
-      );
+      final Uint8List rawBytes = bytes.takeBytes();
+      truncated = truncated || (rawBytes.length == limit && totalSize > limit);
+      final ({bool image, String? text}) preview =
+          await compute(_decodePreview, (rawBytes, truncated));
       if (!mounted) return;
       setState(() {
-        _text = text;
+        _text = preview.text;
+        _imageBytes = preview.image ? rawBytes : null;
         _truncated = truncated;
+        _showMarkdownSource =
+            preview.text != null && preview.text!.length > maxHighlightedChars;
         _isLoading = false;
       });
     } catch (err) {
@@ -821,15 +1033,34 @@ class _FilePreviewScreenState extends State<_FilePreviewScreen> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final String name = widget.entry.name.toLowerCase();
+    final bool isMarkdown = name.endsWith('.md') || name.endsWith('.markdown');
     final String? language = name == 'dockerfile' || name == 'makefile'
         ? name
         : name.contains('.')
             ? name.substring(name.lastIndexOf('.') + 1)
             : null;
+    final TextStyle markdownBase = TextStyle(
+      color: theme.colorScheme.onSurface,
+      height: 1.5,
+      fontSize: 15,
+    );
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.entry.name),
         actions: <Widget>[
+          if (!_isLoading && _error == null && _text != null && isMarkdown)
+            IconButton(
+              tooltip: _showMarkdownSource
+                  ? context.l10n.viewRenderedMarkdown
+                  : context.l10n.viewSource,
+              onPressed: () =>
+                  setState(() => _showMarkdownSource = !_showMarkdownSource),
+              icon: Icon(
+                _showMarkdownSource
+                    ? Icons.article_outlined
+                    : Icons.code_outlined,
+              ),
+            ),
           ListenableBuilder(
             listenable: _downloads,
             builder: (BuildContext context, Widget? _) => IconButton(
@@ -846,25 +1077,77 @@ class _FilePreviewScreenState extends State<_FilePreviewScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              if (_truncated) Text(context.l10n.filePreviewTruncated),
+              if (_truncated && _text != null)
+                Text(context.l10n.filePreviewTruncated),
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
-                    : _error != null || _text == null
+                    : _error != null || (_text == null && _imageBytes == null)
                         ? Center(
                             child: Text(
                               _error ?? context.l10n.cannotPreviewFile,
                             ),
                           )
-                        : SelectionArea(
-                            child: SingleChildScrollView(
-                              child: CodeBlock(
-                                code: _text!,
-                                color: theme.colorScheme.onSurface,
-                                language: language,
+                        : _imageBytes != null
+                            ? InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 4,
+                                child: Center(
+                                  child: Image.memory(
+                                    _imageBytes!,
+                                    fit: BoxFit.contain,
+                                    gaplessPlayback: true,
+                                    errorBuilder: (
+                                      BuildContext context,
+                                      Object _,
+                                      StackTrace? __,
+                                    ) =>
+                                        Center(
+                                      child: Text(
+                                        context.l10n.cannotPreviewFile,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : SelectionArea(
+                                child: SingleChildScrollView(
+                                  child: isMarkdown && !_showMarkdownSource
+                                      ? MarkdownBody(
+                                          data: _text!,
+                                          selectable: false,
+                                          softLineBreak: true,
+                                          styleSheet: relayMarkdownStyleSheet(
+                                            theme.colorScheme.onSurface,
+                                            markdownBase,
+                                          ),
+                                          // Preview never fetches remote images
+                                          // or resolves local files.
+                                          imageBuilder: (
+                                            Uri uri,
+                                            String? title,
+                                            String? alt,
+                                          ) =>
+                                              Text(
+                                            (alt != null && alt.isNotEmpty)
+                                                ? alt
+                                                : uri.toString(),
+                                            style: markdownBase,
+                                          ),
+                                          builders: <String,
+                                              MarkdownElementBuilder>{
+                                            'pre': CodeBlockBuilder(
+                                              theme.colorScheme.onSurface,
+                                            ),
+                                          },
+                                        )
+                                      : CodeBlock(
+                                          code: _text!,
+                                          color: theme.colorScheme.onSurface,
+                                          language: language,
+                                        ),
+                                ),
                               ),
-                            ),
-                          ),
               ),
               ListenableBuilder(
                 listenable: _downloads,

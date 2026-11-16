@@ -294,6 +294,92 @@ test('an unknown agent is refused before using a pool', async () => {
   }), /Unknown agent: missing/);
 });
 
+test('Codex completed messages fill missing deltas without repeating streamed text', async () => {
+  pools.codex.send = async (call) => {
+    call.onMessage({ type: 'delta', itemId: 'first', text: 'Hello' });
+    call.onMessage({ type: 'item', item: { type: 'agentMessage', id: 'first', text: 'Hello there' } });
+    call.onMessage({ type: 'item', item: { type: 'agentMessage', id: 'first', text: 'Hello there' } });
+    call.onMessage({
+      type: 'item', item: { type: 'agentMessage', id: 'async', text: 'Follow-up', delivery: 'async' },
+    });
+    return { result: { stopReason: 'completed' }, sessionId: 'codex-full', stderr: '' };
+  };
+  const events = [];
+  const result = await runAgent('codex', 'hi', (event) => events.push(event), {
+    workdir: '/tmp/w', sessionKey: 'codex-full', settings: {},
+  });
+  assert.equal(result, 'Hello thereFollow-up');
+  assert.deepEqual(events.filter((event) => event.type !== 'progress'), [
+    { type: 'delta', text: 'Hello' },
+    { type: 'delta', text: ' there' },
+    { type: 'segment' },
+    { type: 'delta', text: 'Follow-up' },
+  ]);
+});
+
+test('Codex automatic replies open on text, replay events and stay separate from the user turn', async () => {
+  let factory;
+  pools.codex.send = async (call) => {
+    factory = call.onBackgroundTurn;
+    call.onMessage({ type: 'delta', itemId: 'user-reply', text: 'Initial reply' });
+    return { result: { stopReason: 'completed' }, sessionId: 'codex-bg', stderr: '' };
+  };
+  const started = [];
+  const foreground = [];
+  await runAgent('codex', 'hi', (event) => foreground.push(event), {
+    workdir: '/tmp/w', sessionKey: 'codex-bg', settings: {},
+    onBackgroundTurn: (turn) => started.push(turn),
+  });
+  const tool = { type: 'item', item: { type: 'commandExecution', command: ['ls'] } };
+  const silent = factory({ interrupt() {} });
+  silent.onMessage(tool);
+  silent.finish({ stopReason: 'completed' });
+  assert.equal(started.length, 0);
+
+  const background = factory({ interrupt() {} });
+  background.onMessage(tool);
+  background.onMessage({ type: 'delta', itemId: 'bg-first', text: 'Child done.' });
+  background.onMessage({ type: 'item', item: { type: 'agentMessage', id: 'bg-first', text: 'Child done.' } });
+  background.onMessage({ type: 'item', item: { type: 'agentMessage', id: 'bg-final', text: 'Ready.' } });
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].progressLines, ['Codex continued on its own.']);
+  const events = [];
+  const done = started[0].run((event) => events.push(event));
+  background.onMessage({ type: 'context', used: 4200, size: 258400 });
+  background.finish({ stopReason: 'completed' });
+  assert.equal(await done, 'Child done.Ready.');
+  assert.deepEqual(events.filter((event) => event.type !== 'progress'), [
+    { type: 'delta', text: 'Child done.' },
+    { type: 'segment' },
+    { type: 'delta', text: 'Ready.' },
+    { type: 'context', used: 4200, size: 258400 },
+  ]);
+  assert.deepEqual(foreground.filter((event) => event.type === 'delta'), [
+    { type: 'delta', text: 'Initial reply' },
+  ]);
+});
+
+test('stopping an automatic Codex reply interrupts it and rejects its chat turn', async () => {
+  let factory;
+  pools.codex.send = async (call) => {
+    factory = call.onBackgroundTurn;
+    return { result: { stopReason: 'completed' }, sessionId: 'codex-stop', stderr: '' };
+  };
+  let started;
+  await runAgent('codex', 'hi', () => {}, {
+    workdir: '/tmp/w', sessionKey: 'codex-stop', settings: {},
+    onBackgroundTurn: (turn) => { started = turn; },
+  });
+  let interrupted = 0;
+  const background = factory({ interrupt: () => { interrupted += 1; } });
+  background.onMessage({ type: 'delta', itemId: 'bg', text: 'Working' });
+  const done = started.run(() => {});
+  started.cancel();
+  background.fail(Object.assign(new Error('cancelled'), { code: 'AGENT_CANCELLED' }));
+  await assert.rejects(done, AgentCancelledError);
+  assert.equal(interrupted, 1);
+});
+
 test('Antigravity approvals follow the selected tier', async () => {
   for (const permission of ['cautious', 'bypass']) {
     pools.agy.send = async (call) => {
@@ -327,4 +413,99 @@ test('Antigravity emits context usage from trajectory metadata after a turn', as
     events.filter((e) => e.type === 'context'),
     [{ type: 'context', used: 10428, size: 256000 }],
   );
+});
+
+test('Antigravity background turns open on text, include wakeup notices, and support cancellation', async () => {
+  let factory;
+  pools.agy.send = async (call) => {
+    factory = call.onBackgroundTurn;
+    call.onMessage({
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'm1',
+      content: { type: 'text', text: 'Started timer' },
+    });
+    return { result: { stopReason: 'end_turn' }, sessionId: 'agy-bg', stderr: '' };
+  };
+  const started = [];
+  await runAgent('agy', 'set timer', () => {}, {
+    workdir: '/tmp/w',
+    sessionKey: 'agy-bg',
+    settings: { permission: 'bypass' },
+    onBackgroundTurn: (turn) => started.push(turn),
+  });
+
+  // A tool-only background turn never reaches the chat history.
+  const silent = factory({
+    notices: [{ summary: 'Task id task-1 finished with result' }],
+    interrupt() {},
+  });
+  silent.onMessage({ sessionUpdate: 'tool_call', title: 'run_command' });
+  silent.finish({ stopReason: 'end_turn' });
+  assert.equal(started.length, 0);
+
+  // Once assistant text arrives, the background turn opens with its wakeup notice.
+  let interrupted = 0;
+  const active = factory({
+    notices: [{ summary: 'Task id task-7 finished with result' }],
+    interrupt: () => {
+      interrupted += 1;
+    },
+  });
+  active.onMessage({ sessionUpdate: 'tool_call', title: 'read_file' });
+  active.onMessage({
+    sessionUpdate: 'agent_message_chunk',
+    messageId: 'step-5',
+    content: { type: 'text', text: 'Timer ' },
+  });
+  active.onMessage({
+    sessionUpdate: 'agent_message_chunk',
+    messageId: 'step-5',
+    content: { type: 'text', text: 'complete.' },
+  });
+  active.onMessage({
+    sessionUpdate: 'agent_message_chunk',
+    messageId: 'step-7',
+    content: { type: 'text', text: 'All done.' },
+  });
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].progressLines, [
+    'Background task: Task id task-7 finished with result',
+  ]);
+  const bgEvents = [];
+  const done = started[0].run((event) => bgEvents.push(event));
+  active.onMessage({ sessionUpdate: 'usage_update', used: 12000, size: 256000 });
+  active.finish({ stopReason: 'end_turn' });
+  assert.equal(await done, 'Timer complete.All done.');
+  assert.deepEqual(
+    bgEvents.filter((event) => event.type !== 'progress'),
+    [
+      { type: 'delta', text: 'Timer ' },
+      { type: 'delta', text: 'complete.' },
+      { type: 'segment' },
+      { type: 'delta', text: 'All done.' },
+      { type: 'context', used: 12000, size: 256000 },
+    ],
+  );
+
+  // Stopping a background turn calls interrupt and rejects with AgentCancelledError.
+  const stopped = factory({
+    notices: [],
+    interrupt: () => {
+      interrupted += 1;
+    },
+  });
+  stopped.onMessage({
+    sessionUpdate: 'agent_message_chunk',
+    messageId: 'step-9',
+    content: { type: 'text', text: 'Partial' },
+  });
+  assert.equal(started.length, 2);
+  assert.deepEqual(started[1].progressLines, [
+    'Antigravity continued on its own.',
+  ]);
+  const stopPromise = started[1].run(() => {});
+  started[1].cancel();
+  stopped.fail(Object.assign(new Error('cancelled'), { code: 'AGENT_CANCELLED' }));
+  await assert.rejects(stopPromise, AgentCancelledError);
+  assert.equal(interrupted, 1);
 });

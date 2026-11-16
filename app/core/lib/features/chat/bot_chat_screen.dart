@@ -24,6 +24,7 @@ import '../machines/machine_credentials_controller.dart';
 import '../quota/quota_strip.dart';
 import 'bot_chat_controller.dart';
 import 'bot_message_bubble.dart';
+import 'chat_links.dart';
 import 'chat_input_bar.dart';
 import 'cli_agents_drawer.dart';
 import 'context_meter.dart';
@@ -94,12 +95,8 @@ class _BotChatScreenState extends State<BotChatScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // Coming back to the foreground, the OS may have torn down the long-lived
-    // event SSE while the backend kept running a turn. Reconnect it right away
-    // so a turn that continued in the background is mirrored without waiting for
-    // the periodic reconnect.
     if (state == AppLifecycleState.resumed) {
-      widget.chatController.reconnectEvents();
+      widget.chatController.onAppResumed();
     }
   }
 
@@ -638,6 +635,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                                   onOptionSelected: (String option) => widget
                                       .chatController
                                       .sendUserText(option),
+                                  onTapLink: _openLink,
                                 );
                                 // RepaintBoundary isolates each bubble's painting so
                                 // a streaming bubble does not repaint the visible
@@ -718,6 +716,18 @@ class _BotChatScreenState extends State<BotChatScreen>
           ),
         ),
       ),
+    );
+  }
+
+  // A method tear-off stays equal across rebuilds, so MessageText keeps its
+  // cached Markdown while a turn streams.
+  void _openLink(String href) {
+    openChatLink(
+      context,
+      href: href,
+      backend: widget.chatController.backend,
+      workdir: widget.chatController.activeWorkdir,
+      onSetWorkdir: widget.chatController.setWorkdir,
     );
   }
 }

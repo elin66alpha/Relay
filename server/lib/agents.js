@@ -26,7 +26,13 @@ const {
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
-const { readAgyContext } = require('./usage');
+const {
+  readAgyContext,
+  readAgyTrajectory,
+  answerAgyInteraction,
+  cancelAgyInvocation,
+  agyContextFromTrajectory,
+} = require('./usage');
 
 const TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || String(60 * 60 * 1000),
@@ -220,6 +226,12 @@ const agyPool = createAcpSessionPool({
     const bin = locateBin('agy');
     return bin ? { cmd: bin, args: ['acp', '--process-per-session'] } : null;
   },
+  trajectory: {
+    readTrajectory: readAgyTrajectory,
+    answerInteraction: answerAgyInteraction,
+    cancelInvocation: cancelAgyInvocation,
+    contextFromTrajectory: agyContextFromTrajectory,
+  },
 });
 
 const hermesPool = createAcpSessionPool({
@@ -375,7 +387,14 @@ const codexPool = createCodexSessionPool({
   turnTimeoutMs: TIMEOUT_MS,
   command: () => {
     const bin = locateBin('codex');
-    return bin ? { cmd: bin, args: ['app-server'] } : null;
+    return bin ? {
+      cmd: bin,
+      args: [
+        'app-server',
+        '-c', 'features.multi_agent_v2=true',
+        '-c', 'features.wake_on_agent_messages=true',
+      ],
+    } : null;
   },
 });
 
@@ -469,13 +488,13 @@ function claudeEventEmitter(onEvent) {
   };
 }
 
-// A turn Claude ran on its own, usually on a background task it started
-// finishing. It reaches the conversation only once Claude writes text, so a
+// A turn an agent ran on its own, usually on a background task it started
+// finishing. It reaches the conversation only once the agent writes text, so a
 // turn that only runs tools stays invisible. `start` receives what woke Claude
 // up as progress lines, a `run` that replays the buffered events into the
 // conversation's turn and settles with the reply, and a `cancel` that
 // interrupts the turn, after which `run` rejects as cancelled.
-function claudeBackgroundTurn(start, notices, interrupt) {
+function backgroundTurn(start, progressLines, interrupt) {
   const buffered = [];
   let sink = null;
   let started = false;
@@ -489,12 +508,8 @@ function claudeBackgroundTurn(start, notices, interrupt) {
     buffered.push(event);
     if (started || event.type !== 'delta') return;
     started = true;
-    const lines = notices
-      .map((notice) => oneLine(notice.summary || notice.status || ''))
-      .filter(Boolean)
-      .map((summary) => `Background task: ${summary}`);
     start({
-      progressLines: lines.length ? lines : ['Claude continued on its own.'],
+      progressLines,
       run(emitEvent) {
         for (const event of buffered.splice(0)) emitEvent(event);
         sink = emitEvent;
@@ -509,20 +524,36 @@ function claudeBackgroundTurn(start, notices, interrupt) {
       },
     });
   };
-  const onMessage = claudeEventEmitter(onEvent);
   return {
-    onMessage,
+    onEvent,
+    finish(text) {
+      settle(text);
+    },
+    fail() {
+      settle('');
+    },
+  };
+}
+
+function claudeBackgroundTurn(start, notices, interrupt) {
+  const lines = notices
+    .map((notice) => oneLine(notice.summary || notice.status || ''))
+    .filter(Boolean)
+    .map((summary) => `Background task: ${summary}`);
+  const background = backgroundTurn(
+    start, lines.length ? lines : ['Claude continued on its own.'], interrupt,
+  );
+  return {
+    onMessage: claudeEventEmitter(background.onEvent),
     finish(result) {
       // The streamed text stands in when there is no successful result text.
-      settle(
+      background.finish(
         result.subtype === 'success' && typeof result.result === 'string'
           ? result.result.trim()
           : '',
       );
     },
-    fail() {
-      settle('');
-    },
+    fail: background.fail,
   };
 }
 
@@ -701,15 +732,23 @@ function settlePoolTurn(sent, { agentKey, sessionKey, onEvent, text, afterTurn }
   return finishRun(run, { agentKey, onEvent });
 }
 
-function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
-  const cwd = workdir || getDefaultWorkdir();
-  const prior = getSession(sessionKey);
-  const resumeId = (prior && prior.id) || null;
-  const options = codexSessionOptions(settings);
+function codexEventEmitter(onEvent) {
   // Accumulate the streamed text so a single-message turn has an authoritative
   // result; multi-message turns are rebuilt from segments by agent-turn.
   let finalText = '';
   let currentItemId = null;
+  const itemTexts = new Map();
+
+  const pushText = (itemId, text) => {
+    if (!text) return;
+    if (currentItemId !== null && itemId !== currentItemId) {
+      emit(onEvent, { type: 'segment' });
+    }
+    currentItemId = itemId;
+    itemTexts.set(itemId, (itemTexts.get(itemId) || '') + text);
+    finalText += text;
+    emit(onEvent, { type: 'delta', text });
+  };
 
   const onMessage = (event) => {
     if (event.type === 'context') {
@@ -717,20 +756,29 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
       return;
     }
     if (event.type === 'delta') {
-      // Codex can emit several agent messages in one turn; each new item id
-      // starts a segment so follow-ups keep their own timestamp.
-      if (currentItemId !== null && event.itemId !== currentItemId) {
-        emit(onEvent, { type: 'segment' });
-      }
-      currentItemId = event.itemId;
-      if (!event.text) return;
-      finalText += event.text;
-      emit(onEvent, { type: 'delta', text: event.text });
+      pushText(event.itemId, event.text);
       return;
     }
-    const label = codexItemLabel(event.item);
+    const item = event.item || {};
+    if (item.type === 'agentMessage' && typeof item.text === 'string') {
+      // Async agent messages have no deltas; ordinary completed items repeat
+      // their streamed text, so emit only a missing suffix.
+      const streamed = itemTexts.get(item.id) || '';
+      if (item.text.startsWith(streamed)) pushText(item.id, item.text.slice(streamed.length));
+      return;
+    }
+    const label = codexItemLabel(item);
     if (label) emit(onEvent, label);
   };
+  return { onMessage, text: () => finalText };
+}
+
+function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings, onBackgroundTurn) {
+  const cwd = workdir || getDefaultWorkdir();
+  const prior = getSession(sessionKey);
+  const resumeId = (prior && prior.id) || null;
+  const options = codexSessionOptions(settings);
+  const events = codexEventEmitter(onEvent);
 
   // Relay pins approvals off on every tier, so this is only a backstop against
   // a turn hanging on a prompt nobody can answer.
@@ -749,14 +797,27 @@ function runCodex(prompt, onEvent, sessionKey, signal, workdir, settings) {
     fixedKey: options.sandbox,
     ...options,
     signal,
-    onMessage,
+    onMessage: events.onMessage,
     onPermission,
+    onBackgroundTurn: onBackgroundTurn
+      ? ({ interrupt }) => {
+          const background = backgroundTurn(
+            onBackgroundTurn, ['Codex continued on its own.'], interrupt,
+          );
+          const emitter = codexEventEmitter(background.onEvent);
+          return {
+            onMessage: emitter.onMessage,
+            finish: () => background.finish(emitter.text()),
+            fail: background.fail,
+          };
+        }
+      : null,
   });
   return settlePoolTurn(run, {
     agentKey: 'codex',
     sessionKey,
     onEvent,
-    text: () => finalText,
+    text: events.text,
   });
 }
 
@@ -780,25 +841,7 @@ function errorLines(text) {
 // one turn marks a follow-up message (segment).
 const AFTER_TOOL = Symbol('after tool call');
 
-function runAcpAgent({
-  agentKey,
-  pool,
-  prompt,
-  onEvent,
-  sessionKey,
-  signal,
-  workdir,
-  settings,
-}) {
-  const cwd = workdir || getDefaultWorkdir();
-  const prior = getSession(sessionKey);
-  const resumeId = (prior && prior.id) || null;
-  // model and mode are applied to the live session over the protocol; `approve`
-  // decides how Relay answers the agent's approval requests.
-  const { modelId, modeId, configOptions, approve } = acpSessionOptions(
-    agentKey,
-    settings,
-  );
+function acpEventEmitter(onEvent) {
   // Accumulate the streamed text so a single-message turn has an authoritative
   // result; multi-message turns are rebuilt from segments by agent-turn.
   let finalText = '';
@@ -834,6 +877,55 @@ function runAcpAgent({
     }
   };
 
+  return {
+    onMessage,
+    text: () => finalText,
+    hasContext: () => hasContext,
+  };
+}
+
+function acpBackgroundTurn(agentLabel, start, notices, interrupt) {
+  const lines = (Array.isArray(notices) ? notices : [])
+    .map((notice) =>
+      oneLine((notice && (notice.summary || notice.status)) || notice || ''),
+    )
+    .filter(Boolean)
+    .map((summary) => `Background task: ${summary}`);
+  const background = backgroundTurn(
+    start,
+    lines.length ? lines : [`${agentLabel} continued on its own.`],
+    interrupt,
+  );
+  const emitter = acpEventEmitter(background.onEvent);
+  return {
+    onMessage: emitter.onMessage,
+    finish: () => background.finish(emitter.text().trim()),
+    fail: background.fail,
+  };
+}
+
+function runAcpAgent({
+  agentKey,
+  pool,
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+}) {
+  const cwd = workdir || getDefaultWorkdir();
+  const prior = getSession(sessionKey);
+  const resumeId = (prior && prior.id) || null;
+  // model and mode are applied to the live session over the protocol; `approve`
+  // decides how Relay answers the agent's approval requests.
+  const { modelId, modeId, configOptions, approve } = acpSessionOptions(
+    agentKey,
+    settings,
+  );
+  const events = acpEventEmitter(onEvent);
+
   // Relay has no approval UI, so a permission request is answered from the
   // configured tier instead of being left to hang a turn nobody can unblock.
   // The answer is yes or no; the driver picks the option that says so.
@@ -852,18 +944,27 @@ function runAcpAgent({
     modeId,
     configOptions,
     signal,
-    onMessage,
+    onMessage: events.onMessage,
     onPermission,
+    onBackgroundTurn: onBackgroundTurn
+      ? ({ notices, interrupt }) =>
+          acpBackgroundTurn(
+            (AGENTS[agentKey] && AGENTS[agentKey].label) || agentKey,
+            onBackgroundTurn,
+            notices,
+            interrupt,
+          )
+      : null,
   });
   return settlePoolTurn(run, {
     agentKey,
     sessionKey,
     onEvent,
-    text: () => finalText,
+    text: events.text,
     afterTurn:
       agentKey === 'agy'
         ? async (sessionId) => {
-            if (hasContext || !sessionId) return;
+            if (events.hasContext() || !sessionId) return;
             const ctx = await readAgyContext(sessionId);
             if (ctx) {
               emit(onEvent, {
@@ -877,7 +978,15 @@ function runAcpAgent({
   });
 }
 
-function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
+function runOpencode(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+) {
   return runAcpAgent({
     agentKey: 'opencode',
     pool: opencodePool,
@@ -887,10 +996,19 @@ function runOpencode(prompt, onEvent, sessionKey, signal, workdir, settings) {
     signal,
     workdir,
     settings,
+    onBackgroundTurn,
   });
 }
 
-function runHermes(prompt, onEvent, sessionKey, signal, workdir, settings) {
+function runHermes(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+) {
   return runAcpAgent({
     agentKey: 'hermes',
     pool: hermesPool,
@@ -900,10 +1018,19 @@ function runHermes(prompt, onEvent, sessionKey, signal, workdir, settings) {
     signal,
     workdir,
     settings,
+    onBackgroundTurn,
   });
 }
 
-async function runCursor(prompt, onEvent, sessionKey, signal, workdir, settings) {
+async function runCursor(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+) {
   const poolKey = cursorPoolKey(settings);
   const previous = cursorScopes.get(sessionKey);
   if (previous !== undefined && previous !== poolKey) {
@@ -919,10 +1046,19 @@ async function runCursor(prompt, onEvent, sessionKey, signal, workdir, settings)
     signal,
     workdir,
     settings,
+    onBackgroundTurn,
   });
 }
 
-function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
+function runAgy(
+  prompt,
+  onEvent,
+  sessionKey,
+  signal,
+  workdir,
+  settings,
+  onBackgroundTurn,
+) {
   return runAcpAgent({
     agentKey: 'agy',
     pool: agyPool,
@@ -932,6 +1068,7 @@ function runAgy(prompt, onEvent, sessionKey, signal, workdir, settings) {
     signal,
     workdir,
     settings,
+    onBackgroundTurn,
   });
 }
 

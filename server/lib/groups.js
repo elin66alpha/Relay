@@ -7,10 +7,16 @@
 // model/effort/permission/fast (`memberConfigs`) independently of each member's
 // solo chat.
 //
+// A member is either a local agent key or a remote member `<peerId>:<agentKey>`
+// running on another Relay backend (a peer). `peers` keeps each referenced
+// peer's display name and address; a remote member's config also keeps the
+// peer-side `workdir` and the dedicated `sessionId` created there. No peer
+// token is ever stored: the app supplies it with each request that needs it.
+//
 // Persisted with the shared json-store (in-memory cache + atomic 0o600 writes),
 // consistent with the other backend state files. The on-disk shape is:
 //   { [workspace]: { groups: [ { id, name, members, workdir, memberConfigs,
-//                                createdAt, updatedAt } ] } }
+//                                peers, createdAt, updatedAt } ] } }
 // keyed by the workspace it was created in; `workdir` is the chosen work tree the
 // members actually run against (defaults to the workspace).
 
@@ -41,7 +47,8 @@ function normalizeName(value, fallback) {
   return (text || fallback).slice(0, 80);
 }
 
-// Members are agent keys (claude, codex, opencode, ...). Dedupe, keep order, cap the
+// Members are agent keys (claude, codex, opencode, ...) or remote member keys
+// `<peerId>:<agentKey>`. Dedupe, keep order, cap the
 // count, and reject anything that isn't a plausible agent key so a member can
 // never inject a separator into a derived scope key.
 function normalizeMembers(members) {
@@ -68,6 +75,12 @@ function normalizeMembers(members) {
 const CONFIG_GROUPS = ['model', 'effort', 'permission', 'fast'];
 const MAX_MEMBER_NICKNAME = 80;
 const MAX_MEMBER_PROMPT = 4000;
+const MAX_PEER_FIELD = 4096;
+
+const remotePeerId = (memberKey) => {
+  const match = /^([0-9a-f]{12}):/.exec(memberKey);
+  return match ? match[1] : '';
+};
 
 function normalizeMemberConfigs(raw, members) {
   const out = {};
@@ -90,7 +103,34 @@ function normalizeMemberConfigs(raw, members) {
       const prompt = value.prompt.trim();
       if (prompt) config.prompt = prompt.slice(0, MAX_MEMBER_PROMPT);
     }
+    // Where a remote member runs on its peer; the route sets both.
+    if (remotePeerId(key)) {
+      for (const field of ['workdir', 'sessionId']) {
+        const text = value[field];
+        if (typeof text === 'string' && text && text.length <= MAX_PEER_FIELD) {
+          config[field] = text;
+        }
+      }
+    }
     if (Object.keys(config).length > 0) out[key] = config;
+  }
+  return out;
+}
+
+// Only peers some member still references are kept, so removing a machine's
+// last member drops its entry.
+function normalizePeers(raw, members) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const referenced = new Set(members.map(remotePeerId).filter(Boolean));
+  for (const peerId of Object.keys(raw)) {
+    const value = raw[peerId];
+    if (!referenced.has(peerId) || !value || typeof value !== 'object') continue;
+    if (typeof value.baseUrl !== 'string' || !value.baseUrl) continue;
+    out[peerId] = {
+      name: normalizeName(value.name, value.baseUrl),
+      baseUrl: value.baseUrl.slice(0, MAX_PEER_FIELD),
+    };
   }
   return out;
 }
@@ -107,6 +147,7 @@ function normalizeGroup(raw, now) {
     members,
     workdir: typeof raw.workdir === 'string' ? raw.workdir : '',
     memberConfigs: normalizeMemberConfigs(raw.memberConfigs, members),
+    peers: normalizePeers(raw.peers, members),
     createdAt: String(raw.createdAt || now),
     updatedAt: String(raw.updatedAt || raw.createdAt || now),
   };
@@ -141,6 +182,7 @@ function groupPayload(group) {
     members: [...group.members],
     workdir: group.workdir || '',
     memberConfigs: normalizeMemberConfigs(group.memberConfigs, group.members),
+    peers: normalizePeers(group.peers, group.members),
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
   };
@@ -160,8 +202,9 @@ function getGroup(workdir, groupId) {
 // Create a swarm in `workspace`. `members` must already be known-agent keys (the
 // caller checks against the agent registry); here we only structurally normalize.
 // `workdir` is the chosen work tree (the caller validates the path) and
-// `memberConfigs` the per-member option ids (the caller normalizes them). Returns
-// the new swarm, or null when members are empty or the per-workspace cap is hit.
+// `memberConfigs` the per-member option ids (the caller normalizes them), and
+// `peers` the machines remote members run on. Returns the new swarm, or null
+// when members are empty or the per-workspace cap is hit.
 function createGroup(workspace, rawName, members, options = {}) {
   const normalizedMembers = normalizeMembers(members);
   if (normalizedMembers.length === 0) return null;
@@ -174,6 +217,7 @@ function createGroup(workspace, rawName, members, options = {}) {
     members: normalizedMembers,
     workdir: typeof options.workdir === 'string' ? options.workdir : '',
     memberConfigs: normalizeMemberConfigs(options.memberConfigs, normalizedMembers),
+    peers: normalizePeers(options.peers, normalizedMembers),
     createdAt: now,
     updatedAt: now,
   };
@@ -183,6 +227,7 @@ function createGroup(workspace, rawName, members, options = {}) {
 }
 
 // Replace a swarm's members and per-member configs (keeps id/workdir/transcript).
+// `peers` adds machines for new remote members to the ones already recorded.
 // Returns the updated swarm, or null when it is missing or members are empty.
 function setGroupMembers(workspace, groupId, members, options = {}) {
   const id = validGroupId(groupId);
@@ -197,6 +242,7 @@ function setGroupMembers(workspace, groupId, members, options = {}) {
     options.memberConfigs,
     normalizedMembers,
   );
+  group.peers = normalizePeers({ ...group.peers, ...options.peers }, normalizedMembers);
   group.updatedAt = new Date().toISOString();
   saveBucket(workspace, bucket);
   return groupPayload(group);

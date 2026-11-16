@@ -132,7 +132,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '先确认工作区，再开始任务',
     body:
-        '首页显示当前工作区和最多三个有聊天记录的最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n点击首页当前工作区、聊天标题或左侧栏的“文件系统”即可打开文件浏览器；点击其他最近工作区可直接切换项目。浏览到新项目目录后，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
+        '首页显示当前工作区和最多五个有聊天记录的最近工作区；文件系统顶部同样以一行可横向滑动的小标签显示最近工作区。新设备默认使用后端的 ~/Relay（部署可覆盖默认值）。\n点击首页当前工作区、聊天标题或左侧栏的“文件系统”即可打开文件浏览器；点击首页其他最近工作区可直接切换项目。点击文件系统顶部的最近工作区标签，会直接切换当前工作区，并显示该目录的文件。通过文件夹或路径栏浏览其他目录不会切换工作区；浏览到新项目目录后，点击“设为工作路径”。这是后端机器上的目录；后续聊天会在这个目录执行。每台设备在每台后端上各自选择工作目录，切换目录也会切换对应的聊天记录和蜂群列表。',
   ),
   _GettingStartedStep(
     title: '在机器详情检查 CLI 状态',
@@ -152,17 +152,17 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '描述任务，查看和找回结果',
     body:
-        '可以先发送“解释这个项目的结构”，再补充具体修改要求。回复会流式显示，执行中可以取消；切换页面后可回到原会话继续查看。\n单聊中，点击“+ → 附加文件”可将文件上传到工作区，并把路径加入草稿，确认后再发送。“复制”可复制已完成的消息；“编辑”可将自己的消息原文放回草稿，替换现有草稿，不改写历史，也不会自动发送。输入框上方以“已用 / 窗口”显示上下文词元数，例如 42k / 200k；? 表示未知。\n通过历史搜索查找当前工作区的消息，并跳转到对应会话；需要保存结果时可导出当前对话为 Markdown。新任务可建立独立会话，后续追问则留在原会话。',
+        '可以先发送“解释这个项目的结构”，再补充具体修改要求。回复会流式显示，执行中可以取消；切换页面后可回到原会话继续查看。\n单聊中，点击“+ → 附加文件”可将文件上传到工作区，并把路径加入草稿，确认后再发送。点击回复中的链接可预览对应的工作区文件或目录；网址会先弹窗显示完整地址，确认后用本机浏览器打开。“复制”可复制已完成的消息；“编辑”可将自己的消息原文放回草稿，替换现有草稿，不改写历史，也不会自动发送。输入框上方以“已用 / 窗口”显示上下文词元数，例如 42k / 200k；? 表示未知。\n通过历史搜索查找当前工作区的消息，并跳转到对应会话；需要保存结果时可导出当前对话为 Markdown。新任务可建立独立会话，后续追问则留在原会话。',
   ),
   _GettingStartedStep(
     title: '用蜂群分工协作',
     body:
-        '创建蜂群时选择工作树，配置成员昵称、角色提示、模型（只列主力模型）和权限；创建后工作树不可更改。蜂群列表属于当前工作区，但成员在蜂群选定的工作树里执行。\n发送“@成员名 请检查这段代码”来指定回答者；同时提及多名成员可让他们并行处理。成员回复里的 @提及也可继续召唤队友，默认最多追加三轮，具体上限由部署配置决定。可将成员配置导出为 JSON 模板复用。',
+        '创建蜂群时按机器点选 agent 标签：第一组是本机，其余是“管理凭证”里的其他机器。再点一次成员可设置昵称、角色提示、模型（只列主力模型）、权限和工作树；其他机器上的成员沿用那台机器的模型和权限，只设置昵称、提示和那台机器上的工作目录。创建后工作树不可更改。蜂群列表属于当前工作区，但成员在蜂群选定的工作树里执行。只有保存了那台机器凭证的设备才能召唤它上面的成员。\n发送“@成员名 请检查这段代码”来指定回答者；同时提及多名成员可让他们并行处理。成员回复里的 @提及也可继续召唤队友，默认最多追加三轮，具体上限由部署配置决定。可将成员配置导出为 JSON 模板复用。',
   ),
   _GettingStartedStep(
     title: '浏览、上传和下载文件',
     body:
-        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB，支持的代码在 20,000 字符以内可语法高亮。顶部路径栏始终可见，点击上级路径段可直接跳转；点击向上箭头、“..”或在文件列表右滑可返回上一级。浏览其他目录时，点击工作路径标签即可回到当前项目。顶部还有刷新和隐藏文件开关；首次加载失败可刷新重试。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
+        '“文件系统”可浏览后端允许访问的目录，上传待处理材料、下载结果，也可下载文件夹。点击 UTF-8 文本文件可只读预览前 512 KiB（支持的代码在 20,000 字符以内可语法高亮，Markdown 文件支持渲染排版与源码切换），点击支持的常见图片（JPG、PNG、WebP、GIF、BMP、ICO，最大 20 MiB）可直接缩放预览。顶部路径栏始终可见，点击上级路径段可直接跳转；点击向上箭头、“..”或在文件列表右滑可返回上一级。浏览其他目录时，点击工作路径标签即可回到当前项目。顶部还有刷新和隐藏文件开关；首次加载失败可刷新重试。\n“设为工作路径”用于切换当前项目；上传前先确认所在目录。后端会限制敏感路径，部署也可以限定允许访问的范围。',
   ),
   _GettingStartedStep(
     title: '从机器详情进入 SSH 终端',
@@ -185,7 +185,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose the workspace before starting',
     body:
-        'Home shows the current workspace and up to three recent workspaces with chat history. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nTap the current workspace on Home, the chat title, or File system in the drawer to open the file browser; tap a different recent workspace to switch projects directly. To choose a new project, browse to its directory and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
+        'Home shows the current workspace and up to five recent workspaces with chat history. The file browser also shows them as compact tags in one horizontally scrolling row. A new device defaults to ~/Relay on the backend unless the deployment overrides it.\nTap the current workspace on Home, the chat title, or File system in the drawer to open the file browser; tap a different recent workspace on Home to switch projects directly. Tap a recent-workspace tag at the top of the file browser to switch the active workspace and display that directory. Navigating through folders or the path bar does not switch the workspace; to choose a new project, browse to its directory and select Set as work path. This is a directory on the backend machine where tasks will run. Each device chooses its own directory on each backend; switching it also changes the associated history and Swarm list.',
   ),
   _GettingStartedStep(
     title: 'Check CLI status in Machine details',
@@ -205,17 +205,17 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Describe tasks and find results',
     body:
-        'Start with a request such as “explain this project structure”, then add specific changes. Replies stream as work progresses, and you can cancel a running turn. Return to the same conversation after switching pages to follow its progress.\nIn solo chat, + → Attach file uploads files to the workspace and adds their paths to the draft for you to send. Copy saves a settled message to the clipboard; Edit on your own message replaces the draft with its text, leaving history unchanged and sending nothing. Above the composer, context tokens appear as used / window (for example, 42k / 200k); ? means unknown.\nSearch history in the current workspace and jump to a matching conversation. Export the current conversation as Markdown to keep the result. Use separate sessions for new tasks and the existing session for follow-up questions.',
+        'Start with a request such as “explain this project structure”, then add specific changes. Replies stream as work progresses, and you can cancel a running turn. Return to the same conversation after switching pages to follow its progress.\nIn solo chat, + → Attach file uploads files to the workspace and adds their paths to the draft for you to send. Tap a link in a reply to preview the workspace file or folder it names; a web address first shows its full URL and opens in your browser only after you confirm. Copy saves a settled message to the clipboard; Edit on your own message replaces the draft with its text, leaving history unchanged and sending nothing. Above the composer, context tokens appear as used / window (for example, 42k / 200k); ? means unknown.\nSearch history in the current workspace and jump to a matching conversation. Export the current conversation as Markdown to keep the result. Use separate sessions for new tasks and the existing session for follow-up questions.',
   ),
   _GettingStartedStep(
     title: 'Divide work with a Swarm',
     body:
-        'When creating a Swarm, select its work tree and configure member nicknames, role prompts, models (main models only), and permissions. Its work tree cannot be changed later. The Swarm is listed under the current workspace, while members execute in its selected work tree.\nMention @member-name to choose who answers. Mention several members to run them in parallel. Members can summon teammates through mentions in their replies, with up to three additional waves by default, depending on deployment settings. Export the member configuration as a reusable JSON template.',
+        'When creating a Swarm, tap agent tags grouped by machine: this machine first, then the other machines in Manage credentials. Tap a member again to set its nickname, role prompt, model (main models only), permission, and work tree; a member on another machine keeps that machine\'s model and permission and sets only its nickname, prompt, and work directory there. The work tree cannot be changed later. Only a device that holds the other machine\'s credential can summon its members. The Swarm is listed under the current workspace, while members execute in its selected work tree.\nMention @member-name to choose who answers. Mention several members to run them in parallel. Members can summon teammates through mentions in their replies, with up to three additional waves by default, depending on deployment settings. Export the member configuration as a reusable JSON template.',
   ),
   _GettingStartedStep(
     title: 'Browse, upload, and download files',
     body:
-        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB, with syntax highlighting for supported code up to 20,000 characters. The path bar stays visible: tap an ancestor segment to jump there, or use the up arrow, “..”, or a right swipe on the file list to go up one directory. When browsing elsewhere, tap the work-path chip to return to the active project. Refresh and hidden-file controls are at the top; Refresh also retries a failed initial load.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
+        'File system browses directories permitted by the backend, uploads input files, and downloads results or folders. Tap a UTF-8 text file for a read-only preview of its first 512 KiB (with syntax highlighting for supported code up to 20,000 characters, and rendered Markdown with a source toggle), or tap a supported image (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB) for a zoomable preview. The path bar stays visible: tap an ancestor segment to jump there, or use the up arrow, “..”, or a right swipe on the file list to go up one directory. When browsing elsewhere, tap the work-path chip to return to the active project. Refresh and hidden-file controls are at the top; Refresh also retries a failed initial load.\nSet as work path changes the active project. Check the displayed directory before uploading. The backend restricts sensitive paths, and a deployment may further limit accessible directories.',
   ),
   _GettingStartedStep(
     title: 'Open the SSH terminal from Machine details',

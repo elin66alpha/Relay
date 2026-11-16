@@ -31,8 +31,9 @@ the backend OS user. A stable deployment should have all of the following:
 
 - Forward normal HTTP requests and long-lived SSE responses. Disable buffering
   for `/api/events`, `/api/chat`, and `/api/group/chat`.
-- Forward `Upgrade`/`Connection` headers for the WebSocket endpoint
-  `/api/terminal/connect`. Do not log its one-time `ticket` query value.
+- Forward `Upgrade`/`Connection` headers for the WebSocket endpoints
+  `/api/terminal/connect` and `/api/browser/connect`. Do not log their one-time
+  `ticket` query value.
 - Keep proxy timeouts above `AGENT_TIMEOUT_MS` (60 minutes by default).
 - Pass the real client address in `X-Forwarded-For`. Relay trusts forwarded
   addresses only from loopback proxies.
@@ -64,12 +65,17 @@ path. Native uploads/downloads stream; Web downloads use a browser Blob and may
 hold the file in memory up to the configured cap. Unix directory downloads call
 the host's `zip` command; Windows uses PowerShell `Compress-Archive`.
 
-Tapping a file opens a read-only preview of its first 512 KiB of UTF-8 text,
-with a notice when truncated. Binary content containing NUL bytes and invalid
-UTF-8 cannot be previewed. Supported code languages are syntax-highlighted up
-to 20,000 characters; larger or unrecognized content stays plain text. Preview
-uses the download endpoint, so its path policy and download size limit still
-apply; the download button saves the full file.
+Tapping a file opens a read-only preview: supported images (JPG, PNG, WebP, GIF,
+BMP, and ICO up to 20 MiB and 40 million pixels) render in a zoomable viewer;
+Markdown files (`.md`, `.markdown`) render by default without loading embedded
+images, with a toolbar toggle to inspect raw source (files over 20,000
+characters open as source); and other UTF-8 text files show their first 512 KiB
+with a notice when truncated. Other binary content (containing NUL bytes,
+invalid UTF-8, or malformed/oversized image files) cannot be previewed. Supported
+code languages are syntax-highlighted up to 20,000 characters; larger or
+unrecognized content stays plain text. Preview uses the download endpoint, so
+its path policy and download size limit still apply; the download button saves
+the full file.
 
 `POST /api/fs/upload?path=...&name=...` accepts `mkdir=1` to create a missing
 workdir-relative upload directory and its parents. Before creation, Relay checks
@@ -207,6 +213,45 @@ days) and `TERMINAL_BUFFER_MAX_BYTES` (64 KB to 16 MB), or select a shell with
 has the full permissions of the backend OS user and bypasses the file API's
 denylist and `RELAY_FS_ROOTS`.
 
+## Browser
+
+**Drawer → Browser** shows a page served on the backend machine's own
+`localhost`, such as a dashboard you are developing, from any client, including
+one outside the backend's LAN or Tailscale network. The page is rendered by a
+headless Chrome, Chromium, or Edge on the backend host and streamed to the app
+as JPEG frames over Relay's existing connection; taps, drags, sliders, the
+mouse wheel, and typing are sent back as browser input. Nothing is port
+forwarded, so the page's own absolute paths, API calls, and hot reload work
+exactly as on the host.
+
+The address bar takes `3000`, `3000/admin`, `localhost:5173`, `127.0.0.1:8080`,
+or a full `http(s)://` URL, and only loopback hosts (`localhost`,
+`*.localhost`, `127.0.0.0/8`, `[::1]`). Links and redirects inside the page are
+not restricted, so third-party sign-in or CDN assets still load.
+
+The page is laid out for the device showing it: its width and height are the
+picture's size in the app. Android and iOS, including mobile Web browsers, get
+the page's mobile layout and touch events; desktop clients and desktop Web get
+desktop layout and mouse events. Chrome's swipe-back gesture is turned off so
+a horizontal drag never leaves the page; use the back button. A JavaScript
+`alert`, `confirm`, or `prompt` is accepted at once and its text shown in the
+app, because an unanswered dialog would freeze the page. On a phone, the
+keyboard button opens a text bar: text typed there (with any IME) is inserted
+into the focused field on the page, and its buttons send Backspace and Enter.
+
+The backend looks for Chrome, Chromium, or Edge in their standard install
+locations (on Linux, also on `PATH` and `/snap/bin/chromium`); set
+`RELAY_BROWSER` to an executable path to choose one. Each device token owns
+one browser with one tab. Leaving the page keeps it for 10 minutes, so
+returning shows the same page; opening it on another device replaces the first
+viewer. Each browser uses a new temporary profile that is deleted when it
+closes, so sign-ins inside the page do not persist. There is no sound, no file
+upload or download, no clipboard, and a link that opens a new window does
+nothing.
+
+An authenticated `POST /api/browser/ticket` returns a single-use ticket valid
+for 30 seconds, redeemed at `/api/browser/connect`, as for the terminal.
+
 ## Relay MCP
 
 `mcp/` is a stdio [MCP](https://modelcontextprotocol.io) server that lets a
@@ -252,7 +297,7 @@ Tools (each returns JSON text; long text is paged with `offset`/`maxChars`):
 | `relay_sessions` | list, create, activate, rename, delete, clear |
 | `relay_workdir` | get, set (optionally create), recent |
 | `relay_files` | browse, mkdir, read text (binary files report size only), write text |
-| `relay_swarms`, `relay_swarm_chat` | list, create, members, delete, clear, history; send a round |
+| `relay_swarms`, `relay_swarm_chat` | list, create, members, delete, clear, history; send a round (members on other machines cannot run from MCP) |
 | `relay_usage`, `relay_quota_schedules` | quota report; list, create, cancel scheduled messages |
 | `relay_machine` | hardware/disks/temperatures or the diagnostics report |
 | `relay_terminal` | type into this credential's own PTY and read the output |
@@ -308,7 +353,22 @@ is evicted for the cap only when no other idle process can make room.
 When such work wakes Claude while the chat is idle, the turn it starts is
 shown in solo chat as a reply of its own once Claude writes text, queued behind
 any waiting turn and stopped by Stop like any other. A turn that only runs tools
-stays invisible. Swarm members and the other agents do not surface these turns.
+stays invisible. Codex child-agent completion replies use the same solo-chat
+flow. Relay enables `multi_agent_v2` and the experimental
+`wake_on_agent_messages` feature only for its own Codex app-server process,
+without changing the host's Codex configuration; this was verified with Codex
+0.169.0. Child-agent activity keeps its parent session from idle closure, up to
+the normal turn timeout since the last activity if no completion arrives; the
+session cap can still evict it. Ordinary background shell exits do not wake
+Codex. Stop also prevents native Codex mail from automatically waking that
+interrupted thread until another user turn.
+
+Antigravity background replies woken by timers, subagents, or background
+commands use the same solo-chat flow and can be stopped with Stop. Relay
+watches the isolated worker's language-server trajectory while the chat is idle,
+answers waiting interactions according to the session's permission tier, and
+filters out background steps replayed by the next user turn. Swarm members,
+Cursor, OpenCode, and Hermes do not surface automatic turns.
 
 Deleting or clearing a conversation removes Relay's history and stored resume
 id, then asks the pooled integration to remove its CLI-side transcript. That
@@ -325,11 +385,16 @@ project; selecting the current one opens the file browser. Home disables
 directory actions during refresh, clears recent directories on a machine
 switch, and ignores responses and directory actions belonging to the old machine.
 
+Home shows up to five recent workspaces. The top of the file browser shows up
+to five as compact tags in a single horizontally scrolling row. Selecting a
+tag switches the active workdir and displays that directory in the browser.
+
 The file browser keeps its breadcrumb bar above the scrolling list. Select an
 ancestor segment to jump to it, or use the up arrow, `..` row, or a right swipe
 on the list to visit the parent. Windows UNC paths retain the server and share
-as a single root. Browsing does not change the active workdir: use **Set as work
-path** to select a project, or the work-path chip to return to the current one.
+as a single root. Navigating through folders or breadcrumbs does not change the
+active workdir: use **Set as work path** to select a new project, or the
+work-path chip to return to the current one.
 The current workdir is also marked when it appears in a directory listing.
 Refresh and hidden-file controls are in the app bar. If the initial workdir
 request fails, Refresh retries it without leaving the page. The Swarm work-tree
@@ -455,6 +520,14 @@ answer text. Your own messages also offer **Edit**, which replaces the draft
 with that message's text for you to revise and send. Editing leaves stored
 history unchanged and sends nothing until you choose to send.
 
+Links in finished solo-chat replies are tappable. A web address (`http`,
+`https`, `mailto`) opens in the device's browser only after a dialog shows the
+full address. A file path, absolute or relative to the current workdir and with
+any `:42` or `#L42` line suffix dropped, opens the file preview, or the file
+browser when it names a directory. Lookups go through the same file API, so its
+path policy applies. Other schemes are ignored, plain-text paths that are not
+Markdown links stay text, and Swarm chats do not open links.
+
 The client can search the current workdir across named sessions and agents, or
 limit the search to the current agent. The backend returns at most 50 matches;
 the client can jump to and highlight a result. Markdown export covers the
@@ -493,6 +566,48 @@ resumable session; changing it would address a different conversation.
 Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
+
+The create and edit form groups agents by machine: this machine first, then
+every other machine in Manage credentials, listing that machine's usable agents
+(a machine the app cannot reach shows why). Tap an agent to add it and tap a
+member to configure it. The name is optional (`Swarm N` by default).
+
+#### Members on other machines
+
+A member can be an agent on another Relay backend. The Swarm, its transcript
+and its rounds stay on the backend that hosts it (A); a turn for a remote
+member is sent to the other backend (B) through B's ordinary API
+(`GET /api/agents`, `GET`/`POST /api/sessions`, `POST /api/sessions/active`,
+`POST /api/chat` over SSE, `POST /api/chat/cancel`, and on removal
+`POST /api/sessions/delete` or `POST /api/session/clear`), so B needs no change
+and may run an older version.
+
+- A remote member key is `<peerId>:<agentKey>`, where `peerId` is the first 12
+  hex digits of the SHA-256 of B's normalized `baseUrl`. The same agent can be
+  a member on several machines; labels add the machine name, as in
+  `Claude Code (Studio)`, and `@<peerId>:<agentKey>` summons it.
+- Adding one checks that B is reachable and has the agent, then creates a
+  dedicated session on B named `Swarm: <swarm name>` in the chosen work
+  directory on B (by default the one the app remembers for B). Because creating
+  a session and running a turn both make it B's active session, A restores B's
+  previous active session afterwards.
+- B's own model, effort and permission for that session apply; the Swarm sets
+  only nickname, prompt and the work directory on B, which is fixed once added.
+- The app sends B's credential with each request that reaches B's members. A
+  never stores it (see [Security](SECURITY.md#swarm-members-on-other-machines)).
+  A member whose machine is not in this device's credentials is marked "This
+  device is not connected to that machine", and if summoned its turn ends with
+  `PEER_NOT_LINKED` while the other members run.
+- An unreachable B, a refused credential or a timeout ends that member's turn
+  with `PEER_UNREACHABLE` or `PEER_UNAUTHORIZED`. Adding a member fails without
+  creating anything with those codes or `PEER_UNKNOWN_AGENT`.
+- Stop cancels the remote turn on B with the same request id.
+- Deleting the Swarm or removing the member deletes its session on B, and
+  clearing the Swarm clears it, when the request carries B's credential; that
+  never blocks the change on A.
+
+B sees these turns as turns from the app's device. If no device has the work
+directory open on B, B sends its own task notifications for them.
 
 ### Quota and notifications
 
@@ -548,6 +663,8 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
   cancellation.
 - Push: browser subscription/config and FCM device registration.
 - SSH terminal: authenticated ticket creation plus the WebSocket PTY transport.
+- Browser: authenticated ticket creation plus the WebSocket frame and input
+  transport (`/api/browser/ticket`, `/api/browser/connect`).
 
 The route implementations in `server/routes/` are the source of truth when an
 endpoint changes.
@@ -709,21 +826,22 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend, Ubuntu desktop, Windows, macOS and iOS bundles, verifies their
-contents and checksums, and creates a draft for that exact commit. It refuses
-an existing version tag. The draft is marked incomplete until the Android APK
-is signed locally; signing keys must not be uploaded to GitHub.
-From a terminal, the same workflow starts with
+`main`. It builds the source backend, Ubuntu desktop, Windows, macOS, unsigned
+iOS and signed Android APK bundles (the Android keystore and passwords come from
+GitHub Actions Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`), verifies their contents,
+certificates and checksums, and creates a draft for that exact commit. It refuses
+an existing version tag. From a terminal, the same workflow starts with
 `gh workflow run release.yml --ref main`.
 
-On the machine holding the Relay Android release key, check out the draft's
-commit, set `ANDROID_HOME` and authenticate the GitHub CLI, then run
-`./scripts/release/add_signed_android.sh`. It verifies
-the draft and source commit, signs in a clean temporary checkout, checks the
-APK's version and release certificate, verifies the other downloads, uploads
-the APK and replaces `SHA256SUMS`. The signing configuration must use an
-absolute keystore path. The clean checkout excludes local
-`google-services.json`, so the public APK has no Firebase configuration;
+If you prefer to sign or re-sign the Android APK locally on the machine holding
+the Relay Android release key, check out the draft's commit, set `ANDROID_HOME`
+and authenticate the GitHub CLI, then run `./scripts/release/add_signed_android.sh`.
+It verifies the draft and source commit, signs in a clean temporary checkout,
+checks the APK's version and release certificate, verifies the other downloads,
+uploads the APK and replaces `SHA256SUMS`. The signing configuration must use an
+absolute keystore path. Both the Actions build and clean local checkout exclude
+local `google-services.json`, so the public APK has no Firebase configuration;
 deployments using Android FCM must build their own configured client. Review
 the completed draft on GitHub before publishing it.
 For an unsigned iOS IPA, run **iOS build** manually from the Actions tab; the

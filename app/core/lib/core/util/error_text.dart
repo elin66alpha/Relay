@@ -10,6 +10,9 @@ String friendlyErrorText(AppStrings strings, Object err) {
     if (err.code?.startsWith('NETWORK_') ?? false) {
       return strings.networkError(err.code);
     }
+    if (err.code == 'BACKEND_ROUTE_MISSING') {
+      return strings.backendTooOld;
+    }
     return err.message;
   }
   return err.toString();

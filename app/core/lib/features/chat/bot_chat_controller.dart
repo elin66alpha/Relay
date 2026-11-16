@@ -389,8 +389,9 @@ class BotChatController extends ChangeNotifier {
   }
 
   void goHome() {
-    if (isThinking || _remoteActive) return;
     if (_machine == null && _messages.isEmpty && !_historyLoading) return;
+    // A running turn keeps going on the backend; coming back reloads it.
+    _detachVisibleTurnForContextSwitch();
     _machine = null;
     _contextWindow = null;
     _messages.clear();
@@ -1169,6 +1170,14 @@ class BotChatController extends ChangeNotifier {
       if (code != null && code.startsWith('NETWORK_')) return true;
     }
     return false;
+  }
+
+  /// Back in the foreground: the OS may have dropped the event stream while the
+  /// app was suspended, so events from other devices were missed. Reconnect and
+  /// pull the history once to catch up.
+  Future<void> onAppResumed() async {
+    await reconnectEvents();
+    await _catchUpHistory();
   }
 
   // One-shot pull of the shared history, used after our own turn ends to pick up

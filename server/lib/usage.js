@@ -942,6 +942,129 @@ function agyContextFromTrajectory(body) {
 const AGY_SESSION_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+async function readAgyTrajectory(sessionId, options = {}) {
+  const id = String(sessionId || '').trim();
+  if (!AGY_SESSION_UUID_RE.test(id)) return null;
+  const callRpc =
+    options.callRpc || options.callServer || callAgyLanguageServer;
+  const queryPort = async (port) => {
+    try {
+      const result = await callRpc(port, 'GetCascadeTrajectory', { cascadeId: id }, 1500);
+      const body =
+        result && result.status === 200
+          ? result.body
+          : result && result.trajectory
+            ? result
+            : null;
+      if (!body || !body.trajectory) return null;
+      const steps = Array.isArray(body.trajectory.steps)
+        ? body.trajectory.steps.length
+        : Number(body.numTotalSteps) || 0;
+      return { port, body, steps };
+    } catch (_err) {
+      return null; // A stopped CLI leaves a stale port in its log.
+    }
+  };
+  if (options.port) {
+    const direct = await queryPort(options.port);
+    if (direct) return { port: direct.port, body: direct.body };
+  }
+  const ports =
+    options.ports || (options.readPorts ? options.readPorts() : readAgyPorts());
+  // Read-only on every candidate at once: the worker that just ran the turn holds
+  // it in memory, so no LoadTrajectory into another process is needed.
+  const found = await Promise.all(ports.map(queryPort));
+  let best = null;
+  for (const item of found) {
+    if (item && (!best || item.steps > best.steps)) best = item;
+  }
+  return best ? { port: best.port, body: best.body } : null;
+}
+
+async function cancelAgyInvocation(port, sessionId, options = {}) {
+  const id = String(sessionId || '').trim();
+  if (!port || !AGY_SESSION_UUID_RE.test(id)) return false;
+  const callRpc =
+    options.callRpc || options.callServer || callAgyLanguageServer;
+  try {
+    await callRpc(
+      port,
+      'CancelCascadeInvocation',
+      { cascadeId: id, killBackgroundTasks: false },
+      1500,
+    );
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function answerAgyInteraction(
+  port,
+  sessionId,
+  interaction,
+  approve,
+  options = {},
+) {
+  const id = String(sessionId || '').trim();
+  const { trajectoryId, stepIndex, requestedInteraction } = interaction || {};
+  if (
+    !port ||
+    !AGY_SESSION_UUID_RE.test(id) ||
+    stepIndex == null ||
+    !requestedInteraction
+  ) {
+    return false;
+  }
+  let payload;
+  if (requestedInteraction.askQuestion) {
+    payload = { askQuestion: { cancelled: true } };
+  } else if (requestedInteraction.permission) {
+    payload = {
+      permission: { allow: !!approve, scope: 'PERMISSION_SCOPE_ONCE' },
+    };
+  } else if (requestedInteraction.filePermission) {
+    payload = {
+      filePermission: { allow: !!approve, scope: 'PERMISSION_SCOPE_ONCE' },
+    };
+  } else if (requestedInteraction.runCommand) {
+    payload = { runCommand: { confirm: !!approve } };
+  } else if (requestedInteraction.elicitation) {
+    payload = {
+      elicitation: {
+        action: approve
+          ? 'ELICITATION_ACTION_ACCEPT'
+          : 'ELICITATION_ACTION_DECLINE',
+      },
+    };
+  } else {
+    return false;
+  }
+  const callRpc =
+    options.callRpc || options.callServer || callAgyLanguageServer;
+  try {
+    await callRpc(
+      port,
+      'HandleCascadeUserInteraction',
+      {
+        cascadeId: id,
+        interaction: {
+          ...(trajectoryId ? { trajectoryId } : {}),
+          stepIndex,
+          ...payload,
+        },
+      },
+      1500,
+    );
+  } catch (_err) {
+    return false;
+  }
+  if (!approve && !requestedInteraction.askQuestion) {
+    await cancelAgyInvocation(port, id, options);
+  }
+  return true;
+}
+
 async function readAgyContext(sessionId, options = {}) {
   const id = String(sessionId || '').trim();
   if (!AGY_SESSION_UUID_RE.test(id)) return null;
@@ -1074,6 +1197,9 @@ module.exports = {
   agyQuotaLogNames,
   fetchAgyUsage,
   readAgyContext,
+  readAgyTrajectory,
+  answerAgyInteraction,
+  cancelAgyInvocation,
   getClaudeUsage,
   getCodexUsage,
   cursorUsageFromBodies,

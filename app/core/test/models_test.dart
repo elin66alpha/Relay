@@ -3,6 +3,7 @@ import 'package:relay_core/core/models/agent_options.dart';
 import 'package:relay_core/core/models/agent_session.dart';
 import 'package:relay_core/core/models/chat_message.dart';
 import 'package:relay_core/core/models/group.dart';
+import 'package:relay_core/core/models/machine_credential.dart';
 
 void main() {
   group('ChatGroup.fromJson', () {
@@ -64,6 +65,91 @@ void main() {
         'members': <Object?>['claude', 'codex', 'opencode'],
       });
       expect(g.memberLabels, <String>['Claude Code', 'Codex', 'OpenCode']);
+    });
+
+    test('remote members name their machine and keep their peer settings', () {
+      final ChatGroup g = ChatGroup.fromJson(<String, Object?>{
+        'members': <Object?>['claude', '4e7eeaf61885:claude'],
+        'memberConfigs': <String, Object?>{
+          '4e7eeaf61885:claude': <String, Object?>{
+            'workdir': '/srv/b',
+            'sessionId': 's-1',
+          },
+        },
+        'peers': <String, Object?>{
+          '4e7eeaf61885': <String, Object?>{
+            'name': 'Studio',
+            'baseUrl': 'http://10.0.0.5:8787',
+          },
+          'bad': 'not-a-map',
+          'nourl': <String, Object?>{'name': 'x'},
+        },
+      });
+      expect(g.peers.keys, <String>['4e7eeaf61885']);
+      expect(g.peerOf('4e7eeaf61885:claude')?.name, 'Studio');
+      expect(g.peerOf('claude'), isNull);
+      expect(g.memberLabels, <String>['Claude Code', 'Claude Code (Studio)']);
+      expect(g.memberConfigs['4e7eeaf61885:claude']?['sessionId'], 's-1');
+      expect(groupAuthorLabel('4e7eeaf61885:codex'), 'Codex');
+    });
+
+    test('a payload without peers parses as a local-only swarm', () {
+      final ChatGroup g = ChatGroup.fromJson(<String, Object?>{
+        'members': <Object?>['claude'],
+      });
+      expect(g.peers, isEmpty);
+    });
+  });
+
+  group('remote member keys', () {
+    test('split into machine and agent', () {
+      expect(memberPeerId('4e7eeaf61885:claude'), '4e7eeaf61885');
+      expect(memberAgentKey('4e7eeaf61885:claude'), 'claude');
+      expect(memberPeerId('claude'), isNull);
+      expect(memberAgentKey('claude'), 'claude');
+    });
+
+    test('peer ids match the backend for the same address', () {
+      // Values from normalizeBaseUrl/peerIdFor in server/lib/peer-client.js.
+      expect(
+        normalizePeerBaseUrl('HTTPS://B.Example.com:443/relay/'),
+        'https://b.example.com/relay',
+      );
+      expect(
+        peerIdForBaseUrl('HTTPS://B.Example.com:443/relay/'),
+        '5e22b6276b4c',
+      );
+      expect(peerIdForBaseUrl('http://10.0.0.5:8787'), '4e7eeaf61885');
+      expect(normalizePeerBaseUrl('http://[::1]:3000/'), 'http://[::1]:3000');
+      expect(peerIdForBaseUrl('http://[::1]:3000/'), '12d032a48889');
+    });
+
+    test('only the machines remote members run on are sent', () {
+      const MachineCredential b = MachineCredential(
+        id: 'b',
+        name: 'B',
+        baseUrl: 'http://10.0.0.5:8787',
+        token: 't-b',
+        createdAt: '',
+      );
+      const MachineCredential c = MachineCredential(
+        id: 'c',
+        name: 'C',
+        baseUrl: 'http://10.0.0.6:8787',
+        token: 't-c',
+        createdAt: '',
+      );
+      expect(
+        peerCredentialsFor(
+          <String>['claude', '4e7eeaf61885:codex'],
+          <MachineCredential>[b, c],
+        ),
+        <MachineCredential>[b],
+      );
+      expect(
+        peerCredentialsFor(<String>['claude'], <MachineCredential>[b, c]),
+        isEmpty,
+      );
     });
   });
 

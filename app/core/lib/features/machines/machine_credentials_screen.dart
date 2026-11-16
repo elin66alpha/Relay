@@ -159,14 +159,13 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   Future<void> _uploadCredentialQr() async {
     setState(() => _isImporting = true);
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
+      final PlatformFile? file = await FilePicker.pickFile(
         type: FileType.image,
-        allowMultiple: false,
-        withData: true,
       );
-      if (result == null || result.files.isEmpty) return;
-      final Uint8List? bytes = result.files.single.bytes;
-      if (bytes == null || bytes.isEmpty) {
+      if (file == null) return;
+      final Uint8List bytes = await file.readAsBytes();
+      if (!mounted) return;
+      if (bytes.isEmpty) {
         throw MachineCredentialException(context.l10n.fileUnreadable);
       }
       // Prefer the platform's own decoder (the browser's, on Web) and fall back

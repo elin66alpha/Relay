@@ -1,6 +1,7 @@
 'use strict';
 
-require('dotenv').config();
+// dotenv 17+ logs every load unless told to be quiet.
+require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
@@ -50,6 +51,7 @@ const {
   tokenRecordForToken,
 } = require('./lib/tokens');
 const { createTerminalManager } = require('./lib/terminal-manager');
+const { createBrowserManager } = require('./lib/browser-manager');
 const { buildUsageReport } = require('./lib/usage');
 const { describeAgent, CLI } = require('./lib/agent-options');
 const { getSettings, setSettings, deleteSettings } = require('./lib/agent-settings');
@@ -72,6 +74,7 @@ const {
   touchGroup,
   deleteGroup,
 } = require('./lib/groups');
+const { createPeerClient } = require('./lib/peer-client');
 const {
   readHistory,
   upsertHistoryMessage,
@@ -120,6 +123,7 @@ const createPushRouter = require('./routes/push');
 const createMetaRouter = require('./routes/meta');
 const createGroupRouter = require('./routes/group');
 const createTerminalRouter = require('./routes/terminal');
+const createBrowserRouter = require('./routes/browser');
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -158,6 +162,9 @@ const CORS_ALLOW_ORIGIN = String(process.env.CORS_ALLOW_ORIGIN || '*').trim() ||
 
 const app = express();
 const terminalManager = createTerminalManager({
+  isTokenActive: isTokenIdAllowed,
+});
+const browserManager = createBrowserManager({
   isTokenActive: isTokenIdAllowed,
 });
 // cloudflared connects from localhost and forwards the real client IP in
@@ -233,6 +240,12 @@ app.use(
 );
 
 app.use(express.json({ limit: '16mb' }));
+// Express 5 leaves req.body undefined when no JSON body was parsed; routes read
+// fields from it directly, as they could under Express 4.
+app.use((req, _res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', CORS_ALLOW_ORIGIN);
   if (CORS_ALLOW_ORIGIN !== '*') res.setHeader('Vary', 'Origin');
@@ -556,6 +569,7 @@ const routeContext = {
   agentTurnDependencies,
   backgroundTurnHandler,
   bearerToken,
+  browserManager,
   broadcastScope,
   buildDiagnostics,
   buildUsageReport,
@@ -564,6 +578,7 @@ const routeContext = {
   clearModelDiscoveryCache,
   createAbsoluteDirectory,
   createGroup,
+  createPeerClient,
   deleteGroup,
   purgeSession,
   contextWindowFor,
@@ -645,6 +660,7 @@ app.use(createGroupRouter(routeContext));
 app.use(createSessionsRouter(routeContext));
 app.use(createQuotaRouter(routeContext));
 app.use(createTerminalRouter(routeContext));
+app.use(createBrowserRouter(routeContext));
 
 if (SERVE_WEB) {
   app.use(express.static(WEB_BUILD_DIR, {
@@ -666,7 +682,8 @@ if (SERVE_WEB) {
       res.setHeader('Cache-Control', 'no-cache');
     },
   }));
-  app.get('*', (req, res) => {
+  // Express 5 needs a named wildcard; a bare '*' throws at registration.
+  app.get('/{*splat}', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'not found' });
     }
@@ -689,13 +706,16 @@ function exitCodeForSignal(signal) {
 
 process.on('exit', flushHistoryForShutdown);
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => {
+  process.once(signal, async () => {
+    server.close();
     terminalManager.closeAll();
+    const browsersClosed = browserManager.closeAll();
     // Live agent sessions are children of this process; close them explicitly
     // so a restart never leaves orphaned CLI processes holding memory.
     // shutdownPools never rejects: each pool's failure is caught inside it.
     shutdownPools();
     flushHistoryForShutdown();
+    await browsersClosed;
     process.exit(exitCodeForSignal(signal));
   });
 }
@@ -768,4 +788,4 @@ const server = app.listen(PORT, HOST, () => {
     startClaudeQuotaKeepalive();
   }
 });
-terminalManager.attachServer(server);
+terminalManager.attachServer(server, browserManager.handleUpgrade);

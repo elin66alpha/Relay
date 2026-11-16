@@ -100,6 +100,21 @@ function createStdioAgentPool(options = {}) {
     maxLive: maxSessions,
     idleMs,
     closeEntry: closeSession,
+    isBusy: (entry) => entry.turn || entry.background,
+    keepAlive: (entry) => {
+      // Some CLIs omit a child's failure event. Bound a missing completion by
+      // the turn timeout rather than retaining its session forever.
+      for (const [id, activity] of entry.backgroundTasks) {
+        if (now() - activity >= turnTimeoutMs) entry.backgroundTasks.delete(id);
+      }
+      return entry.backgroundTasks.size > 0;
+    },
+    evictsBefore: (a, b) => {
+      const aBusy = a.backgroundTasks.size > 0;
+      return aBusy !== (b.backgroundTasks.size > 0)
+        ? !aBusy
+        : a.lastActivity < b.lastActivity;
+    },
   });
   const {
     acquireSlot,
@@ -148,9 +163,19 @@ function createStdioAgentPool(options = {}) {
       replyError(id, code, message) {
         writeFrame(c, { jsonrpc: '2.0', id, error: { code, message } });
       },
+      replayMessage(msg) {
+        dispatchMessage(c, msg);
+      },
       // Drivers route inbound traffic by the agent's own session id.
       sessionFor(sessionId) {
         return c.sessions.get(sessionId) || null;
+      },
+      startBackgroundTurn,
+      backgroundTaskChanged(entry, taskId, running) {
+        if (running) entry.backgroundTasks.set(taskId, now());
+        else entry.backgroundTasks.delete(taskId);
+        entry.lastActivity = now();
+        if (!entry.turn && !entry.background) scheduleIdleClose(entry);
       },
     };
   }
@@ -164,6 +189,10 @@ function createStdioAgentPool(options = {}) {
       // is not a protocol frame is not ours to interpret.
       return;
     }
+    dispatchMessage(c, msg);
+  }
+
+  function dispatchMessage(c, msg) {
     if (msg.method === undefined && msg.id !== undefined) {
       const pending = c.pending.get(msg.id);
       if (!pending) return;
@@ -324,10 +353,11 @@ function createStdioAgentPool(options = {}) {
 
   // ------------------------------------------------------------------ sessions
 
-  function settleTurn(entry, settle) {
-    const turn = entry.turn;
+  function settleTurn(entry, settle, turn = entry.turn) {
     if (!turn) return;
-    entry.turn = null;
+    if (entry.turn === turn) entry.turn = null;
+    else if (entry.background === turn) entry.background = null;
+    else return;
     clearTimeout(turn.timer);
     if (turn.cancelTimer) clearTimeout(turn.cancelTimer);
     if (turn.detachAbort) turn.detachAbort();
@@ -342,7 +372,7 @@ function createStdioAgentPool(options = {}) {
     clearIdleTimer(entry);
     if (live.get(entry.key) === entry) live.delete(entry.key);
     if (entry.sessionId && entry.conn) entry.conn.sessions.delete(entry.sessionId);
-    settleTurn(entry, (turn) => {
+    const rejectTurn = (turn) => {
       if (turn.cancelled) return turn.reject(cancelledError());
       const lost = sessionLostError(agentKey, err);
       // Whether the user already saw part of this turn decides if it can be
@@ -350,7 +380,9 @@ function createStdioAgentPool(options = {}) {
       lost.emitted = turn.emitted;
       lost.stderr = (entry.conn && entry.conn.stderr) || '';
       return turn.reject(lost);
-    });
+    };
+    settleTurn(entry, rejectTurn);
+    settleTurn(entry, rejectTurn, entry.background);
     releaseSlot();
     // The process exists only to host sessions; the last one leaving is what
     // ends the idle life of the agent itself.
@@ -411,6 +443,10 @@ function createStdioAgentPool(options = {}) {
       fixedKey: req.fixedKey || null,
       applied: {},
       turn: null,
+      background: null,
+      backgroundTasks: new Map(),
+      onBackgroundTurn: null,
+      onPermission: null,
       idleTimer: null,
       closed: false,
       lastActivity: now(),
@@ -430,9 +466,12 @@ function createStdioAgentPool(options = {}) {
     return entry;
   }
 
-  function runTurn(entry, req) {
-    return new Promise((resolve, reject) => {
-      const turn = {
+  function runTurn(entry, req, turnId = null) {
+    let turn;
+    const pending = new Promise((resolve, reject) => {
+      turn = {
+        turnId,
+        background: turnId !== null,
         onMessage: req.onMessage || (() => {}),
         onPermission: req.onPermission || null,
         emitted: false,
@@ -448,7 +487,7 @@ function createStdioAgentPool(options = {}) {
           settleTurn(entry, (settled) => {
             if (settled.cancelled) settled.reject(cancelledError());
             else settled.resolve(result);
-          });
+          }, turn);
         },
         fail(err) {
           settleTurn(entry, (settled) => {
@@ -457,15 +496,16 @@ function createStdioAgentPool(options = {}) {
             lost.emitted = settled.emitted;
             lost.stderr = entry.conn.stderr || '';
             return settled.reject(lost);
-          });
+          }, turn);
         },
       };
-      entry.turn = turn;
+      if (turn.background) entry.background = turn;
+      else entry.turn = turn;
       entry.lastActivity = now();
       clearIdleTimer(entry);
 
       const stop = () => {
-        if (entry.turn !== turn) return;
+        if (entry.turn !== turn && entry.background !== turn) return;
         turn.cancelled = true;
         try {
           if (entry.conn.driver.cancelTurn) {
@@ -477,12 +517,15 @@ function createStdioAgentPool(options = {}) {
         // Cancel is best-effort: if the agent does not wind the turn down
         // promptly, drop the session so cancel is never a hang.
         turn.cancelTimer = setTimeout(() => {
-          if (entry.turn === turn) dropEntry(entry, new Error('cancelled'));
+          if (entry.turn === turn || entry.background === turn) {
+            dropEntry(entry, new Error('cancelled'));
+          }
         }, cancelGraceMs);
         if (typeof turn.cancelTimer.unref === 'function') {
           turn.cancelTimer.unref();
         }
       };
+      turn.cancel = stop;
 
       const signal = req.signal;
       if (signal) {
@@ -508,6 +551,7 @@ function createStdioAgentPool(options = {}) {
               turnTimeoutMs / 60000,
             )} minutes and was stopped. Split the task or simplify the prompt.`,
           }),
+          turn,
         );
         // The session survives a cancel, so a timed-out turn costs the turn,
         // not the conversation.
@@ -522,7 +566,7 @@ function createStdioAgentPool(options = {}) {
       if (typeof turn.timer.unref === 'function') turn.timer.unref();
 
       try {
-        entry.conn.driver.startTurn(entry, req, turn);
+        if (!turn.background) entry.conn.driver.startTurn(entry, req, turn);
       } catch (err) {
         turn.fail(err);
       }
@@ -547,6 +591,49 @@ function createStdioAgentPool(options = {}) {
         throw err;
       },
     );
+    turn.done = pending;
+    return pending;
+  }
+
+  // An agent may start a turn without a user request. Give it the same timeout,
+  // cancellation and slot ownership as a requested turn, without turn/start.
+  function startBackgroundTurn(entry, turnId, meta) {
+    if (entry.closed || entry.background || !turnId) return entry.background;
+    let background;
+    let handle;
+    try {
+      handle = entry.onBackgroundTurn?.({
+        ...meta,
+        interrupt: () => background.cancel(),
+      });
+    } catch (err) {
+      console.warn(`[${agentKey}] failed to start background turn: ${err.message}`);
+    }
+    const pending = runTurn(entry, {
+      onMessage: (event) => handle?.onMessage(event),
+      onPermission: entry.onPermission,
+    }, turnId);
+    background = entry.background;
+    pending.then(
+      ({ result }) => handle?.finish(result),
+      (err) => handle?.fail(err),
+    ).catch((err) => {
+      console.warn(`[${agentKey}] failed to settle background turn: ${err.message}`);
+    });
+    return background;
+  }
+
+  function waitForBackground(background, signal) {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(cancelledError());
+      const done = () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      background.done.then(done, done);
+    });
   }
 
   // Run one turn on `key`, reusing the live session when there is one.
@@ -555,6 +642,13 @@ function createStdioAgentPool(options = {}) {
     // must not cost a session slot or a process spawn.
     if (req.signal && req.signal.aborted) throw cancelledError();
     let entry = live.get(req.key);
+    // A tool-only background turn may not yet own a chat scope queue. Do not
+    // replace its callbacks or start a competing turn on the same thread.
+    while (entry && entry.background) {
+      await waitForBackground(entry.background, req.signal);
+      if (req.signal && req.signal.aborted) throw cancelledError();
+      entry = live.get(req.key);
+    }
     // The live session knows the current id (a brand-new session gets one the
     // caller has not stored yet), so prefer it over the caller's.
     const resumeId = (entry && entry.sessionId) || req.resumeId || null;
@@ -582,6 +676,12 @@ function createStdioAgentPool(options = {}) {
     if (entry.conn.driver.applySettings) {
       await entry.conn.driver.applySettings(entry, req);
     }
+    // Idle monitoring can start a background turn while settings RPCs await.
+    while (entry.background) {
+      await waitForBackground(entry.background, req.signal);
+    }
+    entry.onBackgroundTurn = req.onBackgroundTurn || null;
+    entry.onPermission = req.onPermission || null;
     try {
       return await runTurn(entry, req);
     } catch (err) {
@@ -593,6 +693,11 @@ function createStdioAgentPool(options = {}) {
       if (fresh.conn.driver.applySettings) {
         await fresh.conn.driver.applySettings(fresh, req);
       }
+      while (fresh.background) {
+        await waitForBackground(fresh.background, req.signal);
+      }
+      fresh.onBackgroundTurn = req.onBackgroundTurn || null;
+      fresh.onPermission = req.onPermission || null;
       return runTurn(fresh, req);
     }
   }

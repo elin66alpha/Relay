@@ -411,7 +411,7 @@ function createTools({ getClient, state, machineName }) {
     },
     {
       name: 'relay_swarms',
-      description: 'Swarms (multi-agent group chats) in the current workdir: list, create (name, members, optional workTree), members (replace members), delete, clear (reset transcript and member sessions), history (newest messages).',
+      description: 'Swarms (multi-agent group chats) in the current workdir: list, create (name, members, optional workTree), members (replace members), delete, clear (reset transcript and member sessions), history (newest messages). Members keyed "<peerId>:<agent>" run on another Relay machine; relay-mcp holds no credential for it, so it cannot add or run them, only keep them by listing their keys in members.',
       inputSchema: schema({
         action: { type: 'string', enum: ['list', 'create', 'members', 'delete', 'clear', 'history'] },
         groupId: { type: 'string' },
@@ -452,7 +452,7 @@ function createTools({ getClient, state, machineName }) {
     },
     {
       name: 'relay_swarm_chat',
-      description: 'Send a message to a swarm; @mentions decide which members answer. Returns the round\'s replies when it ends within waitSeconds, otherwise status "running" with a requestId for relay_task (with groupId).',
+      description: 'Send a message to a swarm; @mentions decide which members answer. Returns the round\'s replies when it ends within waitSeconds, otherwise status "running" with a requestId for relay_task (with groupId). A member on another Relay machine ("<peerId>:<agent>") cannot run from relay-mcp: its turn ends with PEER_NOT_LINKED.',
       inputSchema: schema({
         groupId: { type: 'string' },
         prompt: { type: 'string' },

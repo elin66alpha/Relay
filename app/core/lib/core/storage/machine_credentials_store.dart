@@ -11,7 +11,7 @@ class MachineCredentialsStore {
             const FlutterSecureStorage(
               // The data protection keychain needs an Apple team signature,
               // which the released macOS app does not have.
-              mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+              mOptions: MacOsOptions(usesDataProtectionKeychain: false),
             );
 
   static const String _credentialsKey = 'relay.machine_credentials.v1';
