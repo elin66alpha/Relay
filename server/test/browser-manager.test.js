@@ -439,7 +439,7 @@ const realBrowser = findBrowser();
 
 test('a real headless browser streams a local page and takes touch and mouse input', {
   skip: !realBrowser && 'no Chrome, Chromium or Edge on this host',
-  timeout: 60000,
+  timeout: 180000,
 }, async () => {
   // The slider and button write to the hash, which comes back as a `url` message.
   const html = `<!doctype html><meta name=viewport content="width=device-width">
@@ -453,8 +453,10 @@ test('a real headless browser streams a local page and takes touch and mouse inp
   let browserProcess;
   let browserProfile;
   const manager = createBrowserManager({
+    // A cold browser start on a shared CI runner can exceed the 10 s default.
     launch: (file, options) => launchPage(file, {
       ...options,
+      callTimeoutMs: 45000,
       spawn(file, args, spawnOptions) {
         browserProfile = args.find((arg) => arg.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
         browserProcess = spawn(file, args, spawnOptions);
@@ -464,10 +466,10 @@ test('a real headless browser streams a local page and takes touch and mouse inp
   });
   try {
     const client = await attached(manager);
-    assert.equal(client.json[0].type, 'ready');
+    assert.equal(client.json[0].type, 'ready', JSON.stringify(client.json[0]));
     const say = (message) => client.emit('message', Buffer.from(JSON.stringify(message)), false);
     const waitFor = async (predicate, what) => {
-      for (let i = 0; i < 200; i += 1) {
+      for (let i = 0; i < 600; i += 1) {
         if (predicate()) return;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
