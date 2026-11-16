@@ -3,7 +3,11 @@
 
 function Get-RelayDetails {
   Require-Node
-  $text = & node (Join-Path $Script:ServerDir 'scripts\windows-setup.js')
+  $bridge = Join-Path $Script:ServerDir 'scripts\windows-setup.js'
+  if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
+    Write-Fail "The backend bundle is incomplete; missing $bridge. Extract the entire ZIP again and wait for extraction to finish."
+  }
+  $text = & node $bridge
   if ($LASTEXITCODE -ne 0) { Write-Fail 'Could not read backend status.' }
   $details = ($text -join "`n") | ConvertFrom-Json
   return [ordered]@{

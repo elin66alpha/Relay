@@ -12,7 +12,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 ## First run / 首次使用
 
 1. Extract the entire ZIP to a permanent writable directory. Keep Setup.exe,
-   server/, app/ (the Web client), scripts/ and runtime/ together. Do not run inside the ZIP.
+   server/, app/ (the Web client), scripts/ and runtime/ together. Do not run inside the ZIP,
+   and wait until extraction finishes; Setup.exe is the last file written.
 2. Double-click **Setup.exe**. Windows 10/11's .NET Framework and PowerShell run
    the installer; no extra GUI runtime is downloaded.
 3. Follow the five steps: included runtime/dependencies, optional agent CLIs,
@@ -30,7 +31,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
    same encrypted credential. The API still requires authentication.
 
 1. 将整个 ZIP 解压到固定、可写的目录，保持 Setup.exe、server/、app/（Web 前端）、
-   scripts/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行。
+   scripts/ 和 runtime/ 相对位置不变，不要直接在压缩包内运行；请等解压完成再运行，
+   Setup.exe 是最后写出的文件。
 2. 双击 **Setup.exe**，使用 Windows 10/11 自带的 .NET Framework 和 PowerShell，
    无需另外下载界面运行时。
 3. 按五步完成：运行时和依赖、可选 CLI、Web 开关（默认开启）、网络、设备凭证。

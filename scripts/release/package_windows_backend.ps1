@@ -134,9 +134,29 @@ foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   if ($relative.StartsWith('app/shell/build/web/')) { continue }
   if ($relative -notin $allowed) { throw "Unexpected file in the release: $relative" }
 }
-# ZipFile includes .env.example, unlike Compress-Archive's hidden-file filtering.
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [IO.Compression.CompressionLevel]::Optimal, $false)
+# Extractors write entries in archive order, so dependency trees go first and
+# Setup.exe last: a user cannot open Setup.exe from a half-extracted folder that
+# lacks Relay's own scripts. Entry names use '/' as the ZIP format requires;
+# .NET Framework's CreateFromDirectory writes '\'. -Force keeps .env.example.
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$dependencies = New-Object Collections.Generic.List[string]
+$own = New-Object Collections.Generic.List[string]
+foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
+  $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')
+  if ($relative -match '^(runtime|server/node_modules|app/shell/build/web)/') { $dependencies.Add($relative) }
+  elseif ($relative -ne 'Setup.exe') { $own.Add($relative) }
+}
+$dependencies.Sort([StringComparer]::Ordinal); $own.Sort([StringComparer]::Ordinal)
+$stream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
+try {
+  $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($relative in @($dependencies) + @($own) + @('Setup.exe')) {
+      [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $bundle $relative), "$name/$relative",
+        [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+  } finally { $zip.Dispose() }
+} finally { $stream.Dispose() }
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $OutputDirectory "$name.sha256"), "$hash  $name.zip`n", $ascii)
 Write-Host "Archive: $archive"

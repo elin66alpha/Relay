@@ -36,6 +36,11 @@ internal sealed class RelaySetup : Form
     readonly List<Button> buttons = new List<Button>();
     readonly string[] keys = { "claude", "codex", "cursor", "opencode", "hermes" };
     readonly string[] names = { "Claude Code", "Codex", "Cursor", "OpenCode", "Hermes" };
+    static readonly string[] requiredFiles = {
+        @"scripts\install\windows\setup-action.ps1", @"scripts\install\windows\lib\setup.ps1",
+        @"scripts\install\windows\lib\common.ps1", @"server\server.js", @"server\package.json",
+        @"server\scripts\windows-setup.js", @"server\scripts\create-credential.js"
+    };
     bool busy;
     bool loaded;
     string currentUrl = "";
@@ -242,7 +247,12 @@ internal sealed class RelaySetup : Form
         string result = null;
         try {
             var worker = Path.Combine(root, "scripts", "install", "windows", "setup-action.ps1");
-            if (!File.Exists(worker)) throw new FileNotFoundException("Keep Setup.exe with the complete extracted backend bundle.", worker);
+            // An interrupted or still-running ZIP extraction leaves Setup.exe and Node.js
+            // in place but not every script; say so instead of failing inside Node.js.
+            foreach (var part in requiredFiles) {
+                var path = Path.Combine(root, part);
+                if (!File.Exists(path)) throw new FileNotFoundException("The backend bundle is incomplete; missing " + path + ". Extract the entire ZIP again, wait for extraction to finish, then run Setup.exe from the extracted folder.", path);
+            }
             var start = new ProcessStartInfo {
                 FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
                 Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + worker + "\"",

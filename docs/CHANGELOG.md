@@ -43,6 +43,10 @@
   the turn continues on the backend.
 - Resuming the app from the background reconnects the event stream and pulls
   history once so turns finished from another client appear automatically.
+- Windows backend: Setup.exe in a partly extracted bundle now names the missing
+  file and asks for a complete extraction instead of failing with
+  `Cannot find module ...windows-setup.js`. The ZIP now stores Setup.exe last
+  and uses standard `/` entry paths.
 
 ## 0.1.11 - 2026-11-09
 
