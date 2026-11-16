@@ -10,7 +10,9 @@ $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 $Script:BackendPidFile = Join-Path $scratch 'backend.pid'
 $Script:LogDir = Join-Path $scratch 'logs'
 New-Item -ItemType Directory -Path $Script:ServerDir, (Join-Path $Script:RootDir 'app\shell\build\web') -Force | Out-Null
-[IO.File]::WriteAllText($Script:EnvExample, "PORT=8787`nKEEP_ME=original`n")
+# Non-ASCII comments (as in the real .env.example) must survive every rewrite.
+$unicodeComment = '# Agent binary ' + [char]0x2014 + ' ' + [char]0x9ED8 + [char]0x8BA4
+[IO.File]::WriteAllText($Script:EnvExample, "$unicodeComment`nPORT=8787`nKEEP_ME=original`n", (New-Object Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $Script:RootDir 'app\shell\build\web\index.html'), 'fixture')
 $script:started = 0; $script:stopped = 0; $script:registered = 0; $script:forceDeps = $false
 $script:dnsArgs = @(); $script:credentialArgs = @()
@@ -33,6 +35,7 @@ try {
   Assert-That ((Get-EnvValue 'HOST') -eq '0.0.0.0') 'Direct mode binding.'
   Assert-That ((Get-EnvValue 'RELAY_SERVE_WEB') -eq '1') 'Web should be enabled.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Existing configuration must survive.'
+  Assert-That (([IO.File]::ReadAllLines($Script:EnvFile, [Text.Encoding]::UTF8))[0] -eq $unicodeComment) 'Rewriting .env must keep UTF-8 comments intact.'
   Assert-That ((Get-EnvValue 'RELAY_WORKSPACE_ROOT') -eq '') 'File access is open unless isolation is chosen.'
   Assert-That ($script:registered -eq 1 -and $script:started -eq 1) 'Register and start services.'
   [IO.File]::WriteAllText((Join-Path $Script:ServerDir 'tokens.json'), 'retained fixture')
@@ -57,13 +60,22 @@ try {
   Expect-Failure { Install-RelayBackend -NetworkMode cloudflare -Hostname 'bad"host' }
   Expect-Failure { Set-EnvValue 'PORT' "123`nBAD=1" }
   Assert-That ((Get-Content -LiteralPath $Script:EnvFile -Raw) -eq $before) 'Invalid input must not change configuration.'
+  Assert-That (([IO.File]::ReadAllLines($Script:EnvFile, [Text.Encoding]::UTF8))[0] -eq $unicodeComment) 'Repeated reinstalls must not re-encode .env.'
   Uninstall-RelayBackend
   Assert-That (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'app\shell\build\web'))) 'Uninstall removes Web.'
   Assert-That ((Get-Content -LiteralPath (Join-Path $Script:ServerDir 'tokens.json') -Raw) -eq 'retained fixture') 'Uninstall must keep device tokens.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Uninstall must keep custom configuration.'
   $incomplete = ''; try { Get-RelayDetails | Out-Null } catch { $incomplete = $_.Exception.Message }
   Assert-That ($incomplete -like '*bundle is incomplete*windows-setup.js*') 'A partly extracted bundle must name the missing status bridge.'
-  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, uninstall, retained state and incomplete bundles.'
+  # A host Node on the user PATH must not shadow the bundle's own runtime.
+  $fakeLib = Join-Path $scratch 'bundle\scripts\install\windows\lib'
+  $fakeNodeDir = Join-Path $scratch 'bundle\runtime\node'
+  New-Item -ItemType Directory -Path $fakeLib, $fakeNodeDir -Force | Out-Null
+  Copy-Item -LiteralPath "$PSScriptRoot\..\install\windows\lib\common.ps1" -Destination $fakeLib
+  [IO.File]::WriteAllText((Join-Path $fakeNodeDir 'node.exe'), '')
+  $firstPath = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $fakeLib 'common.ps1')'; (`$env:PATH -split ';')[0]"
+  Assert-That ($firstPath -eq $fakeNodeDir) "Bundled Node must lead PATH, got: $firstPath"
+  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, uninstall, retained state and incomplete bundles.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($scratch)
   $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

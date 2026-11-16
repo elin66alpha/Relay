@@ -6,14 +6,16 @@ $Script:ServerDir = Join-Path $Script:RootDir 'server'
 $Script:EnvFile = Join-Path $Script:ServerDir '.env'
 $Script:EnvExample = Join-Path $Script:ServerDir '.env.example'
 
-# Release bundles carry their own runtime; source checkouts still use PATH.
-$bundledNodeDir = Join-Path $Script:RootDir 'runtime\node'
-if (Test-Path -LiteralPath (Join-Path $bundledNodeDir 'node.exe')) {
-  $env:PATH = "$bundledNodeDir;$env:PATH"
-}
 # Installers update the user PATH after this process has already started.
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 $env:PATH = "$(Join-Path $Script:RootDir 'runtime\tools');$env:USERPROFILE\.local\bin;$env:USERPROFILE\.opencode\bin;$env:LOCALAPPDATA\agy\bin;$env:APPDATA\npm;$userPath;$env:PATH"
+# Release bundles carry their own runtime; source checkouts still use PATH.
+# It goes first, ahead of the user PATH, so a host Node of another major
+# version cannot run the backend against the bundle's native node-pty build.
+$Script:BundledNodeDir = Join-Path $Script:RootDir 'runtime\node'
+if (Test-Path -LiteralPath (Join-Path $Script:BundledNodeDir 'node.exe')) {
+  $env:PATH = "$Script:BundledNodeDir;$env:PATH"
+}
 
 $Script:AppDataDir = if ($env:LOCALAPPDATA) {
   Join-Path $env:LOCALAPPDATA 'Relay'
@@ -72,6 +74,17 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllLines($Path, $Lines, $encoding)
 }
 
+# Windows PowerShell 5.1's Get-Content reads a BOM-less file in the ANSI code
+# page; pairing that with Write-Utf8NoBom re-encoded every non-ASCII character
+# on each rewrite, so .env comments doubled in size per Set-EnvValue call.
+function Read-Utf8Lines {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return @()
+  }
+  return @([System.IO.File]::ReadAllLines($Path, (New-Object System.Text.UTF8Encoding($false))))
+}
+
 function Ensure-EnvFile {
   if (-not (Test-Path -LiteralPath $Script:EnvFile)) {
     Copy-Item -LiteralPath $Script:EnvExample -Destination $Script:EnvFile
@@ -88,10 +101,7 @@ function Set-EnvValue {
     Write-Fail 'Invalid environment key or multiline value.'
   }
   Ensure-EnvFile
-  $lines = @()
-  if (Test-Path -LiteralPath $Script:EnvFile) {
-    $lines = @(Get-Content -LiteralPath $Script:EnvFile)
-  }
+  $lines = Read-Utf8Lines $Script:EnvFile
   $found = $false
   $next = foreach ($line in $lines) {
     if ($line -like "$Key=*") {
@@ -109,10 +119,7 @@ function Set-EnvValue {
 
 function Get-EnvValue {
   param([string]$Key)
-  if (-not (Test-Path -LiteralPath $Script:EnvFile)) {
-    return ''
-  }
-  foreach ($line in Get-Content -LiteralPath $Script:EnvFile) {
+  foreach ($line in Read-Utf8Lines $Script:EnvFile) {
     if ($line -like "$Key=*") {
       return $line.Substring($Key.Length + 1).Trim()
     }

@@ -31,7 +31,9 @@ const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_CACHE_MS = 60_000;
 const CLAUDE_CACHE_MS = 60_000;
-const USAGE_CACHE_FILE = path.join(__dirname, '..', 'usage-cache.json');
+const USAGE_CACHE_FILE = process.env.RELAY_USAGE_CACHE_FILE
+  ? path.resolve(process.env.RELAY_USAGE_CACHE_FILE)
+  : path.join(__dirname, '..', 'usage-cache.json');
 const usageCacheStore = createJsonStore(USAGE_CACHE_FILE, {
   pretty: true,
   trailingNewline: true,
@@ -67,10 +69,10 @@ let claudeCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let agyCache = { at: 0, fetchedAt: '', value: null, stale: false };
 let cursorCache = { at: 0, fetchedAt: '', value: null, stale: false };
 const usageBackoff = {
-  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
-  claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
-  codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
-  cursor: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0 },
+  agy: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0, lastError: null },
+  claude: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0, lastError: null },
+  codex: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0, lastError: null },
+  cursor: { until: 0, delayMs: 0, refreshPromise: null, credMtime: 0, lastError: null },
 };
 
 // Claude/Codex quota credentials are shared with the live CLIs, which rotate
@@ -139,8 +141,13 @@ function rememberUsageSuccess(key, value, setMemoryCache) {
     value: record.value,
     stale: false,
   });
-  usageBackoff[key].delayMs = 0;
-  usageBackoff[key].until = 0;
+  const state = usageBackoff[key];
+  if (state.lastError) {
+    console.log(`[usage:${key}] query recovered`);
+  }
+  state.delayMs = 0;
+  state.until = 0;
+  state.lastError = null;
   return withUsageMetadata(record, false);
 }
 
@@ -154,6 +161,11 @@ function rememberBackoff(key, err) {
   state.delayMs = delayMs;
   state.until = Date.now() + delayMs;
   state.credMtime = credentialMtimeMs(key);
+  // A CLI that was never signed in fails the same way for hours; say so once,
+  // and again only when the failure changes or after it recovers.
+  const repeated = state.lastError && state.lastError.message === err.message;
+  state.lastError = err;
+  if (repeated) return;
   const status = err && err.status ? ` HTTP ${err.status}` : '';
   console.warn(
     `[usage:${key}] query failed${status}; backing off for ` +
@@ -222,12 +234,14 @@ async function cachedUsage({
   }
 
   const state = usageBackoff[key];
-  if (state.until > now && fallback) {
+  if (state.until > now && (fallback || state.lastError)) {
     // Still within the backoff window: only retry early if the CLI has rewritten
     // its credentials (token refreshed / re-login) since the failure. Otherwise
-    // keep serving stale instead of hammering a still-failing API.
+    // keep serving stale, or repeat the last failure when nothing ever
+    // succeeded, instead of hammering a still-failing API.
     if (credentialMtimeMs(key) <= state.credMtime) {
-      return withUsageMetadata(fallback, true);
+      if (fallback) return withUsageMetadata(fallback, true);
+      throw state.lastError;
     }
     state.until = 0;
     state.delayMs = 0;

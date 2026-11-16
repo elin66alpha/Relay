@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.13 - Unreleased
+
+### Fixed
+
+- Windows setup no longer corrupts `server\.env`: Windows PowerShell 5.1 read
+  the BOM-less UTF-8 file in the ANSI code page and wrote it back as UTF-8, so
+  every setting written by Setup re-encoded the non-ASCII comments until the
+  file grew to megabytes. To repair an affected `.env`, replace its overlong
+  `#` comment lines with the matching lines from `.env.example`; setting
+  values were never changed.
+- The Windows backend runs on the bundle's own `runtime
+ode` again; a Node.js
+  on the user PATH had taken precedence over it.
+- A quota source whose CLI is not signed in (for example Claude Code with no
+  `claude login`) is queried at most once per backoff window and its failure
+  is logged once, instead of every few minutes by the usage cache, the quota
+  watcher and the Claude keepalive.
+
 ## 0.1.12 - 2026-11-15
 
 ### Added
