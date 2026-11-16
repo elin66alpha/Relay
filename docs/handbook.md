@@ -893,16 +893,17 @@ exported for the macOS desktop icon.
 
 ### Refreshing README screenshots
 
-`docs/screenshots/` holds the five README screenshots in English and, with a
+`docs/screenshots/` holds the seven README screenshots in English and, with a
 `-zh` suffix, in Chinese: `relay-overview-web` and `relay-chat-web` at
-1440×960, and `relay-chat-mobile`, `relay-swarm-mobile` and
-`relay-files-mobile` at 800×1640 (a 400×820 viewport at 2×). Both READMEs
+1440×960, and `relay-chat-mobile`, `relay-swarm-mobile`,
+`relay-files-mobile`, `relay-browser-mobile` and `relay-image-preview-mobile`
+at 800×1640 (a 400×820 viewport at 2×). Both READMEs
 reference them by name, so a recapture only replaces the files. To recapture
-all ten:
+all fourteen with the existing Ferrari wallpaper:
 
 ```bash
 (cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
-node scripts/dev/readme_screenshots.js /path/to/wallpaper.png
+node scripts/dev/readme_screenshots.js docs/farrari.png
 ```
 
 The script:
@@ -912,33 +913,43 @@ The script:
    local deployment state), and seeded state. The seeded state is a Relay Demo
    token, the Main, Release notes and Flaky tests Claude Code sessions with the
    invoice-race conversation, and the Release readiness Swarm (Lead, Reviewer
-   and Docs).
+   and Docs). The wallpaper image is also copied into the workspace as
+   `ferrari.png` for the image preview capture.
 2. Starts that backend on `127.0.0.1:8790` (`DEMO_PORT` changes it) with the
    quota watch and keepalive off and none of the shell's `PORT`, `HOST`,
    `RELAY_*` or `ENABLE_*` settings, so the running deployment is not touched.
-   It serves the Web build from `app/shell/build/web`.
+   It serves the Web build from `app/shell/build/web`. A second local server
+   on `127.0.0.1:8791` (`DEMO_PORT + 1`) serves the translated Aurora billing
+   dashboard that Relay's Browser opens for its capture.
 3. Opens headless Chromium with Playwright and, in local storage, sets the
    dark theme, the language and the Relay Demo credential. It also stores the
    wallpaper, prepared the way the Web client prepares an import, at dark
    opacity 0.6 (`WALLPAPER_DARK_OPACITY` changes it).
-4. Taps through each screen at fixed coordinates, writes the screenshots and
-   stops the backend.
+4. Navigates using coordinates and accessible button labels, including the
+   localhost dashboard and the workspace image preview, writes the screenshots
+   and stops both demo servers. Browser captures verify navigation and streamed
+   frames; image captures wait for the image preview to render, and quota
+   captures wait for all usage queries to finish.
 
 Playwright is not a repository dependency. The script installs a pinned
 `playwright-core` and its Chromium into the temporary directory and the
 Playwright browser cache on first use; set `PLAYWRIGHT_CORE` to use an existing
-`playwright-core` module instead.
+`playwright-core` module instead. The isolated backend receives that same
+Chromium executable through a demo-only `RELAY_BROWSER` launcher, using
+Playwright's `--no-sandbox` setting for the localhost demo; a separate host
+Chrome install is not required. This does not change the deployed backend.
 
 Chat times are today's date at fixed hours, shown in UTC. The quota bars show
 the backend machine's real Claude Code usage, and the agent dots show
 which CLIs are installed there. Chinese shots use translated conversation
 text, session names and Swarm nicknames as well as the Chinese app language.
-When the drawer or Home layout changes, adjust the tap coordinates for the
-selected capture mode in the script, then review every image before committing
-it.
+When the drawer or Home layout changes, check the tap coordinates and accessible
+button labels for the selected capture mode in the script, then review every
+image before committing it.
 
-For a separate set of Chinese 9:16 phone images (home, chat, empty chat, Swarm,
-files, machine details, quota usage, settings and credentials),
+For a separate set of eleven Chinese 9:16 phone images (home, chat, empty chat,
+Swarm, files, browser, image preview, machine details, quota usage, settings
+and credentials),
 use the same script with `--mobile-zh`:
 
 ```bash

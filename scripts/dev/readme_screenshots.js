@@ -9,6 +9,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
+const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
 
 const REPO = path.resolve(__dirname, '../..');
@@ -21,6 +23,7 @@ const SERVER = path.join(ROOT, 'server');
 const WORKDIR = path.join(ROOT, 'projects', 'aurora-api');
 const PORT = Number(process.env.DEMO_PORT || 8790);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const PREVIEW_PORT = PORT + 1;
 const TOKEN = 'relay-demo-screenshot-token-0000000000000000';
 const DARK_OPACITY = Number(process.env.WALLPAPER_DARK_OPACITY || 0.6);
 const PLAYWRIGHT_VERSION = '1.63.0';
@@ -29,10 +32,11 @@ const SEP = '\u0000';
 const day = new Date().toISOString().slice(0, 10);
 const at = (hm) => `${day}T${hm}:00.000Z`;
 
-// Viewport, device pixel ratio and the taps that reach each screen. Taps are
-// CSS-pixel coordinates in the layout of this release; check them when the
-// drawer or home page changes.
+// Viewport, device pixel ratio and the actions that reach each screen.
 const DRAWER = [28, 27];
+const OPEN_FILES = [{ tap: DRAWER }, { button: ['File system', '文件系统'] }];
+const OPEN_BROWSER = [{ tap: DRAWER }, { button: ['Browser', '浏览器'] }];
+const OPEN_IMAGE = [...OPEN_FILES, { button: ['ferrari.png', 'ferrari.png'] }];
 const SHOTS = [
   { name: 'relay-overview-web', size: [1440, 960, 1], steps: [] },
   { name: 'relay-chat-web', size: [1440, 960, 1], steps: [{ tap: [104, 356] }] },
@@ -40,9 +44,11 @@ const SHOTS = [
   {
     name: 'relay-swarm-mobile',
     size: [400, 820, 2],
-    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { tap: [136, 640] }],
+    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { button: ['Release readiness', '发布检查'] }],
   },
-  { name: 'relay-files-mobile', size: [400, 820, 2], steps: [{ tap: DRAWER }, { tap: [95, 739] }] },
+  { name: 'relay-files-mobile', size: [400, 820, 2], steps: OPEN_FILES },
+  { name: 'relay-browser-mobile', size: [400, 820, 2], steps: OPEN_BROWSER, browser: true },
+  { name: 'relay-image-preview-mobile', size: [400, 820, 2], steps: OPEN_IMAGE, image: true },
 ];
 
 // Same layout as the first phone set, rendered at 2.5× for 1080×1920 PNGs.
@@ -52,12 +58,14 @@ const MOBILE_SHOTS = [
   { name: 'relay-chat-empty-mobile', empty: true, steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
   {
     name: 'relay-swarm-mobile',
-    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { tap: [136, 550] }],
+    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { button: ['Release readiness', '发布检查'] }],
   },
-  { name: 'relay-files-mobile', steps: [{ tap: DRAWER }, { tap: [95, 688] }] },
+  { name: 'relay-files-mobile', steps: OPEN_FILES },
+  { name: 'relay-browser-mobile', steps: OPEN_BROWSER, browser: true },
+  { name: 'relay-image-preview-mobile', steps: OPEN_IMAGE, image: true },
   { name: 'relay-machine-mobile', steps: [{ tap: [180, 132] }] },
-  { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 213] }] },
-  { name: 'relay-settings-mobile', steps: [{ tap: DRAWER }, { tap: [95, 739] }] },
+  { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 213] }], quota: true },
+  { name: 'relay-settings-mobile', steps: [{ tap: DRAWER }, { button: ['Settings', '设置'] }] },
   { name: 'relay-credentials-mobile', steps: [{ tap: DRAWER }, { tap: [100, 165] }] },
 ].map((shot) => ({ ...shot, size: [432, 768, 2.5] }));
 
@@ -79,7 +87,7 @@ function writeJson(name, value) {
   fs.writeFileSync(path.join(SERVER, name), JSON.stringify(value, null, 2));
 }
 
-function seed(lang) {
+function seed(lang, image) {
   const text = (en, zh) => lang === 'zh' ? zh : en;
   fs.rmSync(ROOT, { recursive: true, force: true });
 
@@ -100,6 +108,7 @@ function seed(lang) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body);
   }
+  fs.copyFileSync(image, path.join(WORKDIR, 'ferrari.png'));
 
   // Tracked server code only, so no local deployment state is copied.
   const tracked = execFileSync('git', ['ls-files', 'server'], { cwd: REPO }).toString().trim().split('\n');
@@ -231,7 +240,54 @@ function seed(lang) {
   });
 }
 
-async function startServer() {
+function startPreview(lang) {
+  const text = (en, zh) => lang === 'zh' ? zh : en;
+  const html = `<!doctype html>
+<html lang="${lang}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurora · ${text('Billing', '账单')}</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f6f8;color:#172b3a;font:15px system-ui,sans-serif}
+header{padding:22px 24px;background:#172b3a;color:white;display:flex;align-items:center;justify-content:space-between}
+header strong{font-size:22px;letter-spacing:-.7px}header span{color:#b8c9d6;font-size:12px}
+main{max-width:960px;margin:auto;padding:26px 22px}small{color:#607482;font-size:11px;letter-spacing:1.4px}
+h1{font-size:29px;letter-spacing:-1px;margin:8px 0}p{color:#607482;line-height:1.6;margin:0 0 22px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px}.card,section{background:white;border:1px solid #e0e6eb;border-radius:12px;padding:18px}
+.card span{font-size:12px;color:#607482}.card strong{display:block;font-size:27px;margin:9px 0 4px}.card em{font-size:11px;font-style:normal;color:#13765e}
+section{margin-top:18px}h2{font-size:16px;margin:0 0 20px}.chart{height:85px;display:flex;align-items:end;gap:12px}
+.chart i{flex:1;background:#467d96;border-radius:4px 4px 0 0}.chart i:last-child{background:#172b3a}
+.axis{display:flex;justify-content:space-between;font-size:10px;color:#607482;margin-top:8px}
+.invoice{display:flex;justify-content:space-between;align-items:center;padding:15px 0;border-top:1px solid #edf0f3}
+.invoice b{font-size:13px}.invoice span{display:block;font-size:11px;color:#607482;margin-top:4px}
+.paid{background:#e5f4ec;color:#13765e;padding:5px 9px;border-radius:5px;font-size:11px}
+footer{margin-top:20px;color:#607482;font-size:11px}
+</style>
+<header><strong>aurora<span style="color:#76b4cf"> / </span></strong><span>${text('Development preview', '开发预览')}</span></header>
+<main><small>AURORA API · 2.4.1</small><h1>${text('Billing overview', '账单概览')}</h1>
+<p>${text('A clear view of your invoices and revenue.', '发票与收入，一目了然。')}</p>
+<div class="stats"><div class="card"><span>${text('Revenue this month', '本月收入')}</span><strong>¥48,250</strong><em>↑ 18.6% ${text('vs last month', '较上月')}</em></div>
+<div class="card"><span>${text('Paid invoices', '已付发票')}</span><strong>128</strong><em>${text('All payments settled', '全部款项已结清')}</em></div></div>
+<section><h2>${text('Revenue · Last 7 days', '收入 · 最近 7 天')}</h2><div class="chart">
+${[36, 58, 44, 72, 62, 84, 98].map((height) => `<i style="height:${height}%"></i>`).join('')}</div>
+<div class="axis"><span>${text('MON', '周一')}</span><span>${text('SUN', '周日')}</span></div></section>
+<section><h2>${text('Recent invoices', '最近发票')}</h2>
+${[['1048', 'Northstar Studio', '¥2,400'], ['1047', 'Orbit Labs', '¥1,850'], ['1046', 'Acme Design', '¥3,200']].map(([id, name, amount]) =>
+    `<div class="invoice"><div><b>${name}</b><span>INV-${id} · ${amount}</span></div><label class="paid">${text('Paid', '已付款')}</label></div>`).join('')}
+</section><footer>localhost:${PREVIEW_PORT} · ${text('Served on your backend machine', '运行在你的后端机器上')}</footer></main></html>`;
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(html);
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PREVIEW_PORT, '127.0.0.1', () => resolve(server));
+  });
+}
+
+async function startServer(browserPath) {
+  // Match Playwright's sandbox setting only for this isolated localhost demo.
+  const launcher = path.join(ROOT, 'chromium-demo');
+  const quotedBrowser = `'${browserPath.replace(/'/g, "'\\''")}'`;
+  fs.writeFileSync(launcher, `#!/bin/sh\nexec ${quotedBrowser} --no-sandbox "$@"\n`, { mode: 0o700 });
   // The shell may carry the real deployment's settings; the demo must not use them.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     !/^(PORT|HOST|PUBLIC_BASE_URL|RELAY_.*|ENABLE_.*)$/.test(key)));
@@ -244,6 +300,7 @@ async function startServer() {
       HOST: '127.0.0.1',
       RELAY_DEFAULT_DIR: WORKDIR,
       RELAY_FS_ROOTS: path.join(ROOT, 'projects'),
+      RELAY_BROWSER: launcher,
       ENABLE_QUOTA_WATCH: 'false',
       ENABLE_CLAUDE_KEEPALIVE: 'false',
     },
@@ -268,6 +325,25 @@ async function shoot(browser, wallpaper, lang, shot) {
     deviceScaleFactor: dpr,
     timezoneId: 'UTC',
     locale: lang === 'zh' ? 'zh-CN' : 'en-US',
+  });
+  let previewDownloaded = false;
+  let browserFrames = 0;
+  let browserUrl = '';
+  page.on('response', (response) => {
+    if (response.url().includes('/api/fs/download?') && response.url().includes('ferrari.png') && response.ok()) {
+      previewDownloaded = true;
+    }
+  });
+  page.on('websocket', (socket) => {
+    if (!socket.url().includes('/api/browser/connect?')) return;
+    socket.on('framereceived', ({ payload }) => {
+      if (Buffer.isBuffer(payload)) {
+        browserFrames += 1;
+      } else {
+        const message = JSON.parse(payload);
+        if (message.type === 'url') browserUrl = message.url;
+      }
+    });
   });
   if (shot.empty) {
     // Empty only this browser's history; the demo's translated chat stays intact.
@@ -329,14 +405,38 @@ async function shoot(browser, wallpaper, lang, shot) {
   }, { lang, wallpaper, darkOpacity: DARK_OPACITY, baseUrl: BASE_URL, token: TOKEN });
   await page.reload();
   await page.waitForTimeout(6000);
+  // Flutter paints to canvas; enable its semantics tree to target drawer labels.
+  await page.locator('flt-semantics-placeholder').evaluate((element) => element.click());
+  await page.waitForTimeout(500);
   for (const step of shot.steps) {
     if (step.tap) {
       await page.mouse.click(...step.tap);
+    } else if (step.button) {
+      const label = step.button[lang === 'zh' ? 1 : 0];
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      await page.getByRole('button', { name: new RegExp(escaped) }).click();
     } else {
       await page.mouse.move(step.scroll[0], step.scroll[1]);
       await page.mouse.wheel(0, step.scroll[2]);
     }
-    await page.waitForTimeout(step.tap ? 3000 : 1000);
+    await page.waitForTimeout(step.scroll ? 1000 : 3000);
+  }
+  if (shot.browser) {
+    await page.getByRole('textbox').fill(`http://127.0.0.1:${PREVIEW_PORT}`);
+    const framesBeforeNavigation = browserFrames;
+    await page.getByRole('textbox').press('Enter');
+    await page.waitForTimeout(4000);
+    assert(browserUrl.startsWith(`http://127.0.0.1:${PREVIEW_PORT}`), 'Browser must navigate to the localhost demo');
+    assert(browserFrames > framesBeforeNavigation, 'Browser screenshot must contain a streamed frame');
+  }
+  if (shot.image) {
+    assert(previewDownloaded, 'Image preview must download the demo Ferrari image');
+    await page.getByRole('img').waitFor({ state: 'visible' });
+    assert(!(await page.locator('body').innerText()).match(/Cannot preview|无法预览/), 'Image preview must render successfully');
+  }
+  if (shot.quota) {
+    await page.locator('[role="progressbar"]:not([aria-valuenow])').waitFor({ state: 'hidden', timeout: 60000 });
+    assert(!(await page.locator('body').innerText()).match(/Loading quota|正在查询额度/), 'Quota queries must finish before capture');
   }
   const file = path.join(OUT, `${shot.name}${lang === 'zh' ? '-zh' : ''}.png`);
   await page.screenshot({ path: file });
@@ -360,14 +460,19 @@ async function main() {
   try {
     const wallpaper = fs.readFileSync(image).toString('base64');
     for (const lang of MOBILE_ZH ? ['zh'] : ['en', 'zh']) {
-      seed(lang);
-      const server = await startServer();
+      seed(lang, image);
+      const preview = await startPreview(lang);
+      let server;
       try {
+        server = await startServer(chromium.executablePath());
         const shots = MOBILE_ZH ? MOBILE_SHOTS : SHOTS;
         for (const shot of shots) await shoot(browser, wallpaper, lang, shot);
       } finally {
-        server.kill();
-        await new Promise((resolve) => server.once('exit', resolve));
+        if (server) {
+          server.kill();
+          await new Promise((resolve) => server.once('exit', resolve));
+        }
+        await new Promise((resolve) => preview.close(resolve));
       }
     }
   } finally {

@@ -69,6 +69,19 @@ default 55%) for both themes.
   </tr>
 </table>
 
+### Preview localhost pages and workspace images
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-browser-mobile.png"><img src="docs/screenshots/relay-browser-mobile.png" alt="Relay browser showing a billing dashboard served on the backend's localhost" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-image-preview-mobile.png"><img src="docs/screenshots/relay-image-preview-mobile.png" alt="Relay file preview displaying a Ferrari image from the workspace" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Localhost browser</strong><br>View and operate the development page running on your backend machine.</td>
+    <td align="center"><strong>Image preview</strong><br>Open a workspace image and zoom in to inspect it.</td>
+  </tr>
+</table>
+
 <sub>These screenshots use the dark theme with a wallpaper set in Settings → Wallpaper. They were captured in Chromium against an isolated demo backend and contain no production credentials or project data.</sub>
 
 ## How it fits together

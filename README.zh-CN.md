@@ -64,6 +64,19 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
   </tr>
 </table>
 
+### 预览 localhost 页面和工作区图片
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-browser-mobile-zh.png"><img src="docs/screenshots/relay-browser-mobile-zh.png" alt="Relay 浏览器显示后端 localhost 上运行的账单面板" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-image-preview-mobile-zh.png"><img src="docs/screenshots/relay-image-preview-mobile-zh.png" alt="Relay 文件预览显示工作区中的 Ferrari 图片" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>localhost 浏览器</strong><br>查看并操作后端机器上运行的开发页面。</td>
+    <td align="center"><strong>图片预览</strong><br>打开工作区图片，缩放查看细节。</td>
+  </tr>
+</table>
+
 <sub>这些截图使用暗色主题，并在“设置 → 壁纸”中设置了壁纸；由 Chromium 连接隔离的演示后端截取，不包含生产凭据或真实项目数据。</sub>
 
 ## 它是怎样连接起来的

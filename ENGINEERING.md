@@ -42,7 +42,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend; the linux and macos scripts forward to unix |
 | scripts/install/unix | the one Linux/macOS implementation: install.sh, the setup menu, service scripts and the per-platform adapters in lib/ |
 | scripts/release | release bundle builders, version/documentation checks, Windows setup checks and a local Android signing fallback for a release draft |
-| scripts/dev | local development helpers (build flow, backend restart, icon export, README screenshots) |
+| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
 | .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft that also builds the signed Android APK from Actions Secrets |
 
@@ -443,7 +443,8 @@ navigation on 2026-11-09.
 - `node scripts/release/check_versions.js`, `node scripts/release/check_docs.js` and `node --test scripts/release/*.test.js` -> exit 0
 - `(cd app/core && flutter analyze --no-pub)` and `(cd app/shell && flutter analyze --no-pub)` -> "No issues found!"
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
-- `node scripts/dev/readme_screenshots.js <wallpaper image> --mobile-zh` (Web build present) -> nine Chinese demo screenshots (home, chat, empty chat, Swarm, files, machine details, quota usage, settings and credentials) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings.
+- `node scripts/dev/readme_screenshots.js docs/farrari.png` (Web build present) -> fourteen English/Chinese README screenshots (home and chat at 1440×960; mobile chat, Swarm, files, localhost browser and image preview at 800×1640) in `docs/screenshots/`, using an isolated demo backend and localhost dashboard with the Ferrari wallpaper.
+- `node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh` (Web build present) -> eleven Chinese demo screenshots (home, chat, empty chat, Swarm, files, browser, image preview, machine details, quota usage, settings and credentials) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings; quota capture waits for all usage queries to finish.
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.
