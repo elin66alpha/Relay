@@ -82,6 +82,7 @@ Console commands from the extracted directory / 解压目录的命令：
 .\status.cmd
 .\start.cmd
 .\stop.cmd
+.\update.cmd
 .\credential.cmd --url https://YOUR-BACKEND
 .\uninstall.cmd
 ~~~
@@ -106,14 +107,22 @@ backend/tunnel 的 .out/.err 日志保存服务输出。PID 文件位于
 
 ## Update / 升级
 
-Stop the old installation and back up server/. Extract the new ZIP separately,
+From 0.1.13 on, run .\update.cmd, or use Update in the app's Machine details:
+it downloads the latest release, checks it against SHA256SUMS, replaces the
+code, runtime and Web client in this directory, keeps server/ configuration and
+state, and restarts the backend while the tunnel keeps running.
+.\update.cmd -Archive <zip> installs a ZIP downloaded by hand. To move from an
+older release, stop it and back up server/, extract the new ZIP separately,
 copy your deployment configuration and generated state into its server/
 (excluding node_modules), then run Reinstall in the new directory to update
-the task path. Keep the included fresh app/ and runtime/ from the new bundle.
+the task path.
 Read docs/SECURITY.md before public deployment. Node's license is at
 runtime/node/LICENSE; package licenses remain in server/node_modules/.
 
-先停止旧实例并备份 server/；把新 ZIP 解压到另一目录，将部署配置和生成的状态复制到
-新目录的 server/（不复制 node_modules），然后在新目录选择重装以更新计划任务路径。
-保留新包自带的 app/ 和 runtime/。公网部署前阅读 docs/SECURITY.md。Node 许可证在
+从 0.1.13 起，运行 .\update.cmd，或在 App 的机器详情页点击更新：它会下载最新版本并按
+SHA256SUMS 校验，原地替换本目录的代码、运行时和 Web 客户端，保留 server/ 下的配置与状态，
+然后重启后端，隧道保持运行。.\update.cmd -Archive <zip> 可安装手动下载的 ZIP。从更早的
+版本升级时：先停止旧实例并备份 server/；把新 ZIP 解压到另一目录，将部署配置和生成的状态
+复制到新目录的 server/（不复制 node_modules），然后在新目录选择重装以更新计划任务路径。
+公网部署前阅读 docs/SECURITY.md。Node 许可证在
 runtime/node/LICENSE，依赖许可证在 server/node_modules/ 各包目录中。

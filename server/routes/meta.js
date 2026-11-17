@@ -31,6 +31,7 @@ module.exports = function createMetaRouter(ctx) {
     WEB_BUILD_DIR,
     activeRequests,
     agentRequiredError,
+    backendVersion,
     bearerToken,
     browserManager,
     buildDiagnostics,
@@ -56,6 +57,7 @@ module.exports = function createMetaRouter(ctx) {
     runningScopes,
     scopeChains,
     setSettings,
+    startBackendUpdate,
     terminalManager,
     workdirPresence,
   } = ctx;
@@ -358,7 +360,19 @@ module.exports = function createMetaRouter(ctx) {
 
   // Hardware and live temperatures; the machine page polls this while open.
   router.get('/api/machine', async (req, res) => {
-    res.json(await machineInfo());
+    res.json({ ...(await machineInfo()), version: backendVersion });
+  });
+
+  // Upgrades this backend to the latest release and restarts it. Takes no
+  // input; the app watches `version` on /api/machine for the result.
+  router.post('/api/backend-update', (req, res) => {
+    try {
+      startBackendUpdate();
+    } catch (err) {
+      if (!err.code) throw err;
+      return res.status(409).json({ error: err.message, code: err.code });
+    }
+    return res.status(202).json({ ok: true, version: backendVersion });
   });
 
   router.get('/api/diagnostics', (req, res) => {

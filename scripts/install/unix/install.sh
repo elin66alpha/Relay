@@ -44,7 +44,11 @@ for tool in curl tar; do
   need "$tool" || { c_err "$tool is required. Install it, then rerun this command."; exit 1; }
 done
 # Piped into bash, stdin is the script itself; questions go to the terminal.
-[ -r /dev/tty ] || { c_err "Run this from an interactive terminal."; exit 1; }
+# Upgrading the installation in RELAY_DIR asks nothing, so the backend runs
+# this without one (POST /api/backend-update).
+if [ ! -f "${RELAY_DIR:-}/server/.env" ]; then
+  [ -r /dev/tty ] || { c_err "Run this from an interactive terminal."; exit 1; }
+fi
 
 version="${RELAY_VERSION:-}"
 if [ -z "$version" ]; then

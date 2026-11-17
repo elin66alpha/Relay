@@ -14,6 +14,23 @@
   as before. A disconnected network drive cannot hold up a listing: probes run
   once per 30 seconds and a listing waits at most 1.5 seconds for one.
 
+- The app installs its own updates. When a newer release exists, a dialog at
+  start-up (and Settings → About → Check for updates) offers to download it:
+  Android opens the system package installer, Windows replaces the app's files
+  and restarts it, Linux opens the `.deb` in the software installer and macOS
+  unpacks the new app in Downloads. iOS still only reports the release, and
+  the Web client updates with its backend.
+- The backend updates and restarts from the app: Machine details shows the
+  backend's Relay version and, when a newer release exists, **Update to
+  \<version\> and restart**. `POST /api/backend-update` runs the same in-place
+  upgrade as the host commands (`install.sh` on Linux and macOS, the new
+  `update.cmd` on Windows), keeping `server/.env`, tokens, chats and settings;
+  `GET /api/machine` reports `version`. A backend running from a git checkout
+  refuses (`UPDATE_UNSUPPORTED`).
+- Windows backend: `update.cmd` upgrades the installation in place from the
+  latest release, checked against `SHA256SUMS`, or from a ZIP downloaded by
+  hand (`update.cmd -Archive <zip>`). The tunnel keeps running.
+
 ### Changed
 
 - Windows Setup makes the agent CLIs it finds callable from any new terminal:

@@ -30,6 +30,7 @@ dependencies:
   re_highlight: ^0.0.3
   url_launcher: ^6.3.3
   path: ^1.9.1
+  open_filex: ^5.0.0
 
 dev_dependencies:
   flutter_test:

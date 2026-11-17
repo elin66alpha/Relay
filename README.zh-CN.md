@@ -113,7 +113,7 @@ flowchart LR
 | 🌐 | **localhost 浏览器** | 在任何网络下查看并操作后端机器 `localhost` 上的页面（比如正在开发的面板）：主机上的无头 Chrome 把画面推到 App，点击、拖动、滑块和输入都会转发回去，并按手机或桌面自动排版。见 [浏览器](docs/handbook.md#browser)。 |
 | 🤖 | **通过 MCP 接入个人 Agent** | `mcp/` 是一个零依赖的 stdio MCP server：机器人和 App 一样用凭证 JSON 加密码登录，可以调用所有 Agent、切换工作区、模型和思考深度、查看额度、管理会话、蜂群和文件，并使用终端。见 [Relay MCP](docs/handbook.md#relay-mcp)。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
-| 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
+| 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”下载并安装新版本（Android、Windows、Linux、macOS；启动时也会提示）。机器详情页可更新并重启后端。 |
 
 Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenCode 与 Hermes
 目前是由主机管理的实验性集成。凭据都留在后端主机上，Relay 不会代替你登录。

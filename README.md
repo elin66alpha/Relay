@@ -118,7 +118,7 @@ can run concurrently without sharing a global backend directory.
 | 🌐 | **Browser for localhost** | See and operate the page your agent is serving on the backend's `localhost` (a dashboard under development, say) from anywhere: a headless Chrome on the host streams it to the app and takes taps, drags, sliders and typing, laid out for a phone or a desktop. See [Browser](docs/handbook.md#browser). |
 | 🤖 | **Personal agents over MCP** | `mcp/` is a dependency-free stdio MCP server: a bot signs in with a credential JSON and its password, like the app, and can chat with every agent, switch workdir, model and effort, read quota, manage sessions, Swarms and files, and use the terminal. See [Relay MCP](docs/handbook.md#relay-mcp). |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
-| 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
+| 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates, which downloads and installs a newer release (Android, Windows, Linux, macOS; also offered at start-up). Machine details updates and restarts the backend. |
 
 Claude Code, Codex, and Cursor are signed in on the backend host with each
 CLI's own login. OpenCode and Hermes are experimental, host-managed

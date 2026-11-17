@@ -19,8 +19,9 @@ const MachineCredential _machine = MachineCredential(
 
 Future<void> _pumpDetails(
   WidgetTester tester,
-  CliAgentsController agentsController,
-) async {
+  CliAgentsController agentsController, {
+  String latest = '0.1.13',
+}) async {
   tester.view.physicalSize = const Size(1200, 900);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -37,6 +38,7 @@ Future<void> _pumpDetails(
           machine: _machine,
           backend: backend,
           agentsController: agentsController,
+          latestVersion: () async => latest,
         ),
       ),
     ),
@@ -109,9 +111,35 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Log in'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Log in again'), findsNothing);
   });
+
+  testWidgets('a newer release updates the backend from the hardware card', (
+    WidgetTester tester,
+  ) async {
+    await _pumpDetails(tester, CliAgentsController(), latest: '0.1.14');
+    expect(find.text('0.1.13'), findsOneWidget);
+    await tester.tap(find.text('Update to 0.1.14 and restart'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Updating the backend…'), findsOneWidget);
+
+    // The page polls the backend; the restarted one reports the new version.
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump();
+    expect(find.text('0.1.14'), findsOneWidget);
+    expect(find.text('Backend updated to 0.1.14'), findsOneWidget);
+    expect(find.text('Updating the backend…'), findsNothing);
+    expect(find.text('Update to 0.1.14 and restart'), findsNothing);
+  });
 }
 
 class _OfflineBackendClient extends BackendClient {
+  String _version = '0.1.13';
+
+  @override
+  Future<void> updateBackend() async => _version = '0.1.14';
+
   @override
   Future<Uri> terminalWebSocketUri({required int cols, required int rows}) {
     throw BackendException('terminal offline');
@@ -126,7 +154,8 @@ class _OfflineBackendClient extends BackendClient {
 
   @override
   Future<MachineInfo> machineInfo() async =>
-      MachineInfo.fromJson(const <String, Object?>{
+      MachineInfo.fromJson(<String, Object?>{
+        'version': _version,
         'cpu': <String, Object?>{'model': 'Intel Core i7', 'cores': 8},
         'memoryBytes': 17179869184,
         'gpus': <String>['NVIDIA GeForce GTX 1060'],

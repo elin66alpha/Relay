@@ -531,6 +531,23 @@ class AppStrings {
       : 'Version $version is available on GitHub Releases';
   String get updateCheckFailed =>
       isZh ? '无法检查更新，请稍后再试' : 'Could not check for updates. Try again later.';
+  String updateAvailableTitle(String version) =>
+      isZh ? '发现新版本 $version' : 'Version $version is available';
+  String get updatePrompt =>
+      isZh ? '现在下载并安装吗？' : 'Download and install it now?';
+  String get updateNow => isZh ? '更新' : 'Update';
+  String get updateLater => isZh ? '稍后' : 'Later';
+  String get downloadingUpdate => isZh ? '正在下载更新…' : 'Downloading update…';
+  String updateFailed(Object err) => isZh ? '更新失败：$err' : 'Update failed: $err';
+  String get backendVersionLabel => isZh ? 'Relay 后端' : 'Relay backend';
+  String backendUpdateAction(String version) =>
+      isZh ? '更新到 $version 并重启' : 'Update to $version and restart';
+  String get backendUpdateConfirm => isZh
+      ? '后端会下载最新版本并重启，正在运行的任务和终端会中断。'
+      : 'The backend downloads the latest release and restarts. Running turns and terminals are interrupted.';
+  String get backendUpdating => isZh ? '正在更新后端…' : 'Updating the backend…';
+  String backendUpdated(String version) =>
+      isZh ? '后端已更新到 $version' : 'Backend updated to $version';
   String get fontSize => isZh ? '字体大小' : 'Font size';
   String get fontSizeDescription =>
       isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';

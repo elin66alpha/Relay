@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
+import 'app_update.dart';
 import 'getting_started_screen.dart';
 import 'update_check.dart';
 import 'wallpaper_screen.dart';
@@ -353,8 +354,133 @@ class AppSettingsScreen extends StatelessWidget {
   }
 }
 
-/// Compares this build with the newest GitHub release and only reports the
-/// result; nothing is downloaded.
+/// Compares this build with the newest GitHub release. When one is newer and
+/// this platform can install it, offers to download and install it; otherwise
+/// reports the result. [silent] is the check at app start: it says nothing
+/// unless there is an update to install.
+Future<void> checkForAppUpdate(
+  BuildContext context, {
+  bool silent = false,
+  String currentVersion = _applicationVersion,
+  Future<String> Function() latestVersion = fetchLatestVersion,
+}) async {
+  final AppStrings strings = context.l10n;
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  void report(String message) {
+    if (silent) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  final String latest;
+  try {
+    latest = await latestVersion();
+  } catch (_) {
+    return report(strings.updateCheckFailed);
+  }
+  if (!isNewerVersion(latest, currentVersion)) {
+    return report(strings.upToDate(currentVersion));
+  }
+  final String? asset = updateAssetName(latest);
+  if (asset == null) return report(strings.updateAvailable(latest));
+  if (!context.mounted) return;
+  final bool? install = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(strings.updateAvailableTitle(latest)),
+      content: Text(strings.updatePrompt),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(strings.updateLater),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(strings.updateNow),
+        ),
+      ],
+    ),
+  );
+  if (install != true || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext context) =>
+        _UpdateDownloadDialog(version: latest, asset: asset),
+  );
+}
+
+/// Downloads the update and hands it to the system; closes itself when the
+/// system has taken over, and stays open with the error when it fails.
+class _UpdateDownloadDialog extends StatefulWidget {
+  const _UpdateDownloadDialog({required this.version, required this.asset});
+
+  final String version;
+  final String asset;
+
+  @override
+  State<_UpdateDownloadDialog> createState() => _UpdateDownloadDialogState();
+}
+
+class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
+  double? _progress;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      await downloadAndInstallUpdate(
+        widget.version,
+        widget.asset,
+        onProgress: (double? progress) {
+          if (mounted) setState(() => _progress = progress);
+        },
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (err) {
+      if (mounted) setState(() => _error = err);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final Object? error = _error;
+    return AlertDialog(
+      title: Text(strings.updateAvailableTitle(widget.version)),
+      content: error != null
+          ? Text(strings.updateFailed(error))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  _progress == null
+                      ? strings.downloadingUpdate
+                      : '${strings.downloadingUpdate} '
+                          '${(_progress! * 100).round()}%',
+                ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: _progress),
+              ],
+            ),
+      actions: <Widget>[
+        if (error != null)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(strings.close),
+          ),
+      ],
+    );
+  }
+}
+
 class _UpdateCheckTile extends StatefulWidget {
   const _UpdateCheckTile();
 
@@ -366,23 +492,9 @@ class _UpdateCheckTileState extends State<_UpdateCheckTile> {
   bool _checking = false;
 
   Future<void> _check() async {
-    final AppStrings strings = context.l10n;
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     setState(() => _checking = true);
-    String message;
-    try {
-      final String latest = await fetchLatestVersion();
-      message = isNewerVersion(latest, _applicationVersion)
-          ? strings.updateAvailable(latest)
-          : strings.upToDate(_applicationVersion);
-    } catch (_) {
-      message = strings.updateCheckFailed;
-    }
-    if (!mounted) return;
-    setState(() => _checking = false);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    await checkForAppUpdate(context);
+    if (mounted) setState(() => _checking = false);
   }
 
   @override

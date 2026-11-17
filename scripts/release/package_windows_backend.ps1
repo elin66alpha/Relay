@@ -98,7 +98,7 @@ try {
 } finally { $env:PATH = $oldPath }
 
 $ascii = New-Object Text.ASCIIEncoding
-foreach ($command in @('setup', 'start', 'stop', 'status', 'uninstall')) {
+foreach ($command in @('setup', 'start', 'stop', 'status', 'update', 'uninstall')) {
   $commandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install\windows\' + $command + '.ps1" %*'
   $lines = @('@echo off', $commandLine, 'exit /b %errorlevel%')
   [IO.File]::WriteAllLines((Join-Path $bundle "$command.cmd"), $lines, $ascii)
@@ -126,7 +126,7 @@ $manifest = [ordered]@{
 # files with names that resemble application state. No local config is copied.
 $allowed = @($sources) + @('LICENSE', 'README.md', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
   'docs/install.md', 'docs/install.zh-CN.md', 'docs/handbook.md',
-  'setup.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'uninstall.cmd',
+  'setup.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'update.cmd', 'uninstall.cmd',
   'credential.cmd', 'bundle-info.json', 'Setup.exe')
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')

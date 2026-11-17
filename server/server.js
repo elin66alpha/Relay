@@ -66,6 +66,7 @@ const { startQuotaWatch } = require('./lib/quota-watch');
 const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { buildDiagnostics } = require('./lib/diagnostics');
 const { machineInfo } = require('./lib/machine-info');
+const { backendVersion, startBackendUpdate } = require('./lib/self-update');
 const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
 const { locateBin } = require('./lib/cli-paths');
@@ -589,6 +590,7 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
+  backendVersion,
   backgroundTurnHandler,
   bearerToken,
   browserManager,
@@ -662,6 +664,7 @@ const routeContext = {
   setActiveChatSession,
   setGroupMembers,
   setSettings,
+  startBackendUpdate,
   streamUploadToFile,
   terminalManager,
   touchChatSession,

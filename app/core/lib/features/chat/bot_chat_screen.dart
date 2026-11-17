@@ -15,6 +15,7 @@ import '../../core/platform/file_saver.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/wallpaper.dart';
+import '../settings/app_settings_screen.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
@@ -90,6 +91,10 @@ class _BotChatScreenState extends State<BotChatScreen>
     _syncContext();
     // Open straight at the latest message rather than the top of the list.
     _onChatChanged();
+    // Once per app start: offer a newer release when this platform installs it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(checkForAppUpdate(context, silent: true));
+    });
   }
 
   @override

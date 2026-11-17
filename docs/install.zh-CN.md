@@ -30,7 +30,7 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 在 Linux 和 macOS 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到
 `~/relay`（运行时可改，或用 `RELAY_DIR` 指定），然后运行该系统的安装脚本。再次运行即原地
 升级代码，保留 `server/.env`、令牌、聊天和设置，并重启后端（Linux 上是 PM2 进程，macOS
-上是 LaunchAgent）。`RELAY_VERSION=<版本>` 可安装指定版本。
+上是 LaunchAgent）。`RELAY_VERSION=<版本>` 可安装指定版本。有新版本时，App 的机器详情页也能发起同样的升级。
 
 ```bash
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
@@ -139,7 +139,7 @@ Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.j
 agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 Node 时再加上包内 Node，
 之后新开的终端即可直接调用；Setup.exe 的 “Open terminal (sign in CLIs)” 按钮（命令行菜单 `t`）可立即打开一个。卸载只移除安装器添加的条目。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
-`.\uninstall.cmd` 是下面相同服务脚本的入口。计划任务在当前用户登录时启动。
+`.\uninstall.cmd` 是下面相同服务脚本的入口，`.\update.cmd` 把安装原地升级到最新版本。计划任务在当前用户登录时启动。
 
 ```powershell
 .\scripts\install\windows\status.ps1

@@ -192,6 +192,12 @@ class BackendClient {
     return MachineInfo.fromJson(decoded.cast<String, Object?>());
   }
 
+  /// Starts the backend's upgrade to the latest release. It answers at once
+  /// and restarts when done; [machineInfo] then reports the new version.
+  Future<void> updateBackend() async {
+    await _requestJson('POST', '/api/backend-update');
+  }
+
   Future<List<DeviceToken>> deviceTokens() async {
     final Object? decoded = await _requestJson(
       'GET',

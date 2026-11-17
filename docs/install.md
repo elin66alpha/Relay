@@ -40,7 +40,8 @@ against the release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the
 prompt, or `RELAY_DIR`) and runs that system's setup. Running it again upgrades
 the code in place, keeps `server/.env`, tokens, chats and settings, and restarts
 the backend (the PM2 process on Linux, the LaunchAgent on macOS).
-`RELAY_VERSION=<VERSION>` installs a specific release.
+`RELAY_VERSION=<VERSION>` installs a specific release. The app's Machine details
+page starts the same upgrade when a newer release exists.
 
 ```bash
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
@@ -172,7 +173,8 @@ plus the bundled Node when the host has none, so new terminals find them;
 entries Setup added.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
-same service adapters below. The Scheduled Task starts at this user's login.
+same service adapters below, and `.\update.cmd` upgrades the installation in
+place to the latest release. The Scheduled Task starts at this user's login.
 
 ```powershell
 .\scripts\install\windows\status.ps1
