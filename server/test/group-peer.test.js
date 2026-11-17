@@ -18,13 +18,12 @@ process.env.RELAY_HISTORY_FILE = path.join(scratchDir, 'history.json');
 process.env.RELAY_SWARM_MAX_HOPS = '2';
 
 const history = require('../lib/history');
-const { sessionScopeKey } = require('../lib/chat-sessions');
+const { sessionContextKeyFor, scopeKeyFor } = require('../lib/chat-sessions');
 const { runAgentTurn } = require('../lib/agent-turn');
 const groups = require('../lib/groups');
 const { createPeerClient, normalizeBaseUrl, peerIdFor } = require('../lib/peer-client');
 const createGroupRouter = require('../routes/group');
 
-const SEP = '\0';
 const WORKDIR = '/tmp/group-peer';
 const PEER_TOKEN = 'peer-secret-token-1f6c2a9d';
 const AGENTS = {
@@ -146,9 +145,6 @@ function createFakePeer({ token = PEER_TOKEN } = {}) {
 }
 
 function buildContext() {
-  const sessionContextKeyFor = (agentKey, workdir) => `${workdir}${SEP}${agentKey}`;
-  const scopeKeyFor = (agentKey, workdir, sessionId) =>
-    sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
   const runningScopes = new Set();
   const scopeChains = new Map();
   const agentTurnDependencies = () => ({
@@ -248,7 +244,7 @@ async function createSwarm(name, members, extra = {}) {
 }
 
 function messagesOf(group) {
-  return history.readHistory(sessionScopeKey(`${WORKDIR}${SEP}group:${group.id}`));
+  return history.readHistory(scopeKeyFor(`group:${group.id}`, WORKDIR));
 }
 
 test('adding a remote member creates its own session on the peer and restores the active one', async () => {

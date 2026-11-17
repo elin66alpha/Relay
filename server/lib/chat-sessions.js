@@ -75,9 +75,22 @@ function normalizeContext(raw, now = new Date().toISOString()) {
   return { activeSessionId, sessions };
 }
 
+// Session context = work directory + agent. Individual chat sessions hang under
+// that context and each keeps its own history plus resumable CLI session. NUL
+// separates parts so no real path can collide with the agent/session suffix.
+const SCOPE_SEPARATOR = '\u0000';
+
 function sessionScopeKey(contextKey, sessionId) {
   const id = validSessionId(sessionId) || MAIN_SESSION_ID;
-  return id === MAIN_SESSION_ID ? contextKey : `${contextKey}\u0000${id}`;
+  return id === MAIN_SESSION_ID ? contextKey : `${contextKey}${SCOPE_SEPARATOR}${id}`;
+}
+
+function sessionContextKeyFor(agentKey, workdir) {
+  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
+}
+
+function scopeKeyFor(agentKey, workdir, sessionId) {
+  return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
 }
 
 function contextPayload(context) {
@@ -190,6 +203,7 @@ function renameChatSession(contextKey, sessionId, rawName) {
 module.exports = {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  SCOPE_SEPARATOR,
   listChatSessions,
   resolveChatSession,
   createChatSession,
@@ -198,4 +212,6 @@ module.exports = {
   deleteChatSession,
   renameChatSession,
   sessionScopeKey,
+  sessionContextKeyFor,
+  scopeKeyFor,
 };

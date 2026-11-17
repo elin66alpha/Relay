@@ -992,15 +992,28 @@ class BotChatController extends ChangeNotifier {
         sessionId,
       );
       if (history == null) return;
-      // Never clobber a turn our own POST stream is actively driving (that
-      // stream is the smoother, authoritative source). Once it drops or is
-      // absent (reattach / cold-start restore), polling becomes authoritative.
-      if (_localStreamActive) return;
+      // Never clobber a turn our own foreground request is driving (whether
+      // still connecting or actively streaming), or a snapshot whose mirror
+      // already ended while the fetch was in flight. Once a foreground stream
+      // drops (reattach) or on a cold-start restore, polling is authoritative.
+      if (_localStreamActive ||
+          _foregroundTurn != null ||
+          !(isThinking || _remoteActive)) {
+        return;
+      }
+      final bool wasActive = isThinking || _remoteActive;
       final bool matchesCurrent =
           _historySnapshotMatchesCurrent(history.messages);
       if (!matchesCurrent) _applyHistorySnapshot(history);
       final bool reattachFinished =
           _finishReattachIfNotStreaming(history.messages);
+      if (!reattachFinished &&
+          wasActive &&
+          !isThinking &&
+          !_remoteActive &&
+          _pendingQueue.isNotEmpty) {
+        unawaited(_maybeDrainQueue());
+      }
       if (matchesCurrent) {
         if (!(isThinking || _remoteActive)) _stopHistoryPolling();
         if (reattachFinished) notifyListeners();
@@ -1024,6 +1037,19 @@ class BotChatController extends ChangeNotifier {
     unawaited(_refreshHistorySnapshot());
   }
 
+  void _drainQueueOrCatchUp({bool skipCatchUp = false}) {
+    if (_pendingQueue.isNotEmpty) {
+      unawaited(_maybeDrainQueue());
+    }
+    if (!skipCatchUp &&
+        !isThinking &&
+        _foregroundTurn == null &&
+        !_remoteActive &&
+        _pendingQueue.isEmpty) {
+      unawaited(_catchUpHistory());
+    }
+  }
+
   // A remote turn finished. Do a final refresh shortly after so the snapshot
   // captures the finalized (non-streaming) message, then stop mirroring.
   void _endRemoteMirror() {
@@ -1032,11 +1058,11 @@ class BotChatController extends ChangeNotifier {
     _remoteSettleTimer?.cancel();
     _remoteSettleTimer = Timer(const Duration(milliseconds: 900), () {
       _remoteActive = false;
-      unawaited(_refreshHistorySnapshot());
       if (!isThinking) _stopHistoryPolling();
       // A turn we were only mirroring (e.g. a reattached one) just finished;
-      // release any follow-ups queued while it ran.
-      unawaited(_maybeDrainQueue());
+      // release any follow-ups queued while it ran before catching up, so a
+      // newly promoted message is not raced by an idle history snapshot.
+      _drainQueueOrCatchUp();
     });
   }
 
@@ -1061,6 +1087,7 @@ class BotChatController extends ChangeNotifier {
     notifyListeners();
 
     bool reattach = false;
+    bool deliveryFailed = false;
     try {
       final String sessionId = await ensureActiveSessionId(agent);
       turn.sessionId = sessionId;
@@ -1112,11 +1139,11 @@ class BotChatController extends ChangeNotifier {
       if (turn.detached || !identical(_foregroundTurn, turn)) return;
       if (err is BackendException && err.code == 'AGENT_CANCELLED') {
         _markAssistantCancelled(requestId);
-      } else if (_isStreamDisconnect(err)) {
-        // The stream dropped (app backgrounded/closed, flaky network) but the
-        // backend keeps running this turn. Keep the streaming placeholder and
-        // the user message as-is; hand off to history polling + the shared
-        // event stream, which mirror progress and finalize when it completes.
+      } else if (turn.started && _isStreamDisconnect(err)) {
+        // The stream dropped (app backgrounded/closed, flaky network) after
+        // the server accepted the turn. Keep the streaming placeholder and the
+        // user message as-is; hand off to history polling + the shared event
+        // stream, which mirror progress and finalize when it completes.
         reattach = true;
       } else {
         _discardAssistantByRequestId(requestId);
@@ -1128,6 +1155,7 @@ class BotChatController extends ChangeNotifier {
           // Reflect the failure in the banner right away.
           _authStatus[agent.key] = false;
         }
+        deliveryFailed = true;
         _markUserDeliveryFailed(userMessage.id, detail);
       }
     } finally {
@@ -1147,12 +1175,11 @@ class BotChatController extends ChangeNotifier {
       }
       if (ownsForeground) notifyListeners();
       // A remote turn may have started and finished on this scope while ours was
-      // in flight (we skip mirroring then). Catch up to the shared truth now.
+      // in flight (we skip mirroring then). Drain queued follow-ups first so a
+      // newly promoted message is not raced by an idle history catch-up, and
+      // skip catch-up after a delivery failure so the failed bubble stays put.
       if (!reattach && ownsForeground && !turn.detached) {
-        unawaited(_catchUpHistory());
-        // The conversation is free again: send the next queued follow-up. (A
-        // reattached turn is still running, so its queue drains when it ends.)
-        unawaited(_maybeDrainQueue());
+        _drainQueueOrCatchUp(skipCatchUp: deliveryFailed);
       }
     }
   }
@@ -1177,7 +1204,11 @@ class BotChatController extends ChangeNotifier {
   /// pull the history once to catch up.
   Future<void> onAppResumed() async {
     await reconnectEvents();
-    await _catchUpHistory();
+    if (isThinking || _remoteActive) {
+      await _refreshHistorySnapshot();
+    } else {
+      await _catchUpHistory();
+    }
   }
 
   // One-shot pull of the shared history, used after our own turn ends to pick up
@@ -1197,6 +1228,7 @@ class BotChatController extends ChangeNotifier {
       // Bail if our own or a remote turn started while the fetch was in flight.
       if (history == null ||
           isThinking ||
+          _foregroundTurn != null ||
           _remoteActive ||
           history.messages.isEmpty) {
         return;
@@ -1205,7 +1237,11 @@ class BotChatController extends ChangeNotifier {
       // The snapshot may have adopted a still-streaming turn another device
       // started while ours was running; if so, poll it to completion (nothing
       // else will — _beginRemoteMirror no-ops once isThinking is true).
-      if (isThinking) _startHistoryPolling();
+      if (isThinking) {
+        _startHistoryPolling();
+      } else if (!_remoteActive && _pendingQueue.isNotEmpty) {
+        unawaited(_maybeDrainQueue());
+      }
       notifyListeners();
     } catch (_) {
       // Best-effort; the next interaction will reconcile.

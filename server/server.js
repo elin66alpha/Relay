@@ -94,6 +94,7 @@ const {
 const {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  SCOPE_SEPARATOR,
   listChatSessions,
   resolveChatSession,
   createChatSession,
@@ -101,7 +102,8 @@ const {
   touchChatSession,
   deleteChatSession,
   renameChatSession,
-  sessionScopeKey,
+  sessionContextKeyFor,
+  scopeKeyFor,
 } = require('./lib/chat-sessions');
 const {
   agentPayload,
@@ -402,19 +404,6 @@ function normalizeDeviceId(value) {
   if (!text) return '';
   if (!/^[A-Za-z0-9._-]{8,128}$/.test(text)) return '';
   return text;
-}
-
-// Session context = work directory + agent. Individual chat sessions hang under
-// that context and each keeps its own history plus resumable CLI session. NUL
-// separates parts so no real path can collide with the agent/session suffix.
-const SCOPE_SEPARATOR = '\u0000';
-
-function sessionContextKeyFor(agentKey, workdir) {
-  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
-}
-
-function scopeKeyFor(agentKey, workdir, sessionId) {
-  return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
 }
 
 // The work directory for a request: the device's x-workdir header, or the
