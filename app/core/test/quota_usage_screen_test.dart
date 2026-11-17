@@ -209,6 +209,72 @@ void main() {
       <String?>['claude', 'claude', 'codex', 'cursor', 'agy'],
     );
   });
+
+  testWidgets(
+      'Antigravity composer strip shows only the Quota usage prompt and skips fetching',
+      (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final _CountingUsageBackendClient backendClient =
+        _CountingUsageBackendClient();
+    final QuotaController quotaController = QuotaController(
+      backendClient: backendClient,
+    );
+    final AppSettingsController settings = AppSettingsController();
+    addTearDown(quotaController.dispose);
+    addTearDown(backendClient.close);
+    addTearDown(settings.dispose);
+    String agentKey = 'agy';
+    bool busy = false;
+    late StateSetter rebuild;
+
+    await tester.pumpWidget(
+      AppScope(
+        controller: settings,
+        child: MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (BuildContext context, StateSetter setState) {
+                rebuild = setState;
+                return QuotaStrip(
+                  quotaController: quotaController,
+                  agentKey: agentKey,
+                  busy: busy,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(backendClient.requests, isEmpty);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.byType(InkWell), findsNothing);
+    expect(find.text('Open Quota usage to view quota'), findsOneWidget);
+
+    await settings.setLanguage(AppLanguage.zh);
+    await tester.pump();
+    expect(find.text('请在「额度查询」中查看额度'), findsOneWidget);
+
+    // Finishing an Antigravity turn does not query agy quota from the strip.
+    rebuild(() => busy = true);
+    await tester.pump();
+    rebuild(() => busy = false);
+    await tester.pump();
+    expect(backendClient.requests, isEmpty);
+
+    // Other agents still fetch and render their quota bars normally.
+    rebuild(() => agentKey = 'claude');
+    await tester.pump();
+    expect(backendClient.requests, <String?>['claude']);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    backendClient.answer('claude');
+    await tester.pump();
+    expect(find.text('58%'), findsOneWidget);
+  });
 }
 
 class _CountingUsageBackendClient extends _UsageBackendClient {

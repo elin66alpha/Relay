@@ -117,6 +117,8 @@ class AppStrings {
   String get cursorModelsQuotaShort => isZh ? '模型' : 'Models';
   String get apiModelsQuotaShort => 'API';
   String get quotaResetShort => isZh ? '已重置' : 'Reset';
+  String get agyQuotaStripHint =>
+      isZh ? '请在「额度查询」中查看额度' : 'Open Quota usage to view quota';
   String get contextUsage => isZh ? '上下文' : 'Context';
   String resetsIn(Duration left) =>
       isZh ? '${resetsInShort(left)}后重置' : 'Resets in ${resetsInShort(left)}';

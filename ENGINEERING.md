@@ -236,11 +236,13 @@ architecture change (see Changes).
   `agy -p /usage --output-format json` (which executes the `/usage` slash command
   headlessly with zero model turns or token cost) when no language server is
   running. All returned subscription buckets (including separate Argon limits)
-  appear in the usage page and composer strip; each quota's `label` is the shortened
+  appear in the usage page; each quota's `label` is the shortened
   model group and its `window` (`5h`/`weekly`) is localized by the app, with the shared cache/stale
-  handling; the agy cache lives 5 minutes, longer than the strip's one-minute poll,
-  and concurrent reads of any source share one in-flight fetch. No scheduler is
-  added for agy.
+  handling; the agy cache lives 5 minutes,
+  and concurrent reads of any source share one in-flight fetch. In the solo-chat
+  composer strip, Antigravity displays a short prompt directing the user to
+  Quota usage instead of querying or rendering individual quota meters. No
+  scheduler is added for agy.
 - Fast mode is a control for Claude Code, Codex, and Cursor and defaults off.
   Claude receives a `fastMode` settings override; Codex receives an explicit
   `serviceTier` of `fast` or `default` on every turn; Cursor receives `fast`
@@ -525,10 +527,12 @@ navigation on 2026-11-09.
   running turn, and resume after backend restart: the scope retains its conversation,
   context occupancy and window size (`<used> / <window>`) update after each turn,
   clearing resets to `0 / <window>`, and switching models updates the active model's
-  window. Quota Usage and the composer strip report Antigravity's three model groups
+  window. Quota Usage reports Antigravity's three model groups
   and five quota buckets even when no language server is running prior to the query,
   labelled like Claude and Codex as model plus window (`Gemini 5 小时`, `Gemini 本周`,
-  `Claude/GPT 5 小时`, `Gemini 4 Argon 本周`), 5 hours before the week.
+  `Claude/GPT 5 小时`, `Gemini 4 Argon 本周`), 5 hours before the week, while the
+  composer strip displays the short Quota usage prompt without querying or showing
+  individual meters.
   Two sessions with different models use isolated workers; the selected model and
   permission policy apply to each session. The file API rejects the agy OAuth file.
 

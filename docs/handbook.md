@@ -449,8 +449,9 @@ minutes. Multiple effort variants appear as one model with a separate effort
 control, ordered low to high. Saved variant selections retain their model and effort. Cautious mode refuses approval
 requests; auto-approve accepts them. Deleting a Relay chat closes its live session
 and forgets its ID; agy transcripts remain managed by the host CLI. Antigravity
-quota appears in Usage and the composer strip, with each Gemini, Claude/GPT
-and Argon bucket kept separate. A running Antigravity conversation answers
+quota appears in Usage, with each Gemini, Claude/GPT and Argon bucket kept
+separate, while the composer strip shows a short hint pointing to Quota usage.
+A running Antigravity conversation answers
 instantly; otherwise Relay runs `agy -p /usage` (about two seconds, no model
 turn). Results are cached for five minutes. Quota schedules remain Claude/Codex only.
 

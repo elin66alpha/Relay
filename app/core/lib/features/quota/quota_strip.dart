@@ -7,12 +7,15 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
 import 'quota_controller.dart';
 
-/// The agents whose quota the backend reports.
+/// The agents whose quota strip is shown above the composer.
 bool quotaStripSupports(String agentKey) =>
     agentKey == 'claude' ||
     agentKey == 'codex' ||
     agentKey == 'cursor' ||
     agentKey == 'agy';
+
+bool _fetchesQuotaForStrip(String agentKey) =>
+    quotaStripSupports(agentKey) && agentKey != 'agy';
 
 /// The active agent's remaining quota, pinned above the composer. Display
 /// only: the full quota screen opens from the agents drawer.
@@ -20,7 +23,9 @@ bool quotaStripSupports(String agentKey) =>
 /// Numbers come from the controller's shared usage report. It refreshes when
 /// the agent changes and when a turn ends (the turn just spent quota), at most
 /// once a minute per agent; the backend caches for a minute as well, so these
-/// reads are cheap.
+/// reads are cheap. Antigravity has too many separate pools for the compact
+/// strip, so it shows a short prompt directing the user to Quota usage instead
+/// of querying or rendering quota meters here.
 class QuotaStrip extends StatefulWidget {
   const QuotaStrip({
     required this.quotaController,
@@ -54,7 +59,7 @@ class _QuotaStripState extends State<QuotaStrip> {
     super.initState();
     unawaited(_refresh());
     _tick = Timer.periodic(_minInterval, (_) {
-      if (!mounted) return;
+      if (!mounted || !_fetchesQuotaForStrip(widget.agentKey)) return;
       setState(() {});
       if (_windowPassed()) unawaited(_refresh());
     });
@@ -95,7 +100,7 @@ class _QuotaStripState extends State<QuotaStrip> {
 
   Future<void> _refresh() async {
     final String source = widget.agentKey;
-    if (!quotaStripSupports(source)) return;
+    if (!_fetchesQuotaForStrip(source)) return;
     final DateTime now = DateTime.now();
     final DateTime? last = _fetchedAt[source];
     if (last != null && now.difference(last) < _minInterval) return;
@@ -112,8 +117,20 @@ class _QuotaStripState extends State<QuotaStrip> {
 
   @override
   Widget build(BuildContext context) {
-    final UsageAgent? usage = _usage;
     if (!quotaStripSupports(widget.agentKey)) return const SizedBox.shrink();
+    if (widget.agentKey == 'agy') {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+        child: Text(
+          context.l10n.agyQuotaStripHint,
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+        ),
+      );
+    }
+    final UsageAgent? usage = _usage;
     if (usage == null && _loading) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
