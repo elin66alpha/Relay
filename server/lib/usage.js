@@ -7,7 +7,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { createJsonStore } = require('./json-store');
-const { cursorAuthFile, agyAuthFile, locateBin } = require('./cli-paths');
+const { cursorAuthFile, agyAuthFile, cliCommand } = require('./cli-paths');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -856,16 +856,21 @@ function callAgyLanguageServer(port, method, body = {}, timeoutMs = 1000) {
   );
 }
 
-function runAgyUsageCommand(bin = locateBin('agy')) {
+const AGY_USAGE_ARGS = ['-p', '/usage', '--output-format', 'json'];
+
+function runAgyUsageCommand(bin) {
   return new Promise((resolve, reject) => {
-    if (!bin) {
+    const command = bin
+      ? { cmd: bin, args: AGY_USAGE_ARGS }
+      : cliCommand('agy', AGY_USAGE_ARGS);
+    if (!command) {
       reject(new UsageQueryError('Antigravity CLI is not installed on this host.', 503));
       return;
     }
     execFile(
-      bin,
-      ['-p', '/usage', '--output-format', 'json'],
-      { timeout: 20000, maxBuffer: 1024 * 1024 },
+      command.cmd,
+      command.args,
+      { timeout: 20000, maxBuffer: 1024 * 1024, windowsHide: true },
       (err, stdout) => {
         const text = String(stdout || '').trim();
         if (!text && err) {

@@ -48,7 +48,7 @@ module.exports = function createMetaRouter(ctx) {
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
-    locateBin = (bin) => bin,
+    cliCommand = (bin, args) => ({ cmd: bin, args }),
     machineInfo,
     normalizeDeviceId,
     refreshAgentModels = () => Promise.resolve(),
@@ -141,23 +141,39 @@ module.exports = function createMetaRouter(ctx) {
   // its trimmed output. Used for `<cli> --version` and `<cli> update`.
   function runCliCommand(bin, args, timeoutMs) {
     return new Promise((resolve) => {
-      execFile(
-        locateBin(bin) || bin,
-        args,
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          const out = String(stdout || '').trim();
-          const errOut = String(stderr || '').trim();
-          resolve({
-            ok: !err,
-            code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
-            stdout: out,
-            stderr: errOut,
-            text: out || errOut,
-            timedOut: !!(err && err.killed),
-          });
-        },
-      );
+      const failed = (message) =>
+        resolve({
+          ok: false,
+          code: 1,
+          stdout: '',
+          stderr: message,
+          text: message,
+          timedOut: false,
+        });
+      const command = cliCommand(bin, args);
+      if (!command) return failed(`${bin} is not installed on this host.`);
+      try {
+        execFile(
+          command.cmd,
+          command.args,
+          { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+          (err, stdout, stderr) => {
+            const out = String(stdout || '').trim();
+            const errOut = String(stderr || '').trim();
+            resolve({
+              ok: !err,
+              code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
+              stdout: out,
+              stderr: errOut,
+              // A spawn failure prints nothing; its message is the reason.
+              text: out || errOut || (err ? err.message : ''),
+              timedOut: !!(err && err.killed),
+            });
+          },
+        );
+      } catch (err) {
+        failed(err.message);
+      }
     });
   }
 

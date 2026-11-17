@@ -16,18 +16,23 @@ const path = require('path');
 const LOCATE_BIN_TTL_MS = 60 * 1000;
 const locateBinCache = new Map();
 
+// The file names a bare command may have: on Windows, one per PATHEXT entry.
+function executableExtensions() {
+  return process.platform === 'win32'
+    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean)
+    : [''];
+}
+
 function binFallbacks(bin) {
-  const list = [path.join(os.homedir(), '.local', 'bin', bin)];
-  if (bin === 'opencode') list.push(path.join(os.homedir(), '.opencode', 'bin', bin));
-  return list;
+  const dirs = [path.join(os.homedir(), '.local', 'bin')];
+  if (bin === 'opencode') dirs.push(path.join(os.homedir(), '.opencode', 'bin'));
+  const exts = executableExtensions();
+  return dirs.flatMap((dir) => exts.map((ext) => path.join(dir, bin + ext)));
 }
 
 function executableInPath(bin) {
   const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  const exts =
-    process.platform === 'win32'
-      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';')
-      : [''];
+  const exts = executableExtensions();
   for (const dir of dirs) {
     for (const ext of exts) {
       const full = path.join(dir, bin + ext);
@@ -84,6 +89,50 @@ function resolveBin(bin) {
   }
 }
 
+// What a Windows .cmd/.bat launcher runs, read from its last `%*` line. npm and
+// pnpm install CLIs as such launchers, and Node cannot spawn a batch file
+// without a shell (ENOENT for the bare name, EINVAL for the path). Returns
+// `{ target, node }` (node: the launcher runs target with Node) or null.
+function readBatchShim(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (_err) {
+    return null;
+  }
+  const line = text
+    .split(/\r?\n/)
+    .reverse()
+    .find((l) => l.includes('%*'));
+  if (!line) return null;
+  const dir = path.dirname(file);
+  const targets = [...line.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
+    .map((m) => path.join(dir, m[1]))
+    .filter((p) => !/(^|[\\/])node(\.exe)?$/i.test(p));
+  const target = targets[targets.length - 1];
+  if (!target || !fs.existsSync(target)) return null;
+  const node =
+    /%_prog%|\bnode(\.exe)?"?\s/i.test(line) || /\.[cm]?js$/i.test(target);
+  if (!node && !/\.(exe|com)$/i.test(target)) return null;
+  return { target, node };
+}
+
+// A CLI as `{ cmd, args }` that child_process can spawn without a shell, or
+// null when it is not installed. Every place that runs an agent CLI goes
+// through this, so a Windows npm launcher (codex.cmd) works like a binary.
+function cliCommand(bin, args = []) {
+  const located = locateBin(bin);
+  if (!located) return null;
+  if (process.platform !== 'win32') return { cmd: located, args };
+  const { full } = findBin(bin);
+  if (!/\.(cmd|bat)$/i.test(full)) return { cmd: full, args };
+  const shim = readBatchShim(full);
+  if (!shim) return { cmd: full, args };
+  return shim.node
+    ? { cmd: process.execPath, args: [shim.target, ...args] }
+    : { cmd: shim.target, args };
+}
+
 function commandExists(bin) {
   return findBin(bin).full !== null;
 }
@@ -118,6 +167,7 @@ function agyAuthFile(homeDir = os.homedir()) {
 module.exports = {
   agyAuthFile,
   CURSOR_CONFIG_DIR,
+  cliCommand,
   commandExists,
   cursorAuthFile,
   executableInPath,

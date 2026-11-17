@@ -69,7 +69,7 @@ const { machineInfo } = require('./lib/machine-info');
 const { backendVersion, startBackendUpdate } = require('./lib/self-update');
 const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
-const { locateBin } = require('./lib/cli-paths');
+const { cliCommand } = require('./lib/cli-paths');
 const {
   listGroups,
   getGroup,
@@ -617,7 +617,7 @@ const routeContext = {
   listGroups,
   listQuotaSchedules,
   listTokenSummaries,
-  locateBin,
+  cliCommand,
   machineInfo,
   markdownForConversation,
   inspectCodexAccount,

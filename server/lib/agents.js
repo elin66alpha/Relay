@@ -20,6 +20,7 @@ const {
 } = require('./model-discovery');
 const {
   CURSOR_CONFIG_DIR,
+  cliCommand,
   executableInPath,
   locateBin,
 } = require('./cli-paths');
@@ -192,9 +193,12 @@ function toolBrief(name, input) {
 // version, same auth, same settings as the CLI shown in the app. Falling back
 // to null lets the SDK resolve its own bundled binary.
 function claudeExecutablePath() {
-  return (
-    process.env.RELAY_CLAUDE_BIN || executableInPath('claude') || locateBin('claude')
-  );
+  if (process.env.RELAY_CLAUDE_BIN) return process.env.RELAY_CLAUDE_BIN;
+  // The SDK runs a .js path with Node itself, so an npm launcher on Windows
+  // (claude.cmd) becomes the script it wraps.
+  const command = cliCommand('claude');
+  if (command && command.cmd === process.execPath) return command.args[0];
+  return executableInPath('claude') || locateBin('claude');
 }
 
 // One live CLI process per scope, reused across turns instead of respawned per
@@ -210,12 +214,10 @@ const opencodePool = createAcpSessionPool({
   agentKey: 'opencode',
   turnTimeoutMs: TIMEOUT_MS,
   command: () => {
-    const bin = locateBin('opencode');
-    return bin ? { cmd: bin, args: ['acp'] } : null;
+    return cliCommand('opencode', ['acp']);
   },
   deleteCommand: (sessionId) => {
-    const bin = locateBin('opencode');
-    return bin ? { cmd: bin, args: ['session', 'delete', sessionId] } : null;
+    return cliCommand('opencode', ['session', 'delete', sessionId]);
   },
 });
 
@@ -223,8 +225,7 @@ const agyPool = createAcpSessionPool({
   agentKey: 'agy',
   turnTimeoutMs: TIMEOUT_MS,
   command: () => {
-    const bin = locateBin('agy');
-    return bin ? { cmd: bin, args: ['acp', '--process-per-session'] } : null;
+    return cliCommand('agy', ['acp', '--process-per-session']);
   },
   trajectory: {
     readTrajectory: readAgyTrajectory,
@@ -238,14 +239,10 @@ const hermesPool = createAcpSessionPool({
   agentKey: 'hermes',
   turnTimeoutMs: TIMEOUT_MS,
   command: () => {
-    const bin = locateBin('hermes');
-    return bin ? { cmd: bin, args: ['acp'] } : null;
+    return cliCommand('hermes', ['acp']);
   },
   deleteCommand: (sessionId) => {
-    const bin = locateBin('hermes');
-    return bin
-      ? { cmd: bin, args: ['sessions', 'delete', '--yes', sessionId] }
-      : null;
+    return cliCommand('hermes', ['sessions', 'delete', '--yes', sessionId]);
   },
 });
 
@@ -284,10 +281,8 @@ function cursorPoolFor(poolKey) {
       modelsMethod: 'cursor/list_available_models',
       skipQuestions: true,
       command: () => {
-        const bin = locateBin('agent');
-        return bin
-          ? { cmd: bin, args: ['acp'], env: { CURSOR_CONFIG_DIR } }
-          : null;
+        const command = cliCommand('agent', ['acp']);
+        return command ? { ...command, env: { CURSOR_CONFIG_DIR } } : null;
       },
     });
     cursorPools.set(poolKey, pool);
@@ -316,8 +311,16 @@ const cursorPool = {
 
 function cliOutput(bin, args) {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout) =>
-      err ? reject(err) : resolve(String(stdout).trim()),
+    const command = cliCommand(bin, args);
+    if (!command) {
+      reject(new Error(`${bin} is not installed`));
+      return;
+    }
+    execFile(
+      command.cmd,
+      command.args,
+      { timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true },
+      (err, stdout) => (err ? reject(err) : resolve(String(stdout).trim())),
     );
   });
 }
@@ -368,11 +371,10 @@ function refreshAgentModels(agentKey, { force = false } = {}) {
   catalogRefreshes.set(agentKey, state);
   if (state.pending) return state.pending;
   if (!force && Date.now() - state.at < CATALOG_TTL_MS) return Promise.resolve();
-  const bin = locateBin(fetcher.bin);
-  if (!bin) return Promise.resolve();
+  if (!locateBin(fetcher.bin)) return Promise.resolve();
   state.at = Date.now();
   state.pending = fetcher
-    .fetch(bin)
+    .fetch(fetcher.bin)
     .catch(() => {})
     .finally(() => {
       state.pending = null;
@@ -386,15 +388,11 @@ const codexPool = createCodexSessionPool({
   agentKey: 'codex',
   turnTimeoutMs: TIMEOUT_MS,
   command: () => {
-    const bin = locateBin('codex');
-    return bin ? {
-      cmd: bin,
-      args: [
-        'app-server',
-        '-c', 'features.multi_agent_v2=true',
-        '-c', 'features.wake_on_agent_messages=true',
-      ],
-    } : null;
+    return cliCommand('codex', [
+      'app-server',
+      '-c', 'features.multi_agent_v2=true',
+      '-c', 'features.wake_on_agent_messages=true',
+    ]);
   },
 });
 

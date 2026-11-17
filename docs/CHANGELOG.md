@@ -57,6 +57,12 @@
 
 ### Fixed
 
+- A Windows backend runs CLIs that npm installed as `.cmd` launchers, such as
+  Codex. Node cannot start a batch file without a shell, so chat failed with
+  `spawn codex ENOENT`, the model page showed no CLI version, the model list
+  fell back to the built-in models, and **Update CLI** failed with no message.
+  Relay now runs the script or binary the launcher wraps, and a failed update
+  reports why.
 - Windows setup no longer corrupts `server\.env`: Windows PowerShell 5.1 read
   the BOM-less UTF-8 file in the ANSI code page and wrote it back as UTF-8, so
   every setting written by Setup re-encoded the non-ASCII comments until the
