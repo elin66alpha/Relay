@@ -20,6 +20,6 @@ English 或中文。切换后界面和本教程都会换成对应语言。
 
 ## 其他设置
 
-- 「设置」最上方是[管理凭证](import-credential.md)。
+- 「设置」最上方是[机器凭证](import-credential.md)（已有机器列表、「添加机器」与「测试当前机器」）。
 - 通知开关见[通知](notifications.md)。
 - 「关于」里有版本号和[检查更新](app-update.md)。

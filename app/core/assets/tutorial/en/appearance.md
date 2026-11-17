@@ -20,6 +20,6 @@ English or 中文. Switching changes the interface and this tutorial.
 
 ## Other settings
 
-- [Manage credentials](import-credential.md) is at the top of Settings.
+- [Machine credentials](import-credential.md) (saved machines, **Add machine**, and **Test current machine**) are at the top of Settings.
 - The notification switches: see [Notifications](notifications.md).
 - **About** holds the version and [Check for updates](app-update.md).

@@ -235,13 +235,8 @@ class CliAgentsDrawer extends StatelessWidget {
                           MaterialPageRoute<void>(
                             builder: (_) => AppSettingsScreen(
                               settingsController: settingsController,
-                              onManageCredentials: (BuildContext context) =>
-                                  Navigator.of(context).push<void>(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => MachineCredentialsScreen(
-                                    machinesController: machinesController,
-                                  ),
-                                ),
+                              machinesSection: MachineCredentialsSection(
+                                machinesController: machinesController,
                               ),
                             ),
                           ),

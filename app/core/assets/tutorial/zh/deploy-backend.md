@@ -52,7 +52,7 @@ Windows 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/late
 
 ## 5. 在 App 里连接
 
-回到 App 的凭证页（「设置」最上方的「管理凭证」）：手机可以扫码；所有平台都可以上传二维码图片或粘贴 JSON，然后输入密码。详见[导入凭证与管理机器](import-credential.md)。
+回到 App 的「设置」最上方的「机器凭证」（点击「添加机器」；若尚无机器则在首屏直接导入）：手机可以扫码；所有平台都可以上传二维码图片或粘贴 JSON，然后输入密码。详见[导入凭证与管理机器](import-credential.md)。
 
 连上后建议依次：
 

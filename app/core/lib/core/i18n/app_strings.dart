@@ -33,7 +33,6 @@ class AppStrings {
   String get home => isZh ? '首页' : 'Home';
   String get tutorialHomeTitle => isZh ? '浏览全部教程' : 'Browse all articles';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
-  String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
   String unavailableAgentsCount(int count) =>
       isZh ? '另有 $count 个不可用' : '$count unavailable';
@@ -504,6 +503,7 @@ class AppStrings {
   String get browserKeyboard => isZh ? '键盘输入' : 'Keyboard input';
   String get browserTypeHint => isZh ? '输入到页面' : 'Type into the page';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
+  String get addMachine => isZh ? '添加机器' : 'Add machine';
   String get importOrChooseMachine =>
       isZh ? '请导入或选择一台机器' : 'Import or choose a machine';
   String get loadingStatus => isZh ? '正在获取状态...' : 'Loading status...';

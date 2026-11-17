@@ -36,4 +36,4 @@ On wide screens it stays on the left; on a phone tap the menu button, or swipe r
 
 ## Settings
 
-Manage credentials, Appearance (theme, font size, wallpaper), Language, Notifications, Tutorial, and About (version and Check for updates). See [Theme, language and font size](appearance.md).
+Machine credentials (at the top, with **Add machine** and **Test current machine**), Appearance (theme, font size, wallpaper), Language, Notifications, Tutorial, and About (version and Check for updates). See [Theme, language and font size](appearance.md).

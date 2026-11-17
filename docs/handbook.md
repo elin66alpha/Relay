@@ -148,8 +148,8 @@ subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
 Generate a different credential for each device. **Machine details** (tap the
-machine in the drawer or on the home page; **Manage credentials** is at the top
-of Settings)
+machine in the drawer or on the home page; **Machine credentials** are at the
+top of Settings)
 lists their token ids, device metadata, and last-use time. Revoke a token before
 deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
@@ -573,7 +573,7 @@ Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
 
 The create and edit form groups agents by machine: this machine first, then
-every other machine in Manage credentials, listing that machine's usable agents
+every other machine in Settings → Machine credentials, listing that machine's usable agents
 (a machine the app cannot reach shows why). Tap an agent to add it and tap a
 member to configure it. The name is optional (`Swarm N` by default).
 

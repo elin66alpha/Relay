@@ -723,20 +723,32 @@ void main() {
       expect(find.text('Manage credentials'), findsNothing);
       expect(find.byIcon(Icons.vpn_key_outlined), findsNothing);
 
-      // Settings opens with Manage credentials above every section.
+      // Settings opens with the existing credentials section above every section.
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       expect(find.byType(AppSettingsScreen), findsOneWidget);
       expect(find.byType(CliAgentsDrawer), findsNothing);
+      expect(find.byType(MachineCredentialsSection), findsOneWidget);
+      expect(find.text('Manage credentials'), findsNothing);
       expect(
-        tester.getTopLeft(find.text('Manage credentials')).dy,
+        tester.getTopLeft(find.text('Local test')).dy,
         lessThan(tester.getTopLeft(find.text('Appearance')).dy),
       );
+      expect(find.text('Add machine'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Add machine')).dy,
+        greaterThan(tester.getTopLeft(find.text('Local test')).dy),
+      );
+      expect(find.text('Test current machine'), findsOneWidget);
+      expect(find.text('Paste credential'), findsNothing);
+      expect(find.text('Upload QR image'), findsNothing);
 
-      // The drawer has closed by now; the push still works from Settings.
-      await tester.tap(find.text('Manage credentials'));
+      // Add machine opens the import options dialog.
+      await tester.tap(find.text('Add machine'));
       await tester.pumpAndSettle();
-      expect(find.byType(MachineCredentialsScreen), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Paste credential'), findsOneWidget);
+      expect(find.text('Upload QR image'), findsOneWidget);
     },
   );
 }

@@ -10,7 +10,7 @@ A credential is the key that connects the app to a backend. It is an encrypted `
 
 ## Ways to import
 
-Open **Manage credentials** at the top of Settings, or the first screen when no machine exists yet:
+Open **Settings** (under **Machine credentials** at the top, select **Add machine**), or use the first screen when no machine exists yet:
 
 | Method | Platforms |
 |---|---|
@@ -30,7 +30,7 @@ Then enter **the password set when the credential was generated** and select **D
 
 ## Several machines
 
-Import one credential per backend. The machine card on Home and at the top of the drawer shows the connected one; in **Manage credentials** tap another to switch, use **Test current machine** to check the connection, or delete a machine you no longer use.
+Import one credential per backend. The machine card on Home and at the top of the drawer shows the connected one; under **Machine credentials** at the top of Settings, tap another to switch, use **Add machine** to import more, **Test current machine** to check the connection, or delete a machine you no longer use.
 
 Switching machines also switches the workspace, session lists and Swarms to that machine's. A Swarm can also bring agents from several machines together; see [Members on other machines](swarm-remote-members.md).
 

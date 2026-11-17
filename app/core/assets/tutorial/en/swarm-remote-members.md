@@ -10,7 +10,7 @@ A Swarm member can be an agent on **another Relay backend**. The Swarm, its tran
 
 ## Requirements
 
-- This device's Manage credentials holds B's credential.
+- This device holds B's credential under Settings → Machine credentials.
 - The app sends B's credential with each request; A **never stores** it.
 
 ## Adding one

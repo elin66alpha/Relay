@@ -52,7 +52,7 @@ Once setup starts the backend, it prints an encrypted credential QR code in the 
 
 ## 5. Connect in the app
 
-Go to the app's credential page (**Manage credentials** at the top of Settings): phones can scan the QR; every platform can upload the QR image or paste the JSON, then enter the password. See [Import a credential and manage machines](import-credential.md).
+Go to **Machine credentials** at the top of Settings and select **Add machine** (or use the first screen when no machine exists yet): phones can scan the QR; every platform can upload the QR image or paste the JSON, then enter the password. See [Import a credential and manage machines](import-credential.md).
 
 Once connected:
 

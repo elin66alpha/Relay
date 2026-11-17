@@ -176,7 +176,7 @@ const List<_Release> _zhReleases = <_Release>[
       ),
     ],
     changes: <String>[
-      '侧边栏更简洁：底部改成一行首页、浏览器、文件系统、设置；蜂群收成一项；不可用的智能体收进一行；“管理凭证”移到设置最上方。',
+      '侧边栏更简洁：底部改成一行首页、浏览器、文件系统、设置；蜂群收成一项；不可用的智能体收进一行；机器凭证直接显示在设置最上方，通过「添加机器」导入。',
       '定时消息并入“额度查询”：在 Claude Code 和 Codex 卡片上设置，卡片会显示发送时间和内容预览。',
       'Antigravity 的额度只在“额度查询”里显示，输入框上方改为一行提示。',
       '下载时，relay-client 是客户端，relay-backend 是后端。后端解压后即可安装：Linux 和 macOS 运行 ./install.sh，Windows 运行 setup.cmd。',
@@ -356,7 +356,7 @@ const List<_Release> _enReleases = <_Release>[
       ),
     ],
     changes: <String>[
-      'A tidier drawer: one bottom row for Home, Browser, File system and Settings; Swarm as one entry; unavailable agents folded into one row; Manage credentials moved to the top of Settings.',
+      'A tidier drawer: one bottom row for Home, Browser, File system and Settings; Swarm as one entry; unavailable agents folded into one row; machine credentials sit at the top of Settings with Add machine.',
       'Scheduled messages moved into Quota usage: set them on the Claude Code and Codex cards, which show the send time and a preview.',
       'Antigravity quota shows only in Quota usage; the strip above the composer shows a short hint instead.',
       'Release downloads are labeled relay-client or relay-backend. Extract the backend and run ./install.sh on Linux and macOS, or setup.cmd on Windows.',

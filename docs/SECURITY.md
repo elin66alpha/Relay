@@ -53,7 +53,7 @@ and then deleted deliberately.
 ## Swarm members on other machines
 
 A Swarm member can run on another Relay backend (B) that the app holds a
-credential for in Manage credentials. B is unchanged: the backend running the
+credential for in Settings → Machine credentials. B is unchanged: the backend running the
 Swarm (A) calls B's ordinary API as the app would. To do that, the app puts B's
 `baseUrl` and bearer token in the body of each Swarm request that reaches B's
 members (create, members, chat, clear, delete), over the same authenticated

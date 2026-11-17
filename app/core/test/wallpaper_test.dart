@@ -165,7 +165,6 @@ void main() {
               theme: dark ? AppTheme.dark() : AppTheme.light(),
               home: AppSettingsScreen(
                 settingsController: settings,
-                onManageCredentials: (_) {},
               ),
             ),
           ),

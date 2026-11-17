@@ -17,7 +17,7 @@ Each workspace holds up to 20 Swarms, each with up to 8 members.
 ## Create
 
 1. Select **New swarm**. The name is optional; the default is "Swarm N".
-2. Agents are grouped by machine: this machine first, then the other machines in Manage credentials. Tap an agent to add it as a member; the same agent can be added more than once.
+2. Agents are grouped by machine: this machine first, then the other machines in Settings → Machine credentials. Tap an agent to add it as a member; the same agent can be added more than once.
 3. Tap a member again to configure it:
    - **Nickname**: used only in this Swarm, and the name that @ summons it with.
    - **Task / prompt**: this member's role or job in this Swarm.
