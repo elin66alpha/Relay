@@ -99,6 +99,7 @@ device token. The Windows backend ZIP includes the same compiled Web client:
    the credential when it rotates. Find the new URL in the service logs, then
    run `npm --prefix server run credential -- --url https://NEW-URL` from the
    repository root.
+4. **Tailscale.** Relay listens only on the detected tailnet IPv4. Native apps can use `http://<tailscale-ip>:<port>` over WireGuard. Relay Web needs HTTPS to store credentials. To use it, configure a reverse proxy with a trusted certificate on port 443 forwarding to that tailnet IP and backend port, then enter its hostname during setup. Open that HTTPS address and import the generated credential. Leaving the hostname blank configures native apps only and disables Web. If Tailscale is unavailable, setup returns to the network menu.
 
 ## Service management
 

@@ -50,6 +50,7 @@ class CliAgentsDrawer extends StatelessWidget {
         final String activeKey = agentsController.activeAgentKey;
         final MachineCredential? activeMachine =
             machinesController.activeMachine;
+        final bool isDemo = isDemoMachine(activeMachine);
         final List<CliAgent> mainAgents = <CliAgent>[];
         final List<CliAgent> unavailableAgents = <CliAgent>[];
         for (final CliAgent agent in agentsController.agents) {
@@ -197,15 +198,18 @@ class CliAgentsDrawer extends StatelessWidget {
                     child: _DrawerActionButton(
                       icon: Icons.public_rounded,
                       label: context.l10n.browser,
-                      onTap: () {
-                        if (closeOnAction) Navigator.of(context).pop();
-                        Navigator.of(context).push<void>(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                BrowserScreen(backend: chatController.backend),
-                          ),
-                        );
-                      },
+                      onTap: isDemo
+                          ? null
+                          : () {
+                              if (closeOnAction) Navigator.of(context).pop();
+                              Navigator.of(context).push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => BrowserScreen(
+                                    backend: chatController.backend,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                   ),
                   Expanded(
@@ -572,16 +576,22 @@ class _DrawerActionButton extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool selected;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final Color color = selected ? colors.primary : colors.onSurfaceVariant;
+    final bool enabled = onTap != null;
+    final Color color = !enabled
+        ? colors.outline.withValues(alpha: 0.45)
+        : selected
+            ? colors.primary
+            : colors.onSurfaceVariant;
     return Semantics(
       container: true,
       button: true,
+      enabled: enabled,
       selected: selected,
       child: InkWell(
         onTap: onTap,

@@ -33,8 +33,18 @@ A page's `alert`, `confirm` or `prompt` is accepted at once and its text shown i
 - One browser with one tab per device token.
 - Leaving keeps it for 10 minutes, so coming back shows the same page; opening it on another device takes it over.
 - Each browser uses a fresh temporary profile deleted when it closes, so sign-ins inside the page do not persist.
-- No sound, no file upload or download, no clipboard; links that open a new window do nothing.
+- No sound, no file upload or download, no clipboard.
+
+## Links that open a new tab
+
+New tabs pointing to localhost or another loopback address open in the streamed tab on the backend. For other HTTP or HTTPS addresses, Relay shows the full URL and asks before opening it in your device’s browser.
+
+## Info button
+
+The **i** button at the top right summarizes what this browser can and cannot do.
 
 ## No browser found
 
 The backend looks for Chrome, Chromium or Edge in their standard locations (on Linux, also on PATH and `/snap/bin/chromium`). Set `RELAY_BROWSER` in `server/.env` to an executable path to choose one.
+
+Setup checks for one after installing the server dependencies (step 1). If none is found it shows how to install one and carries on, since everything else works without it. A browser installed later is found without restarting Relay.

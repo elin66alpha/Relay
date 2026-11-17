@@ -176,6 +176,8 @@ const List<_Release> _zhReleases = <_Release>[
       ),
     ],
     changes: <String>[
+      '演示模式：在初始欢迎页点击「试用演示」，即可不部署后端直接体验界面和模拟对话（禁用 SSH 与浏览器，导入真实机器时自动移除）。',
+      '内置浏览器：新标签里的本机链接留在后端，外部链接确认后用你设备上的浏览器打开；右上角新增信息按钮，说明它的能力和限制。',
       '侧边栏更简洁：底部改成一行首页、浏览器、文件系统、设置；蜂群收成一项；不可用的智能体收进一行；机器凭证直接显示在设置最上方，通过「添加机器」导入。',
       '定时消息并入“额度查询”：在 Claude Code 和 Codex 卡片上设置，卡片会显示发送时间和内容预览。',
       'Antigravity 的额度只在“额度查询”里显示，输入框上方改为一行提示。',
@@ -356,6 +358,8 @@ const List<_Release> _enReleases = <_Release>[
       ),
     ],
     changes: <String>[
+      'Demo mode: tap "Try the demo" on the welcome screen to explore the app and simulated replies without a backend (SSH and Browser disabled; removed when importing a real machine).',
+      'Browser: new localhost tabs open on the backend, and external links open on your device after confirmation; a new info button explains what it can and cannot do.',
       'A tidier drawer: one bottom row for Home, Browser, File system and Settings; Swarm as one entry; unavailable agents folded into one row; machine credentials sit at the top of Settings with Add machine.',
       'Scheduled messages moved into Quota usage: set them on the Claude Code and Codex cards, which show the send time and a preview.',
       'Antigravity quota shows only in Quota usage; the strip above the composer shows a short hint instead.',

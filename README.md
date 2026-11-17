@@ -163,8 +163,8 @@ its root:
 | macOS | `./scripts/install/macos/setup.sh` |
 | Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
-The installer walks through direct access, a named Cloudflare Tunnel, or a
-temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
+The installer walks through direct access, a named Cloudflare Tunnel, a
+temporary Quick Tunnel, or this machine's Tailscale address. Use HTTPS before exposing a direct deployment publicly.
 Linux also needs PM2 and the native tools listed in the
 [backend requirements](docs/install.md#requirements); Unix hosts need `zip`
 for folder downloads. On Debian and Ubuntu, the Linux installer offers to

@@ -12,6 +12,7 @@
 #   1. No tunnel: for a VPS / box with a reachable public IP or domain.
 #   2. Cloudflare Tunnel: named tunnel + stable hostname in your Cloudflare zone.
 #   3. Cloudflare Quick Tunnel: temporary trycloudflare.com URL for fast trials.
+#   4. Tailscale: this machine's tailnet IP; falls back to the menu without one.
 #
 set -euo pipefail
 
@@ -160,11 +161,43 @@ clear_tunnel_logs() {
   while IFS= read -r file; do rm -f "$file"; done < <(tunnel_log_files)
 }
 
+# The Browser page drives a host Chrome, Chromium or Edge. Without one the rest
+# of Relay works, so this only reminds.
+check_browser() {
+  local found
+  if found="$(cd "$SERVER_DIR" && node scripts/check-browser.js 2>/dev/null)"; then
+    c_info "Browser page will use: $found"
+  else
+    c_warn "No Chrome, Chromium or Edge found. Relay's Browser page needs one; everything else works without it."
+    c_warn "$(browser_install_hint)"
+    c_warn "Relay finds it once installed, without a restart. Or set RELAY_BROWSER in server/.env to its path, then restart Relay."
+  fi
+}
+
+# This machine's tailnet IPv4, or failure when Tailscale is missing or not up.
+# The macOS app ships its CLI inside the bundle rather than on PATH.
+tailscale_ipv4() {
+  local bin raw ip
+  bin="$(command -v tailscale 2>/dev/null || true)"
+  if [ -z "$bin" ] && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
+    bin=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  fi
+  [ -n "$bin" ] || return 1
+  raw="$("$bin" ip -4 2>/dev/null)" || return 1
+  ip="${raw%%$'\n'*}"
+  ip="${ip%$'\r'}"
+  local octet='(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+  local tailnet="^100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]${octet}[.]${octet}$"
+  [[ "$ip" =~ $tailnet ]] || return 1
+  printf '%s' "$ip"
+}
+
 install_backend() {
-  local port mode public_url hostname_value tunnel_name answer_name tunnel_id config_file quick_url
+  local port mode public_url tailscale_ip hostname_value tunnel_name answer_name tunnel_id config_file quick_url
   section "Step 1/6 · System software and server dependencies"
   install_prerequisites
   install_server_deps
+  check_browser
   section "Step 2/6 · Agent CLIs"
   install_agent_clis
   section "Step 3/6 · Web client"
@@ -175,13 +208,20 @@ install_backend() {
   port="$(backend_port)"
 
   section "Step 5/6 · Network mode"
-  cat <<EOF
+  while :; do
+    cat <<EOF
   1) No tunnel / direct public address
   2) Cloudflare Tunnel / named stable hostname
   3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL
+  4) Tailscale / this machine's Tailscale IP, reachable from your tailnet
 EOF
-  read -rp "${ASK}Network mode [1/2/3, default 3]: " mode
-  mode="${mode:-3}"
+    read -rp "${ASK}Network mode [1/2/3/4, default 3]: " mode
+    mode="${mode:-3}"
+    [ "$mode" = 4 ] || break
+    tailscale_ip="$(tailscale_ipv4)" && break
+    c_warn "Tailscale is not installed here, or this machine is not connected to a tailnet."
+    c_warn "Install it from https://tailscale.com/download and run \"tailscale up\", or choose another mode."
+  done
 
   case "$mode" in
     1)
@@ -204,6 +244,30 @@ EOF
       c_warn "Make sure port ${port} is open in your firewall / security group, and that"
       c_warn "${public_url} actually reaches this machine (directly or via a reverse proxy)."
       c_warn "For HTTPS, terminate TLS at a reverse proxy (nginx/Caddy) in front of port ${port}."
+      ;;
+    4)
+      public_url="http://${tailscale_ip}:${port}"
+      c_info "Tailscale mode: devices on your tailnet connect to $public_url (WireGuard-encrypted)."
+      if [ -f "$WEB_DIR/index.html" ] && [ "$(get_env RELAY_SERVE_WEB)" != 0 ]; then
+        c_info "Native apps can use $public_url. Relay Web needs a trusted HTTPS origin to store credentials."
+        c_info "For Web, configure an HTTPS reverse proxy to $public_url and enter its hostname."
+        read -rp "${ASK}HTTPS proxy hostname (Enter for native apps only): " hostname_value
+        if [ -n "$hostname_value" ]; then
+          [[ "$hostname_value" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || { c_err "Enter a hostname without a scheme, port or path."; return 1; }
+          public_url="https://$hostname_value"
+        else
+          set_env RELAY_SERVE_WEB 0
+        fi
+      fi
+      set_env HOST "$tailscale_ip"
+      set_env PUBLIC_BASE_URL "$public_url"
+      set_env RELAY_TUNNEL_MODE none
+      set_env CLOUDFLARED_BIN ""
+      set_env CLOUDFLARED_ARGS ""
+
+      c_info "Starting the backend..."
+      svc_start fresh
+      c_warn "Install Tailscale on each phone or computer that uses Relay and sign in to the same tailnet."
       ;;
     2)
       ensure_cloudflared

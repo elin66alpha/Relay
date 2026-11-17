@@ -166,6 +166,10 @@ svc_remove() {
   done
 }
 
+browser_install_hint() {
+  printf '%s' 'Install one, for example: brew install --cask google-chrome'
+}
+
 svc_summary() {
   local label line
   for label in "$SERVER_LABEL" "$TUNNEL_LABEL"; do

@@ -38,9 +38,10 @@ Setup asks for the port, whether to serve the Web client, the file access mode (
 
 | Mode | Good for | Note |
 |---|---|---|
-| Direct | LAN, Tailscale, or your own HTTPS reverse proxy | enter an address the client device can actually reach; other devices cannot use `localhost` to reach your host. Add HTTPS before exposing it to the internet |
+| Direct | LAN or your own HTTPS reverse proxy | enter an address the client device can actually reach; other devices cannot use `localhost` to reach your host. Add HTTPS before exposing it to the internet |
 | Named Cloudflare Tunnel | long-term use | needs your own domain on Cloudflare; a stable HTTPS address |
 | Cloudflare Quick Tunnel | a trial | no domain needed, but the `trycloudflare.com` address may change after a restart, and then you must generate and import a new credential |
+| Tailscale | private tailnet access | reads `tailscale ip -4` automatically and uses WireGuard encryption over your tailnet |
 
 See [Network modes and HTTPS](network-modes.md).
 

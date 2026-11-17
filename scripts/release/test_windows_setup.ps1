@@ -18,6 +18,7 @@ $script:started = 0; $script:stopped = 0; $script:registered = 0; $script:forceD
 $script:dnsArgs = @(); $script:credentialArgs = @()
 function Require-Node { }
 function Install-ServerDeps { param([switch]$Force); $script:forceDeps = [bool]$Force }
+function Test-RelayBrowser { }
 function Install-RelayAgentClis { param([string[]]$Agents); }
 function Register-RelayStartup { $script:registered++ }
 function Unregister-RelayStartup { $script:registered-- }
@@ -59,6 +60,13 @@ try {
   $config = Join-Path $Script:ServerDir 'cloudflared-config\relay-fixture.yml'
   Assert-That ((Get-EnvValue 'CLOUDFLARED_ARGS').Contains('"' + $config + '"')) 'Tunnel config paths with spaces must stay quoted.'
   Assert-That ($script:dnsArgs[0] -eq 'tunnel' -and $script:dnsArgs[2] -eq 'dns') 'Named DNS route.'
+  Install-RelayBackend -Reinstall -NetworkMode none -BindAddress '100.101.102.103' -PublicUrl 'https://relay.example.test' -Passphrase 'fixture-password'
+  Assert-That ((Get-EnvValue 'HOST') -eq '100.101.102.103') 'Bind only the Tailscale address.'
+  Assert-That ((Get-EnvValue 'PUBLIC_BASE_URL') -eq 'https://relay.example.test') 'Use HTTPS for Web credentials.'
+  Assert-That ($script:credentialArgs[1] -eq 'https://relay.example.test') 'The device credential uses the proxy origin.'
+  Install-RelayBackend -Reinstall -NetworkMode none -BindAddress '100.101.102.103' -ServeWeb $false -PublicUrl 'http://100.101.102.103:8787' -Passphrase 'fixture-password'
+  Assert-That ((Get-EnvValue 'RELAY_SERVE_WEB') -eq '0') 'Native-only Tailscale disables Web.'
+  Assert-That ($script:credentialArgs[1] -eq 'http://100.101.102.103:8787') 'Native-only credentials use the tailnet IP.'
   $before = Get-Content -LiteralPath $Script:EnvFile -Raw
   Expect-Failure { Install-RelayBackend -Port 0 -NetworkMode none -PublicUrl 'http://example.com' }
   Expect-Failure { Install-RelayBackend -NetworkMode none -PublicUrl "http://example.com`nBAD=1" }
@@ -104,7 +112,15 @@ try {
   [IO.File]::WriteAllText((Join-Path $fakeNodeDir 'node.exe'), '')
   $firstPath = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$(Join-Path $fakeLib 'common.ps1')'; (`$env:PATH -split ';')[0]"
   Assert-That ($firstPath -eq $fakeNodeDir) "Bundled Node must lead PATH, got: $firstPath"
-  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, user PATH sync, uninstall, retained state and incomplete bundles.'
+  # Test-RelayBrowser warns instead of throwing when check-browser fails or writes stderr, and Get-TailscaleIPv4 validates 100.64.0.0/10.
+  $fakeServerScripts = Join-Path $scratch 'bundle\server\scripts'
+  $fakeBin = Join-Path $scratch 'fake-bin'
+  New-Item -ItemType Directory -Path $fakeServerScripts, $fakeBin -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $fakeServerScripts 'check-browser.js'), "console.error('stderr noise'); process.exitCode = 1;")
+  [IO.File]::WriteAllText((Join-Path $fakeBin 'tailscale.cmd'), "@echo off`r`nif `"%RELAY_FAKE_TS%`"==`"bad`" (`r`n  echo 100.200.1.2`r`n  exit /b 0`r`n)`r`nif `"%RELAY_FAKE_TS%`"==`"fail`" (`r`n  echo 100.101.102.103`r`n  exit /b 1`r`n)`r`necho 100.101.102.103`r`n")
+  $tsResult = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-StrictMode -Version 2.0; `$env:PATH = '$fakeBin;' + `$env:PATH; . '$(Join-Path $fakeLib 'common.ps1')'; Test-RelayBrowser; `$env:RELAY_FAKE_TS='ok'; `$a = Get-TailscaleIPv4; `$env:RELAY_FAKE_TS='bad'; `$b = Get-TailscaleIPv4; `$env:RELAY_FAKE_TS='fail'; `$c = Get-TailscaleIPv4; if (`$a -ne '100.101.102.103' -or `$b -ne `$null -or `$c -ne `$null) { throw 'Tailscale contract failed' }; 'ok'"
+  Assert-That (($tsResult | Select-Object -Last 1) -eq 'ok') 'Test-RelayBrowser and Get-TailscaleIPv4 contract.'
+  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, user PATH sync, browser/Tailscale checks, uninstall, retained state and incomplete bundles.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($scratch)
   $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

@@ -55,6 +55,40 @@ function Write-Fail {
   throw "Relay: $Message"
 }
 
+# The Browser page drives a host Chrome, Chromium or Edge. Without one the rest
+# of Relay works, so this only reminds. The check is the backend's own.
+function Test-RelayBrowser {
+  try {
+    $found = (& node (Join-Path $Script:ServerDir 'scripts\check-browser.js') 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -eq 0 -and $found) {
+      Write-Info "Browser page will use: $found"
+      return
+    }
+  } catch {
+    # Missing browser or check failure only warns; the rest of Relay works without it.
+  }
+  Write-Warn "No Chrome, Chromium or Edge found. Relay's Browser page needs one; everything else works without it."
+  Write-Warn 'Install one, for example Microsoft Edge (https://www.microsoft.com/edge) or Google Chrome (https://www.google.com/chrome/).'
+  Write-Warn 'Relay finds it once installed, without a restart. Or set RELAY_BROWSER in server\.env to its path, then restart Relay.'
+}
+
+# This machine's tailnet IPv4, or $null when Tailscale is missing or not up.
+function Get-TailscaleIPv4 {
+  $command = Get-Command tailscale -ErrorAction SilentlyContinue
+  $bin = if ($command) { $command.Source } else { Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe' }
+  if (-not (Test-Path -LiteralPath $bin)) { return $null }
+  try {
+    $ip = (& $bin ip -4 2>$null | Select-Object -First 1)
+  } catch {
+    return $null
+  }
+  if ($LASTEXITCODE -eq 0 -and "$ip".Trim() -match '^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$') {
+    $address = $null
+    if ([ipaddress]::TryParse("$ip".Trim(), [ref]$address) -and $address.IPAddressToString -eq "$ip".Trim()) { return $address.IPAddressToString }
+  }
+  return $null
+}
+
 function Test-Command {
   param([string]$Name)
   return [bool](Get-Command $Name -ErrorAction SilentlyContinue)

@@ -109,11 +109,12 @@ module.exports = function createMetaRouter(ctx) {
         installed,
         authed,
         authKind: status.authKind || 'unknown',
-        // hermes/opencode remain host-managed and do not gate on a key Relay
-        // cannot reliably validate. Codex is gated on its detected auth mode.
+        // Antigravity may store its login in the host keyring. Hermes and
+        // OpenCode also manage credentials that Relay cannot validate.
         usable:
           installed &&
-          (authed || agent.key === 'opencode' || agent.key === 'hermes'),
+          (authed || (agent.key === 'agy' && status.authed === null) ||
+            agent.key === 'opencode' || agent.key === 'hermes'),
       };
     });
   }
@@ -307,9 +308,7 @@ module.exports = function createMetaRouter(ctx) {
           agents: listAgents().map((agent) => ({
             key: agent.key,
             label: agent.label,
-            loggedIn: statuses[agent.key]
-              ? statuses[agent.key].authed === true
-              : null,
+            loggedIn: statuses[agent.key]?.authed ?? null,
           })),
         }),
       (err) =>

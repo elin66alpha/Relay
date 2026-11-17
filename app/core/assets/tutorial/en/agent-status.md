@@ -34,6 +34,7 @@ Unusable agents fold into the drawer's last row, "n unavailable"; tapping one te
 
 - Codex's Recheck really verifies the current login with its app-server; a network or verification failure shows as a check error and does not necessarily mean you must sign in again.
 - Every CLI renews its own login, so Relay shows no login-expiry countdown.
+- Antigravity keeps its login in the host's system keyring when one is available, which Relay cannot read. An installed CLI can still be selected. Relay reports its login as unknown and shows no login light, and a real sign-out appears as an error on your next message.
 
 ## Where CLIs are found
 

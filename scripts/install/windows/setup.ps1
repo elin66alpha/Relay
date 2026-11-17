@@ -11,6 +11,7 @@
 #   1. No tunnel: for a host with a reachable public IP or domain.
 #   2. Cloudflare Tunnel: named tunnel + stable hostname in your Cloudflare zone.
 #   3. Cloudflare Quick Tunnel: temporary trycloudflare.com URL for fast trials.
+#   4. Tailscale: this machine's tailnet IP; falls back to the menu without one.
 [CmdletBinding()]
 param([ValidateSet('menu', 'install')][string]$Action = 'menu')
 Set-StrictMode -Version 2.0
@@ -61,11 +62,19 @@ function Read-InstallOptions {
   Write-Info 'Network mode'
   $port = Read-Host "Backend port [$(Get-BackendPort)]"
   if (-not $port) { $port = Get-BackendPort }
-  Write-Host '  1) No tunnel / direct public address'
-  Write-Host '  2) Cloudflare Tunnel / named stable hostname'
-  Write-Host '  3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL'
-  $mode = Read-Host 'Network mode [1/2/3, default 3]'
   $options = @{ Port = [int]$port; ServeWeb = $serve; Agents = $agents; Isolated = ($access -eq '2') }
+  while ($true) {
+    Write-Host '  1) No tunnel / direct public address'
+    Write-Host '  2) Cloudflare Tunnel / named stable hostname'
+    Write-Host '  3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL'
+    Write-Host "  4) Tailscale / this machine's Tailscale IP, reachable from your tailnet"
+    $mode = Read-Host 'Network mode [1/2/3/4, default 3]'
+    if ($mode -ne '4') { break }
+    $tailscaleIp = Get-TailscaleIPv4
+    if ($tailscaleIp) { break }
+    Write-Warn 'Tailscale is not installed here, or this machine is not connected to a tailnet.'
+    Write-Warn 'Install it from https://tailscale.com/download and sign in, or choose another mode.'
+  }
   switch ($mode) {
     '1' {
       $options.NetworkMode = 'none'
@@ -80,6 +89,21 @@ function Read-InstallOptions {
       $options.OverwriteDns = (Read-Host 'Allow replacing an existing DNS record? [y/N]') -match '^[Yy]'
     }
     { $_ -in @('', '3') } { $options.NetworkMode = 'quick' }
+    '4' {
+      $options.BindAddress = $tailscaleIp
+      $options.NetworkMode = 'none'
+      $options.PublicUrl = "http://${tailscaleIp}:$port"
+      if ($serve) {
+        Write-Info "Native apps can use $($options.PublicUrl). Relay Web needs a trusted HTTPS origin to store credentials."
+        Write-Info "For Web, configure an HTTPS reverse proxy to $($options.PublicUrl) and enter its hostname."
+        $proxyName = Read-Host 'HTTPS proxy hostname (Enter for native apps only)'
+        if ($proxyName) {
+          if ($proxyName -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') { Write-Fail 'Enter a hostname without a scheme, port or path.' }
+          $options.PublicUrl = "https://$proxyName"
+        } else { $options.ServeWeb = $false }
+      }
+      Write-Info "Tailscale: devices on your tailnet connect to $($options.PublicUrl). Install Tailscale on each of them and sign in to the same tailnet."
+    }
     default { Write-Fail "Invalid network mode: $mode" }
   }
   return $options

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/widgets/author_contact_link.dart';
 import 'app_update.dart';
 import 'tutorial_screen.dart';
 import 'update_check.dart';
@@ -364,6 +365,8 @@ class AppSettingsScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text('${context.l10n.license}: ${context.l10n.licenseText}'),
+        const SizedBox(height: 12),
+        const AuthorContactLink(textAlign: TextAlign.start),
       ],
     );
   }

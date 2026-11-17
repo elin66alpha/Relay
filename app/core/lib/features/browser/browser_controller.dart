@@ -17,7 +17,8 @@ enum BrowserStatus {
 }
 
 /// What the backend tells the page beyond frames: a JavaScript dialog it
-/// accepted, or an address it refused.
+/// accepted, an address it refused, or a new tab's address to open on the
+/// device.
 typedef BrowserNotice = ({String kind, String message});
 
 /// One headless browser on the backend machine, shown as a stream of JPEG
@@ -189,6 +190,8 @@ class BrowserController extends ChangeNotifier {
       case 'rejected':
         onNotice
             ?.call((kind: 'rejected', message: '${decoded['message'] ?? ''}'));
+      case 'open':
+        onNotice?.call((kind: 'open', message: '${decoded['url'] ?? ''}'));
       case 'replaced':
         _setStatus(BrowserStatus.replaced);
       case 'exit':

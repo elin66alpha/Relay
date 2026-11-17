@@ -173,11 +173,16 @@ function cursorCredential(fsModule, homeDir, environment, platform) {
 function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform) {
   switch (agentKey) {
     case 'agy':
+      if (!installed) return { authed: false };
       try {
-        return { authed: nonEmpty(fsModule.readFileSync(agyAuthFile(homeDir), 'utf8')) };
-      } catch (_err) {
-        return { authed: false };
-      }
+        if (nonEmpty(fsModule.readFileSync(agyAuthFile(homeDir), 'utf8'))) {
+          return { authed: true };
+        }
+      } catch (_err) { /* No token file: agy keeps it in the OS keyring. */ }
+      // agy stores its token in the OS keyring when a D-Bus session exists and
+      // only falls back to the file without one, so a missing file is not a
+      // logout. A real logout surfaces as an auth error on the next turn.
+      return { authed: null, authKind: 'hostManaged' };
     case 'claude':
       return claudeCredential(fsModule, homeDir);
     case 'codex':

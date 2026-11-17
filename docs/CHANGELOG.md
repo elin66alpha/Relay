@@ -4,6 +4,23 @@
 
 ### Added
 
+- **Demo mode**: **Try the demo** on the empty-credential screen activates an
+  in-memory demo machine (`https://demo.relay.invalid`) backed by
+  `DemoHttpClient` (Claude Code and Codex with streamed simulated replies,
+  disabled SSH/Browser entries, a **Demo mode** banner with **Exit demo**,
+  automatic removal when importing a real machine, and an author GitHub contact
+  link on the welcome screen and in Settings → About).
+- **Browser new tabs**: a tab the page opens (`target="_blank"`,
+  `window.open`) opens loopback URLs in the streamed tab. External web addresses
+  open in the device's browser after confirmation; an info
+  button in the browser's app bar lists its capabilities and limits.
+- **Setup browser check**: setup step 1 (Linux, macOS, Windows) runs
+  `server/scripts/check-browser.js`, the backend's own browser lookup, and when
+  no Chrome, Chromium or Edge is found reminds how to install one and continues.
+- **Tailscale network mode**: setup's network menu adds 4) Tailscale, which
+  reads `tailscale ip -4` and uses `http://<tailscale-ip>:<port>` for native apps, binding only the
+  tailnet IP (Web uses a configured HTTPS proxy hostname); without Tailscale signed in it shows the menu
+  again. The backend's plain-HTTP warning treats 100.64.0.0/10 as private.
 - **Tutorial** on Home and in Settings is a searchable library of articles,
   one per feature, grouped by area (getting started, backend setup, chat,
   agents, Swarms, files, machine and tools, usage and notifications, app

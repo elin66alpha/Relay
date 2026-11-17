@@ -234,6 +234,11 @@ For a backend reachable beyond localhost:
 
 See the [production checklist](handbook.md#production-deployment).
 
+In the installer’s Tailscale mode, the backend listens only on its tailnet IPv4.
+Native clients can use HTTP over the encrypted tailnet. Relay Web requires a
+trusted HTTPS origin for browser credential storage. Its reverse proxy must
+forward to the bound tailnet IP and backend port.
+
 ## What Relay does not do
 
 - It does not sandbox Claude Code, Codex, OpenCode, or Hermes.

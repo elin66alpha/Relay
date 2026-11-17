@@ -100,6 +100,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool isDemo = isDemoMachine(widget.machine);
     _status ??= _loadStatus(strings);
     return Scaffold(
       appBar: AppBar(title: Text(strings.machineDetails)),
@@ -117,7 +118,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: FilledButton.icon(
-                        onPressed: _enterSsh,
+                        onPressed: isDemo ? null : _enterSsh,
                         icon: const Icon(Icons.terminal_rounded),
                         label: Text(strings.enterSsh),
                       ),
@@ -127,6 +128,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                       backend: widget.backend,
                       title: widget.machine.displayName,
                       latestVersion: widget.latestVersion,
+                      allowUpdate: !isDemo,
                     ),
                     const SizedBox(height: 20),
                     _AgentCredentialStatusSection(
@@ -193,11 +195,13 @@ class _MachineInfoPanel extends StatefulWidget {
     required this.backend,
     required this.title,
     required this.latestVersion,
+    this.allowUpdate = true,
   });
 
   final BackendClient backend;
   final String title;
   final Future<String> Function() latestVersion;
+  final bool allowUpdate;
 
   @override
   State<_MachineInfoPanel> createState() => _MachineInfoPanelState();
@@ -219,7 +223,7 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
   void initState() {
     super.initState();
     unawaited(_load());
-    unawaited(_loadLatest());
+    if (widget.allowUpdate) unawaited(_loadLatest());
     // Temperatures change slowly; one sample every 10 seconds is enough.
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
@@ -376,7 +380,8 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
                     ],
                   ),
                 )
-              else if (info.version.isNotEmpty &&
+              else if (widget.allowUpdate &&
+                  info.version.isNotEmpty &&
                   _latest.isNotEmpty &&
                   isNewerVersion(_latest, info.version))
                 Padding(

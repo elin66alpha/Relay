@@ -335,6 +335,8 @@ function warnIfPlaintextTokenExposure() {
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     /^169\.254\./.test(host) ||
+    // 100.64.0.0/10: Tailscale tailnet addresses (also carrier-grade NAT).
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
     host.endsWith('.local');
   console.warn('');
   console.warn('  ============================================================');

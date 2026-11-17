@@ -79,6 +79,7 @@ Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `
 3. **Cloudflare Quick Tunnel：** 适合试用。重启后 `trycloudflare.com` 地址可能变化，
    地址变化时需要重新生成并导入凭证。先从服务日志找到新地址，再在仓库根目录运行
    `npm --prefix server run credential -- --url https://新地址`。
+4. **Tailscale。** Relay 只监听检测到的 tailnet IPv4。原生客户端可以通过 WireGuard 使用 `http://<tailscale-ip>:<端口>`。Web 客户端需要 HTTPS 才能保存凭证。请先配置使用受信任证书的反向代理，让它在 443 端口接收 HTTPS 并转发到该 tailnet IP 和后端端口，再在安装时填写代理主机名。用浏览器打开这个 HTTPS 地址并导入生成的凭证。主机名留空将关闭 Web，仅供原生客户端连接。 Tailscale 不可用时会返回网络菜单。
 
 ## 服务管理
 

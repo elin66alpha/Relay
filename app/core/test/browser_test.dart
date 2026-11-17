@@ -10,6 +10,8 @@ import 'package:relay_core/core/i18n/app_strings.dart';
 import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/features/browser/browser_controller.dart';
 import 'package:relay_core/features/browser/browser_screen.dart';
+import 'package:url_launcher_platform_interface/link.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 void main() {
   test(
@@ -34,6 +36,11 @@ void main() {
       );
       socket.add(
         jsonEncode(<String, Object?>{'type': 'dialog', 'message': 'saved'}),
+      );
+      socket.add(
+        jsonEncode(
+          <String, Object?>{'type': 'open', 'url': 'https://github.com/a'},
+        ),
       );
     });
     final BrowserController controller = BrowserController(
@@ -76,8 +83,10 @@ void main() {
 
     expect(controller.frame.value, <int>[0xff, 0xd8, 1, 2]);
     expect(controller.url, 'http://localhost:3000/');
-    expect(notices.single.kind, 'dialog');
-    expect(notices.single.message, 'saved');
+    expect(
+      notices.map((BrowserNotice n) => '${n.kind}:${n.message}').toList(),
+      <String>['dialog:saved', 'open:https://github.com/a'],
+    );
   });
 
   testWidgets('phones send touches and desktops send mouse clicks',
@@ -173,6 +182,62 @@ void main() {
     expect(controller.events, <String>['text:keep this draft']);
     expect(tester.widget<TextField>(input).controller!.text, isEmpty);
   });
+
+  testWidgets('info button shows capabilities and open notice confirms URL',
+      (WidgetTester tester) async {
+    final UrlLauncherPlatform previousLauncher = UrlLauncherPlatform.instance;
+    final _FakeLauncher launcher = _FakeLauncher();
+    UrlLauncherPlatform.instance = launcher;
+    addTearDown(() => UrlLauncherPlatform.instance = previousLauncher);
+
+    final _RecordingController controller = _RecordingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: BrowserScreen(
+            backend: _LocalBackendClient(Uri()),
+            controller: controller,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.info_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('About this browser'), findsOneWidget);
+    expect(find.textContaining('headless Chrome'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    controller.onNotice?.call((kind: 'open', message: 'https://github.com/a'));
+    await tester.pumpAndSettle();
+    expect(find.text('https://github.com/a'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(launcher.launched, isEmpty);
+
+    controller.onNotice?.call((kind: 'open', message: 'https://github.com/a'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(launcher.launched, <String>['https://github.com/a']);
+  });
+}
+
+class _FakeLauncher extends UrlLauncherPlatform {
+  final List<String> launched = <String>[];
+
+  @override
+  LinkDelegate? get linkDelegate => null;
+
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions options) async {
+    launched.add(url);
+    return true;
+  }
 }
 
 class _RecordingController extends BrowserController {

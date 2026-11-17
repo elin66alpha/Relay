@@ -2,13 +2,13 @@
 title: Network modes and HTTPS
 category: Backend setup
 order: 230
-summary: Direct, named Cloudflare Tunnel and Quick Tunnel compared, plus reverse proxy requirements.
+summary: Direct, named Cloudflare Tunnel, Quick Tunnel and Tailscale compared, plus reverse proxy requirements.
 keywords: network, tunnel, cloudflare, trycloudflare, https, reverse proxy, caddy, nginx, direct, tailscale
 ---
 
 Setup asks how the app reaches the backend. That address (`PUBLIC_BASE_URL`) is stored in the credential, so when it changes you must generate and import a new credential.
 
-## The three modes
+## The four modes
 
 **1. Direct**
 
@@ -30,6 +30,13 @@ npm --prefix server run credential -- --url https://NEW-URL
 ```
 
 then import the new credential in the app. [Relay MCP](relay-mcp.md) refuses Quick Tunnel addresses.
+
+**4. Tailscale**
+
+Relay listens only on the detected tailnet IPv4. Native apps can use `http://<tailscale-ip>:<port>` over WireGuard. Relay Web needs HTTPS to store credentials. To use it, configure a reverse proxy with a trusted certificate on port 443 forwarding to that tailnet IP and backend port, then enter its hostname during setup. Open that HTTPS address and import the generated credential. Leaving the hostname blank configures native apps only and disables Web.
+
+- Install Tailscale on each phone or computer that uses Relay and sign in to the same tailnet.
+- If Tailscale is missing or not signed in, setup says so and shows the menu again so you can install it or pick another mode.
 
 ## The Web client and HTTPS
 

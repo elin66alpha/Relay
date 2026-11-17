@@ -8,6 +8,7 @@ import '../platform/client_device_name.dart';
 import '../storage/device_id_store.dart';
 import '../storage/machine_credentials_store.dart';
 import '../storage/workdir_store.dart';
+import 'demo_http_client.dart';
 
 class BackendException implements Exception {
   BackendException(this.message, {this.status, this.code});
@@ -30,12 +31,44 @@ class ApiTransport {
   })  : _credentialsStore = credentialsStore ?? MachineCredentialsStore(),
         _deviceIdStore = deviceIdStore ?? DeviceIdStore(),
         _workdirStore = workdirStore ?? WorkdirStore(),
-        httpClient = httpClient ?? http.Client();
+        _injectedClient = httpClient;
 
   final MachineCredentialsStore _credentialsStore;
   final DeviceIdStore _deviceIdStore;
   final WorkdirStore _workdirStore;
-  final http.Client httpClient;
+  final http.Client? _injectedClient;
+  http.Client? _networkClient;
+  DemoHttpClient? _demoClient;
+
+  http.Client get httpClient =>
+      _injectedClient ?? (_networkClient ??= http.Client());
+
+  /// Returns the client to use for [credential]: any test-injected client,
+  /// [DemoHttpClient] for the demo machine, or the shared network client.
+  http.Client clientFor(MachineCredential credential) {
+    final http.Client? injected = _injectedClient;
+    if (injected != null) return injected;
+    if (isDemoMachine(credential)) {
+      return _demoClient ??= DemoHttpClient();
+    }
+    return _networkClient ??= http.Client();
+  }
+
+  /// Resolves a client for a single SSE chat stream so cancelling one turn does
+  /// not close the transport's shared client.
+  ({http.Client client, bool owned}) createStreamClientFor(
+    MachineCredential credential,
+  ) {
+    final http.Client? injected = _injectedClient;
+    if (injected != null) return (client: injected, owned: false);
+    if (isDemoMachine(credential)) {
+      return (
+        client: (_demoClient ??= DemoHttpClient()).createStreamClient(),
+        owned: true,
+      );
+    }
+    return (client: http.Client(), owned: true);
+  }
 
   /// The machine every request goes to; null means the active machine.
   final MachineCredential? machine;
@@ -44,7 +77,9 @@ class ApiTransport {
       _workdirStore.write(credential.id, dir);
 
   void close() {
-    httpClient.close();
+    _injectedClient?.close();
+    _networkClient?.close();
+    _demoClient?.close();
   }
 
   Future<Object?> requestJson(
@@ -72,14 +107,15 @@ class ApiTransport {
   }) async {
     final Uri requestUri = uri(credential, path);
     final Map<String, String> requestHeaders = await headers(credential);
+    final http.Client client = clientFor(credential);
     late final http.Response response;
     try {
       if (method == 'GET') {
-        response = await httpClient
+        response = await client
             .get(requestUri, headers: requestHeaders)
             .timeout(timeout);
       } else if (method == 'POST') {
-        response = await httpClient
+        response = await client
             .post(
               requestUri,
               headers: requestHeaders,

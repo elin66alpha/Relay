@@ -242,13 +242,15 @@ into the focused field on the page, and its buttons send Backspace and Enter.
 
 The backend looks for Chrome, Chromium, or Edge in their standard install
 locations (on Linux, also on `PATH` and `/snap/bin/chromium`); set
-`RELAY_BROWSER` to an executable path to choose one. Each device token owns
+`RELAY_BROWSER` to an executable path to choose one. Setup runs the same
+check (`server/scripts/check-browser.js`) in step 1 and, when none is found,
+shows how to install one and continues. Each device token owns
 one browser with one tab. Leaving the page keeps it for 10 minutes, so
 returning shows the same page; opening it on another device replaces the first
 viewer. Each browser uses a new temporary profile that is deleted when it
 closes, so sign-ins inside the page do not persist. There is no sound, no file
-upload or download, no clipboard, and a link that opens a new window does
-nothing.
+upload or download, and no clipboard; loopback links opened in a new tab navigate the streamed tab on the backend.
+Other HTTP(S) links opened in a new tab are offered to the device’s browser after confirmation.
 
 An authenticated `POST /api/browser/ticket` returns a single-use ticket valid
 for 30 seconds, redeemed at `/api/browser/connect`, as for the terminal.

@@ -38,9 +38,10 @@ Windows 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/late
 
 | 方式 | 适合 | 注意 |
 |---|---|---|
-| 直连 | 局域网、Tailscale，或自己有 HTTPS 反向代理 | 填写客户端设备真正能访问的地址；其他设备不能用 `localhost` 访问你的主机。公开到互联网前要配 HTTPS |
+| 直连 | 局域网，或自己有 HTTPS 反向代理 | 填写客户端设备真正能访问的地址；其他设备不能用 `localhost` 访问你的主机。公开到互联网前要配 HTTPS |
 | Cloudflare 命名隧道 | 长期使用 | 需要你自己在 Cloudflare 上的域名，地址稳定且自带 HTTPS |
 | Cloudflare 快速隧道 | 试用 | 不需要域名；但 `trycloudflare.com` 地址在重启后可能变化，变了就要重新生成并导入凭证 |
+| Tailscale | tailnet 私网直连 | 自动读取本机 `tailscale ip -4`，流量经 WireGuard 加密 |
 
 详见[网络方式与 HTTPS](network-modes.md)。
 

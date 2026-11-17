@@ -16,6 +16,7 @@ import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
+import '../../core/widgets/author_contact_link.dart';
 import '../settings/tutorial_screen.dart';
 import 'machine_credentials_controller.dart';
 
@@ -56,6 +57,10 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen>
   @override
   bool get _notifyOnImport => !widget.requireCredential;
 
+  Future<void> _enterDemoMode() async {
+    await _machinesController.saveCredential(demoMachineCredential());
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -75,6 +80,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen>
                     onScan: _scanCredential,
                     onPaste: _pasteCredential,
                     onUpload: _uploadCredentialQr,
+                    onTryDemo: _enterDemoMode,
                     settingsController: widget.requireCredential
                         ? widget.settingsController
                         : null,
@@ -589,6 +595,7 @@ class _EmptyCredentialState extends StatelessWidget {
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
+    required this.onTryDemo,
     required this.settingsController,
   });
 
@@ -597,6 +604,7 @@ class _EmptyCredentialState extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
+  final VoidCallback onTryDemo;
   final AppSettingsController? settingsController;
 
   @override
@@ -655,6 +663,12 @@ class _EmptyCredentialState extends StatelessWidget {
                         onPaste: onPaste,
                         onUpload: onUpload,
                       ),
+                      const SizedBox(height: 12),
+                      FilledButton.tonalIcon(
+                        onPressed: isImporting ? null : onTryDemo,
+                        icon: const Icon(Icons.play_circle_outline_rounded),
+                        label: Text(context.l10n.tryDemo),
+                      ),
                       const SizedBox(height: 18),
                       const Divider(height: 1),
                       const SizedBox(height: 10),
@@ -669,6 +683,8 @@ class _EmptyCredentialState extends StatelessWidget {
                         icon: const Icon(Icons.menu_book_outlined, size: 18),
                         label: Text(context.l10n.deployBackendGuide),
                       ),
+                      const SizedBox(height: 6),
+                      const AuthorContactLink(),
                     ],
                   ),
                 ),

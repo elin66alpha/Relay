@@ -39,7 +39,7 @@ class BotChatController extends ChangeNotifier {
   final BackendClient _backendClient;
   late final ChatPushRegistration _pushRegistration = ChatPushRegistration(
     backendClient: _backendClient,
-    hasMachine: () => _machine != null,
+    hasMachine: () => _machine != null && !isDemoMachine(_machine),
     language: () => _strings.isZh ? 'zh' : 'en',
     quotaPushEnabled: () => _quotaPushEnabled,
     taskPushEnabled: () => _taskPushEnabled,
@@ -709,23 +709,32 @@ class BotChatController extends ChangeNotifier {
     _connectEventsNow();
   }
 
+  /// Stops the shared backend event stream and any pending reconnect timer.
+  Future<void> disconnectEvents() async {
+    _wantsEvents = false;
+    _eventReconnectTimer?.cancel();
+    _eventReconnectTimer = null;
+    final StreamSubscription<BackendEvent>? sub = _eventsSub;
+    _eventsSub = null;
+    await sub?.cancel();
+  }
+
   Future<void> reconnectEvents() async {
     _eventReconnectTimer?.cancel();
+    _eventReconnectTimer = null;
     await _eventsSub?.cancel();
     _eventsSub = null;
     if (_wantsEvents) _connectEventsNow();
   }
 
   Future<void> disposeController() async {
-    _wantsEvents = false;
-    _eventReconnectTimer?.cancel();
     _historyPollTimer?.cancel();
     _remoteSettleTimer?.cancel();
     _cancelStreamingNotifyTimer();
     _foregroundTurn?.detached = true;
     _foregroundTurn?.streamHandle.close();
     _clearBackgroundTurns();
-    await _eventsSub?.cancel();
+    await disconnectEvents();
     await _backendClient.close();
   }
 

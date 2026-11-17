@@ -18,7 +18,7 @@ console.log(JSON.stringify({
   agents: definitions.map(([key, label, login]) => ({
     key, label, login,
     installed: !!states[key]?.installed,
-    authed: !!states[key]?.authed,
+    authed: states[key]?.authed ?? null,
   })),
   tokens: listTokenSummaries(),
 }));

@@ -21,7 +21,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 3. Follow the six steps: included runtime/dependencies, optional agent CLIs,
    Web on/off (default on), file access (open, or isolated to workspace\),
    network, and an encrypted device credential. Direct mode, a named
-   Cloudflare Tunnel and Quick Tunnel match Linux setup. Missing cloudflared
+   Cloudflare Tunnel, Quick Tunnel and Tailscale (binds only the tailnet IP; Web requires a configured HTTPS proxy hostname)
+   match Linux setup. Missing cloudflared
    is downloaded only for tunnel modes.
 4. Choose a password of at least six characters. Import the encrypted
    server/credentials/*.relay.json or *.relay.png in Relay, or view the QR on
@@ -42,8 +43,8 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 2. 在该目录打开 PowerShell，运行 **.\setup.cmd**（双击 setup.cmd 也可以），选择
    1) Install。菜单与 Linux、macOS 的安装菜单相同。
 3. 按六步完成：运行时和依赖、可选 CLI、Web 开关（默认开启）、文件访问（开放，或隔离在
-   workspace\ 内）、网络、设备凭证。与 Linux 一样支持直连、正式 Cloudflare Tunnel 和
-   Quick Tunnel；仅隧道模式缺少 cloudflared 时下载它。
+   workspace\ 内）、网络、设备凭证。与 Linux 一样支持直连、正式 Cloudflare Tunnel、
+   Quick Tunnel 和 Tailscale（只监听本机 tailnet IP，使用 Web 需填写已配置的 HTTPS 代理主机名）；仅隧道模式缺少 cloudflared 时下载它。
 4. 设置至少六位的凭证密码，在 Relay 导入 server/credentials/ 中的 .relay.json
    或 .relay.png，或在设备令牌页查看二维码并扫码。密码不会保存。
 5. 在终端自行运行上面的 CLI 登录或配置命令；安装器使用官方 Windows 安装方式，

@@ -92,6 +92,9 @@ class MachineCredentialsStore {
       List<MachineCredential> list,
     ) {
       final List<MachineCredential> mutable = list.toList(growable: true);
+      if (!isDemoMachine(credential)) {
+        mutable.removeWhere(isDemoMachine);
+      }
       final int index = mutable.indexWhere(
         (MachineCredential item) => item.id == credential.id,
       );

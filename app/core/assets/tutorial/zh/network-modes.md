@@ -2,13 +2,13 @@
 title: 网络方式与 HTTPS
 category: 部署后端
 order: 230
-summary: 直连、Cloudflare 命名隧道、快速隧道的区别，以及反向代理的要求。
+summary: 直连、Cloudflare 命名隧道、快速隧道、Tailscale 的区别，以及反向代理的要求。
 keywords: 网络, 隧道, cloudflare, tunnel, trycloudflare, https, 反向代理, caddy, nginx, 直连, tailscale
 ---
 
 安装时要选择 App 怎么访问后端。凭证里保存的就是这个地址（`PUBLIC_BASE_URL`），地址变了就要重新生成并导入凭证。
 
-## 三种方式
+## 四种方式
 
 **1. 直连**
 
@@ -30,6 +30,13 @@ npm --prefix server run credential -- --url https://新地址
 ```
 
 再把新凭证导入 App。[Relay MCP](relay-mcp.md) 不接受快速隧道地址。
+
+**4. Tailscale**
+
+Relay 只监听检测到的 tailnet IPv4。原生客户端可以通过 WireGuard 使用 `http://<tailscale-ip>:<端口>`。Web 客户端需要 HTTPS 才能保存凭证。请先配置使用受信任证书的反向代理，让它在 443 端口接收 HTTPS 并转发到该 tailnet IP 和后端端口，再在安装时填写代理主机名。用浏览器打开这个 HTTPS 地址并导入生成的凭证。主机名留空将关闭 Web，仅供原生客户端连接。
+
+- 每台使用 Relay 的手机或电脑都要装 Tailscale，并登录同一个 tailnet。
+- 没装 Tailscale 或没登录时，安装脚本会提示，并重新显示菜单，你可以先去安装，或改选其他方式。
 
 ## 网页客户端与 HTTPS
 

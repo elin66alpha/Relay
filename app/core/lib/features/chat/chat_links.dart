@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/download/download_manager.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/web_link.dart';
 import '../filesystem/file_system_screen.dart';
 
 final RegExp _windowsPath = RegExp(r'^([A-Za-z]:[\\/]|\\\\)');
@@ -68,7 +68,7 @@ Future<void> openChatLink(
   final ({Uri? web, String? path})? link = classifyChatLink(href);
   if (link == null) return;
   if (link.web != null) {
-    await _openWeb(context, link.web!);
+    await confirmAndOpenWebLink(context, link.web!);
   } else {
     await _openFile(
       context,
@@ -78,35 +78,6 @@ Future<void> openChatLink(
       onSetWorkdir: onSetWorkdir,
     );
   }
-}
-
-Future<void> _openWeb(BuildContext context, Uri uri) async {
-  final AppStrings strings = context.l10n;
-  final bool? confirmed = await showDialog<bool>(
-    context: context,
-    builder: (BuildContext context) => AlertDialog(
-      title: Text(strings.openLinkTitle),
-      content: Text(uri.toString()),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(strings.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(strings.openLink),
-        ),
-      ],
-    ),
-  );
-  if (confirmed != true || !context.mounted) return;
-  bool launched;
-  try {
-    launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } catch (_) {
-    launched = false;
-  }
-  if (!launched && context.mounted) _notify(context, strings.cannotOpenLink);
 }
 
 Future<void> _openFile(
