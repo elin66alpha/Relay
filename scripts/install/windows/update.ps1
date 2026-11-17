@@ -60,6 +60,10 @@ try {
     }
     & robocopy.exe $source $Script:RootDir /E /NFL /NDL /NJH /NJS /NP /R:5 /W:1 | Out-Null
     if ($LASTEXITCODE -ge 8) { Write-Fail "Copying the new version failed (robocopy $LASTEXITCODE)." }
+    # Releases up to 0.1.12 shipped a graphical Setup.exe; setup.cmd replaces it.
+    foreach ($stale in @('Setup.exe', 'scripts\install\windows\Setup.cs', 'scripts\install\windows\setup-action.ps1')) {
+      Remove-Item -LiteralPath (Join-Path $Script:RootDir $stale) -Force -ErrorAction SilentlyContinue
+    }
     $new = (Get-Content -LiteralPath (Join-Path $Script:ServerDir 'package.json') -Raw | ConvertFrom-Json).version
     Write-Info "Upgraded from $current to $new. Tokens, chats and settings are unchanged."
   } finally {

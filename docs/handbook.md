@@ -720,8 +720,7 @@ and builds a debug APK.
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution
-(including npm and its license), Git, Flutter, the system .NET Framework 4.x
-C# compiler and access to the npm registry:
+(including npm and its license), Git, Flutter and access to the npm registry:
 
 ```powershell
 .\scripts\release\package_windows_backend.ps1
@@ -746,12 +745,13 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. `Setup.exe` is a Windows Forms UI built with the system .NET
-Framework compiler, without a downloaded GUI runtime. It and the console menu
-share `scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
-agent installation and token create/delete/list/re-show. Passwords reach the
-worker through stdin and the existing credential generator through its
-environment, never command arguments or temporary request files. The bundle
+installation. Setup is command-line only, as on Linux and macOS: `setup.cmd`
+runs `scripts/install/windows/setup.ps1`, the same menu and six install steps as
+`scripts/install/unix/setup.sh`, on top of the operations in
+`scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+agent installation and token create/delete/list/re-show. The credential
+password is typed into the credential generator's own prompt, never passed as
+a command argument or written to a file. The bundle
 includes `app/shell/build/web`; Node serves it alongside the API, without another Web
 server. Setup enables it by default and can turn it off. Tunnel modes download
 missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows

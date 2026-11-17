@@ -2,25 +2,25 @@
 title: Install on Windows
 category: Backend setup
 order: 220
-summary: Install with Setup.exe, put the CLIs on PATH, manage the service, find logs and upgrade in place.
-keywords: windows, setup.exe, setup.cmd, powershell, scheduled task, update.cmd, install
+summary: Install with setup.cmd, put the CLIs on PATH, manage the service, find logs and upgrade in place.
+keywords: windows, setup.cmd, powershell, scheduled task, update.cmd, install
 ---
 
 ## Install
 
 1. Download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest). Not `relay-windows-x64-v<VERSION>.zip`: that one is the desktop client.
 2. **Extract the whole ZIP** to a permanent, writable folder (do not move it later).
-3. Double-click `Setup.exe`, or run `.\setup.cmd` in that folder for the console menu.
+3. Open PowerShell in that folder, run `.\setup.cmd` and choose `1) Install`. Setup is a command-line menu, the same as on Linux and macOS (double-clicking `setup.cmd` opens it too).
 
 The ZIP includes the Node.js runtime, npm, production dependencies and the Web client; one Node.js process serves both the Web client and the API.
 
-## What Setup does
+## What setup does
 
 - Install, reinstall, uninstall, show status, and manage device tokens.
 - Choose whether to serve the Web client (on by default), the network mode and the [file access mode](file-access-mode.md). A missing `cloudflared` is downloaded for tunnel modes.
 - Install any of Claude Code, Codex, Cursor, OpenCode and Hermes, and Antigravity, with their official Windows installers. Sign in or configure them yourself afterwards.
 - Append the folders that hold an agent CLI (such as `%APPDATA%\npm`, where Codex and OpenCode install) to your **user PATH**, plus the bundled Node when the host has none (npm's command shims need it). Uninstall removes only the entries it added.
-- **Open terminal (sign in CLIs)** (`t` in the console menu) opens a PowerShell with the backend's PATH and lists each CLI's sign-in command.
+- Menu choice `t` opens a PowerShell with the backend's PATH and lists each CLI's sign-in command.
 
 The backend runs as a per-user **Scheduled Task** that starts when you sign in to Windows.
 
@@ -45,7 +45,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## Logs
 
-`logs\` in the Relay folder: `setup.log` from Setup.exe plus the backend and tunnel `.out` / `.err` logs. PID files live in `%LOCALAPPDATA%\Relay\runtime\`.
+`logs\` in the Relay folder: the backend and tunnel `.out` / `.err` logs. Setup prints its progress in the console window. PID files live in `%LOCALAPPDATA%\Relay\runtime\`.
 
 ## Drives
 

@@ -132,12 +132,12 @@ Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.j
 ### Windows
 
 每个 release 的 `relay-backend-windows-x64-v<版本>.zip` 包含 Node.js、npm、按锁文件安装的
-生产依赖、Web 前端和 `Setup.exe`。将整个 ZIP 解压到固定、可写的目录，双击
-`Setup.exe`，或运行 `.\setup.cmd` 打开命令行菜单。两种入口共用安装、重装、卸载、
-状态查询、CLI 安装和设备令牌管理功能。Web 默认开启；隧道模式缺少 `cloudflared`
+生产依赖和 Web 前端。将整个 ZIP 解压到固定、可写的目录，在该目录运行 `.\setup.cmd`。
+与 Linux、macOS 一样只有命令行安装：菜单相同（安装、重装、卸载、状态查询、CLI 安装和
+设备令牌管理），安装同样分六步，包括开放/隔离的文件访问选择。Web 默认开启；隧道模式缺少 `cloudflared`
 时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。安装器会把装有
 agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 Node 时再加上包内 Node，
-之后新开的终端即可直接调用；Setup.exe 的 “Open terminal (sign in CLIs)” 按钮（命令行菜单 `t`）可立即打开一个。卸载只移除安装器添加的条目。包内 `README.md`
+之后新开的终端即可直接调用；菜单选项 `t` 可立即打开一个。卸载只移除安装器添加的条目。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
 `.\uninstall.cmd` 是下面相同服务脚本的入口，`.\update.cmd` 把安装原地升级到最新版本。计划任务在当前用户登录时启动。
 
@@ -148,8 +148,7 @@ agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 
 .\scripts\install\windows\uninstall.ps1
 ```
 
-日志位于 Relay 目录下的 `logs\`（Setup.exe 的 `setup.log`，以及后端和隧道的
-`.out`/`.err` 日志）；PID 文件位于 `%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell
+日志位于 Relay 目录下的 `logs\`（后端和隧道的 `.out`/`.err` 日志）；PID 文件位于 `%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell
 阻止脚本执行，只为当前会话临时放开：
 
 ```powershell

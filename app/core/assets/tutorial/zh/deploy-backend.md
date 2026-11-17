@@ -26,7 +26,7 @@ Linux 和 macOS 只需一行命令。它把最新版本下载到 `~/relay`，校
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
 ```
 
-Windows 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-windows-x64-v<版本>.zip`，**完整解压**到一个固定目录，双击 `Setup.exe`（或运行 `.\setup.cmd` 使用命令行菜单）。压缩包已包含 Node.js、依赖和网页客户端。
+Windows 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-windows-x64-v<版本>.zip`，**完整解压**到一个固定目录，在该目录运行 `.\setup.cmd`：与 Linux、macOS 相同的命令行菜单。压缩包已包含 Node.js、依赖和网页客户端。
 
 用源码仓库安装时，在仓库根目录运行对应系统的脚本：
 

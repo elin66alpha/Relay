@@ -131,10 +131,10 @@ Antigravity 需在后端主机自行安装支持 `agy acp --process-per-session`
 模型和思考强度分别选择；订阅额度展示各模型组的独立额度。若额度服务未运行，先开始一次对话。
 
 Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/releases/latest)
-下载 `relay-backend-windows-x64-v<版本>.zip`，解压后双击 `Setup.exe`，或运行
-`.\setup.cmd` 打开命令行菜单。包内包含 Node.js、生产依赖和编译后的 Web 前端，
-Web 与 API 共用同一个 Node.js 服务。安装向导支持选装 agent CLI、开关 Web、配置网络和
-管理设备令牌；CLI 登录仍由你在主机上完成。
+下载 `relay-backend-windows-x64-v<版本>.zip`，解压后在该目录运行 `.\setup.cmd`。
+安装是命令行菜单，与 Linux、macOS 相同。包内包含 Node.js、生产依赖和编译后的 Web 前端，
+Web 与 API 共用同一个 Node.js 服务。安装菜单支持选装 agent CLI、开关 Web、文件访问、
+配置网络和管理设备令牌；CLI 登录仍由你在主机上完成。
 `relay-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
 和 Ubuntu 客户端。
 

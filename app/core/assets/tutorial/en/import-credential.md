@@ -45,7 +45,7 @@ npm run credential -- --list-tokens
 npm run credential -- --revoke <token-id>
 ```
 
-The Linux and macOS setup menu and Windows `Setup.exe` can also create, list and delete tokens or show a QR again (showing again asks for a new password, since the old one is never stored).
+The setup menu (`setup.sh` on Linux and macOS, `setup.cmd` on Windows) can also create, list and delete tokens or show a QR again (showing again asks for a new password, since the old one is never stored).
 
 ## Where credentials are kept
 

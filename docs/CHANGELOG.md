@@ -43,11 +43,16 @@
 
 ### Changed
 
-- Windows Setup makes the agent CLIs it finds callable from any new terminal:
+- Windows backend setup is command-line only, like Linux and macOS: the
+  graphical `Setup.exe` is gone, and `setup.cmd` runs the same menu and the
+  same six install steps as `setup.sh`, including the open/isolated file
+  access choice. `update.cmd` deletes the `Setup.exe` left by an older release,
+  and `bundle-info.json` no longer has a `setupGui` field.
+- Windows setup makes the agent CLIs it finds callable from any new terminal:
   it appends their folders (such as `%APPDATA%\npm`, where Codex and OpenCode
   install) to the user PATH, plus the bundled Node when the host has none,
   since npm's command shims need `node`. Uninstall removes only those entries.
-  **Open terminal (sign in CLIs)** in Setup.exe, or `t` in `setup.cmd`, opens a
+  `t` in the `setup.cmd` menu opens a
   PowerShell with the backend's PATH and lists each CLI's sign-in command.
 
 ### Fixed

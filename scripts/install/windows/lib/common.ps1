@@ -570,7 +570,7 @@ function Remove-RelayUserPath {
   $next = (Get-UserPathWithoutRelay) -join ';'
   if ($next -ne $raw) {
     Set-UserPathRaw $next
-    Write-Info 'Removed the folders Setup had added to your user PATH.'
+    Write-Info 'Removed the folders setup had added to your user PATH.'
   }
   Write-UserPathRecord @()
 }

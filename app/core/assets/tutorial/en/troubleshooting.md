@@ -31,7 +31,7 @@ Run the status command in the install directory (`~/relay` for the one-line inst
 |---|---|
 | Linux | `pm2 logs relay-server`; files in `~/.pm2/logs/` |
 | macOS | `~/Library/Logs/Relay/` |
-| Windows | `logs\` in the Relay folder (including Setup.exe's `setup.log`) |
+| Windows | `logs\` in the Relay folder |
 
 ## Address problems
 

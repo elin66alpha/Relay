@@ -1,4 +1,4 @@
-# Shared operations for the console menu and the graphical Setup.exe.
+# Operations behind the setup.cmd menu (setup.ps1) and status.cmd.
 . "$PSScriptRoot\common.ps1"
 
 function Get-RelayDetails {
@@ -66,7 +66,7 @@ function Install-RelayAgentClis {
     Write-Info "$($state.label) login/configuration command: $($state.login)"
   }
   Sync-RelayUserPath
-  Write-Info 'Sign in to agent CLIs yourself in a terminal (Open terminal in Setup has them on PATH). Relay never signs an agent in.'
+  Write-Info 'Sign in to agent CLIs yourself in a terminal (choose t in setup.cmd for one with them on PATH). Relay never signs an agent in.'
 }
 
 # A PowerShell window with the backend's PATH (bundled Node, every agent CLI

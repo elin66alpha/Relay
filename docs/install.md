@@ -160,17 +160,18 @@ tokens, and credentials in place.
 ### Windows
 
 `relay-backend-windows-x64-v<VERSION>.zip` from each release includes the Node.js
-runtime, npm, locked production dependencies, Web client and `Setup.exe`.
-Extract the whole ZIP to a permanent writable directory and double-click
-`Setup.exe`, or run `.\setup.cmd` for the console menu. Both provide install,
-reinstall, uninstall, status, agent CLI installation and device token management,
-using shared operations. Web defaults on. Missing `cloudflared` is downloaded
+runtime, npm, locked production dependencies and the Web client. Extract the
+whole ZIP to a permanent writable directory and run `.\setup.cmd` there. Setup
+is command-line only, like Linux and macOS: the same menu (install, reinstall,
+uninstall, status, agent CLI installation and device token management) and the
+same six install steps, including the open/isolated file access choice.
+Web defaults on. Missing `cloudflared` is downloaded
 for tunnel modes. The five CLIs can be selected for installation with official
 Windows installers; sign in/configure them yourself afterward. Setup appends
 the folders holding an agent CLI (such as `%APPDATA%\npm`) to your user PATH,
 plus the bundled Node when the host has none, so new terminals find them;
-"Open terminal" (menu `t`) opens one right away. Uninstall removes only the
-entries Setup added.
+menu choice `t` opens one right away. Uninstall removes only the entries setup
+added.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
 same service adapters below, and `.\update.cmd` upgrades the installation in
@@ -183,8 +184,8 @@ place to the latest release. The Scheduled Task starts at this user's login.
 .\scripts\install\windows\uninstall.ps1
 ```
 
-Logs live in `logs\` inside the Relay directory (`setup.log` from Setup.exe,
-plus backend and tunnel `.out`/`.err` logs); PID files live under
+Logs live in `logs\` inside the Relay directory (backend and tunnel
+`.out`/`.err` logs); PID files live under
 `%LOCALAPPDATA%\Relay\runtime\`. If PowerShell blocks the setup script, allow it
 for the current shell only:
 

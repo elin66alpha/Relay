@@ -26,7 +26,7 @@ On Linux and macOS it is one command. It downloads the latest release into `~/re
 curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
 ```
 
-On Windows, download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), **extract the whole ZIP** to a permanent folder and double-click `Setup.exe` (or run `.\setup.cmd` for the console menu). The ZIP includes Node.js, dependencies and the Web client.
+On Windows, download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), **extract the whole ZIP** to a permanent folder and run `.\setup.cmd` there: the same command-line menu as on Linux and macOS. The ZIP includes Node.js, dependencies and the Web client.
 
 From a copy of the repository, run the script for your OS from its root:
 

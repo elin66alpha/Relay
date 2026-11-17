@@ -31,7 +31,7 @@ keywords: 排错, 故障, 连接失败, 解密失败, 日志, 401, troubleshooti
 |---|---|
 | Linux | `pm2 logs relay-server`，文件在 `~/.pm2/logs/` |
 | macOS | `~/Library/Logs/Relay/` |
-| Windows | Relay 目录下的 `logs\`（含 Setup.exe 的 `setup.log`） |
+| Windows | Relay 目录下的 `logs\` |
 
 ## 地址问题
 

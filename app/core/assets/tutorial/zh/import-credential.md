@@ -45,7 +45,7 @@ npm run credential -- --list-tokens
 npm run credential -- --revoke <token-id>
 ```
 
-Linux 和 macOS 的安装菜单、Windows 的 `Setup.exe` 也能创建、列出、删除令牌或重新显示二维码（重新显示会要求设置新密码，因为旧密码从不保存）。
+安装菜单（Linux、macOS 的 `setup.sh`，Windows 的 `setup.cmd`）也能创建、列出、删除令牌或重新显示二维码（重新显示会要求设置新密码，因为旧密码从不保存）。
 
 ## 凭证存在哪里
 
