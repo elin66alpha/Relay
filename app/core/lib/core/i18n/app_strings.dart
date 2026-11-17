@@ -31,7 +31,7 @@ class AppStrings {
 
   String get appName => 'Relay';
   String get home => isZh ? '首页' : 'Home';
-  String get gettingStarted => isZh ? '开始使用' : 'Getting started';
+  String get tutorialHomeTitle => isZh ? '浏览全部教程' : 'Browse all articles';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
@@ -449,9 +449,13 @@ class AppStrings {
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>
       isZh ? '还没有工作过的工作区。' : 'No recent workspaces yet.';
-  String get gettingStartedHomeHint => isZh
-      ? '第一次使用或忘记流程时，从这里快速查看步骤。'
-      : 'Use this when you are new or want a quick reminder.';
+  String get tutorialHomeHint => isZh
+      ? '按模块分类讲解每个功能，可以搜索。'
+      : 'Every feature, grouped by area, with search.';
+  String get tutorialSearchHint => isZh ? '搜索教程' : 'Search the tutorial';
+  String get tutorialNoMatches => isZh ? '没有找到相关文章。' : 'No articles match.';
+  String get tutorialLoadFailed =>
+      isZh ? '教程加载失败。' : 'Could not load the tutorial.';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get machineDetails => isZh ? '机器详情' : 'Machine details';

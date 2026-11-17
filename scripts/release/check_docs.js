@@ -10,6 +10,17 @@ function checkDocs(root) {
     if (entry.endsWith('.md')) files.push(`docs/${entry}`);
   }
   const errors = [];
+  // In-app tutorial articles: each language holds the same articles, and
+  // their links to each other resolve like any other Markdown link.
+  const tutorial = 'app/core/assets/tutorial';
+  const articles = (language) => {
+    const dir = path.join(root, tutorial, language);
+    return fs.existsSync(dir) ? fs.readdirSync(dir).filter((entry) => entry.endsWith('.md')).sort() : [];
+  };
+  const [en, zh] = [articles('en'), articles('zh')];
+  for (const name of en.filter((entry) => !zh.includes(entry))) errors.push(`${tutorial}/zh/${name}: missing translation`);
+  for (const name of zh.filter((entry) => !en.includes(entry))) errors.push(`${tutorial}/en/${name}: missing translation`);
+  files.push(...en.map((name) => `${tutorial}/en/${name}`), ...zh.map((name) => `${tutorial}/zh/${name}`));
   for (const file of files) {
     const source = path.join(root, file);
     let inFence = false;

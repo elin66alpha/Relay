@@ -16,7 +16,7 @@ import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
-import 'deploy_backend_screen.dart';
+import '../settings/tutorial_screen.dart';
 import 'machine_credentials_controller.dart';
 
 class MachineCredentialsScreen extends StatefulWidget {
@@ -533,7 +533,9 @@ class _EmptyCredentialState extends StatelessWidget {
                       TextButton.icon(
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => const DeployBackendScreen(),
+                            builder: (_) => const TutorialArticleScreen(
+                              slug: 'deploy-backend',
+                            ),
                           ),
                         ),
                         icon: const Icon(Icons.menu_book_outlined, size: 18),

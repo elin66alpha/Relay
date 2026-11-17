@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import 'app_update.dart';
-import 'getting_started_screen.dart';
+import 'tutorial_screen.dart';
 import 'update_check.dart';
 import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.12';
+const String _applicationVersion = '0.1.13';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
@@ -201,13 +201,13 @@ class AppSettingsScreen extends StatelessWidget {
                           margin: const EdgeInsets.only(bottom: 24),
                           child: ListTile(
                             leading: const Icon(Icons.school_outlined),
-                            title: Text(context.l10n.gettingStarted),
-                            subtitle: Text(context.l10n.gettingStartedHomeHint),
+                            title: Text(context.l10n.tutorialHomeTitle),
+                            subtitle: Text(context.l10n.tutorialHomeHint),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () {
                               Navigator.of(context).push<void>(
                                 MaterialPageRoute<void>(
-                                  builder: (_) => const GettingStartedScreen(),
+                                  builder: (_) => const TutorialScreen(),
                                 ),
                               );
                             },

@@ -48,7 +48,9 @@ void main() {
     await tester.tap(find.text('如何部署后端？'));
     await tester.pumpAndSettle();
 
-    expect(find.text('在自己的机器上部署后端'), findsOneWidget);
+    // The deploy guide is the tutorial's `deploy-backend` article.
+    expect(find.text('部署后端'), findsWidgets);
+    expect(find.textContaining('Node.js 22'), findsWidgets);
   });
 }
 

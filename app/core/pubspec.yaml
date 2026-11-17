@@ -49,6 +49,8 @@ flutter:
   assets:
     - assets/agent_icons/
     - assets/fonts/OFL.txt
+    - assets/tutorial/en/
+    - assets/tutorial/zh/
   fonts:
     - family: RelayTerminalMono
       fonts:

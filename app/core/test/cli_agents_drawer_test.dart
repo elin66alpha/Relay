@@ -229,8 +229,8 @@ void main() {
       final CliAgentsController agentsController = CliAgentsController();
       final MachineCredentialsController machinesController =
           MachineCredentialsController(
-            store: _MemoryMachineCredentialsStore(machine),
-          );
+        store: _MemoryMachineCredentialsStore(machine),
+      );
       final AppSettingsController settingsController = AppSettingsController();
       final _SessionBackendClient backendClient = _SessionBackendClient();
       final BotChatController chatController = BotChatController(
@@ -297,9 +297,8 @@ void main() {
         final Size size = tester.getSize(finder);
         expect(size.height, greaterThanOrEqualTo(48));
         widths.add(size.width);
-        final SemanticsData sem = tester
-            .getSemantics(finder)
-            .getSemanticsData();
+        final SemanticsData sem =
+            tester.getSemantics(finder).getSemanticsData();
         expect(sem.flagsCollection.isButton, isTrue);
       }
       for (final double width in widths) {
@@ -369,7 +368,8 @@ void main() {
     },
   );
 
-  testWidgets('Swarm tile sits under Quota usage with count and no sub-entries', (
+  testWidgets('Swarm tile sits under Quota usage with count and no sub-entries',
+      (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -385,8 +385,8 @@ void main() {
     final CliAgentsController agentsController = CliAgentsController();
     final MachineCredentialsController machinesController =
         MachineCredentialsController(
-          store: _MemoryMachineCredentialsStore(machine),
-        );
+      store: _MemoryMachineCredentialsStore(machine),
+    );
     final AppSettingsController settingsController = AppSettingsController();
     final _SessionBackendClient backendClient = _SessionBackendClient();
     final BotChatController chatController = BotChatController(
@@ -427,15 +427,12 @@ void main() {
     expect(find.byIcon(Icons.forum_outlined), findsNothing);
 
     // Directly under Quota usage, above the CLI agents header, no subtitle.
-    final double quotaBottom = tester
-        .getBottomLeft(find.widgetWithText(ListTile, 'Quota usage'))
-        .dy;
-    final double swarmTop = tester
-        .getTopLeft(find.byType(SwarmDrawerSection))
-        .dy;
-    final double swarmBottom = tester
-        .getBottomLeft(find.byType(SwarmDrawerSection))
-        .dy;
+    final double quotaBottom =
+        tester.getBottomLeft(find.widgetWithText(ListTile, 'Quota usage')).dy;
+    final double swarmTop =
+        tester.getTopLeft(find.byType(SwarmDrawerSection)).dy;
+    final double swarmBottom =
+        tester.getBottomLeft(find.byType(SwarmDrawerSection)).dy;
     final double agentsTop = tester.getTopLeft(find.text('CLI agents')).dy;
     expect(swarmTop, greaterThanOrEqualTo(quotaBottom));
     expect(swarmBottom, lessThanOrEqualTo(agentsTop));
@@ -462,7 +459,8 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('unavailable agents fold into a collapsed row and keep selected agent '
+  testWidgets(
+      'unavailable agents fold into a collapsed row and keep selected agent '
       'visible', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     MachineCredentialsStore.resetCacheForTest();
@@ -477,8 +475,8 @@ void main() {
     final CliAgentsController agentsController = CliAgentsController();
     final MachineCredentialsController machinesController =
         MachineCredentialsController(
-          store: _MemoryMachineCredentialsStore(machine),
-        );
+      store: _MemoryMachineCredentialsStore(machine),
+    );
     final AppSettingsController settingsController = AppSettingsController();
     final _SessionBackendClient backendClient = _SessionBackendClient();
     final BotChatController chatController = BotChatController(
@@ -624,8 +622,8 @@ void main() {
       ]);
       final MachineCredentialsController machinesController =
           MachineCredentialsController(
-            store: _MemoryMachineCredentialsStore(machine),
-          );
+        store: _MemoryMachineCredentialsStore(machine),
+      );
       final AppSettingsController settingsController = AppSettingsController();
       final _SessionBackendClient backendClient = _SessionBackendClient();
       final BotChatController chatController = BotChatController(

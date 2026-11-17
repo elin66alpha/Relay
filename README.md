@@ -200,8 +200,8 @@ a right swipe on the file list to go up one directory. When browsing elsewhere,
 tap the work-path chip to return to the active project. The top of the file
 browser shows up to five recent workspaces as compact, horizontally scrolling
 tags. Tap a tag to switch the active workspace and display that directory.
-Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
-and the mobile terminal key bar.
+Home → Tutorial is a searchable library with one article per feature, from
+deployment and sessions to Swarms, files, the terminal and quota.
 For service commands, networking details, and platform notes, continue with the
 [backend guide](docs/install.md).
 

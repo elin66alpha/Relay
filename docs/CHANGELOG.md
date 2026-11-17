@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Tutorial** on Home and in Settings is a searchable library of articles,
+  one per feature, grouped by area (getting started, backend setup, chat,
+  agents, Swarms, files, machine and tools, usage and notifications, app
+  settings, advanced). Each article is a Markdown file under
+  `app/core/assets/tutorial/{en,zh}/`, so editing a file updates the in-app
+  tutorial with the next release; `scripts/release/check_docs.js` checks that
+  both languages hold the same articles and that their links resolve. The
+  search matches every word of the query in titles, summaries, keywords and
+  text. The credential screen's deploy guide opens the **Deploy the backend**
+  article; the old step lists are gone.
 - The file browser switches between disks: when the backend has more than
   one, the first breadcrumb opens a menu of them. On Windows these are the
   drive letters, so `D:\` is reachable without leaving `C:\` through a chat
