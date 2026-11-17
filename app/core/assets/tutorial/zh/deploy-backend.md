@@ -20,11 +20,7 @@ Relay 的智能体跑在你自己的电脑或服务器上，App 只是入口。�
 
 ## 2. 下载并运行安装脚本
 
-Linux 和 macOS 只需一行命令。它把最新版本下载到 `~/relay`，校验 `SHA256SUMS` 后启动安装菜单；以后再次运行就是升级：
-
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+Linux 和 macOS 共用一个后端包。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
 Windows 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-windows-x64-v<版本>.zip`，**完整解压**到一个固定目录，在该目录运行 `.\setup.cmd`：与 Linux、macOS 相同的命令行菜单。压缩包已包含 Node.js、依赖和网页客户端。
 

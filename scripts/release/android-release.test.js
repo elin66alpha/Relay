@@ -29,7 +29,7 @@ test('Android release signs the matching draft and rejects the wrong certificate
   write('app/core/lib/features/settings/app_settings_screen.dart', "const _applicationVersion = '1.2.3';");
   write('app/core/lib/features/settings/whats_new_screen.dart', "const List<_Release> _zhReleases = [version: '1.2.3'];\nconst List<_Release> _enReleases = [version: '1.2.3'];");
   write('docs/CHANGELOG.md', '## 1.2.3 - today\n');
-  const assets = ['install.sh', 'relay-backend-setup-v1.2.3.tar.gz', 'relay-windows-x64-v1.2.3.zip', 'relay-backend-windows-x64-v1.2.3.zip', 'relay-desktop_1.2.3_amd64.deb', 'relay-macos-v1.2.3.zip', 'relay-ios-unsigned-v1.2.3.ipa'];
+  const assets = ['relay-backend-linux-macos-v1.2.3.tar.gz', 'relay-client-windows-x64-v1.2.3.zip', 'relay-backend-windows-x64-v1.2.3.zip', 'relay-client-linux_1.2.3_amd64.deb', 'relay-client-macos-v1.2.3.zip', 'relay-client-ios-unsigned-v1.2.3.ipa'];
   let sums = '';
   for (const asset of assets) {
     write(`fixtures/${asset}`, `fixture ${asset}`);
@@ -98,10 +98,10 @@ fi
 
   const accepted = run(cert);
   assert.equal(accepted.status, 0, accepted.stderr);
-  assert.ok(fs.existsSync(path.join(root, 'uploads', 'relay-android-v1.2.3.apk')));
+  assert.ok(fs.existsSync(path.join(root, 'uploads', 'relay-client-android-v1.2.3.apk')));
   assert.match(fs.readFileSync(path.join(root, 'uploads', 'edited'), 'utf8'), /^--tag\nv1\.2\.3$/m);
   const updated = fs.readFileSync(path.join(root, 'uploads', 'SHA256SUMS'), 'utf8');
-  assert.match(updated, new RegExp(`${createHash('sha256').update('signed-apk').digest('hex')}  relay-android-v1.2.3\\.apk`));
+  assert.match(updated, new RegExp(`${createHash('sha256').update('signed-apk').digest('hex')}  relay-client-android-v1.2.3\\.apk`));
 
   fs.copyFileSync(path.join(root, 'uploads', 'SHA256SUMS'), path.join(root, 'fixtures', 'SHA256SUMS'));
   const retry = run(cert);

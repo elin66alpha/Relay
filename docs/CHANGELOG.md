@@ -33,7 +33,7 @@
 - The backend updates and restarts from the app: Machine details shows the
   backend's Relay version and, when a newer release exists, **Update to
   \<version\> and restart**. `POST /api/backend-update` runs the same in-place
-  upgrade as the host commands (`install.sh` on Linux and macOS, the new
+  upgrade as the host commands (`scripts/install/unix/update.sh` on Linux and macOS, the new
   `update.cmd` on Windows), keeping `server/.env`, tokens, chats and settings;
   `GET /api/machine` reports `version`. A backend running from a git checkout
   refuses (`UPDATE_UNSUPPORTED`).
@@ -42,6 +42,8 @@
   hand (`update.cmd -Archive <zip>`). The tunnel keeps running.
 
 ### Changed
+
+- Release downloads use `relay-client-*` for the five clients and `relay-backend-*` for the two backend archives. On Linux and macOS, extract the tarball and run its `./install.sh`. Windows setup stays inside the backend ZIP.
 
 - Windows backend setup is command-line only, like Linux and macOS: the
   graphical `Setup.exe` is gone, and `setup.cmd` runs the same menu and the

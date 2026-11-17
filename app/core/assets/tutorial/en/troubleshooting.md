@@ -17,7 +17,7 @@ keywords: troubleshooting, error, connection failed, decryption failed, logs, 40
 
 ## Is the backend running
 
-Run the status command in the install directory (`~/relay` for the one-line install):
+Run the status command in the install directory:
 
 | OS | Command |
 |---|---|

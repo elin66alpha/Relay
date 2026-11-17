@@ -8,7 +8,7 @@ keywords: windows, setup.cmd, powershell, scheduled task, update.cmd, install
 
 ## Install
 
-1. Download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest). Not `relay-windows-x64-v<VERSION>.zip`: that one is the desktop client.
+1. Download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest). Not `relay-client-windows-x64-v<VERSION>.zip`: that one is the desktop client.
 2. **Extract the whole ZIP** to a permanent, writable folder (do not move it later).
 3. Open PowerShell in that folder, run `.\setup.cmd` and choose `1) Install`. Setup is a command-line menu, the same as on Linux and macOS (double-clicking `setup.cmd` opens it too).
 

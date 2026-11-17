@@ -137,8 +137,8 @@ jobs:
         run: |
           tar -C app/shell/build/linux/x64/release -czf "$RUNNER_TEMP/relay-linux-x64.tar.gz" bundle
           ./scripts/release/package_linux_desktop.sh app/shell/build/linux/x64/release/bundle "$RUNNER_TEMP"
-          dpkg-deb --info "$RUNNER_TEMP"/relay-desktop_*_amd64.deb
-          dpkg-deb --extract "$RUNNER_TEMP"/relay-desktop_*_amd64.deb "$RUNNER_TEMP/relay-desktop-check"
+          dpkg-deb --info "$RUNNER_TEMP"/relay-client-linux_*_amd64.deb
+          dpkg-deb --extract "$RUNNER_TEMP"/relay-client-linux_*_amd64.deb "$RUNNER_TEMP/relay-desktop-check"
           test -x "$RUNNER_TEMP/relay-desktop-check/usr/lib/relay-desktop/relay"
           test -L "$RUNNER_TEMP/relay-desktop-check/usr/bin/relay-desktop"
           desktop-file-validate "$RUNNER_TEMP/relay-desktop-check/usr/share/applications/dev.relay.app.desktop"
@@ -152,8 +152,8 @@ jobs:
           name: relay-linux-x64-ubuntu-22.04
           path: |
             ${{ runner.temp }}/relay-linux-x64.tar.gz
-            ${{ runner.temp }}/relay-desktop_*_amd64.deb
-            ${{ runner.temp }}/relay-desktop_*_amd64.deb.sha256
+            ${{ runner.temp }}/relay-client-linux_*_amd64.deb
+            ${{ runner.temp }}/relay-client-linux_*_amd64.deb.sha256
           if-no-files-found: error
 
   windows-client:

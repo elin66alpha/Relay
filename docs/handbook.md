@@ -796,7 +796,7 @@ workflow artifacts. To build the `.deb` after the Linux release build, run
 `dpkg-dev` and `desktop-file-utils`. Build it on Ubuntu 22.04 for releases so
 that its system library requirements also work on newer Ubuntu versions.
 
-Install the package with `sudo apt install ./relay-desktop_<VERSION>_amd64.deb`,
+Install the package with `sudo apt install ./relay-client-linux_<VERSION>_amd64.deb`,
 then launch **Relay** from the applications menu or run `relay-desktop`.
 Removing the package does not remove the backend or the user's settings.
 Store signing and macOS notarization are not configured.
@@ -857,29 +857,25 @@ with `gh workflow run ios.yml --ref main`.
 
 A GitHub release `v<VERSION>` carries:
 
-- `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
-- `install.sh` — `scripts/install/unix/install.sh`, the Linux and macOS one-line installer
-  (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
-  It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
-  them;
-- `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
-  service adapters, without tests, dependencies, or deployment state, plus the
+- `relay-client-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
+- `relay-backend-linux-macos-v<VERSION>.tar.gz` — the root `install.sh` launcher, backend sources and
+  Linux/macOS service adapters, without tests, dependencies, or deployment state, plus the
   compiled Web client in `app/shell/build/web`. `./scripts/release/package_backend.sh` builds the
   Web client and writes it with a `.sha256` to `build/release/`; it refuses a
   tree with uncommitted tracked changes.
-- `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
+- `relay-client-windows-x64-v<VERSION>.zip` — the Windows desktop client
   (`app/shell/build/windows/x64/runner/Release/`);
-- `relay-desktop_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
+- `relay-client-linux_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
   Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
-- `relay-macos-v<VERSION>.zip` — the macOS desktop client
+- `relay-client-macos-v<VERSION>.zip` — the macOS desktop client
   (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
   Intel). It has only an ad-hoc signature, so macOS blocks the first launch:
   open it from the context menu, or run
   `xattr -dr com.apple.quarantine Relay.app`. It keeps credentials in the login
   keychain, which may ask for access again after an update;
-- `relay-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
+- `relay-client-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
   it while installing, for example with Sideloadly or AltStore; an app signed
   with a free Apple ID expires after seven days;
 - `SHA256SUMS` — `sha256sum` of every asset above.

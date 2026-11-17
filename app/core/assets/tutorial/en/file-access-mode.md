@@ -11,7 +11,7 @@ keywords: isolated, open, workspace, RELAY_WORKSPACE_ROOT, RELAY_FS_ROOTS, permi
 | Choice | Effect |
 |---|---|
 | **Open** (default) | agents and the file browser reach every file the backend user can |
-| **Isolated** | workspaces, the file browser and SSH's starting directory stay inside `workspace/` in the install directory (`~/relay/workspace` for the one-line install), and agents lose their full-auto / unsandboxed permission tier |
+| **Isolated** | workspaces, the file browser and SSH's starting directory stay inside `workspace/` in the install directory, and agents lose their full-auto / unsandboxed permission tier |
 
 Isolated writes `RELAY_WORKSPACE_ROOT` to `server/.env`. Reinstalling offers the current choice as the default; Service status shows it as `File access`. Uninstall keeps `workspace/` and its files.
 

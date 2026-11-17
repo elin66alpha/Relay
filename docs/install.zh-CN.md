@@ -23,18 +23,15 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
   当前版本，以及 `zip`，选择隧道模式时安装 `cloudflared`。没有 Homebrew 时会列出需要
   安装的软件。终端的 PTY 依赖需要编译时，会打开 Xcode Command Line Tools 安装程序。
 - 将现有 Relay 升级到 0.1.10 或更新版本前，请先把 Node.js 更新到 22 或更新版本。
-  一键安装脚本会在替换文件前检查；版本过低时不会改动现有安装。
+  升级脚本会在替换文件前检查；版本过低时不会改动现有安装。
 
 ## 安装
 
-在 Linux 和 macOS 上，一行命令会下载最新版本，按发布的 `SHA256SUMS` 校验后解压到
-`~/relay`（运行时可改，或用 `RELAY_DIR` 指定），然后运行该系统的安装脚本。再次运行即原地
-升级代码，保留 `server/.env`、令牌、聊天和设置，并重启后端（Linux 上是 PM2 进程，macOS
-上是 LaunchAgent）。`RELAY_VERSION=<版本>` 可安装指定版本。有新版本时，App 的机器详情页也能发起同样的升级。
+Linux 和 macOS 共用 `relay-backend-linux-macos-v<版本>.tar.gz`。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载后，对照 `SHA256SUMS` 中的同名记录校验文件。解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。
+
+从 0.1.12 或更早版本升级时，先将新包解压到另一个目录。在新目录运行 `RELAY_DIR="/原安装目录的绝对路径" ./scripts/install/unix/update.sh`，把路径换成现有 Relay 安装目录。
 
 使用仓库副本时，在仓库根目录运行一个命令：
 
@@ -57,15 +54,15 @@ Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PAT
 不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供），然后询问文件访问方式：
 
 - **开放**（默认）：agent 和文件浏览器能访问后端用户可访问的所有文件。
-- **隔离**：工作目录、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/` 中
-  （一行命令安装时为 `~/relay/workspace`），agent 也不再提供完全自动 / 不受沙箱限制的权限
+- **隔离**：工作目录、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/` 中，
+  agent 也不再提供完全自动 / 不受沙箱限制的权限
   档位。安装脚本把该目录写入 `server/.env` 的 `RELAY_WORKSPACE_ROOT`。这是 Relay 自己的路径
   策略，不是操作系统级沙箱：agent CLI 和终端仍以后端用户身份运行。
 
 再次安装或重新安装时默认沿用当前选择；服务信息中以 `File access` 显示。卸载会保留
 `workspace/` 及其中的文件。
 
-源码安装包（`relay-backend-setup-v<版本>.tar.gz`）在 `app/shell/build/web` 中自带编译好的
+源码安装包（`relay-backend-linux-macos-v<版本>.tar.gz`）在 `app/shell/build/web` 中自带编译好的
 Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `/` 上提供它。`/api`
 下的接口始终需要设备令牌。Windows 后端 ZIP 也包含相同的 Web 前端：
 

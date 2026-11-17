@@ -2,7 +2,7 @@
 title: Install on Linux and macOS
 category: Backend setup
 order: 210
-summary: The one-line install and upgrade, every setup menu item, service management and log locations.
+summary: Install from the archive and upgrade in place, every setup menu item, service management and log locations.
 keywords: linux, macos, ubuntu, debian, install.sh, pm2, launchd, homebrew, upgrade, logs
 ---
 
@@ -14,13 +14,9 @@ Linux and macOS share one set of scripts (`scripts/install/unix/`), so the menu 
 | Runs the service with | PM2 (`relay-server`, `relay-tunnel`) | LaunchAgents (`dev.relay.app.backend`, `dev.relay.app.tunnel`), started at login |
 | Logs | `~/.pm2/logs/relay-server-*.log` | `~/Library/Logs/Relay/backend.*.log` |
 
-## One-line install or upgrade
+## Install from the backend archive
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-It downloads the latest release, verifies it against `SHA256SUMS`, unpacks it into `~/relay` (change it at the prompt, or set `RELAY_DIR`) and runs setup. Running it again **upgrades in place**: `server/.env`, tokens, chats and settings are kept and the backend restarts. `RELAY_VERSION=<VERSION>` installs a specific release.
+Download `relay-backend-linux-macos-v<VERSION>.tar.gz` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), extract it to a permanent writable directory, and run `./install.sh` from the extracted folder containing `server/`.
 
 Run it as the ordinary user that will run Relay, **not with sudo**.
 
@@ -48,7 +44,7 @@ Install asks, in order: the port, the network mode (see [Network modes and HTTPS
 
 ## Service management
 
-From the install directory (`~/relay` by default):
+From the install directory:
 
 ```bash
 ./scripts/install/linux/status.sh
@@ -67,4 +63,4 @@ pm2 restart relay-server --update-env
 
 ## Upgrading
 
-Three ways do the same thing: run the one-line command again; choose Reinstall in the setup menu; or select **Update to x and restart** in the app's Machine details, see [Update the backend](backend-update.md).
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats. See [Update the backend](backend-update.md).

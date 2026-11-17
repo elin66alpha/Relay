@@ -20,11 +20,7 @@ First confirm in a host terminal that the chosen CLI can hold a conversation. Li
 
 ## 2. Download and run setup
 
-On Linux and macOS it is one command. It downloads the latest release into `~/relay`, checks it against `SHA256SUMS` and opens the setup menu; running it again later upgrades:
-
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+Linux and macOS share one backend archive. Download `relay-backend-linux-macos-v<VERSION>.tar.gz` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), extract it to a permanent writable directory, and run `./install.sh` from the extracted folder containing `server/`.
 
 On Windows, download `relay-backend-windows-x64-v<VERSION>.zip` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), **extract the whole ZIP** to a permanent folder and run `.\setup.cmd` there: the same command-line menu as on Linux and macOS. The ZIP includes Node.js, dependencies and the Web client.
 

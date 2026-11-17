@@ -12,7 +12,7 @@ Open [Machine details](machine-details.md). The **Relay backend** row shows the 
 
 After you confirm, the backend downloads the latest release and restarts. **Running turns and terminals are interrupted**, so wait for tasks to finish first. The update keeps `server/.env`, tokens, chats and settings.
 
-It uses the same upgrade path as the host: the release's `install.sh` on Linux and macOS, `update.cmd` on Windows. Its output goes to `relay-update.log` in the OS temp directory.
+It uses the same upgrade path as the host: the installed `scripts/install/unix/update.sh` on Linux and macOS, `update.cmd` on Windows. Its output goes to `relay-update.log` in the OS temp directory.
 
 The app cannot update a backend when:
 
@@ -23,12 +23,10 @@ The app cannot update a backend when:
 
 | OS | Command |
 |---|---|
-| Linux / macOS | run the one-line install again, or choose Reinstall in the setup menu |
+| Linux / macOS | run `./scripts/install/unix/update.sh` in the Relay folder |
 | Windows | run `.\update.cmd` in the Relay folder |
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 
 ## Client versions
 

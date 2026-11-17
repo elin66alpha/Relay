@@ -1,7 +1,7 @@
 'use strict';
 
 // Updating the backend itself: the same in-place upgrade the host commands do
-// (install.sh on Linux and macOS, update.ps1 on Windows), started from the API.
+// (update.sh on Linux and macOS, update.ps1 on Windows), started from the API.
 
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -9,8 +9,6 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const INSTALL_URL =
-  'https://github.com/elin66alpha/Relay/releases/latest/download/install.sh';
 // The updater restarts the backend, so a second request would only race it.
 const RUNNING_MS = 10 * 60 * 1000;
 
@@ -44,9 +42,11 @@ function updateCommand(platform, root, log) {
   }
   return {
     file: 'sh',
-    // RELAY_DIR makes install.sh upgrade this installation without a prompt.
-    args: ['-c', `(curl -fsSL "${INSTALL_URL}" | bash) > "$RELAY_UPDATE_LOG" 2>&1 &`],
-    options: { env: { ...process.env, RELAY_DIR: root, RELAY_UPDATE_LOG: log } },
+    args: [
+      '-c', 'bash "$1" > "$2" 2>&1 &', 'relay-update',
+      path.join(root, 'scripts', 'install', 'unix', 'update.sh'), log,
+    ],
+    options: { env: { ...process.env, RELAY_DIR: root } },
   };
 }
 

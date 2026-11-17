@@ -12,7 +12,7 @@ keywords: 更新, 升级, update, 版本, 重启, self-update
 
 确认后，后端下载最新版本并重启。**正在运行的任务和终端会中断**，所以先等任务结束。更新保留 `server/.env`、令牌、聊天和设置。
 
-它使用和主机上相同的升级方式：Linux 和 macOS 运行发行版里的 `install.sh`，Windows 运行 `update.cmd`。升级输出写到系统临时目录的 `relay-update.log`。
+它使用和主机上相同的升级方式：Linux 和 macOS 运行包内的 `scripts/install/unix/update.sh`，Windows 运行 `update.cmd`。升级输出写到系统临时目录的 `relay-update.log`。
 
 以下情况不能从 App 更新：
 
@@ -23,12 +23,10 @@ keywords: 更新, 升级, update, 版本, 重启, self-update
 
 | 系统 | 命令 |
 |---|---|
-| Linux / macOS | 再次运行一行安装命令，或在安装菜单里选重装 |
+| Linux / macOS | 在 Relay 目录运行 `./scripts/install/unix/update.sh` |
 | Windows | 在 Relay 目录运行 `.\update.cmd` |
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+从 0.1.12 或更早版本升级时，先将新包解压到另一个目录。在新目录运行 `RELAY_DIR="/原安装目录的绝对路径" ./scripts/install/unix/update.sh`，把路径换成现有 Relay 安装目录。
 
 ## 客户端版本
 

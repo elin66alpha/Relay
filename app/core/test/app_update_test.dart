@@ -11,18 +11,21 @@ void main() {
   test('each platform installs its own release asset', () {
     String? asset(TargetPlatform target) =>
         updateAssetName('0.1.14', target: target, web: false);
-    expect(asset(TargetPlatform.android), 'relay-android-v0.1.14.apk');
-    expect(asset(TargetPlatform.windows), 'relay-windows-x64-v0.1.14.zip');
-    expect(asset(TargetPlatform.linux), 'relay-desktop_0.1.14_amd64.deb');
-    expect(asset(TargetPlatform.macOS), 'relay-macos-v0.1.14.zip');
+    expect(asset(TargetPlatform.android), 'relay-client-android-v0.1.14.apk');
+    expect(
+      asset(TargetPlatform.windows),
+      'relay-client-windows-x64-v0.1.14.zip',
+    );
+    expect(asset(TargetPlatform.linux), 'relay-client-linux_0.1.14_amd64.deb');
+    expect(asset(TargetPlatform.macOS), 'relay-client-macos-v0.1.14.zip');
     expect(asset(TargetPlatform.iOS), isNull);
     expect(
       updateAssetName('0.1.14', target: TargetPlatform.android, web: true),
       isNull,
     );
     expect(
-      updateAssetUri('0.1.14', 'relay-android-v0.1.14.apk').toString(),
-      'https://github.com/elin66alpha/Relay/releases/download/v0.1.14/relay-android-v0.1.14.apk',
+      updateAssetUri('0.1.14', 'relay-client-android-v0.1.14.apk').toString(),
+      'https://github.com/elin66alpha/Relay/releases/download/v0.1.14/relay-client-android-v0.1.14.apk',
     );
   });
 

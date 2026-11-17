@@ -135,19 +135,12 @@ Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/re
 安装是命令行菜单，与 Linux、macOS 相同。包内包含 Node.js、生产依赖和编译后的 Web 前端，
 Web 与 API 共用同一个 Node.js 服务。安装菜单支持选装 agent CLI、开关 Web、文件访问、
 配置网络和管理设备令牌；CLI 登录仍由你在主机上完成。
-`relay-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
+`relay-client-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
 和 Ubuntu 客户端。
 
-在 Linux 和 macOS 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的
-校验和核对后运行安装脚本；缺少的系统软件会在你确认后安装（Debian/Ubuntu 用 apt-get，macOS
-用 Homebrew）：
+Linux 和 macOS 共用一个后端包。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-安装脚本还能替你安装缺少的 agent CLI（五个里任选），装完会打印各自的登录命令。再次运行
-这条命令就是原地升级，令牌、聊天和设置都会保留。
+需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。
 
 使用仓库副本时，在仓库根目录执行对应系统的安装命令：
 

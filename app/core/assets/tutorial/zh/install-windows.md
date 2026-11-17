@@ -8,7 +8,7 @@ keywords: windows, setup.cmd, powershell, 计划任务, update.cmd, 安装
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-windows-x64-v<版本>.zip`。注意不要下成 `relay-windows-x64-v<版本>.zip`，那个是桌面客户端。
+1. 从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-windows-x64-v<版本>.zip`。注意不要下成 `relay-client-windows-x64-v<版本>.zip`，那个是桌面客户端。
 2. **完整解压**到一个固定、可写的目录（以后不要移动它）。
 3. 在该目录打开 PowerShell，运行 `.\setup.cmd` 并选择 `1) Install`。安装是命令行菜单，与 Linux、macOS 相同（双击 `setup.cmd` 也能打开）。
 

@@ -32,11 +32,12 @@ jobs:
         run: |
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry Relay-unsigned.ipa Payload
+          version="$(node -p "require('../../server/package.json').version")"
+          zip -qry "relay-client-ios-unsigned-v$version.ipa" Payload
         working-directory: app/shell
 
       - uses: actions/upload-artifact@v7
         with:
-          name: relay-ios-unsigned
-          path: app/shell/Relay-unsigned.ipa
+          name: relay-client-ios-unsigned
+          path: app/shell/relay-client-ios-unsigned-v*.ipa
           if-no-files-found: error

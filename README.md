@@ -147,21 +147,12 @@ dependencies and the compiled Web client, served by the same Node.js process as
 the API. Setup offers agent CLI installation, Web on/off, file access, network
 setup and device token management; sign in
 to the selected CLIs yourself on the host. The asset
-`relay-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
+`relay-client-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
 the Android, iOS, macOS and Ubuntu clients.
 
-On Linux and macOS, one command downloads the latest release into `~/relay` (or
-a directory you choose), checks it against the release checksums, and runs
-setup, which installs missing system software after you confirm (apt-get on
-Debian/Ubuntu, Homebrew on macOS):
+On Linux and macOS, download `relay-backend-linux-macos-v<VERSION>.tar.gz` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), extract it to a permanent writable directory, and run `./install.sh` from the extracted folder containing `server/`.
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-Setup can also install any of the five agent CLIs that are missing, then
-prints each one's login command. Running the command again upgrades the backend
-in place, keeping tokens, chats and settings.
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats.
 
 From a copy of the repository, run the setup command for your backend OS from
 its root:

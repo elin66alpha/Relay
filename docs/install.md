@@ -30,22 +30,16 @@ same order; only the package manager and service manager differ.
   for a tunnel mode. Without Homebrew it names what to install. If the terminal's
   PTY module has to compile, it opens the Xcode Command Line Tools installer.
 - Before upgrading an existing Relay installation to 0.1.10 or later, update
-  Node.js to 22 or newer. The one-line installer checks this before replacing
+  Node.js to 22 or newer. The updater checks this before replacing
   files and leaves the existing installation untouched if it is too old.
 
 ## Install
 
-On Linux and macOS, one command downloads the latest release, verifies it
-against the release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the
-prompt, or `RELAY_DIR`) and runs that system's setup. Running it again upgrades
-the code in place, keeps `server/.env`, tokens, chats and settings, and restarts
-the backend (the PM2 process on Linux, the LaunchAgent on macOS).
-`RELAY_VERSION=<VERSION>` installs a specific release. The app's Machine details
-page starts the same upgrade when a newer release exists.
+Linux and macOS share `relay-backend-linux-macos-v<VERSION>.tar.gz`. Download it from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) and compare its SHA-256 digest with its entry in `SHA256SUMS`. Extract it to a permanent writable directory and run `./install.sh` from the folder containing `server/`.
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats.
+
+For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 
 From a copy of the repository, run one command from its root:
 
@@ -75,8 +69,7 @@ client at the backend address (default yes), and then for file access:
 - **Open** (the default): agents and the file browser reach every file the
   backend user can.
 - **Isolated**: work directories, the file browser and SSH's starting directory
-  stay inside `workspace/` in the installation directory (for the one-line
-  install, `~/relay/workspace`), and agents lose their full-auto / unsandboxed
+  stay inside `workspace/` in the installation directory, and agents lose their full-auto / unsandboxed
   permission tier. Setup writes the directory to `RELAY_WORKSPACE_ROOT` in
   `server/.env`. This is Relay's own path policy, not an operating-system
   sandbox: agent CLIs and the terminal still run as the backend user.
@@ -85,7 +78,7 @@ Rerunning install or reinstall offers the current choice as the default; the
 service status shows it as `File access`. Uninstall keeps `workspace/` and its
 files.
 
-The source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
+The source setup package (`relay-backend-linux-macos-v<VERSION>.tar.gz`) includes
 the compiled Web client, in `app/shell/build/web`; the backend serves it at `/`
 unless `server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
 device token. The Windows backend ZIP includes the same compiled Web client:

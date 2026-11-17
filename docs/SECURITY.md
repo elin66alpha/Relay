@@ -190,7 +190,7 @@ Windows uses PowerShell `Compress-Archive`.
 
 `POST /api/backend-update` takes no input: it always installs the latest
 GitHub release of this repository over the running installation and restarts
-the backend. On Linux and macOS it runs the release's `install.sh`, which
+the backend. On Linux and macOS it runs the installed `scripts/install/unix/update.sh`, which
 verifies the bundle against the release's `SHA256SUMS`; on Windows `update.ps1`
 does the same check. Both run as the backend's OS user. Any device token can
 start it, which grants nothing new, since a token already has a terminal with

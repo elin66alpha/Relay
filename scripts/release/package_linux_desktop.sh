@@ -7,7 +7,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bundle="${1:-$root/app/shell/build/linux/x64/release/bundle}"
 output="${2:-$root/build/release}"
 version="$(node -p "require(process.argv[1]).version" "$root/server/package.json")"
-package="relay-desktop_${version}_amd64.deb"
+package="relay-client-linux_${version}_amd64.deb"
 
 [ "$(dpkg --print-architecture)" = amd64 ] || { echo 'An amd64 Ubuntu build host is required.' >&2; exit 1; }
 [ -x "$bundle/relay" ] && [ -f "$bundle/lib/libflutter_linux_gtk.so" ] || {

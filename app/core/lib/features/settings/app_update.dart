@@ -13,10 +13,10 @@ String? updateAssetName(
 }) {
   if (web) return null;
   return switch (target ?? defaultTargetPlatform) {
-    TargetPlatform.android => 'relay-android-v$version.apk',
-    TargetPlatform.windows => 'relay-windows-x64-v$version.zip',
-    TargetPlatform.linux => 'relay-desktop_${version}_amd64.deb',
-    TargetPlatform.macOS => 'relay-macos-v$version.zip',
+    TargetPlatform.android => 'relay-client-android-v$version.apk',
+    TargetPlatform.windows => 'relay-client-windows-x64-v$version.zip',
+    TargetPlatform.linux => 'relay-client-linux_${version}_amd64.deb',
+    TargetPlatform.macOS => 'relay-client-macos-v$version.zip',
     _ => null,
   };
 }

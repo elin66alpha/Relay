@@ -11,7 +11,7 @@ keywords: 隔离, 开放, isolated, workspace, RELAY_WORKSPACE_ROOT, RELAY_FS_RO
 | 选项 | 效果 |
 |---|---|
 | **开放**（默认） | 智能体和文件浏览器能访问后端用户能访问的所有文件 |
-| **隔离** | 工作区、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/`（一行命令安装时是 `~/relay/workspace`）；智能体不再提供「完全自动 / 不受沙箱限制」的权限档 |
+| **隔离** | 工作区、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/`；智能体不再提供「完全自动 / 不受沙箱限制」的权限档 |
 
 隔离会写入 `server/.env` 的 `RELAY_WORKSPACE_ROOT`。重装时会把当前选择作为默认值；「服务状态」里显示为 `File access`。卸载会保留 `workspace/` 和里面的文件。
 

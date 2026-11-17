@@ -43,7 +43,7 @@ test('the updater is detached, targets this installation and runs once', () => {
   startBackendUpdate({ root, platform: 'linux', run, now: 1e9 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].file, 'sh');
-  assert.match(calls[0].args[1], /releases\/latest\/download\/install\.sh/);
+  assert.equal(calls[0].args[3], path.join(root, 'scripts', 'install', 'unix', 'update.sh'));
   assert.equal(calls[0].options.env.RELAY_DIR, root);
   assert.equal(calls[0].options.detached, true);
 

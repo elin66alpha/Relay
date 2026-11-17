@@ -2,7 +2,7 @@
 title: 在 Linux 和 macOS 上安装
 category: 部署后端
 order: 210
-summary: 一行命令安装和升级、安装菜单的每一项、服务管理与日志位置。
+summary: 从压缩包安装和原地升级、安装菜单的每一项、服务管理与日志位置。
 keywords: linux, macos, ubuntu, debian, install.sh, pm2, launchd, homebrew, 安装, 升级, 日志
 ---
 
@@ -14,13 +14,9 @@ Linux 和 macOS 共用同一套脚本（`scripts/install/unix/`），菜单和�
 | 运行服务 | PM2（`relay-server`、`relay-tunnel`） | LaunchAgents（`dev.relay.app.backend`、`dev.relay.app.tunnel`），登录后自启 |
 | 日志 | `~/.pm2/logs/relay-server-*.log` | `~/Library/Logs/Relay/backend.*.log` |
 
-## 一行命令安装或升级
+## 从后端包安装
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-它会下载最新版本，用 `SHA256SUMS` 校验，解压到 `~/relay`（可在提示时修改，或设置 `RELAY_DIR`），然后运行安装。再次运行就是**原地升级**：保留 `server/.env`、令牌、聊天和设置，并重启后端。`RELAY_VERSION=<版本>` 可以安装指定版本。
+从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
 请以将来运行 Relay 的那个普通用户运行，**不要加 sudo**。
 
@@ -48,7 +44,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 
 ## 服务管理
 
-在安装目录（默认 `~/relay`）下：
+在安装目录下：
 
 ```bash
 ./scripts/install/linux/status.sh
@@ -67,4 +63,4 @@ pm2 restart relay-server --update-env
 
 ## 升级
 
-三种方式效果相同：再次运行一行命令；在安装菜单里重装；或在 App 的机器详情里点「更新到 x 并重启」，见[更新后端](backend-update.md)。
+需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。 见[更新后端](backend-update.md)。
