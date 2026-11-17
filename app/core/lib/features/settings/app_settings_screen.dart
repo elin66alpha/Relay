@@ -14,10 +14,13 @@ const int _fontScaleDivisions = 9;
 class AppSettingsScreen extends StatelessWidget {
   const AppSettingsScreen({
     required this.settingsController,
+    required this.onManageCredentials,
     super.key,
   });
 
   final AppSettingsController settingsController;
+  // Opens the machines' credentials screen, which lives in features/machines.
+  final void Function(BuildContext context) onManageCredentials;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +46,19 @@ class AppSettingsScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 24),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            leading: const Icon(Icons.vpn_key_outlined),
+                            title: Text(context.l10n.manageCredentials),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => onManageCredentials(context),
+                          ),
+                        ),
                         _buildSectionTitle(context, context.l10n.appearance),
                         Card(
                           margin: const EdgeInsets.only(bottom: 24),

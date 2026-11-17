@@ -127,7 +127,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '连接后端机器',
     body:
-        '先在自己的电脑或服务器上部署 Relay 后端，并在主机上安装、登录或配置 CLI 智能体。应用不会替你登录 CLI。\n在“管理凭证”导入后端生成的二维码图片或 JSON，输入生成时设置的密码；移动端也可用摄像头扫码。多台机器可分别导入并切换，首页会显示当前连接的机器。',
+        '先在自己的电脑或服务器上部署 Relay 后端，并在主机上安装、登录或配置 CLI 智能体。应用不会替你登录 CLI。\n在“设置”最上方的“管理凭证”导入后端生成的二维码图片或 JSON，输入生成时设置的密码；移动端也可用摄像头扫码。多台机器可分别导入并切换，首页会显示当前连接的机器。',
   ),
   _GettingStartedStep(
     title: '先确认工作区，再开始任务',
@@ -142,7 +142,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '选择智能体和会话',
     body:
-        '左侧栏先列出 CLI 智能体，再列出蜂群。选择可用的智能体，并通过会话选择器新建或切换任务；每个工作目录下，每个智能体最多有八个命名会话。点击会话旁的重命名按钮可修改名称；Main 保留原始对话，不能删除或重命名。\n聊天标题第一行是工作区，第二行是“智能体 - 会话”。发送前核对这两行，避免在错误项目中操作。同一个工作区、智能体和会话在不同设备上共享历史。',
+        '左侧栏在“额度查询”下方是“蜂群”，接着列出 CLI 智能体（不可用的智能体会折叠在列表末尾），底部固定首页、浏览器、文件系统和设置快捷行。选择可用的智能体，并通过会话选择器新建或切换任务；每个工作目录下，每个智能体最多有八个命名会话。点击会话旁的重命名按钮可修改名称；Main 保留原始对话，不能删除或重命名。\n聊天标题第一行是工作区，第二行是“智能体 - 会话”。发送前核对这两行，避免在错误项目中操作。同一个工作区、智能体和会话在不同设备上共享历史。',
   ),
   _GettingStartedStep(
     title: '设置模型、思考强度和权限',
@@ -172,7 +172,7 @@ const List<_GettingStartedStep> _zhSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: '查看用量与管理设备',
     body:
-        '“用量查询”分别加载 Claude Code、Codex、Cursor 和 Antigravity 的卡片；一张卡片仍在等待时，其他卡片可以先显示结果。此页面用于查看额度，与机器详情中的认证状态不同。\n在机器详情检查设备令牌与最近使用信息。不再使用的设备可先撤销令牌再删除记录；撤销当前设备会断开自己的访问及终端。需要重读本教程时，可从首页“教程”或设置进入。',
+        '“额度查询”分别加载 Claude Code、Codex、Cursor 和 Antigravity 的卡片；一张卡片仍在等待时，其他卡片可以先显示结果。Claude Code 和 Codex 卡片上还可设置“定时消息”，在下次 5 小时额度重置时自动发送预设消息。此页面用于查看额度，与机器详情中的认证状态不同。\n在机器详情检查设备令牌与最近使用信息。不再使用的设备可先撤销令牌再删除记录；撤销当前设备会断开自己的访问及终端。需要重读本教程时，可从首页“教程”或设置进入。',
   ),
 ];
 
@@ -180,7 +180,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Connect a backend machine',
     body:
-        'Deploy Relay on your own computer or server and install and authenticate or configure the CLI agents there. Relay does not log you into a CLI.\nIn Manage credentials, import the generated QR image or JSON and enter its passphrase. Mobile also supports camera scanning. Import multiple machines separately and switch between them; Home shows the current connection.',
+        'Deploy Relay on your own computer or server and install and authenticate or configure the CLI agents there. Relay does not log you into a CLI.\nIn Manage credentials, at the top of Settings, import the generated QR image or JSON, and enter its passphrase. Mobile also supports camera scanning. Import multiple machines separately and switch between them; Home shows the current connection.',
   ),
   _GettingStartedStep(
     title: 'Choose the workspace before starting',
@@ -195,7 +195,7 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Choose an agent and conversation',
     body:
-        'The drawer lists CLI agents above Swarm. Choose an available agent, then create or switch tasks through the session picker. Each agent in each workdir supports up to eight named conversations. Rename sessions with the button beside their names; Main preserves the original conversation and cannot be deleted or renamed.\nThe chat header shows the workspace, with “Agent - Session” below it. Check both before sending a task. Devices using the same workspace, agent, and session share its history.',
+        'The drawer shows Swarm under Quota usage, then lists CLI agents (folding unavailable ones at the end of the list), with the Home, Browser, File system, and Settings row pinned at the bottom. Choose an available agent, then create or switch tasks through the session picker. Each agent in each workdir supports up to eight named conversations. Rename sessions with the button beside their names; Main preserves the original conversation and cannot be deleted or renamed.\nThe chat header shows the workspace, with “Agent - Session” below it. Check both before sending a task. Devices using the same workspace, agent, and session share its history.',
   ),
   _GettingStartedStep(
     title: 'Set the model, effort, and permissions',
@@ -225,6 +225,6 @@ const List<_GettingStartedStep> _enSteps = <_GettingStartedStep>[
   _GettingStartedStep(
     title: 'Check usage and manage devices',
     body:
-        'Usage query loads Claude Code, Codex, Cursor, and Antigravity cards independently, so one can show results while another is still loading. Usage reporting is separate from authentication status in Machine details.\nReview device tokens and last-use details in Machine details. Revoke an unused device before deleting its record; revoking the current device disconnects your own access and terminal. Reopen this guide from the Tutorial section on Home or from Settings.',
+        'Quota usage loads Claude Code, Codex, Cursor, and Antigravity cards independently, so one can show results while another is still loading. Claude Code and Codex cards also let you configure Scheduled messages to send a prompt at the next five-hour reset. Usage reporting is separate from authentication status in Machine details.\nReview device tokens and last-use details in Machine details. Revoke an unused device before deleting its record; revoking the current device disconnects your own access and terminal. Reopen this guide from the Tutorial section on Home or from Settings.',
   ),
 ];

@@ -31,15 +31,15 @@ class AppStrings {
 
   String get appName => 'Relay';
   String get home => isZh ? '首页' : 'Home';
-  String get backHome => isZh ? '回到首页' : 'Back to Home';
   String get gettingStarted => isZh ? '开始使用' : 'Getting started';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
   String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
+  String unavailableAgentsCount(int count) =>
+      isZh ? '另有 $count 个不可用' : '$count unavailable';
   String get resyncSessions =>
       isZh ? '刷新会话（同步到当前工作区）' : 'Refresh sessions for the current workspace';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
-  String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
   String get newGroup => isZh ? '新建蜂群' : 'New swarm';
   String get groupName => isZh ? '蜂群名称' : 'Swarm name';
   String get groupMembers => isZh ? '成员' : 'Members';
@@ -142,6 +142,8 @@ class AppStrings {
   }
 
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
+  String scheduledMessageAt(String time) =>
+      isZh ? '定时消息 · $time 发送' : 'Scheduled message · sends at $time';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
       isZh ? '已更新 $agent 的预设消息。' : 'Updated scheduled message for $agent.';
@@ -480,6 +482,10 @@ class AppStrings {
       isZh ? 'localhost:3000 或端口号' : 'localhost:3000 or a port';
   String get browserStarting =>
       isZh ? '正在启动后端机器上的浏览器…' : 'Starting the browser on the backend machine…';
+  String get browserLoadingHint => isZh
+      ? '提示：浏览器只能打开后端机器上的 localhost 和 127.0.0.1，用于本地面板测试。'
+      : 'Note: the browser only opens localhost and 127.0.0.1 on the backend '
+          'machine, for testing local dashboards.';
   String get browserLocalhostOnly => isZh
       ? '只能打开 localhost 或 127.0.0.1 上的地址。'
       : 'Only localhost and 127.0.0.1 addresses can be opened.';

@@ -317,6 +317,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
               if (busy) const CircularProgressIndicator(),
               const SizedBox(height: 16),
               Text(message, textAlign: TextAlign.center),
+              if (busy) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  strings.browserLoadingHint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.outline,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
               if (!busy) ...<Widget>[
                 const SizedBox(height: 16),
                 FilledButton(

@@ -148,8 +148,9 @@ subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
 Generate a different credential for each device. **Machine details** (tap the
-machine in the drawer or on the home page) lists their token ids, device
-metadata, and last-use time. Revoke a token before
+machine in the drawer or on the home page; **Manage credentials** is at the top
+of Settings)
+lists their token ids, device metadata, and last-use time. Revoke a token before
 deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
 tokens that were already issued.
@@ -626,7 +627,8 @@ dashboard for included usage. An X plan such as Premium is one weekly pool; an
 older Cursor plan is two pools, Cursor models and API models. The query does not
 spend usage. Cursor's reset does not queue a scheduled message.
 Reset detection and
-scheduled messages support Claude Code and Codex only. A schedule stores one
+scheduled messages support Claude Code and Codex only, configured from the
+schedule button on their cards in **Quota usage**. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
 Claude's five-hour window only exists while it runs: once it lapses the usage API

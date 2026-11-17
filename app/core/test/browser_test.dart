@@ -151,6 +151,11 @@ void main() {
     controller.currentStatus = BrowserStatus.disconnected;
     controller.notifyListeners();
     await tester.pump();
+    // The loading overlay says what the browser can open.
+    expect(
+      find.textContaining('only opens localhost and 127.0.0.1'),
+      findsOneWidget,
+    );
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(tester.widget<TextField>(input).controller!.text, 'keep this draft');
@@ -159,6 +164,10 @@ void main() {
     controller.currentStatus = BrowserStatus.connected;
     controller.notifyListeners();
     await tester.pump();
+    expect(
+      find.textContaining('only opens localhost and 127.0.0.1'),
+      findsNothing,
+    );
     await tester.tap(find.byIcon(Icons.send_rounded));
     await tester.pump();
     expect(controller.events, <String>['text:keep this draft']);
