@@ -8,7 +8,7 @@
 PRODUCT_NAME = Relay
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = dev.relay.app
+PRODUCT_BUNDLE_IDENTIFIER = io.github.elin66alpha.relay
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 Relay. All rights reserved.
