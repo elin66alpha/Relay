@@ -64,16 +64,16 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
   </tr>
 </table>
 
-### 预览 localhost 页面和工作区图片
+### 设置与内置教程
 
 <table>
   <tr>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-browser-mobile-zh.png"><img src="docs/screenshots/relay-browser-mobile-zh.png" alt="Relay 浏览器显示后端 localhost 上运行的账单面板" width="100%"></a></td>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-image-preview-mobile-zh.png"><img src="docs/screenshots/relay-image-preview-mobile-zh.png" alt="Relay 文件预览显示工作区中的 Ferrari 图片" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-settings-mobile-zh.png"><img src="docs/screenshots/relay-settings-mobile-zh.png" alt="Relay 移动端设置页：机器凭证、外观、壁纸与语言" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-tutorial-mobile-zh.png"><img src="docs/screenshots/relay-tutorial-mobile-zh.png" alt="Relay 移动端教程库，可搜索，按模块分类" width="100%"></a></td>
   </tr>
   <tr>
-    <td align="center"><strong>localhost 浏览器</strong><br>查看并操作后端机器上运行的开发页面。</td>
-    <td align="center"><strong>图片预览</strong><br>打开工作区图片，缩放查看细节。</td>
+    <td align="center"><strong>设置</strong><br>管理机器凭证、主题、字号、壁纸和语言。</td>
+    <td align="center"><strong>教程</strong><br>每个功能都有一篇可搜索的中英文教程。</td>
   </tr>
 </table>
 

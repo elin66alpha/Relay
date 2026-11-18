@@ -69,16 +69,16 @@ default 55%) for both themes.
   </tr>
 </table>
 
-### Preview localhost pages and workspace images
+### Settings and the built-in tutorial
 
 <table>
   <tr>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-browser-mobile.png"><img src="docs/screenshots/relay-browser-mobile.png" alt="Relay browser showing a billing dashboard served on the backend's localhost" width="100%"></a></td>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-image-preview-mobile.png"><img src="docs/screenshots/relay-image-preview-mobile.png" alt="Relay file preview displaying a Ferrari image from the workspace" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-settings-mobile.png"><img src="docs/screenshots/relay-settings-mobile.png" alt="Relay settings on mobile: machine credentials, appearance, wallpaper and language" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-tutorial-mobile.png"><img src="docs/screenshots/relay-tutorial-mobile.png" alt="Relay tutorial library on mobile, with search and articles grouped by area" width="100%"></a></td>
   </tr>
   <tr>
-    <td align="center"><strong>Localhost browser</strong><br>View and operate the development page running on your backend machine.</td>
-    <td align="center"><strong>Image preview</strong><br>Open a workspace image and zoom in to inspect it.</td>
+    <td align="center"><strong>Settings</strong><br>Manage machine credentials, theme, font size, wallpaper, and language.</td>
+    <td align="center"><strong>Tutorial</strong><br>Every feature has a searchable article, in English and Chinese.</td>
   </tr>
 </table>
 

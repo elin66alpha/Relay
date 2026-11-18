@@ -925,7 +925,7 @@ exported for the macOS desktop icon.
 `docs/screenshots/` holds the seven README screenshots in English and, with a
 `-zh` suffix, in Chinese: `relay-overview-web` and `relay-chat-web` at
 1440×960, and `relay-chat-mobile`, `relay-swarm-mobile`,
-`relay-files-mobile`, `relay-browser-mobile` and `relay-image-preview-mobile`
+`relay-files-mobile`, `relay-settings-mobile` and `relay-tutorial-mobile`
 at 800×1640 (a 400×820 viewport at 2×). Both READMEs
 reference them by name, so a recapture only replaces the files. To recapture
 all fourteen with the existing Ferrari wallpaper:
@@ -955,10 +955,11 @@ The script:
    wallpaper, prepared the way the Web client prepares an import, at dark
    opacity 0.6 (`WALLPAPER_DARK_OPACITY` changes it).
 4. Navigates using coordinates and accessible button labels, including the
-   localhost dashboard and the workspace image preview, writes the screenshots
-   and stops both demo servers. Browser captures verify navigation and streamed
-   frames; image captures wait for the image preview to render, and quota
-   captures wait for all usage queries to finish.
+   localhost dashboard and the workspace image preview (`--mobile-zh` set
+   only), writes the screenshots and stops both demo servers. Browser
+   captures verify navigation and streamed frames; image captures wait for the
+   image preview to render, tutorial captures wait for the article list, and
+   quota captures wait for all usage queries to finish.
 
 Playwright is not a repository dependency. The script installs a pinned
 `playwright-core` and its Chromium into the temporary directory and the
@@ -976,10 +977,9 @@ When the drawer or Home layout changes, check the tap coordinates and accessible
 button labels for the selected capture mode in the script, then review every
 image before committing it.
 
-For a separate set of eleven Chinese 9:16 phone images (home, chat, empty chat,
-Swarm, files, browser, image preview, machine details, quota usage, settings
-and credentials),
-use the same script with `--mobile-zh`:
+For a separate set of ten Chinese 9:16 phone images (home, chat, empty chat,
+Swarm, files, browser, image preview, machine details, quota usage and
+settings), use the same script with `--mobile-zh`:
 
 ```bash
 node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh

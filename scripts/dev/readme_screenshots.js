@@ -39,34 +39,33 @@ const OPEN_BROWSER = [{ tap: DRAWER }, { button: ['Browser', '浏览器'] }];
 const OPEN_IMAGE = [...OPEN_FILES, { button: ['ferrari.png', 'ferrari.png'] }];
 const SHOTS = [
   { name: 'relay-overview-web', size: [1440, 960, 1], steps: [] },
-  { name: 'relay-chat-web', size: [1440, 960, 1], steps: [{ tap: [104, 356] }] },
-  { name: 'relay-chat-mobile', size: [400, 820, 2], steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
+  { name: 'relay-chat-web', size: [1440, 960, 1], steps: [{ tap: [104, 308] }] },
+  { name: 'relay-chat-mobile', size: [400, 820, 2], steps: [{ tap: DRAWER }, { tap: [104, 308] }] },
   {
     name: 'relay-swarm-mobile',
     size: [400, 820, 2],
-    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { button: ['Release readiness', '发布检查'] }],
+    steps: [{ tap: DRAWER }, { tap: [100, 212] }],
   },
   { name: 'relay-files-mobile', size: [400, 820, 2], steps: OPEN_FILES },
-  { name: 'relay-browser-mobile', size: [400, 820, 2], steps: OPEN_BROWSER, browser: true },
-  { name: 'relay-image-preview-mobile', size: [400, 820, 2], steps: OPEN_IMAGE, image: true },
+  { name: 'relay-settings-mobile', size: [400, 820, 2], steps: [{ tap: DRAWER }, { button: ['Settings', '设置'] }] },
+  { name: 'relay-tutorial-mobile', size: [400, 820, 2], steps: [{ button: ['Browse all articles', '浏览全部教程'] }], loads: true },
 ];
 
 // Same layout as the first phone set, rendered at 2.5× for 1080×1920 PNGs.
 const MOBILE_SHOTS = [
   { name: 'relay-overview-mobile', steps: [] },
-  { name: 'relay-chat-mobile', steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
-  { name: 'relay-chat-empty-mobile', empty: true, steps: [{ tap: DRAWER }, { tap: [104, 356] }] },
+  { name: 'relay-chat-mobile', steps: [{ tap: DRAWER }, { tap: [104, 308] }] },
+  { name: 'relay-chat-empty-mobile', empty: true, steps: [{ tap: DRAWER }, { tap: [104, 308] }] },
   {
     name: 'relay-swarm-mobile',
-    steps: [{ tap: DRAWER }, { scroll: [150, 500, 300] }, { button: ['Release readiness', '发布检查'] }],
+    steps: [{ tap: DRAWER }, { tap: [100, 212] }],
   },
   { name: 'relay-files-mobile', steps: OPEN_FILES },
   { name: 'relay-browser-mobile', steps: OPEN_BROWSER, browser: true },
   { name: 'relay-image-preview-mobile', steps: OPEN_IMAGE, image: true },
   { name: 'relay-machine-mobile', steps: [{ tap: [180, 132] }] },
-  { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 213] }], quota: true },
+  { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 165] }], quota: true },
   { name: 'relay-settings-mobile', steps: [{ tap: DRAWER }, { button: ['Settings', '设置'] }] },
-  { name: 'relay-credentials-mobile', steps: [{ tap: DRAWER }, { tap: [100, 165] }] },
 ].map((shot) => ({ ...shot, size: [432, 768, 2.5] }));
 
 function loadPlaywright() {
@@ -434,8 +433,13 @@ async function shoot(browser, wallpaper, lang, shot) {
     await page.getByRole('img').waitFor({ state: 'visible' });
     assert(!(await page.locator('body').innerText()).match(/Cannot preview|无法预览/), 'Image preview must render successfully');
   }
+  // The tutorial's search field appears once every article has loaded; the
+  // extra wait lets Flutter fetch the CJK glyphs that new text needs.
+  if (shot.loads) {
+    await page.getByRole('textbox').waitFor({ timeout: 60000 });
+    await page.waitForTimeout(4000);
+  }
   if (shot.quota) {
-    await page.locator('[role="progressbar"]:not([aria-valuenow])').waitFor({ state: 'hidden', timeout: 60000 });
     assert(!(await page.locator('body').innerText()).match(/Loading quota|正在查询额度/), 'Quota queries must finish before capture');
   }
   const file = path.join(OUT, `${shot.name}${lang === 'zh' ? '-zh' : ''}.png`);
