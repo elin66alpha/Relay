@@ -719,6 +719,31 @@ recreates `relay-server`, and waits until the port answers.
 `scripts/dev/build_flow.sh` also analyzes and tests the client, rebuilds Web
 and builds a debug APK.
 
+### Backend sandbox (Docker)
+
+`scripts/dev/backend-sandbox/sandbox.sh` runs an isolated Ubuntu 24.04 container
+(`relay-sandbox`, non-root user `relay`, named volume `relay-sandbox-home` for
+`/home/relay`) with Node.js 22 and PM2 so release tarballs and `update.sh`
+upgrades can be tested without colliding with the host backend. It keeps its
+own network namespace and publishes backend port `18787` only on host loopback
+(`127.0.0.1:18787`).
+
+```bash
+./scripts/dev/backend-sandbox/sandbox.sh build
+./scripts/dev/backend-sandbox/sandbox.sh install build/release/relay-backend-linux-macos-v0.2.0.tar.gz
+./scripts/dev/backend-sandbox/sandbox.sh status
+./scripts/dev/backend-sandbox/sandbox.sh update [version]
+./scripts/dev/backend-sandbox/sandbox.sh shell
+./scripts/dev/backend-sandbox/sandbox.sh destroy
+```
+
+`install` pipes non-interactive choices to `./install.sh` (skip agent CLIs,
+disable Web when bundled, open file access, direct network mode on
+`http://127.0.0.1:18787`, passphrase from `RELAY_CREDENTIAL_PASSPHRASE` or
+`sandbox-pass`), `update` runs the installed `scripts/install/unix/update.sh`
+(setting `RELAY_VERSION` when given), and `status` checks `pm2 list` plus the
+HTTP status of `http://127.0.0.1:18787/api/health` (401 when a token is configured).
+
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution

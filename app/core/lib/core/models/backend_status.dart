@@ -253,7 +253,7 @@ class MachineInfo {
   final List<StorageDisk> disks;
   final List<TemperatureReading> temperatures;
 
-  /// The backend's Relay version; empty from a backend older than 0.1.13.
+  /// The backend's Relay version; empty from a backend older than 0.2.0.
   final String version;
 }
 

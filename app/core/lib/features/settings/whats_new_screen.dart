@@ -154,7 +154,7 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
-    version: '0.1.13',
+    version: '0.2.0',
     highlights: <_Highlight>[
       _Highlight(
         icon: Icons.menu_book_outlined,
@@ -185,6 +185,7 @@ const List<_Release> _zhReleases = <_Release>[
       'Windows 安装会把智能体 CLI 加入用户 PATH，并新增打开终端登录 CLI 的入口；新增 update.cmd 原地升级。',
       '修复 Windows 安装反复重写 .env 导致文件越来越大的问题，后端也重新优先使用自带的 Node.js。',
       '修复同步历史时偶尔丢掉排队中的跟进消息的问题。',
+      '修复 Windows 桌面端 SSH 终端无法输入字符的问题。',
     ],
   ),
   _Release(
@@ -336,7 +337,7 @@ const List<_Release> _zhReleases = <_Release>[
 
 const List<_Release> _enReleases = <_Release>[
   _Release(
-    version: '0.1.13',
+    version: '0.2.0',
     highlights: <_Highlight>[
       _Highlight(
         icon: Icons.menu_book_outlined,
@@ -367,6 +368,7 @@ const List<_Release> _enReleases = <_Release>[
       'Windows setup puts the agent CLIs on the user PATH and can open a terminal to sign them in; update.cmd upgrades in place.',
       'Fixed Windows setup rewriting .env until it grew huge, and the backend prefers its bundled Node.js again.',
       'Fixed a history sync that could drop a queued follow-up message.',
+      'Fixed typing in the SSH terminal on the Windows desktop app.',
     ],
   ),
   _Release(

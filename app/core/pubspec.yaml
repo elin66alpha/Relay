@@ -25,7 +25,12 @@ dependencies:
   markdown: ^7.3.1
   firebase_core: ^5.1.0
   firebase_messaging: ^17.0.1
-  xterm: ^4.0.0
+  # shortcut: pinned to upstream PR #231 (viewId fix for Windows typing, issue #37);
+  # return to a pub.dev version once xterm releases the fix.
+  xterm:
+    git:
+      url: https://github.com/LarryHsiao/xterm.dart.git
+      ref: 25bc19e49d9e948ba45bdb185d534c26bb3df9b2
   web_socket_channel: ^3.0.3
   re_highlight: ^0.0.3
   url_launcher: ^6.3.3

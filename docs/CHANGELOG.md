@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.13 - Unreleased
+## 0.2.0 - Unreleased
 
 ### Added
 
@@ -76,6 +76,7 @@
 
 ### Fixed
 
+- Windows desktop SSH terminal accepts typed characters (`xterm` now passes the Flutter view id when attaching text input).
 - On Windows, `update.cmd`, `start.cmd` and `setup.cmd` no longer hang after
   "backend started" when their output is captured (a CI job, an agent, a pipe).
   The backend used to inherit the caller's output pipe, so the caller waited
