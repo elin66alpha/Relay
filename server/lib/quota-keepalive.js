@@ -60,6 +60,7 @@ function startClaudeQuotaKeepalive({
   let timer = null;
   let stopped = false;
   let nextPrimeAllowedAt = 0;
+  let lastFailure = null;
 
   async function tick() {
     let waitMs;
@@ -71,6 +72,7 @@ function startClaudeQuotaKeepalive({
         nextPrimeAllowedAt,
       });
       waitMs = plan.waitMs;
+      lastFailure = null;
       if (plan.action === 'prime') {
         nextPrimeAllowedAt = Date.now() + MIN_PRIME_INTERVAL_MS;
         const result = await prime();
@@ -81,7 +83,10 @@ function startClaudeQuotaKeepalive({
         );
       }
     } catch (err) {
-      console.warn(`[quota:claude] keepalive failed: ${err.message}`);
+      if (err.message !== lastFailure) {
+        console.warn(`[quota:claude] keepalive failed: ${err.message}`);
+      }
+      lastFailure = err.message;
       waitMs = ERROR_RETRY_MS;
     }
     if (stopped) return;

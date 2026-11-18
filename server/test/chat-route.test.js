@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { test, before, beforeEach, after } = require('node:test');
 const express = require('express');
 const createChatRouter = require('../routes/chat');
+const { sessionContextKeyFor, scopeKeyFor } = require('../lib/chat-sessions');
 
 const WORKDIR = '/tmp/chat-route';
 const MAX_PROMPT_BYTES = 32;
@@ -18,9 +19,6 @@ const sessions = [
 const histories = new Map();
 const runCalls = [];
 const purgeCalls = [];
-const sessionContextKeyFor = (agent, workdir) => `${workdir}\0${agent}`;
-const scopeKeyFor = (agent, workdir, sessionId) =>
-  `${sessionContextKeyFor(agent, workdir)}${sessionId === 'default' ? '' : `\0${sessionId}`}`;
 const resolveChatSession = (_contextKey, id) =>
   sessions.find((session) => session.id === (id || 'default'));
 let server;

@@ -164,9 +164,6 @@ void main() {
       expect(attached, isTrue);
       expect(viewId, tester.view.viewId);
     },
-    // Known bug: xterm 4.0.0 sends no view id, so typing is dead on Windows.
-    // Unskip once xterm is patched (TerminalStudio/xterm.dart #228, #231).
-    skip: true,
   );
 }
 

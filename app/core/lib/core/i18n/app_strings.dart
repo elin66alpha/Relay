@@ -31,15 +31,14 @@ class AppStrings {
 
   String get appName => 'Relay';
   String get home => isZh ? '首页' : 'Home';
-  String get backHome => isZh ? '回到首页' : 'Back to Home';
-  String get gettingStarted => isZh ? '开始使用' : 'Getting started';
+  String get tutorialHomeTitle => isZh ? '浏览全部教程' : 'Browse all articles';
   String get notConnected => isZh ? '未连接机器' : 'No machine connected';
-  String get manageCredentials => isZh ? '管理凭证' : 'Manage credentials';
   String get cliAgents => isZh ? 'CLI 智能体' : 'CLI agents';
+  String unavailableAgentsCount(int count) =>
+      isZh ? '另有 $count 个不可用' : '$count unavailable';
   String get resyncSessions =>
       isZh ? '刷新会话（同步到当前工作区）' : 'Refresh sessions for the current workspace';
   String get groupChat => isZh ? '蜂群' : 'Swarm';
-  String get groupChatSubtitle => isZh ? '多智能体蜂群协作' : 'Multi-agent swarm';
   String get newGroup => isZh ? '新建蜂群' : 'New swarm';
   String get groupName => isZh ? '蜂群名称' : 'Swarm name';
   String get groupMembers => isZh ? '成员' : 'Members';
@@ -117,6 +116,8 @@ class AppStrings {
   String get cursorModelsQuotaShort => isZh ? '模型' : 'Models';
   String get apiModelsQuotaShort => 'API';
   String get quotaResetShort => isZh ? '已重置' : 'Reset';
+  String get agyQuotaStripHint =>
+      isZh ? '请在「额度查询」中查看额度' : 'Open Quota usage to view quota';
   String get contextUsage => isZh ? '上下文' : 'Context';
   String resetsIn(Duration left) =>
       isZh ? '${resetsInShort(left)}后重置' : 'Resets in ${resetsInShort(left)}';
@@ -140,6 +141,8 @@ class AppStrings {
   }
 
   String get quotaScheduler => isZh ? '定时消息' : 'Scheduled messages';
+  String scheduledMessageAt(String time) =>
+      isZh ? '定时消息 · $time 发送' : 'Scheduled message · sends at $time';
   String get prompt => isZh ? '消息内容' : 'Message';
   String scheduleUpdated(String agent) =>
       isZh ? '已更新 $agent 的预设消息。' : 'Updated scheduled message for $agent.';
@@ -445,9 +448,13 @@ class AppStrings {
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>
       isZh ? '还没有工作过的工作区。' : 'No recent workspaces yet.';
-  String get gettingStartedHomeHint => isZh
-      ? '第一次使用或忘记流程时，从这里快速查看步骤。'
-      : 'Use this when you are new or want a quick reminder.';
+  String get tutorialHomeHint => isZh
+      ? '按模块分类讲解每个功能，可以搜索。'
+      : 'Every feature, grouped by area, with search.';
+  String get tutorialSearchHint => isZh ? '搜索教程' : 'Search the tutorial';
+  String get tutorialNoMatches => isZh ? '没有找到相关文章。' : 'No articles match.';
+  String get tutorialLoadFailed =>
+      isZh ? '教程加载失败。' : 'Could not load the tutorial.';
   String get credentialTitle => isZh ? '机器凭证' : 'Machine credentials';
   String get currentMachine => isZh ? '当前机器' : 'Current machine';
   String get machineDetails => isZh ? '机器详情' : 'Machine details';
@@ -478,6 +485,10 @@ class AppStrings {
       isZh ? 'localhost:3000 或端口号' : 'localhost:3000 or a port';
   String get browserStarting =>
       isZh ? '正在启动后端机器上的浏览器…' : 'Starting the browser on the backend machine…';
+  String get browserLoadingHint => isZh
+      ? '提示：浏览器只能打开后端机器上的 localhost 和 127.0.0.1，用于本地面板测试。'
+      : 'Note: the browser only opens localhost and 127.0.0.1 on the backend '
+          'machine, for testing local dashboards.';
   String get browserLocalhostOnly => isZh
       ? '只能打开 localhost 或 127.0.0.1 上的地址。'
       : 'Only localhost and 127.0.0.1 addresses can be opened.';
@@ -490,8 +501,36 @@ class AppStrings {
   String get browserBack => isZh ? '后退' : 'Back';
   String get browserReload => isZh ? '刷新页面' : 'Reload';
   String get browserKeyboard => isZh ? '键盘输入' : 'Keyboard input';
+  String get browserInfo => isZh ? '关于这个浏览器' : 'About this browser';
+  String get browserInfoBody => isZh
+      ? '它是后端机器上的一个无头 Chrome，画面实时传到这里。\n\n'
+          '能做的：\n'
+          '• 打开后端机器 localhost 上的页面（输入端口号或 localhost:端口），无需端口转发\n'
+          '• 点击、拖动、滚动；用键盘按钮输入文字\n'
+          '• 手机上看到页面的移动版布局和触摸效果\n'
+          '• 页面弹窗（alert、confirm）会自动确认并显示内容\n'
+          '• 新标签里的本机链接在当前画面打开，外部链接确认后在设备上打开\n\n'
+          '限制：\n'
+          '• 地址栏只接受 localhost 和 127.0.0.1\n'
+          '• 只有一个标签页；没有声音、文件上传下载和剪贴板\n'
+          '• 每次都是全新的临时配置，页面里的登录不会保存；离开 10 分钟后关闭'
+      : 'This is a headless Chrome on the backend machine, streamed here live.\n\n'
+          'What it can do:\n'
+          '• Open pages on the backend machine\'s localhost (a port or '
+          'localhost:port), with no port forwarding\n'
+          '• Tap, drag and scroll; type with the keyboard button\n'
+          '• Show phones the page\'s mobile layout and touch behavior\n'
+          '• Accept page alerts and confirms and show their text\n'
+          '• Open new localhost tabs here, and external web links in your '
+          'device browser after confirmation\n\n'
+          'Limits:\n'
+          '• The address bar accepts only localhost and 127.0.0.1\n'
+          '• One tab; no sound, file upload or download, or clipboard\n'
+          '• A fresh temporary profile each time, so sign-ins in the page do '
+          'not persist; it closes 10 minutes after you leave';
   String get browserTypeHint => isZh ? '输入到页面' : 'Type into the page';
   String get testMachine => isZh ? '测试当前机器' : 'Test current machine';
+  String get addMachine => isZh ? '添加机器' : 'Add machine';
   String get importOrChooseMachine =>
       isZh ? '请导入或选择一台机器' : 'Import or choose a machine';
   String get loadingStatus => isZh ? '正在获取状态...' : 'Loading status...';
@@ -506,6 +545,15 @@ class AppStrings {
       : 'Import the credential QR code or QR payload generated by the script on the machine, then enter the credential password.';
   String get deployBackendGuide =>
       isZh ? '如何部署后端？' : 'How to deploy the backend?';
+  String get tryDemo => isZh ? '试用演示' : 'Try the demo';
+  String get contactAuthorOnGitHub => isZh
+      ? '需要一台现成的后端？请在 GitHub 联系作者'
+      : 'Need a ready-made backend? Contact the author on GitHub';
+  String get demoMode => isZh ? '演示模式' : 'Demo mode';
+  String get demoModeBannerHint => isZh
+      ? '当前为本地模拟演示，未连接真实后端。'
+      : 'Replies are simulated locally with no backend connected.';
+  String get exitDemo => isZh ? '退出演示' : 'Exit demo';
   String get credentialPassword => isZh ? '凭证密码' : 'Credential password';
   String get password => isZh ? '密码' : 'Password';
   String get passwordHint =>
@@ -531,6 +579,23 @@ class AppStrings {
       : 'Version $version is available on GitHub Releases';
   String get updateCheckFailed =>
       isZh ? '无法检查更新，请稍后再试' : 'Could not check for updates. Try again later.';
+  String updateAvailableTitle(String version) =>
+      isZh ? '发现新版本 $version' : 'Version $version is available';
+  String get updatePrompt =>
+      isZh ? '现在下载并安装吗？' : 'Download and install it now?';
+  String get updateNow => isZh ? '更新' : 'Update';
+  String get updateLater => isZh ? '稍后' : 'Later';
+  String get downloadingUpdate => isZh ? '正在下载更新…' : 'Downloading update…';
+  String updateFailed(Object err) => isZh ? '更新失败：$err' : 'Update failed: $err';
+  String get backendVersionLabel => isZh ? 'Relay 后端' : 'Relay backend';
+  String backendUpdateAction(String version) =>
+      isZh ? '更新到 $version 并重启' : 'Update to $version and restart';
+  String get backendUpdateConfirm => isZh
+      ? '后端会下载最新版本并重启，正在运行的任务和终端会中断。'
+      : 'The backend downloads the latest release and restarts. Running turns and terminals are interrupted.';
+  String get backendUpdating => isZh ? '正在更新后端…' : 'Updating the backend…';
+  String backendUpdated(String version) =>
+      isZh ? '后端已更新到 $version' : 'Backend updated to $version';
   String get fontSize => isZh ? '字体大小' : 'Font size';
   String get fontSizeDescription =>
       isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';

@@ -137,6 +137,7 @@ function launchPage(file, { signal, callTimeoutMs = 10000, spawn: spawnBrowser =
   let exited = false;
   let closing = false;
   let pageSession = null;
+  let pageTargetId = null;
   let resolveClosed;
   const closed = new Promise((resolve) => { resolveClosed = resolve; });
 
@@ -164,7 +165,8 @@ function launchPage(file, { signal, callTimeoutMs = 10000, spawn: spawnBrowser =
         if (!call) continue;
         if (message.error) call.reject(new Error(message.error.message));
         else call.resolve(message.result || {});
-      } else if (message.sessionId === pageSession) {
+      } else if (message.sessionId === pageSession || !message.sessionId) {
+        // Browser-level events (no session) are only the Target.* ones enabled below.
         events.emit(message.method, message.params || {});
       }
     }
@@ -236,6 +238,9 @@ function launchPage(file, { signal, callTimeoutMs = 10000, spawn: spawnBrowser =
       const { targetId } = await call('Target.createTarget', { url: 'about:blank' });
       const { sessionId } = await call('Target.attachToTarget', { targetId, flatten: true });
       pageSession = sessionId;
+      pageTargetId = targetId;
+      // Report tabs a page opens (target=_blank, window.open) so they can be handed off.
+      await call('Target.setDiscoverTargets', { discover: true });
     } catch (err) {
       close();
       const detail = stderr.trim().split('\n').slice(-3).join(' ');
@@ -244,7 +249,13 @@ function launchPage(file, { signal, callTimeoutMs = 10000, spawn: spawnBrowser =
         'BROWSER_START_FAILED',
       );
     }
-    return { send: (method, params) => call(method, params, pageSession), events, close };
+    return {
+      send: (method, params) => call(method, params, pageSession),
+      sendBrowser: (method, params) => call(method, params),
+      targetId: pageTargetId,
+      events,
+      close,
+    };
   })();
   return Object.assign(ready, { closed });
 }
@@ -379,6 +390,21 @@ function createBrowserManager(options = {}) {
         .catch(() => {});
       send(session.client, { type: 'dialog', dialogType: type, message: String(message || '') });
     });
+    // Reuse the streamed tab for loopback links. External web links open on the device.
+    const handedOff = new Set();
+    const handOff = (info) => {
+      if (!info || info.type !== 'page' || info.targetId === page.targetId) return;
+      const url = String(info.url || '');
+      if (!url || url === 'about:blank' || handedOff.has(info.targetId)) return;
+      handedOff.add(info.targetId);
+      page.sendBrowser('Target.closeTarget', { targetId: info.targetId }).catch(() => {});
+      if (!/^https?:\/\//i.test(url)) return;
+      const local = loopbackUrl(url);
+      if (local) page.send('Page.navigate', { url: local }).catch(() => {});
+      else send(session.client, { type: 'open', url });
+    };
+    page.events.on('Target.targetCreated', ({ targetInfo }) => handOff(targetInfo));
+    page.events.on('Target.targetInfoChanged', ({ targetInfo }) => handOff(targetInfo));
     page.events.on('exit', () => {
       send(session.client, { type: 'exit' });
       destroySession(session);
@@ -409,9 +435,11 @@ function createBrowserManager(options = {}) {
         page.close();
         throw new Error('browser closed');
       }
+      // Attach listeners before enabling Page events so frames or navigations
+      // emitted in the same stdio chunk as the CDP response are not dropped.
+      wirePage(session, page);
       await page.send('Page.enable');
       await page.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
-      wirePage(session, page);
       return page;
     });
     session.ready.catch(() => {

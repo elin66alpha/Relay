@@ -295,6 +295,60 @@ void main() {
     expect(backend.browsed.last, '/repo');
   });
 
+  testWidgets('the first breadcrumb switches between the backend drives', (
+    WidgetTester tester,
+  ) async {
+    Future<_FsBackendClient> open(List<String> drives) async {
+      final _FsBackendClient backend = _FsBackendClient(drives: drives);
+      await tester.pumpWidget(
+        AppScope(
+          controller: AppSettingsController(),
+          child: MaterialApp(
+            key: UniqueKey(),
+            home: FileSystemScreen(
+              backend: backend,
+              onSetWorkdir: backend.setWorkdir,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return backend;
+    }
+
+    // An isolated or older backend (no drives) and a host with a single root
+    // keep the plain breadcrumb.
+    await open(const <String>[]);
+    expect(find.byIcon(Icons.arrow_drop_down), findsNothing);
+    await open(const <String>['/']);
+    expect(find.byIcon(Icons.arrow_drop_down), findsNothing);
+
+    final _FsBackendClient backend =
+        await open(const <String>['/', '/Volumes/Backup']);
+    await tester.tap(find.byIcon(Icons.arrow_drop_down));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('/Volumes/Backup'));
+    await tester.pumpAndSettle();
+    expect(backend.browsed.last, '/Volumes/Backup');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Set as work path'));
+    await tester.pumpAndSettle();
+    expect(backend.selectedWorkdirs.last, '/Volumes/Backup');
+  });
+
+  test('FsListing reads drives and tolerates backends without them', () {
+    FsListing parse(Object? drives) => FsListing.fromJson(<String, Object?>{
+          'absolutePath': r'C:\',
+          if (drives != null) 'drives': drives,
+        });
+    expect(
+      parse(<Object?>[r'C:\', r'D:\', 7]).drives,
+      <String>[r'C:\', r'D:\'],
+    );
+    expect(parse(null).drives, isEmpty);
+    expect(parse('C:').drives, isEmpty);
+  });
+
   test('splitPathBreadcrumbs parses POSIX and Windows paths', () {
     expect(
       splitPathBreadcrumbs('/repo/app'),
@@ -720,9 +774,11 @@ class _FsBackendClient extends BackendClient {
     this.recentPaths = const <String>[],
     this.recentRequest,
     this.workdirUpdate,
+    this.drives = const <String>[],
   });
 
   final Map<String, List<int>> files;
+  final List<String> drives;
   final List<String> recentPaths;
   final Future<List<String>>? recentRequest;
   final Future<WorkdirInfo>? workdirUpdate;
@@ -780,6 +836,7 @@ class _FsBackendClient extends BackendClient {
       path: path,
       absolutePath: path,
       parentPath: atRoot ? null : '/repo',
+      drives: drives,
       entries: <FsEntry>[
         FsEntry(
           name: child,

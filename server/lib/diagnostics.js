@@ -14,7 +14,7 @@ const REPO_DIR = path.join(SERVER_DIR, '..');
 
 function authStatus(agentKey) {
   const status = getAgentStatuses()[agentKey];
-  return status ? status.authed === true : null;
+  return status?.authed ?? null;
 }
 
 function safeStat(filePath) {

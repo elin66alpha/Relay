@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.2.0 - Unreleased
+
+### Added
+
+- **Demo mode**: **Try the demo** on the empty-credential screen activates an
+  in-memory demo machine (`https://demo.relay.invalid`) backed by
+  `DemoHttpClient` (Claude Code and Codex with streamed simulated replies,
+  disabled SSH/Browser entries, a **Demo mode** banner with **Exit demo**,
+  automatic removal when importing a real machine, and an author GitHub contact
+  link on the welcome screen and in Settings → About).
+- **Browser new tabs**: a tab the page opens (`target="_blank"`,
+  `window.open`) opens loopback URLs in the streamed tab. External web addresses
+  open in the device's browser after confirmation; an info
+  button in the browser's app bar lists its capabilities and limits.
+- **Setup browser check**: setup step 1 (Linux, macOS, Windows) runs
+  `server/scripts/check-browser.js`, the backend's own browser lookup, and when
+  no Chrome, Chromium or Edge is found reminds how to install one and continues.
+- **Tailscale network mode**: setup's network menu adds 4) Tailscale, which
+  reads `tailscale ip -4` and uses `http://<tailscale-ip>:<port>` for native apps, binding only the
+  tailnet IP (Web uses a configured HTTPS proxy hostname); without Tailscale signed in it shows the menu
+  again. The backend's plain-HTTP warning treats 100.64.0.0/10 as private.
+- **Tutorial** on Home and in Settings is a searchable library of articles,
+  one per feature, grouped by area (getting started, backend setup, chat,
+  agents, Swarms, files, machine and tools, usage and notifications, app
+  settings, advanced). Each article is a Markdown file under
+  `app/core/assets/tutorial/{en,zh}/`, so editing a file updates the in-app
+  tutorial with the next release; `scripts/release/check_docs.js` checks that
+  both languages hold the same articles and that their links resolve. The
+  search matches every word of the query in titles, summaries, keywords and
+  text. The credential screen's deploy guide opens the **Deploy the backend**
+  article; the old step lists are gone.
+- The file browser switches between disks: when the backend has more than
+  one, the first breadcrumb opens a menu of them. On Windows these are the
+  drive letters, so `D:\` is reachable without leaving `C:\` through a chat
+  link; on macOS and Linux they are `/` plus each mounted disk (`/Volumes/…`,
+  `/media/…`). `GET /api/workdir/browse` reports them as `drives`, the same
+  disks the machine page lists. Isolated installs and roots outside
+  `RELAY_FS_ROOTS` report none, and an older backend without the field browses
+  as before. A disconnected network drive cannot hold up a listing: probes run
+  once per 30 seconds and a listing waits at most 1.5 seconds for one.
+
+- The app installs its own updates. When a newer release exists, a dialog at
+  start-up (and Settings → About → Check for updates) offers to download it:
+  Android opens the system package installer, Windows replaces the app's files
+  and restarts it, Linux opens the `.deb` in the software installer and macOS
+  unpacks the new app in Downloads. iOS still only reports the release, and
+  the Web client updates with its backend.
+- The backend updates and restarts from the app: Machine details shows the
+  backend's Relay version and, when a newer release exists, **Update to
+  \<version\> and restart**. `POST /api/backend-update` runs the same in-place
+  upgrade as the host commands (`scripts/install/unix/update.sh` on Linux and macOS, the new
+  `update.cmd` on Windows), keeping `server/.env`, tokens, chats and settings;
+  `GET /api/machine` reports `version`. A backend running from a git checkout
+  refuses (`UPDATE_UNSUPPORTED`).
+- Windows backend: `update.cmd` upgrades the installation in place from the
+  latest release, checked against `SHA256SUMS`, or from a ZIP downloaded by
+  hand (`update.cmd -Archive <zip>`). The tunnel keeps running.
+
+### Changed
+
+- Release downloads use `relay-client-*` for the five clients and `relay-backend-*` for the two backend archives. On Linux and macOS, extract the tarball and run its `./install.sh`. Windows setup stays inside the backend ZIP.
+
+- Windows backend setup is command-line only, like Linux and macOS: the
+  graphical `Setup.exe` is gone, and `setup.cmd` runs the same menu and the
+  same six install steps as `setup.sh`, including the open/isolated file
+  access choice. `update.cmd` deletes the `Setup.exe` left by an older release,
+  and `bundle-info.json` no longer has a `setupGui` field.
+- Windows setup makes the agent CLIs it finds callable from any new terminal:
+  it appends their folders (such as `%APPDATA%\npm`, where Codex and OpenCode
+  install) to the user PATH, plus the bundled Node when the host has none,
+  since npm's command shims need `node`. Uninstall removes only those entries.
+  `t` in the `setup.cmd` menu opens a
+  PowerShell with the backend's PATH and lists each CLI's sign-in command.
+
+### Fixed
+
+- Browser sessions no longer stall with no picture when Chrome emits the first
+  screencast frame (or early navigation event) in the same response as starting
+  the screencast.
+- Windows desktop SSH terminal accepts typed characters (`xterm` now passes the Flutter view id when attaching text input).
+- On Windows, `update.cmd`, `start.cmd` and `setup.cmd` no longer hang after
+  "backend started" when their output is captured (a CI job, an agent, a pipe).
+  The backend used to inherit the caller's output pipe, so the caller waited
+  for the backend to exit. Background processes now inherit only their log
+  files. An upgrade from an earlier release still runs the old script once.
+- Windows `update.cmd` no longer half-deletes an installation: it refuses, and
+  changes nothing, while another process runs from the folder or holds the
+  backend port; it waits until the new backend listens and otherwise puts the
+  previous version back; and it removes scripts and modules a release no
+  longer ships instead of leaving them to load.
+- Windows PID files record the process start time. After a reboot a reused
+  PID no longer stops Relay from starting at logon, and `stop.cmd` or an
+  update no longer kills the unrelated process that received it.
+- A Windows backend runs CLIs that npm installed as `.cmd` launchers, such as
+  Codex. Node cannot start a batch file without a shell, so chat failed with
+  `spawn codex ENOENT`, the model page showed no CLI version, the model list
+  fell back to the built-in models, and **Update CLI** failed with no message.
+  Relay now runs the script or binary the launcher wraps, and a failed update
+  reports why.
+- Windows setup no longer corrupts `server\.env`: Windows PowerShell 5.1 read
+  the BOM-less UTF-8 file in the ANSI code page and wrote it back as UTF-8, so
+  every setting written by Setup re-encoded the non-ASCII comments until the
+  file grew to megabytes. To repair an affected `.env`, replace its overlong
+  `#` comment lines with the matching lines from `.env.example`; setting
+  values were never changed.
+- The Windows backend runs on the bundle's own `runtime\node` again; a Node.js
+  on the user PATH had taken precedence over it.
+- A quota source whose CLI is not signed in (for example Claude Code with no
+  `claude login`) is queried at most once per backoff window and its failure
+  is logged once, instead of every few minutes by the usage cache, the quota
+  watcher and the Claude keepalive.
+
 ## 0.1.12 - 2026-11-15
 
 ### Added

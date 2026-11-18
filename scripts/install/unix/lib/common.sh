@@ -17,6 +17,7 @@
 #   svc_summary                  the service manager's own view, for status
 #   server_log_files, tunnel_log_files   one path per line
 #   service_hint                 how to manage the services directly
+#   browser_install_hint         how to install a browser for the Browser page
 #   remove_system_software       uninstall's offer to remove what setup added
 #
 # Bash 3.2 compatible: macOS ships no newer bash.

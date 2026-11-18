@@ -84,6 +84,24 @@ class MachineCredential {
   }
 }
 
+const String demoMachineId = 'relay-demo';
+const String demoMachineBaseUrl = 'https://demo.relay.invalid';
+
+bool isDemoMachine(MachineCredential? credential) {
+  if (credential == null) return false;
+  final Uri? uri = Uri.tryParse(credential.baseUrl);
+  return uri != null && uri.host.toLowerCase() == 'demo.relay.invalid';
+}
+
+MachineCredential demoMachineCredential({String name = 'Relay Demo'}) =>
+    MachineCredential(
+      id: demoMachineId,
+      name: name,
+      baseUrl: demoMachineBaseUrl,
+      token: 'demo-token',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    );
+
 class MachineCredentialException implements Exception {
   const MachineCredentialException(this.message);
 

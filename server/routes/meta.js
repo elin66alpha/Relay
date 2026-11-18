@@ -31,6 +31,7 @@ module.exports = function createMetaRouter(ctx) {
     WEB_BUILD_DIR,
     activeRequests,
     agentRequiredError,
+    backendVersion,
     bearerToken,
     browserManager,
     buildDiagnostics,
@@ -47,7 +48,7 @@ module.exports = function createMetaRouter(ctx) {
     inspectCodexAccount,
     listAgents,
     listTokenSummaries,
-    locateBin = (bin) => bin,
+    cliCommand = (bin, args) => ({ cmd: bin, args }),
     machineInfo,
     normalizeDeviceId,
     refreshAgentModels = () => Promise.resolve(),
@@ -56,6 +57,7 @@ module.exports = function createMetaRouter(ctx) {
     runningScopes,
     scopeChains,
     setSettings,
+    startBackendUpdate,
     terminalManager,
     workdirPresence,
   } = ctx;
@@ -107,11 +109,12 @@ module.exports = function createMetaRouter(ctx) {
         installed,
         authed,
         authKind: status.authKind || 'unknown',
-        // hermes/opencode remain host-managed and do not gate on a key Relay
-        // cannot reliably validate. Codex is gated on its detected auth mode.
+        // Antigravity may store its login in the host keyring. Hermes and
+        // OpenCode also manage credentials that Relay cannot validate.
         usable:
           installed &&
-          (authed || agent.key === 'opencode' || agent.key === 'hermes'),
+          (authed || (agent.key === 'agy' && status.authed === null) ||
+            agent.key === 'opencode' || agent.key === 'hermes'),
       };
     });
   }
@@ -139,23 +142,39 @@ module.exports = function createMetaRouter(ctx) {
   // its trimmed output. Used for `<cli> --version` and `<cli> update`.
   function runCliCommand(bin, args, timeoutMs) {
     return new Promise((resolve) => {
-      execFile(
-        locateBin(bin) || bin,
-        args,
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          const out = String(stdout || '').trim();
-          const errOut = String(stderr || '').trim();
-          resolve({
-            ok: !err,
-            code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
-            stdout: out,
-            stderr: errOut,
-            text: out || errOut,
-            timedOut: !!(err && err.killed),
-          });
-        },
-      );
+      const failed = (message) =>
+        resolve({
+          ok: false,
+          code: 1,
+          stdout: '',
+          stderr: message,
+          text: message,
+          timedOut: false,
+        });
+      const command = cliCommand(bin, args);
+      if (!command) return failed(`${bin} is not installed on this host.`);
+      try {
+        execFile(
+          command.cmd,
+          command.args,
+          { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+          (err, stdout, stderr) => {
+            const out = String(stdout || '').trim();
+            const errOut = String(stderr || '').trim();
+            resolve({
+              ok: !err,
+              code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
+              stdout: out,
+              stderr: errOut,
+              // A spawn failure prints nothing; its message is the reason.
+              text: out || errOut || (err ? err.message : ''),
+              timedOut: !!(err && err.killed),
+            });
+          },
+        );
+      } catch (err) {
+        failed(err.message);
+      }
     });
   }
 
@@ -289,9 +308,7 @@ module.exports = function createMetaRouter(ctx) {
           agents: listAgents().map((agent) => ({
             key: agent.key,
             label: agent.label,
-            loggedIn: statuses[agent.key]
-              ? statuses[agent.key].authed === true
-              : null,
+            loggedIn: statuses[agent.key]?.authed ?? null,
           })),
         }),
       (err) =>
@@ -358,7 +375,19 @@ module.exports = function createMetaRouter(ctx) {
 
   // Hardware and live temperatures; the machine page polls this while open.
   router.get('/api/machine', async (req, res) => {
-    res.json(await machineInfo());
+    res.json({ ...(await machineInfo()), version: backendVersion });
+  });
+
+  // Upgrades this backend to the latest release and restarts it. Takes no
+  // input; the app watches `version` on /api/machine for the result.
+  router.post('/api/backend-update', (req, res) => {
+    try {
+      startBackendUpdate();
+    } catch (err) {
+      if (!err.code) throw err;
+      return res.status(409).json({ error: err.message, code: err.code });
+    }
+    return res.status(202).json({ ok: true, version: backendVersion });
   });
 
   router.get('/api/diagnostics', (req, res) => {

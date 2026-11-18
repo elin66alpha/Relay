@@ -528,6 +528,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "9.5.0"
+  open_filex:
+    dependency: "direct main"
+    description:
+      name: open_filex
+      sha256: "0c3fe80e73f0b3200fef6e175b83dae9790dd23c9cdbb6d15f46e2ff10ae84ad"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.0.0"
   package_config:
     dependency: transitive
     description:
@@ -920,10 +928,11 @@ packages:
   xterm:
     dependency: "direct main"
     description:
-      name: xterm
-      sha256: "168dfedca77cba33fdb6f52e2cd001e9fde216e398e89335c19b524bb22da3a2"
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: "25bc19e49d9e948ba45bdb185d534c26bb3df9b2"
+      resolved-ref: "25bc19e49d9e948ba45bdb185d534c26bb3df9b2"
+      url: "https://github.com/LarryHsiao/xterm.dart.git"
+    source: git
     version: "4.0.0"
   yaml:
     dependency: transitive

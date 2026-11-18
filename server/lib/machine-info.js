@@ -209,4 +209,5 @@ module.exports = {
   parseLinuxMounts,
   parseLspciGpus,
   readHwmonTemperatures,
+  storageDisks,
 };

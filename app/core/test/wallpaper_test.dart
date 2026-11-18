@@ -163,7 +163,9 @@ void main() {
             controller: settings,
             child: MaterialApp(
               theme: dark ? AppTheme.dark() : AppTheme.light(),
-              home: AppSettingsScreen(settingsController: settings),
+              home: AppSettingsScreen(
+                settingsController: settings,
+              ),
             ),
           ),
         );

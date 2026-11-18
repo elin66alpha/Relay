@@ -148,8 +148,9 @@ subject to browser-origin storage security, so use a private profile on a
 trusted device.
 
 Generate a different credential for each device. **Machine details** (tap the
-machine in the drawer or on the home page) lists their token ids, device
-metadata, and last-use time. Revoke a token before
+machine in the drawer or on the home page; **Machine credentials** are at the
+top of Settings)
+lists their token ids, device metadata, and last-use time. Revoke a token before
 deleting its record; revocation also closes the terminal owned by that token.
 Generating another credential removes old export files but does not revoke
 tokens that were already issued.
@@ -241,13 +242,15 @@ into the focused field on the page, and its buttons send Backspace and Enter.
 
 The backend looks for Chrome, Chromium, or Edge in their standard install
 locations (on Linux, also on `PATH` and `/snap/bin/chromium`); set
-`RELAY_BROWSER` to an executable path to choose one. Each device token owns
+`RELAY_BROWSER` to an executable path to choose one. Setup runs the same
+check (`server/scripts/check-browser.js`) in step 1 and, when none is found,
+shows how to install one and continues. Each device token owns
 one browser with one tab. Leaving the page keeps it for 10 minutes, so
 returning shows the same page; opening it on another device replaces the first
 viewer. Each browser uses a new temporary profile that is deleted when it
 closes, so sign-ins inside the page do not persist. There is no sound, no file
-upload or download, no clipboard, and a link that opens a new window does
-nothing.
+upload or download, and no clipboard; loopback links opened in a new tab navigate the streamed tab on the backend.
+Other HTTP(S) links opened in a new tab are offered to the device’s browser after confirmation.
 
 An authenticated `POST /api/browser/ticket` returns a single-use ticket valid
 for 30 seconds, redeemed at `/api/browser/connect`, as for the terminal.
@@ -392,7 +395,10 @@ tag switches the active workdir and displays that directory in the browser.
 The file browser keeps its breadcrumb bar above the scrolling list. Select an
 ancestor segment to jump to it, or use the up arrow, `..` row, or a right swipe
 on the list to visit the parent. Windows UNC paths retain the server and share
-as a single root. Navigating through folders or breadcrumbs does not change the
+as a single root. When the backend has more than one disk, the first segment
+shows a ▾ and opens a menu of them: the drive letters on Windows, `/` plus each
+mounted disk on macOS and Linux (the disks the machine page lists). An isolated
+install offers none. Navigating through folders or breadcrumbs does not change the
 active workdir: use **Set as work path** to select a new project, or the
 work-path chip to return to the current one.
 The current workdir is also marked when it appears in a directory listing.
@@ -446,8 +452,9 @@ minutes. Multiple effort variants appear as one model with a separate effort
 control, ordered low to high. Saved variant selections retain their model and effort. Cautious mode refuses approval
 requests; auto-approve accepts them. Deleting a Relay chat closes its live session
 and forgets its ID; agy transcripts remain managed by the host CLI. Antigravity
-quota appears in Usage and the composer strip, with each Gemini, Claude/GPT
-and Argon bucket kept separate. A running Antigravity conversation answers
+quota appears in Usage, with each Gemini, Claude/GPT and Argon bucket kept
+separate, while the composer strip shows a short hint pointing to Quota usage.
+A running Antigravity conversation answers
 instantly; otherwise Relay runs `agy -p /usage` (about two seconds, no model
 turn). Results are cached for five minutes. Quota schedules remain Claude/Codex only.
 
@@ -568,7 +575,7 @@ Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
 
 The create and edit form groups agents by machine: this machine first, then
-every other machine in Manage credentials, listing that machine's usable agents
+every other machine in Settings → Machine credentials, listing that machine's usable agents
 (a machine the app cannot reach shows why). Tap an agent to add it and tap a
 member to configure it. The name is optional (`Swarm N` by default).
 
@@ -622,7 +629,8 @@ dashboard for included usage. An X plan such as Premium is one weekly pool; an
 older Cursor plan is two pools, Cursor models and API models. The query does not
 spend usage. Cursor's reset does not queue a scheduled message.
 Reset detection and
-scheduled messages support Claude Code and Codex only. A schedule stores one
+scheduled messages support Claude Code and Codex only, configured from the
+schedule button on their cards in **Quota usage**. A schedule stores one
 prompt per source and workspace for the next detected five-hour reset.
 
 Claude's five-hour window only exists while it runs: once it lapses the usage API
@@ -711,11 +719,35 @@ recreates `relay-server`, and waits until the port answers.
 `scripts/dev/build_flow.sh` also analyzes and tests the client, rebuilds Web
 and builds a debug APK.
 
+### Backend sandbox (Docker)
+
+`scripts/dev/backend-sandbox/sandbox.sh` runs an isolated Ubuntu 24.04 container
+(`relay-sandbox`, non-root user `relay`, named volume `relay-sandbox-home` for
+`/home/relay`) with Node.js 22 and PM2 so release tarballs and `update.sh`
+upgrades can be tested without colliding with the host backend. It keeps its
+own network namespace and publishes backend port `18787` only on host loopback
+(`127.0.0.1:18787`).
+
+```bash
+./scripts/dev/backend-sandbox/sandbox.sh build
+./scripts/dev/backend-sandbox/sandbox.sh install build/release/relay-backend-linux-macos-v0.2.0.tar.gz
+./scripts/dev/backend-sandbox/sandbox.sh status
+./scripts/dev/backend-sandbox/sandbox.sh update [version]
+./scripts/dev/backend-sandbox/sandbox.sh shell
+./scripts/dev/backend-sandbox/sandbox.sh destroy
+```
+
+`install` pipes non-interactive choices to `./install.sh` (skip agent CLIs,
+disable Web when bundled, open file access, direct network mode on
+`http://127.0.0.1:18787`, passphrase from `RELAY_CREDENTIAL_PASSPHRASE` or
+`sandbox-pass`), `update` runs the installed `scripts/install/unix/update.sh`
+(setting `RELAY_VERSION` when given), and `status` checks `pm2 list` plus the
+HTTP status of `http://127.0.0.1:18787/api/health` (401 when a token is configured).
+
 ### Windows backend release bundle
 
 Build the backend bundle on Windows x64 using a complete Node.js distribution
-(including npm and its license), Git, Flutter, the system .NET Framework 4.x
-C# compiler and access to the npm registry:
+(including npm and its license), Git, Flutter and access to the npm registry:
 
 ```powershell
 .\scripts\release\package_windows_backend.ps1
@@ -740,12 +772,13 @@ licenses, including Windows `node-pty` binaries. The Windows adapters prefer
 `runtime/node` when present; a source checkout continues using Node on PATH.
 The bundle provides setup/start/stop/status/uninstall and credential `.cmd`
 entry points, with the same state paths and login Scheduled Task as the source
-installation. `Setup.exe` is a Windows Forms UI built with the system .NET
-Framework compiler, without a downloaded GUI runtime. It and the console menu
-share `scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
-agent installation and token create/delete/list/re-show. Passwords reach the
-worker through stdin and the existing credential generator through its
-environment, never command arguments or temporary request files. The bundle
+installation. Setup is command-line only, as on Linux and macOS: `setup.cmd`
+runs `scripts/install/windows/setup.ps1`, the same menu and six install steps as
+`scripts/install/unix/setup.sh`, on top of the operations in
+`scripts/install/windows/lib/setup.ps1`: install, reinstall, uninstall, status,
+agent installation and token create/delete/list/re-show. The credential
+password is typed into the credential generator's own prompt, never passed as
+a command argument or written to a file. The bundle
 includes `app/shell/build/web`; Node serves it alongside the API, without another Web
 server. Setup enables it by default and can turn it off. Tunnel modes download
 missing `cloudflared` into `runtime/tools`; selected CLIs use official Windows
@@ -790,7 +823,7 @@ workflow artifacts. To build the `.deb` after the Linux release build, run
 `dpkg-dev` and `desktop-file-utils`. Build it on Ubuntu 22.04 for releases so
 that its system library requirements also work on newer Ubuntu versions.
 
-Install the package with `sudo apt install ./relay-desktop_<VERSION>_amd64.deb`,
+Install the package with `sudo apt install ./relay-client-linux_<VERSION>_amd64.deb`,
 then launch **Relay** from the applications menu or run `relay-desktop`.
 Removing the package does not remove the backend or the user's settings.
 Store signing and macOS notarization are not configured.
@@ -851,29 +884,25 @@ with `gh workflow run ios.yml --ref main`.
 
 A GitHub release `v<VERSION>` carries:
 
-- `relay-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
-- `install.sh` — `scripts/install/unix/install.sh`, the Linux and macOS one-line installer
-  (`curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash`).
-  It downloads this release's setup bundle and `SHA256SUMS`, so upload it with
-  them;
-- `relay-backend-setup-v<VERSION>.tar.gz` — the committed backend sources and
-  service adapters, without tests, dependencies, or deployment state, plus the
+- `relay-client-android-v<VERSION>.apk` — `app/shell/build/app/outputs/flutter-apk/app-release.apk`;
+- `relay-backend-linux-macos-v<VERSION>.tar.gz` — the root `install.sh` launcher, backend sources and
+  Linux/macOS service adapters, without tests, dependencies, or deployment state, plus the
   compiled Web client in `app/shell/build/web`. `./scripts/release/package_backend.sh` builds the
   Web client and writes it with a `.sha256` to `build/release/`; it refuses a
   tree with uncommitted tracked changes.
-- `relay-windows-x64-v<VERSION>.zip` — the Windows desktop client
+- `relay-client-windows-x64-v<VERSION>.zip` — the Windows desktop client
   (`app/shell/build/windows/x64/runner/Release/`);
-- `relay-desktop_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
+- `relay-client-linux_<VERSION>_amd64.deb` — the Ubuntu desktop client, built on
   Ubuntu 22.04 with a desktop launcher and application icon;
 - `relay-backend-windows-x64-v<VERSION>.zip` — see
   [Windows backend release bundle](#windows-backend-release-bundle);
-- `relay-macos-v<VERSION>.zip` — the macOS desktop client
+- `relay-client-macos-v<VERSION>.zip` — the macOS desktop client
   (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
   Intel). It has only an ad-hoc signature, so macOS blocks the first launch:
   open it from the context menu, or run
   `xattr -dr com.apple.quarantine Relay.app`. It keeps credentials in the login
   keychain, which may ask for access again after an update;
-- `relay-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
+- `relay-client-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
   it while installing, for example with Sideloadly or AltStore; an app signed
   with a free Apple ID expires after seven days;
 - `SHA256SUMS` — `sha256sum` of every asset above.

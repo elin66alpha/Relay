@@ -51,17 +51,29 @@ List<MessageSegment> _segmentsFromMessage(Map<String, Object?> message) {
 }
 
 class ChatStreamHandle {
-  ChatStreamHandle({http.Client? client}) : _client = client ?? http.Client();
+  ChatStreamHandle({http.Client? client}) : _injectedClient = client;
 
-  final http.Client _client;
+  final http.Client? _injectedClient;
+  http.Client? _ownedClient;
   bool _closed = false;
 
   bool get closed => _closed;
 
+  http.Client _clientFor(
+    ({http.Client client, bool owned}) Function() resolve,
+  ) {
+    final http.Client? injected = _injectedClient;
+    if (injected != null) return injected;
+    final (:http.Client client, :bool owned) = resolve();
+    if (owned) _ownedClient = client;
+    return client;
+  }
+
   void close() {
     if (_closed) return;
     _closed = true;
-    _client.close();
+    _injectedClient?.close();
+    _ownedClient?.close();
   }
 }
 
@@ -81,7 +93,6 @@ class BackendClient {
         );
 
   final ApiTransport _transport;
-  http.Client get _httpClient => _transport.httpClient;
 
   Future<void> close() async {
     _transport.close();
@@ -190,6 +201,12 @@ class BackendClient {
       throw BackendException('Invalid machine info response.');
     }
     return MachineInfo.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Starts the backend's upgrade to the latest release. It answers at once
+  /// and restarts when done; [machineInfo] then reports the new version.
+  Future<void> updateBackend() async {
+    await _requestJson('POST', '/api/backend-update');
   }
 
   Future<List<DeviceToken>> deviceTokens() async {
@@ -388,9 +405,18 @@ class BackendClient {
     });
 
     try {
-      final http.StreamedResponse response = await handle._client
-          .send(request)
-          .timeout(const Duration(minutes: 65));
+      if (handle.closed) {
+        throw BackendException(
+          'request cancelled',
+          status: 499,
+          code: 'AGENT_CANCELLED',
+        );
+      }
+      final http.Client client = handle._clientFor(
+        () => _transport.createStreamClientFor(credential),
+      );
+      final http.StreamedResponse response =
+          await client.send(request).timeout(const Duration(minutes: 65));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final String text = await response.stream.bytesToString();
         throw _exceptionFor(response.statusCode, text);
@@ -399,14 +425,23 @@ class BackendClient {
 
       ChatReply? reply;
       BackendException? streamError;
-      try {
-        await for (final BackendEvent event in decodeSse(
-          response.stream,
-        ).timeout(const Duration(minutes: 65))) {
-          if (event.type == 'ready' || event.type == 'heartbeat') continue;
+      final Completer<void> streamDone = Completer<void>();
+      void failStream(Object err, StackTrace stack) {
+        if (!streamDone.isCompleted) streamDone.completeError(err, stack);
+      }
+
+      final Future<void> Function() cancelSse = _listenSseStream(
+        response.stream,
+        idleTimeout: const Duration(minutes: 65),
+        onEvent: (BackendEvent event) {
+          if (event.type == 'ready' || event.type == 'heartbeat') return;
           onEvent(event);
           if (event.type == 'agent_done') {
-            reply = _chatReplyFromStreamDone(event.data, requestId, agentKey);
+            reply = _chatReplyFromStreamDone(
+              event.data,
+              requestId,
+              agentKey,
+            );
           } else if (event.type == 'agent_cancelled') {
             streamError = BackendException(
               'request cancelled',
@@ -421,7 +456,14 @@ class BackendClient {
               code: code,
             );
           }
-        }
+        },
+        onError: failStream,
+        onDone: () {
+          if (!streamDone.isCompleted) streamDone.complete();
+        },
+      );
+      try {
+        await streamDone.future;
       } on http.ClientException {
         // The app was backgrounded/closed and the OS tore down the socket while
         // the backend keeps running the turn. A distinct code lets the caller
@@ -435,9 +477,13 @@ class BackendClient {
           'The agent stream stalled.',
           code: 'STREAM_DISCONNECTED',
         );
+      } finally {
+        await cancelSse();
       }
-      if (streamError != null) throw streamError;
-      if (reply == null) {
+      final BackendException? error = streamError;
+      if (error != null) throw error;
+      final ChatReply? finalReply = reply;
+      if (finalReply == null) {
         // The stream ended without a terminal agent_done — the turn may still be
         // running on the backend. A distinct code lets the caller reattach.
         throw BackendException(
@@ -445,7 +491,7 @@ class BackendClient {
           code: 'STREAM_INCOMPLETE',
         );
       }
-      return reply;
+      return finalReply;
     } finally {
       handle.close();
     }
@@ -625,7 +671,8 @@ class BackendClient {
     final Uri uri = _uri(credential, '/api/history?$query');
     late final http.Response response;
     try {
-      response = await _httpClient
+      response = await _transport
+          .clientFor(credential)
           .get(uri, headers: await _headers(credential))
           .timeout(const Duration(seconds: 20));
     } on BackendException {
@@ -1064,8 +1111,10 @@ class BackendClient {
     request.headers.addAll(
       await _headers(credential, accept: 'application/octet-stream'),
     );
-    final http.StreamedResponse response =
-        await _httpClient.send(request).timeout(const Duration(minutes: 15));
+    final http.StreamedResponse response = await _transport
+        .clientFor(credential)
+        .send(request)
+        .timeout(const Duration(minutes: 15));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final String text = await response.stream.bytesToString();
       throw _exceptionFor(response.statusCode, text);
@@ -1094,7 +1143,8 @@ class BackendClient {
       '&name=${Uri.encodeQueryComponent(name)}'
       '${createDirectory ? '&mkdir=1' : ''}',
     );
-    final http.Response response = await _httpClient
+    final http.Response response = await _transport
+        .clientFor(credential)
         .post(
           uri,
           headers: await _headers(
@@ -1132,8 +1182,10 @@ class BackendClient {
       ),
     );
     request.contentLength = length;
-    final Future<http.StreamedResponse> responseFuture =
-        _httpClient.send(request).timeout(const Duration(minutes: 10));
+    final Future<http.StreamedResponse> responseFuture = _transport
+        .clientFor(credential)
+        .send(request)
+        .timeout(const Duration(minutes: 10));
     await request.sink.addStream(bytes);
     await request.sink.close();
     final http.StreamedResponse response = await responseFuture;
@@ -1152,23 +1204,126 @@ class BackendClient {
     return FsEntry.fromJson((decoded['entry'] as Map).cast<String, Object?>());
   }
 
-  Stream<BackendEvent> streamEvents() async* {
-    final MachineCredential credential = await _requireCredential();
-    final http.Request request = http.Request(
-      'GET',
-      _uri(credential, '/api/events'),
-    );
-    request.headers.addAll(
-      await _headers(credential, accept: 'text/event-stream'),
-    );
+  Stream<BackendEvent> streamEvents() {
+    late final StreamController<BackendEvent> controller;
+    Future<void> Function()? cancelSse;
+    bool cancelled = false;
 
-    final http.StreamedResponse response = await _httpClient.send(request);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final String text = await response.stream.bytesToString();
-      throw _exceptionFor(response.statusCode, text);
+    void closeWithError(Object err, StackTrace st) {
+      if (!controller.isClosed) {
+        controller.addError(err, st);
+        unawaited(controller.close());
+      }
     }
 
-    yield* decodeSse(response.stream.timeout(const Duration(seconds: 90)));
+    controller = StreamController<BackendEvent>(
+      onListen: () async {
+        try {
+          final MachineCredential credential = await _requireCredential();
+          if (cancelled) return;
+          final http.Request request = http.Request(
+            'GET',
+            _uri(credential, '/api/events'),
+          );
+          request.headers.addAll(
+            await _headers(credential, accept: 'text/event-stream'),
+          );
+          if (cancelled) return;
+          final http.StreamedResponse response =
+              await _transport.clientFor(credential).send(request);
+          if (cancelled) {
+            unawaited(response.stream.listen((_) {}).cancel());
+            return;
+          }
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            final String text = await response.stream.bytesToString();
+            throw _exceptionFor(response.statusCode, text);
+          }
+          cancelSse = _listenSseStream(
+            response.stream,
+            idleTimeout: const Duration(seconds: 90),
+            onEvent: (BackendEvent event) {
+              if (!controller.isClosed) controller.add(event);
+            },
+            onError: closeWithError,
+            onDone: () {
+              if (!controller.isClosed) unawaited(controller.close());
+            },
+          );
+        } catch (err, st) {
+          closeWithError(err, st);
+        }
+      },
+      onCancel: () {
+        cancelled = true;
+        return cancelSse?.call();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// Subscribes to decoded SSE frames from [byteStream] with an inactivity
+  /// timer and returns a cancellation callback safe to call after completion.
+  Future<void> Function() _listenSseStream(
+    Stream<List<int>> byteStream, {
+    required Duration idleTimeout,
+    required void Function(BackendEvent event) onEvent,
+    required void Function(Object error, StackTrace stackTrace) onError,
+    required void Function() onDone,
+  }) {
+    Timer? idleTimer;
+    bool ended = false;
+    late final StreamSubscription<BackendEvent> subscription;
+
+    void resetIdleTimer() {
+      idleTimer?.cancel();
+      idleTimer = Timer(idleTimeout, () {
+        if (ended) return;
+        ended = true;
+        unawaited(subscription.cancel());
+        onError(
+          TimeoutException('No stream event', idleTimeout),
+          StackTrace.current,
+        );
+      });
+    }
+
+    resetIdleTimer();
+    subscription = decodeSse(byteStream).listen(
+      (BackendEvent event) {
+        if (ended) return;
+        resetIdleTimer();
+        try {
+          onEvent(event);
+        } catch (err, st) {
+          if (ended) return;
+          ended = true;
+          idleTimer?.cancel();
+          unawaited(subscription.cancel());
+          onError(err, st);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (ended) return;
+        ended = true;
+        idleTimer?.cancel();
+        onError(error, stackTrace);
+      },
+      onDone: () {
+        if (ended) return;
+        ended = true;
+        idleTimer?.cancel();
+        onDone();
+      },
+      cancelOnError: true,
+    );
+
+    return () async {
+      idleTimer?.cancel();
+      if (ended) return;
+      ended = true;
+      await subscription.cancel();
+    };
   }
 
   ChatReply _chatReplyFromStreamDone(

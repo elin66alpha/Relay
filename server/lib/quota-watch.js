@@ -47,6 +47,8 @@ function startQuotaWatch({ name = 'app', onReset, intervalMs }) {
   // Guard against overlapping runs: a slow poll (network hiccups) must not let
   // setInterval stack a second check on top of the first.
   let checking = false;
+  // Last failure logged per source; an unchanged failure is not logged again.
+  const lastFailure = {};
 
   async function check() {
     if (checking) return;
@@ -65,9 +67,13 @@ function startQuotaWatch({ name = 'app', onReset, intervalMs }) {
       try {
         current = await source.read();
       } catch (err) {
-        console.error(`[quota:${source.key}] usage query failed: ${err.message}`);
+        if (lastFailure[source.key] !== err.message) {
+          console.error(`[quota:${source.key}] usage query failed: ${err.message}`);
+        }
+        lastFailure[source.key] = err.message;
         continue;
       }
+      delete lastFailure[source.key];
       if (current.utilization == null) continue;
 
       const prev = state[source.key];

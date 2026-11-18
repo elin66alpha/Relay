@@ -18,7 +18,6 @@ import '../machines/machine_credentials_screen.dart';
 import '../machines/machine_details_screen.dart';
 import '../settings/app_settings_screen.dart';
 import '../filesystem/file_system_screen.dart';
-import '../quota/quota_scheduler_screen.dart';
 import '../quota/quota_usage_screen.dart';
 import 'bot_chat_controller.dart';
 import 'group_chat_screen.dart';
@@ -51,6 +50,18 @@ class CliAgentsDrawer extends StatelessWidget {
         final String activeKey = agentsController.activeAgentKey;
         final MachineCredential? activeMachine =
             machinesController.activeMachine;
+        final bool isDemo = isDemoMachine(activeMachine);
+        final List<CliAgent> mainAgents = <CliAgent>[];
+        final List<CliAgent> unavailableAgents = <CliAgent>[];
+        for (final CliAgent agent in agentsController.agents) {
+          final bool selected =
+              chatController.machine != null && agent.key == activeKey;
+          if (isCliAgentSelectable(agent) || selected) {
+            mainAgents.add(agent);
+          } else {
+            unavailableAgents.add(agent);
+          }
+        }
         return Column(
           children: <Widget>[
             Padding(
@@ -75,20 +86,6 @@ class CliAgentsDrawer extends StatelessWidget {
               child: ListView(
                 children: <Widget>[
                   ListTile(
-                    leading: const Icon(Icons.vpn_key_outlined),
-                    title: Text(context.l10n.manageCredentials),
-                    onTap: () {
-                      if (closeOnAction) Navigator.of(context).pop();
-                      Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) => MachineCredentialsScreen(
-                            machinesController: machinesController,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
                     leading: const Icon(Icons.query_stats_outlined),
                     title: Text(context.l10n.usageQuery),
                     onTap: () {
@@ -97,26 +94,19 @@ class CliAgentsDrawer extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => QuotaUsageScreen(
                             quotaController: chatController.quotaController,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.schedule_send_outlined),
-                    title: Text(context.l10n.quotaScheduler),
-                    onTap: () {
-                      if (closeOnAction) Navigator.of(context).pop();
-                      Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) => QuotaSchedulerScreen(
-                            quotaController: chatController.quotaController,
                             ensureActiveSessionId:
                                 chatController.ensureActiveSessionId,
                           ),
                         ),
                       );
                     },
+                  ),
+                  SwarmDrawerSection(
+                    agentsController: agentsController,
+                    settingsController: settingsController,
+                    machinesController: machinesController,
+                    chatController: chatController,
+                    closeOnAction: closeOnAction,
                   ),
                   const Divider(height: 16),
                   Padding(
@@ -156,70 +146,110 @@ class CliAgentsDrawer extends StatelessWidget {
                       ],
                     ),
                   ),
-                  for (final CliAgent agent in agentsController.agents)
+                  for (final CliAgent agent in mainAgents)
                     ..._agentTiles(context, agent, activeKey, activeMachine),
-                  const Divider(height: 16),
-                  SwarmDrawerSection(
-                    agentsController: agentsController,
-                    settingsController: settingsController,
-                    machinesController: machinesController,
-                    chatController: chatController,
-                    closeOnAction: closeOnAction,
-                  ),
+                  if (unavailableAgents.isNotEmpty)
+                    ExpansionTile(
+                      key: const ValueKey<String>('unavailable_agents'),
+                      shape: const Border(),
+                      collapsedShape: const Border(),
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                      visualDensity: VisualDensity.compact,
+                      iconColor: Theme.of(context).colorScheme.outline,
+                      collapsedIconColor: Theme.of(context).colorScheme.outline,
+                      title: Text(
+                        context.l10n
+                            .unavailableAgentsCount(unavailableAgents.length),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                      children: <Widget>[
+                        for (final CliAgent agent in unavailableAgents)
+                          ..._agentTiles(
+                            context,
+                            agent,
+                            activeKey,
+                            activeMachine,
+                          ),
+                      ],
+                    ),
                 ],
               ),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.home_rounded),
-              title: Text(context.l10n.backHome),
-              selected: chatController.machine == null,
-              onTap: () {
-                chatController.goHome();
-                if (closeOnAction) Navigator.of(context).pop();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.public_rounded),
-              title: Text(context.l10n.browser),
-              onTap: () {
-                if (closeOnAction) Navigator.of(context).pop();
-                Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        BrowserScreen(backend: chatController.backend),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_open_outlined),
-              title: Text(context.l10n.fileSystem),
-              onTap: () {
-                if (closeOnAction) Navigator.of(context).pop();
-                Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) => FileSystemScreen(
-                      backend: chatController.backend,
-                      onSetWorkdir: chatController.setWorkdir,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _DrawerActionButton(
+                      icon: Icons.home_rounded,
+                      label: context.l10n.home,
+                      selected: chatController.machine == null,
+                      onTap: () {
+                        chatController.goHome();
+                        if (closeOnAction) Navigator.of(context).pop();
+                      },
                     ),
                   ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: Text(context.l10n.settings),
-              onTap: () {
-                if (closeOnAction) Navigator.of(context).pop();
-                Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) => AppSettingsScreen(
-                      settingsController: settingsController,
+                  Expanded(
+                    child: _DrawerActionButton(
+                      icon: Icons.public_rounded,
+                      label: context.l10n.browser,
+                      onTap: isDemo
+                          ? null
+                          : () {
+                              if (closeOnAction) Navigator.of(context).pop();
+                              Navigator.of(context).push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => BrowserScreen(
+                                    backend: chatController.backend,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                   ),
-                );
-              },
+                  Expanded(
+                    child: _DrawerActionButton(
+                      icon: Icons.folder_open_outlined,
+                      label: context.l10n.fileSystem,
+                      onTap: () {
+                        if (closeOnAction) Navigator.of(context).pop();
+                        Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (_) => FileSystemScreen(
+                              backend: chatController.backend,
+                              onSetWorkdir: chatController.setWorkdir,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Expanded(
+                    child: _DrawerActionButton(
+                      icon: Icons.settings_outlined,
+                      label: context.l10n.settings,
+                      onTap: () {
+                        if (closeOnAction) Navigator.of(context).pop();
+                        Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (_) => AppSettingsScreen(
+                              settingsController: settingsController,
+                              machinesSection: MachineCredentialsSection(
+                                machinesController: machinesController,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -536,11 +566,67 @@ class _RunningSessionIndicator extends StatelessWidget {
 // "new session" button disables before the create call would be rejected.
 const int _maxSessionsPerAgent = 8;
 
-/// The Swarm drawer entry plus an always-visible list of the workspace's swarms
-/// as sub-entries. Tapping the header opens the swarm screen on its most-recent
-/// swarm (or the create flow when there are none); tapping a sub-entry opens
-/// directly into that swarm. The list reloads whenever the user returns from the
-/// swarm screen, so creates/deletes there are reflected here.
+class _DrawerActionButton extends StatelessWidget {
+  const _DrawerActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool enabled = onTap != null;
+    final Color color = !enabled
+        ? colors.outline.withValues(alpha: 0.45)
+        : selected
+            ? colors.primary
+            : colors.onSurfaceVariant;
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(icon, color: color),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: color, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Swarm drawer entry, under Quota usage. Tapping it opens the swarm
+/// screen on its most-recent swarm (or the create flow when there are none),
+/// and the trailing count reloads when the workdir changes or after returning
+/// from that screen.
 class SwarmDrawerSection extends StatefulWidget {
   const SwarmDrawerSection({
     required this.agentsController,
@@ -600,7 +686,7 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
     }
   }
 
-  Future<void> _openSwarm(BuildContext context, {String? groupId}) async {
+  Future<void> _openSwarm(BuildContext context) async {
     if (widget.closeOnAction) Navigator.of(context).pop();
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -609,50 +695,29 @@ class _SwarmDrawerSectionState extends State<SwarmDrawerSection> {
           agentsController: widget.agentsController,
           settingsController: widget.settingsController,
           machinesController: widget.machinesController,
-          initialGroupId: groupId,
         ),
       ),
     );
-    // The roster may have changed on that screen; refresh the sub-entries.
+    // The roster may have changed on that screen; refresh the count.
     await _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
-    return Column(
-      children: <Widget>[
-        ListTile(
-          leading: const Icon(Icons.groups_outlined),
-          title: Text(strings.groupChat),
-          subtitle: Text(
-            strings.groupChatSubtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          onTap: () => _openSwarm(context),
-        ),
-        for (final ChatGroup swarm in _swarms)
-          Padding(
-            padding: const EdgeInsets.only(left: 28),
-            child: ListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              leading: const Icon(Icons.forum_outlined, size: 18),
-              title: Text(
-                swarm.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return ListTile(
+      leading: const Icon(Icons.groups_outlined),
+      title: Text(strings.groupChat),
+      trailing: _swarms.isEmpty
+          ? null
+          : Text(
+              '${_swarms.length}',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.outline,
+                fontSize: 13,
               ),
-              subtitle: Text(
-                swarm.memberLabels.join(' · '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () => _openSwarm(context, groupId: swarm.id),
             ),
-          ),
-      ],
+      onTap: () => _openSwarm(context),
     );
   }
 }

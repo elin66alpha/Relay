@@ -1,4 +1,4 @@
-# Shared operations for the console menu and the graphical Setup.exe.
+# Operations behind the setup.cmd menu (setup.ps1) and status.cmd.
 . "$PSScriptRoot\common.ps1"
 
 function Get-RelayDetails {
@@ -65,7 +65,24 @@ function Install-RelayAgentClis {
     $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
     Write-Info "$($state.label) login/configuration command: $($state.login)"
   }
-  Write-Info 'Sign in to agent CLIs yourself in a terminal. Relay never signs an agent in.'
+  Sync-RelayUserPath
+  Write-Info 'Sign in to agent CLIs yourself in a terminal (choose t in setup.cmd for one with them on PATH). Relay never signs an agent in.'
+}
+
+# A PowerShell window with the backend's PATH (bundled Node, every agent CLI
+# folder) and the sign-in command of each CLI, for signing in on this host.
+function Open-RelayTerminal {
+  $lines = @('Relay agent terminal: the agent CLIs and Relay''s Node are on PATH here.', 'Sign in or configure each CLI you use:')
+  foreach ($agent in (Get-RelayDetails).agents) {
+    $state = if (-not $agent.installed) { 'not installed' } elseif ($null -eq $agent.authed) { 'installed, sign-in managed on host' } elseif ($agent.authed) { 'ready' } else { 'needs sign-in' }
+    $lines += "  $($agent.label) ($state): $($agent.login)"
+  }
+  $script = ($lines | ForEach-Object { "Write-Host '" + ($_ -replace "'", "''") + "'" }) -join '; '
+  # -EncodedCommand: Start-Process would split an unquoted -Command on spaces.
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+  Start-Process -FilePath (Get-Command 'powershell.exe').Source -WorkingDirectory $env:USERPROFILE `
+    -ArgumentList @('-NoExit', '-NoLogo', '-EncodedCommand', $encoded)
+  Write-Info 'Opened a terminal with the agent CLIs on PATH.'
 }
 
 function Ensure-Cloudflared {
@@ -107,7 +124,8 @@ function Install-RelayBackend {
     [string]$Passphrase = '', [string]$Label = '',
     [switch]$Reinstall, [switch]$OverwriteDns,
     # Confine workdirs, the file API and agent tiers to <bundle>\workspace.
-    [bool]$Isolated = $false
+    [bool]$Isolated = $false,
+    [ipaddress]$BindAddress = '0.0.0.0'
   )
   if ($Port -lt 1 -or $Port -gt 65535) { Write-Fail 'Port must be between 1 and 65535.' }
   if ($Passphrase -and $Passphrase.Length -lt 6) { Write-Fail 'Credential password must have at least 6 characters.' }
@@ -134,6 +152,7 @@ function Install-RelayBackend {
   Ensure-EnvFile
   if ($Reinstall) { Stop-RelayServices }
   Install-ServerDeps -Force:$Reinstall
+  Test-RelayBrowser
   Write-Info 'Step 2/6 - Agent CLIs'
   Install-RelayAgentClis -Agents $Agents
   Write-Info 'Step 3/6 - Web client'
@@ -155,7 +174,7 @@ function Install-RelayBackend {
   Set-EnvValue 'RELAY_TUNNEL_MODE' $NetworkMode
   Set-EnvValue 'RELAY_TUNNEL_NAME' $TunnelName
   if ($NetworkMode -eq 'none') {
-    Set-EnvValue 'HOST' '0.0.0.0'
+    Set-EnvValue 'HOST' $BindAddress.IPAddressToString
     Set-EnvValue 'PUBLIC_BASE_URL' $PublicUrl
     Set-EnvValue 'CLOUDFLARED_BIN' ''
     Set-EnvValue 'CLOUDFLARED_ARGS' ''
@@ -207,6 +226,7 @@ function Uninstall-RelayBackend {
   param([bool]$RemoveWeb = $true, [switch]$DeleteTunnel, [switch]$RemoveCloudflared)
   Stop-RelayServices
   Unregister-RelayStartup
+  Remove-RelayUserPath
   if ($RemoveWeb) { Remove-RelayWeb }
   $name = Get-EnvValue 'RELAY_TUNNEL_NAME'
   if ($DeleteTunnel -and $name -and (Test-Command cloudflared)) {

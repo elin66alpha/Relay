@@ -13,7 +13,7 @@ import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
-import '../settings/getting_started_screen.dart';
+import '../settings/tutorial_screen.dart';
 import '../settings/whats_new_screen.dart';
 import 'bot_chat_controller.dart';
 import 'cli_agents_drawer.dart';
@@ -158,9 +158,9 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
     );
   }
 
-  void _openGettingStarted() {
+  void _openTutorial() {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const GettingStartedScreen()),
+      MaterialPageRoute<void>(builder: (_) => const TutorialScreen()),
     );
   }
 
@@ -253,10 +253,10 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                     children: <Widget>[
                       ListTile(
                         leading: const Icon(Icons.school_outlined),
-                        title: Text(strings.gettingStarted),
-                        subtitle: Text(strings.gettingStartedHomeHint),
+                        title: Text(strings.tutorialHomeTitle),
+                        subtitle: Text(strings.tutorialHomeHint),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: _openGettingStarted,
+                        onTap: _openTutorial,
                       ),
                     ],
                   ),

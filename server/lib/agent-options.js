@@ -230,7 +230,6 @@ const CLI = {
   agy: { bin: 'agy', versionArgs: ['--version'], updateArgs: ['update'] },
   claude: { bin: 'claude', versionArgs: ['--version'], updateArgs: ['update'] },
   codex: { bin: 'codex', versionArgs: ['--version'], updateArgs: ['update'] },
-  // TODO(opencode/hermes): confirm version/update subcommands once installed.
   opencode: { bin: 'opencode', versionArgs: ['--version'], updateArgs: ['upgrade'] },
   hermes: { bin: 'hermes', versionArgs: ['--version'], updateArgs: ['update'] },
   cursor: { bin: 'agent', versionArgs: ['--version'], updateArgs: ['update'] },

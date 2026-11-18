@@ -125,6 +125,10 @@ svc_remove() {
   pm2 save >/dev/null 2>&1 || true
 }
 
+browser_install_hint() {
+  printf '%s' 'Install one, for example: sudo snap install chromium, or Google Chrome from https://www.google.com/chrome/'
+}
+
 svc_summary() { require_pm2; pm2 list; }
 
 server_log_files() { printf '%s\n' "$PM2_LOG_DIR/$SERVER_PROC-out.log" "$PM2_LOG_DIR/$SERVER_PROC-error.log"; }

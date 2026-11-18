@@ -47,7 +47,7 @@ const { listAgents } = require("./lib/agents");
 const statuses = getAgentStatuses();
 for (const agent of listAgents()) {
   const s = statuses[agent.key] || {};
-  const state = !s.installed ? "not installed" : s.authed ? "ready" : "installed, not signed in";
+  const state = !s.installed ? "not installed" : s.authed === null ? "installed, sign-in managed on host" : s.authed ? "ready" : "installed, not signed in";
   console.log(`  ${agent.label.padEnd(12)} ${state}`);
 }')
 

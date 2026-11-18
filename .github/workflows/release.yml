@@ -42,7 +42,7 @@ jobs:
 
   source-bundle:
     if: ${{ !inputs.windows_backend_only }}
-    name: Backend setup bundle
+    name: Linux and macOS backend archive
     needs: validate
     runs-on: ubuntu-latest
     steps:
@@ -62,13 +62,11 @@ jobs:
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
       - run: ./scripts/release/package_backend.sh
-      - run: cp scripts/install/unix/install.sh build/release/install.sh
       - uses: actions/upload-artifact@v7
         with:
           name: source-bundle
           path: |
-            build/release/relay-backend-setup-*.tar.gz
-            build/release/install.sh
+            build/release/relay-backend-linux-macos-*.tar.gz
           if-no-files-found: error
 
   windows-bundles:
@@ -97,7 +95,7 @@ jobs:
         run: |
           $version = node -p "require('./server/package.json').version"
           New-Item -ItemType Directory -Force -Path build/release | Out-Null
-          Compress-Archive -Path app/shell/build/windows/x64/runner/Release/* -DestinationPath "build/release/relay-windows-x64-v$version.zip"
+          Compress-Archive -Path app/shell/build/windows/x64/runner/Release/* -DestinationPath "build/release/relay-client-windows-x64-v$version.zip"
       - name: Build and audit Windows backend bundle
         shell: powershell
         run: ./scripts/release/package_windows_backend.ps1
@@ -105,7 +103,7 @@ jobs:
         with:
           name: windows-bundles
           path: |
-            build/release/relay-windows-x64-*.zip
+            build/release/relay-client-windows-x64-*.zip
             build/release/relay-backend-windows-x64-*.zip
           if-no-files-found: error
 
@@ -136,7 +134,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-desktop
-          path: build/release/relay-desktop_*_amd64.deb
+          path: build/release/relay-client-linux_*_amd64.deb
           if-no-files-found: error
 
   apple-clients:
@@ -165,14 +163,14 @@ jobs:
           version="$(node -p "require('./server/package.json').version")"
           mkdir -p build/release build/ipa/Payload
           cp -R app/shell/build/ios/iphoneos/Runner.app build/ipa/Payload/
-          (cd build/ipa && zip -qry "../release/relay-ios-unsigned-v$version.ipa" Payload)
-          ditto -c -k --keepParent app/shell/build/macos/Build/Products/Release/Relay.app "build/release/relay-macos-v$version.zip"
+          (cd build/ipa && zip -qry "../release/relay-client-ios-unsigned-v$version.ipa" Payload)
+          ditto -c -k --keepParent app/shell/build/macos/Build/Products/Release/Relay.app "build/release/relay-client-macos-v$version.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: apple-clients
           path: |
-            build/release/relay-ios-unsigned-v*.ipa
-            build/release/relay-macos-v*.zip
+            build/release/relay-client-ios-unsigned-v*.ipa
+            build/release/relay-client-macos-v*.zip
           if-no-files-found: error
 
   android-client:
@@ -268,14 +266,14 @@ jobs:
             exit 1
           }
           mkdir -p build/release
-          cp "$apk" "build/release/relay-android-v$version.apk"
+          cp "$apk" "build/release/relay-client-android-v$version.apk"
       - name: Clean up signing files
         if: always()
         run: rm -f app/shell/android/key.properties "${{ runner.temp }}/relay-release.jks"
       - uses: actions/upload-artifact@v7
         with:
           name: android-client
-          path: build/release/relay-android-v*.apk
+          path: build/release/relay-client-android-v*.apk
           if-no-files-found: error
 
   draft:
@@ -307,19 +305,19 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
             --jq '[.check_runs[] | select(.name == "CI complete")] | sort_by(.started_at) | last | .status == "completed" and .conclusion == "success"' | grep -qx true
           cd build/release
-          sha256sum install.sh "relay-backend-setup-$tag.tar.gz" \
-            "relay-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
-            "relay-desktop_${version}_amd64.deb" "relay-macos-$tag.zip" \
-            "relay-ios-unsigned-$tag.ipa" "relay-android-$tag.apk" > SHA256SUMS
+          sha256sum "relay-backend-linux-macos-$tag.tar.gz" \
+            "relay-client-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
+            "relay-client-linux_${version}_amd64.deb" "relay-client-macos-$tag.zip" \
+            "relay-client-ios-unsigned-$tag.ipa" "relay-client-android-$tag.apk" > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ../..
           awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md > build/release/notes.md
           gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Relay $version" \
-            --notes-file build/release/notes.md build/release/install.sh \
-            "build/release/relay-backend-setup-$tag.tar.gz" \
-            "build/release/relay-windows-x64-$tag.zip" \
+            --notes-file build/release/notes.md \
+            "build/release/relay-backend-linux-macos-$tag.tar.gz" \
+            "build/release/relay-client-windows-x64-$tag.zip" \
             "build/release/relay-backend-windows-x64-$tag.zip" \
-            "build/release/relay-desktop_${version}_amd64.deb" \
-            "build/release/relay-macos-$tag.zip" \
-            "build/release/relay-ios-unsigned-$tag.ipa" \
-            "build/release/relay-android-$tag.apk" build/release/SHA256SUMS
+            "build/release/relay-client-linux_${version}_amd64.deb" \
+            "build/release/relay-client-macos-$tag.zip" \
+            "build/release/relay-client-ios-unsigned-$tag.ipa" \
+            "build/release/relay-client-android-$tag.apk" build/release/SHA256SUMS

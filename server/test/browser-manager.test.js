@@ -44,7 +44,12 @@ function fakePage() {
     calls: [],
     events: new EventEmitter(),
     closed: false,
+    targetId: 'main-target',
     send(method, params) {
+      page.calls.push([method, params]);
+      return Promise.resolve({});
+    },
+    sendBrowser(method, params) {
       page.calls.push([method, params]);
       return Promise.resolve({});
     },
@@ -208,7 +213,7 @@ test('shutdown refuses new browser sessions while process cleanup is still pendi
   assert.equal(fs.existsSync(browser.child.profile), false);
 });
 
-for (const method of ['Target.createTarget', 'Target.attachToTarget']) {
+for (const method of ['Target.createTarget', 'Target.attachToTarget', 'Target.setDiscoverTargets']) {
   test(`browser startup times out and cleans up when ${method} stalls`, async () => {
     const browser = fakeBrowser(method);
     const ready = launchPage('/fake/chrome', { spawn: browser.spawn, callTimeoutMs: 20 });
@@ -350,6 +355,54 @@ test('frames go out as binary, are acked after sending, and replay on reattach',
   manager.closeAll();
 });
 
+test('captures an early screencast frame emitted synchronously while answering Page.startScreencast', async () => {
+  const { manager, page } = managerWithFakePage();
+  const send = page.send;
+  page.send = (method, params) => {
+    const result = send(method, params);
+    if (method === 'Page.startScreencast') {
+      // Chrome can emit the first frame in the same stdio chunk as the startScreencast response.
+      page.events.emit('Page.screencastFrame', {
+        data: Buffer.from('early-frame').toString('base64'),
+        sessionId: 1,
+      });
+    }
+    return result;
+  };
+  const client = await attached(manager);
+  assert.equal(client.frames.length > 0, true);
+  assert.equal(client.frames[0].toString(), 'early-frame');
+  assert.deepEqual(lastCall(page, 'Page.screencastFrameAck'), { sessionId: 1 });
+  await manager.closeAll();
+});
+
+test('a tab the page opens is closed and its address handed to the app once', async () => {
+  const { manager, page } = managerWithFakePage();
+  const client = await attached(manager);
+  const opens = () => client.json.filter((m) => m.type === 'open');
+  const closes = () => page.calls.filter(([name]) => name === 'Target.closeTarget');
+
+  // The streamed tab itself and a popup still on about:blank are left alone.
+  page.events.emit('Target.targetCreated', { targetInfo: { targetId: 'main-target', type: 'page', url: 'https://x.test/' } });
+  page.events.emit('Target.targetCreated', { targetInfo: { targetId: 'pop', type: 'page', url: 'about:blank' } });
+  assert.equal(closes().length, 0);
+
+  page.events.emit('Target.targetInfoChanged', { targetInfo: { targetId: 'pop', type: 'page', url: 'https://github.com/a' } });
+  page.events.emit('Target.targetInfoChanged', { targetInfo: { targetId: 'pop', type: 'page', url: 'https://github.com/a' } });
+  assert.deepEqual(opens(), [{ type: 'open', url: 'https://github.com/a' }]);
+  assert.deepEqual(closes(), [['Target.closeTarget', { targetId: 'pop' }]]);
+
+  // A non-web address is closed but never sent to the device.
+  page.events.emit('Target.targetCreated', { targetInfo: { targetId: 'file', type: 'page', url: 'file:///etc/passwd' } });
+  assert.equal(closes().length, 2);
+  for (const url of ['http://localhost:3000/preview', 'http://127.0.0.1:3000/', 'http://[::1]:3000/']) {
+    page.events.emit('Target.targetCreated', { targetInfo: { targetId: url, type: 'page', url } });
+    assert.deepEqual(lastCall(page, 'Page.navigate'), { url });
+  }
+  assert.equal(opens().length, 1);
+  manager.closeAll();
+});
+
 test('navigation, dialogs and a second device are reported to the viewer', async () => {
   const { manager, page } = managerWithFakePage();
   const first = await attached(manager);
@@ -443,8 +496,8 @@ test('a real headless browser streams a local page and takes touch and mouse inp
 }, async () => {
   // The slider and button write to the hash, which comes back as a `url` message.
   const html = `<!doctype html><meta name=viewport content="width=device-width">
-    <body style="margin:0">
-    <input id=s type=range min=0 max=100 value=0 style="position:absolute;left:20px;top:100px;width:360px;height:40px;margin:0"
+    <body style="margin:0" onload="location.hash='ready'">
+    <input id=s type=range min=0 max=100 value=0 style="position:absolute;left:20px;top:100px;width:360px;height:40px;margin:0;touch-action:none"
       oninput="location.hash='s'+this.value">
     <button style="position:absolute;left:20px;top:300px;width:200px;height:80px"
       onclick="location.hash='clicked'">x</button>`;
@@ -466,7 +519,8 @@ test('a real headless browser streams a local page and takes touch and mouse inp
   });
   try {
     const client = await attached(manager);
-    assert.equal(client.json[0].type, 'ready', JSON.stringify(client.json[0]));
+    const first = client.json.find((m) => m.type !== 'ping');
+    assert.equal(first?.type, 'ready', JSON.stringify(client.json));
     const say = (message) => client.emit('message', Buffer.from(JSON.stringify(message)), false);
     const waitFor = async (predicate, what) => {
       for (let i = 0; i < 600; i += 1) {
@@ -480,6 +534,7 @@ test('a real headless browser streams a local page and takes touch and mouse inp
     say({ type: 'resize', width: 400, height: 800, scale: 1, mobile: true });
     say({ type: 'navigate', url: String(site.address().port) });
     await waitFor(() => urls().some((url) => url.endsWith(`:${site.address().port}/`)), 'navigation');
+    await waitFor(() => urls().some((url) => url.endsWith('#ready')), 'page load');
     await waitFor(() => client.frames.length > 0, 'a frame');
     assert.equal(client.frames.at(-1)[0], 0xff, 'frames are JPEG');
 

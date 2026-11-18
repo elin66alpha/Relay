@@ -154,6 +154,41 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.2.0',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.menu_book_outlined,
+        title: '全新的教程',
+        body:
+            '首页和设置里的“教程”改成了按模块分类的文章列表，从部署后端、聊天、各个智能体、蜂群、文件到终端和额度，每个功能都有一篇详细说明，顶部还可以搜索。',
+      ),
+      _Highlight(
+        icon: Icons.system_update_alt_rounded,
+        title: 'App 和后端都能自己更新',
+        body:
+            '有新版本时，App 启动会询问是否下载安装（Android、Windows、Linux、macOS），也可以在“设置 → 关于 → 检查更新”手动检查。机器详情显示后端版本，并可以一键更新到新版本并重启。',
+      ),
+      _Highlight(
+        icon: Icons.storage_rounded,
+        title: '文件浏览器切换磁盘',
+        body:
+            '后端有多个磁盘时，点路径栏第一段即可切换：Windows 上是 C:、D: 等盘符，macOS 和 Linux 上是 / 和每个挂载的磁盘。',
+      ),
+    ],
+    changes: <String>[
+      '演示模式：在初始欢迎页点击「试用演示」，即可不部署后端直接体验界面和模拟对话（禁用 SSH 与浏览器，导入真实机器时自动移除）。',
+      '内置浏览器：新标签里的本机链接留在后端，外部链接确认后用你设备上的浏览器打开；右上角新增信息按钮，说明它的能力和限制。',
+      '侧边栏更简洁：底部改成一行首页、浏览器、文件系统、设置；蜂群收成一项；不可用的智能体收进一行；机器凭证直接显示在设置最上方，通过「添加机器」导入。',
+      '定时消息并入“额度查询”：在 Claude Code 和 Codex 卡片上设置，卡片会显示发送时间和内容预览。',
+      'Antigravity 的额度只在“额度查询”里显示，输入框上方改为一行提示。',
+      '下载时，relay-client 是客户端，relay-backend 是后端。后端解压后即可安装：Linux 和 macOS 运行 ./install.sh，Windows 运行 setup.cmd。',
+      'Windows 安装会把智能体 CLI 加入用户 PATH，并新增打开终端登录 CLI 的入口；新增 update.cmd 原地升级。',
+      '修复 Windows 安装反复重写 .env 导致文件越来越大的问题，后端也重新优先使用自带的 Node.js。',
+      '修复同步历史时偶尔丢掉排队中的跟进消息的问题。',
+      '修复 Windows 桌面端 SSH 终端无法输入字符的问题。',
+    ],
+  ),
+  _Release(
     version: '0.1.12',
     highlights: <_Highlight>[
       _Highlight(
@@ -301,6 +336,41 @@ const List<_Release> _zhReleases = <_Release>[
 ];
 
 const List<_Release> _enReleases = <_Release>[
+  _Release(
+    version: '0.2.0',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.menu_book_outlined,
+        title: 'A new tutorial',
+        body:
+            'Tutorial on Home and in Settings is now a list of articles grouped by area: deploying the backend, chat, each agent, Swarms, files, the terminal, quota and more, one detailed article per feature, with a search box at the top.',
+      ),
+      _Highlight(
+        icon: Icons.system_update_alt_rounded,
+        title: 'The app and backend update themselves',
+        body:
+            'When a newer release exists, the app offers to download and install it at start-up (Android, Windows, Linux, macOS), or from Settings → About → Check for updates. Machine details shows the backend version and can update and restart it in one step.',
+      ),
+      _Highlight(
+        icon: Icons.storage_rounded,
+        title: 'Switch disks in the file browser',
+        body:
+            'When the backend has more than one disk, the first segment of the path bar switches between them: drive letters such as C: and D: on Windows, / and each mounted disk on macOS and Linux.',
+      ),
+    ],
+    changes: <String>[
+      'Demo mode: tap "Try the demo" on the welcome screen to explore the app and simulated replies without a backend (SSH and Browser disabled; removed when importing a real machine).',
+      'Browser: new localhost tabs open on the backend, and external links open on your device after confirmation; a new info button explains what it can and cannot do.',
+      'A tidier drawer: one bottom row for Home, Browser, File system and Settings; Swarm as one entry; unavailable agents folded into one row; machine credentials sit at the top of Settings with Add machine.',
+      'Scheduled messages moved into Quota usage: set them on the Claude Code and Codex cards, which show the send time and a preview.',
+      'Antigravity quota shows only in Quota usage; the strip above the composer shows a short hint instead.',
+      'Release downloads are labeled relay-client or relay-backend. Extract the backend and run ./install.sh on Linux and macOS, or setup.cmd on Windows.',
+      'Windows setup puts the agent CLIs on the user PATH and can open a terminal to sign them in; update.cmd upgrades in place.',
+      'Fixed Windows setup rewriting .env until it grew huge, and the backend prefers its bundled Node.js again.',
+      'Fixed a history sync that could drop a queued follow-up message.',
+      'Fixed typing in the SSH terminal on the Windows desktop app.',
+    ],
+  ),
   _Release(
     version: '0.1.12',
     highlights: <_Highlight>[

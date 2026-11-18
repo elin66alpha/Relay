@@ -2,21 +2,27 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
-import 'getting_started_screen.dart';
+import '../../core/widgets/author_contact_link.dart';
+import 'app_update.dart';
+import 'tutorial_screen.dart';
 import 'update_check.dart';
 import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.1.12';
+const String _applicationVersion = '0.2.0';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
   const AppSettingsScreen({
     required this.settingsController,
+    this.machinesSection,
     super.key,
   });
 
   final AppSettingsController settingsController;
+  // Built by the caller (e.g. from features/chat) so features/settings stays
+  // decoupled from features/machines.
+  final Widget? machinesSection;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +48,17 @@ class AppSettingsScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
+                        if (machinesSection != null) ...<Widget>[
+                          _buildSectionTitle(
+                            context,
+                            context.l10n.credentialTitle,
+                          ),
+                          Card(
+                            margin: const EdgeInsets.only(bottom: 24),
+                            clipBehavior: Clip.antiAlias,
+                            child: machinesSection,
+                          ),
+                        ],
                         _buildSectionTitle(context, context.l10n.appearance),
                         Card(
                           margin: const EdgeInsets.only(bottom: 24),
@@ -184,13 +201,13 @@ class AppSettingsScreen extends StatelessWidget {
                           margin: const EdgeInsets.only(bottom: 24),
                           child: ListTile(
                             leading: const Icon(Icons.school_outlined),
-                            title: Text(context.l10n.gettingStarted),
-                            subtitle: Text(context.l10n.gettingStartedHomeHint),
+                            title: Text(context.l10n.tutorialHomeTitle),
+                            subtitle: Text(context.l10n.tutorialHomeHint),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () {
                               Navigator.of(context).push<void>(
                                 MaterialPageRoute<void>(
-                                  builder: (_) => const GettingStartedScreen(),
+                                  builder: (_) => const TutorialScreen(),
                                 ),
                               );
                             },
@@ -348,13 +365,140 @@ class AppSettingsScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text('${context.l10n.license}: ${context.l10n.licenseText}'),
+        const SizedBox(height: 12),
+        const AuthorContactLink(textAlign: TextAlign.start),
       ],
     );
   }
 }
 
-/// Compares this build with the newest GitHub release and only reports the
-/// result; nothing is downloaded.
+/// Compares this build with the newest GitHub release. When one is newer and
+/// this platform can install it, offers to download and install it; otherwise
+/// reports the result. [silent] is the check at app start: it says nothing
+/// unless there is an update to install.
+Future<void> checkForAppUpdate(
+  BuildContext context, {
+  bool silent = false,
+  String currentVersion = _applicationVersion,
+  Future<String> Function() latestVersion = fetchLatestVersion,
+}) async {
+  final AppStrings strings = context.l10n;
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  void report(String message) {
+    if (silent) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  final String latest;
+  try {
+    latest = await latestVersion();
+  } catch (_) {
+    return report(strings.updateCheckFailed);
+  }
+  if (!isNewerVersion(latest, currentVersion)) {
+    return report(strings.upToDate(currentVersion));
+  }
+  final String? asset = updateAssetName(latest);
+  if (asset == null) return report(strings.updateAvailable(latest));
+  if (!context.mounted) return;
+  final bool? install = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(strings.updateAvailableTitle(latest)),
+      content: Text(strings.updatePrompt),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(strings.updateLater),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(strings.updateNow),
+        ),
+      ],
+    ),
+  );
+  if (install != true || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext context) =>
+        _UpdateDownloadDialog(version: latest, asset: asset),
+  );
+}
+
+/// Downloads the update and hands it to the system; closes itself when the
+/// system has taken over, and stays open with the error when it fails.
+class _UpdateDownloadDialog extends StatefulWidget {
+  const _UpdateDownloadDialog({required this.version, required this.asset});
+
+  final String version;
+  final String asset;
+
+  @override
+  State<_UpdateDownloadDialog> createState() => _UpdateDownloadDialogState();
+}
+
+class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
+  double? _progress;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      await downloadAndInstallUpdate(
+        widget.version,
+        widget.asset,
+        onProgress: (double? progress) {
+          if (mounted) setState(() => _progress = progress);
+        },
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (err) {
+      if (mounted) setState(() => _error = err);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final Object? error = _error;
+    return AlertDialog(
+      title: Text(strings.updateAvailableTitle(widget.version)),
+      content: error != null
+          ? Text(strings.updateFailed(error))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  _progress == null
+                      ? strings.downloadingUpdate
+                      : '${strings.downloadingUpdate} '
+                          '${(_progress! * 100).round()}%',
+                ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: _progress),
+              ],
+            ),
+      actions: <Widget>[
+        if (error != null)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(strings.close),
+          ),
+      ],
+    );
+  }
+}
+
 class _UpdateCheckTile extends StatefulWidget {
   const _UpdateCheckTile();
 
@@ -366,23 +510,9 @@ class _UpdateCheckTileState extends State<_UpdateCheckTile> {
   bool _checking = false;
 
   Future<void> _check() async {
-    final AppStrings strings = context.l10n;
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     setState(() => _checking = true);
-    String message;
-    try {
-      final String latest = await fetchLatestVersion();
-      message = isNewerVersion(latest, _applicationVersion)
-          ? strings.updateAvailable(latest)
-          : strings.upToDate(_applicationVersion);
-    } catch (_) {
-      message = strings.updateCheckFailed;
-    }
-    if (!mounted) return;
-    setState(() => _checking = false);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    await checkForAppUpdate(context);
+    if (mounted) setState(() => _checking = false);
   }
 
   @override

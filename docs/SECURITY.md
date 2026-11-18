@@ -53,7 +53,7 @@ and then deleted deliberately.
 ## Swarm members on other machines
 
 A Swarm member can run on another Relay backend (B) that the app holds a
-credential for in Manage credentials. B is unchanged: the backend running the
+credential for in Settings → Machine credentials. B is unchanged: the backend running the
 Swarm (A) calls B's ordinary API as the app would. To do that, the app puts B's
 `baseUrl` and bearer token in the body of each Swarm request that reaches B's
 members (create, members, chat, clear, delete), over the same authenticated
@@ -186,6 +186,21 @@ Uploads stream to a temporary file and default to 100 MB. Downloads default to
 need those sizes. Unix directory downloads invoke the host's `zip` command;
 Windows uses PowerShell `Compress-Archive`.
 
+## Updates
+
+`POST /api/backend-update` takes no input: it always installs the latest
+GitHub release of this repository over the running installation and restarts
+the backend. On Linux and macOS it runs the installed `scripts/install/unix/update.sh`, which
+verifies the bundle against the release's `SHA256SUMS`; on Windows `update.ps1`
+does the same check. Both run as the backend's OS user. Any device token can
+start it, which grants nothing new, since a token already has a terminal with
+that user's permissions. A backend running from a git checkout refuses.
+
+The app downloads its own update from the same release over HTTPS. Android
+installs it through the system package installer, which rejects an APK signed
+with a different certificate than the installed app; the desktop builds are
+not signed, so their integrity rests on GitHub's HTTPS download.
+
 ## Android APK signing
 
 Official Android APKs from 0.1.8 on are signed with the Relay release key,
@@ -218,6 +233,11 @@ For a backend reachable beyond localhost:
   unredacted conversation content.
 
 See the [production checklist](handbook.md#production-deployment).
+
+In the installer’s Tailscale mode, the backend listens only on its tailnet IPv4.
+Native clients can use HTTP over the encrypted tailnet. Relay Web requires a
+trusted HTTPS origin for browser credential storage. Its reverse proxy must
+forward to the bound tailnet IP and backend port.
 
 ## What Relay does not do
 

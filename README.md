@@ -118,7 +118,7 @@ can run concurrently without sharing a global backend directory.
 | 🌐 | **Browser for localhost** | See and operate the page your agent is serving on the backend's `localhost` (a dashboard under development, say) from anywhere: a headless Chrome on the host streams it to the app and takes taps, drags, sliders and typing, laid out for a phone or a desktop. See [Browser](docs/handbook.md#browser). |
 | 🤖 | **Personal agents over MCP** | `mcp/` is a dependency-free stdio MCP server: a bot signs in with a credential JSON and its password, like the app, and can chat with every agent, switch workdir, model and effort, read quota, manage sessions, Swarms and files, and use the terminal. See [Relay MCP](docs/handbook.md#relay-mcp). |
 | 🔔 | **Notifications** | In-app/browser alerts, with optional Web Push and Android FCM for configured deployments. |
-| 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates against GitHub Releases (it reports, never downloads). |
+| 🎨 | **Appearance and updates** | Light/dark theme, font size, a device-local wallpaper, What's new on Home, and Settings → About → Check for updates, which downloads and installs a newer release (Android, Windows, Linux, macOS; also offered at start-up). Machine details updates and restarts the backend. |
 
 Claude Code, Codex, and Cursor are signed in on the backend host with each
 CLI's own login. OpenCode and Hermes are experimental, host-managed
@@ -141,26 +141,18 @@ first if no running CLI quota service is available.
 
 Windows x64 users can download `relay-backend-windows-x64-v<VERSION>.zip` from
 the [latest release](https://github.com/elin66alpha/Relay/releases/latest), extract
-it, and double-click `Setup.exe` (or run `.\setup.cmd` for the console menu).
-The bundle includes Node.js, production dependencies and the compiled Web
-client, served by the same Node.js process as the API. Setup offers agent CLI
-installation, Web on/off, network setup and device token management; sign in
+it, and run `.\setup.cmd` in that folder. Setup is a command-line menu, the
+same as on Linux and macOS. The bundle includes Node.js, production
+dependencies and the compiled Web client, served by the same Node.js process as
+the API. Setup offers agent CLI installation, Web on/off, file access, network
+setup and device token management; sign in
 to the selected CLIs yourself on the host. The asset
-`relay-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
+`relay-client-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
 the Android, iOS, macOS and Ubuntu clients.
 
-On Linux and macOS, one command downloads the latest release into `~/relay` (or
-a directory you choose), checks it against the release checksums, and runs
-setup, which installs missing system software after you confirm (apt-get on
-Debian/Ubuntu, Homebrew on macOS):
+On Linux and macOS, download `relay-backend-linux-macos-v<VERSION>.tar.gz` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), extract it to a permanent writable directory, and run `./install.sh` from the extracted folder containing `server/`.
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-Setup can also install any of the five agent CLIs that are missing, then
-prints each one's login command. Running the command again upgrades the backend
-in place, keeping tokens, chats and settings.
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats.
 
 From a copy of the repository, run the setup command for your backend OS from
 its root:
@@ -171,8 +163,8 @@ its root:
 | macOS | `./scripts/install/macos/setup.sh` |
 | Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
-The installer walks through direct access, a named Cloudflare Tunnel, or a
-temporary Quick Tunnel. Use HTTPS before exposing a direct deployment publicly.
+The installer walks through direct access, a named Cloudflare Tunnel, a
+temporary Quick Tunnel, or this machine's Tailscale address. Use HTTPS before exposing a direct deployment publicly.
 Linux also needs PM2 and the native tools listed in the
 [backend requirements](docs/install.md#requirements); Unix hosts need `zip`
 for folder downloads. On Debian and Ubuntu, the Linux installer offers to
@@ -200,8 +192,8 @@ a right swipe on the file list to go up one directory. When browsing elsewhere,
 tap the work-path chip to return to the active project. The top of the file
 browser shows up to five recent workspaces as compact, horizontally scrolling
 tags. Tap a tag to switch the active workspace and display that directory.
-Home → Tutorial includes a detailed guide to sessions, controls, Swarms, files,
-and the mobile terminal key bar.
+Home → Tutorial is a searchable library with one article per feature, from
+deployment and sessions to Swarms, files, the terminal and quota.
 For service commands, networking details, and platform notes, continue with the
 [backend guide](docs/install.md).
 

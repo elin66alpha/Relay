@@ -16,9 +16,21 @@ import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/settings/app_settings_controller.dart';
-import 'deploy_backend_screen.dart';
+import '../../core/widgets/author_contact_link.dart';
+import '../settings/tutorial_screen.dart';
 import 'machine_credentials_controller.dart';
 
+bool _supportsCameraQrScan() {
+  // Camera QR scanning only exists on mobile. Desktop (and web) have no
+  // mobile_scanner implementation, so they import via image upload or paste.
+  return !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+}
+
+enum _AddMachineMethod { scan, paste, upload }
+
+/// Full-screen onboarding gate shown when no machine credential is stored yet.
 class MachineCredentialsScreen extends StatefulWidget {
   const MachineCredentialsScreen({
     required this.machinesController,
@@ -36,9 +48,18 @@ class MachineCredentialsScreen extends StatefulWidget {
       _MachineCredentialsScreenState();
 }
 
-class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
-  bool _isImporting = false;
-  bool _isTesting = false;
+class _MachineCredentialsScreenState extends State<MachineCredentialsScreen>
+    with _MachineCredentialActions<MachineCredentialsScreen> {
+  @override
+  MachineCredentialsController get _machinesController =>
+      widget.machinesController;
+
+  @override
+  bool get _notifyOnImport => !widget.requireCredential;
+
+  Future<void> _enterDemoMode() async {
+    await _machinesController.saveCredential(demoMachineCredential());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,14 +68,6 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       builder: (BuildContext context, Widget? _) {
         final List<MachineCredential> credentials =
             widget.machinesController.credentials;
-        final MachineCredential? active =
-            widget.machinesController.activeMachine;
-        // Camera QR scanning only exists on mobile. Desktop (and web) have no
-        // mobile_scanner implementation, so they import via image upload or
-        // paste instead.
-        final bool showCameraScan = !kIsWeb &&
-            (defaultTargetPlatform == TargetPlatform.android ||
-                defaultTargetPlatform == TargetPlatform.iOS);
         return Scaffold(
           appBar: widget.requireCredential
               ? null
@@ -63,10 +76,11 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
             child: credentials.isEmpty
                 ? _EmptyCredentialState(
                     isImporting: _isImporting,
-                    showCameraScan: showCameraScan,
+                    showCameraScan: _supportsCameraQrScan(),
                     onScan: _scanCredential,
                     onPaste: _pasteCredential,
                     onUpload: _uploadCredentialQr,
+                    onTryDemo: _enterDemoMode,
                     settingsController: widget.requireCredential
                         ? widget.settingsController
                         : null,
@@ -78,43 +92,11 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
                         alignment: Alignment.topCenter,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 720),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-                                child: Text(
-                                  context.l10n.currentMachine,
-                                  style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.outline,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              for (final MachineCredential credential
-                                  in credentials)
-                                _MachineTile(
-                                  credential: credential,
-                                  active: credential.id == active?.id,
-                                  onSelect: () => widget.machinesController
-                                      .setActive(credential.id),
-                                  onDelete: () => _confirmDelete(credential),
-                                ),
-                              const SizedBox(height: 16),
-                              _CredentialActionButtons(
-                                active: active,
-                                isImporting: _isImporting,
-                                isTesting: _isTesting,
-                                showCameraScan: showCameraScan,
-                                onScan: _scanCredential,
-                                onPaste: _pasteCredential,
-                                onUpload: _uploadCredentialQr,
-                                onTest: _testActive,
-                              ),
-                            ],
+                          child: Card(
+                            clipBehavior: Clip.antiAlias,
+                            child: MachineCredentialsSection(
+                              machinesController: widget.machinesController,
+                            ),
                           ),
                         ),
                       ),
@@ -124,6 +106,165 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
         );
       },
     );
+  }
+}
+
+/// Stored machines list, single "Add machine" action, and connection test card
+/// embedded at the top of Settings.
+class MachineCredentialsSection extends StatefulWidget {
+  const MachineCredentialsSection({
+    required this.machinesController,
+    super.key,
+  });
+
+  final MachineCredentialsController machinesController;
+
+  @override
+  State<MachineCredentialsSection> createState() =>
+      _MachineCredentialsSectionState();
+}
+
+class _MachineCredentialsSectionState extends State<MachineCredentialsSection>
+    with _MachineCredentialActions<MachineCredentialsSection> {
+  @override
+  MachineCredentialsController get _machinesController =>
+      widget.machinesController;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool showCameraScan = _supportsCameraQrScan();
+    return AnimatedBuilder(
+      animation: widget.machinesController,
+      builder: (BuildContext context, Widget? _) {
+        final List<MachineCredential> credentials =
+            widget.machinesController.credentials;
+        final MachineCredential? active =
+            widget.machinesController.activeMachine;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (credentials.isEmpty)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                leading: const Icon(Icons.link_off_rounded),
+                title: Text(context.l10n.notConnected),
+                subtitle: Text(context.l10n.importOrChooseMachine),
+              )
+            else
+              for (int i = 0; i < credentials.length; i++) ...<Widget>[
+                if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+                _MachineTile(
+                  credential: credentials[i],
+                  active: credentials[i].id == active?.id,
+                  onSelect: () => widget.machinesController.setActive(
+                    credentials[i].id,
+                  ),
+                  onDelete: () => _confirmDelete(credentials[i]),
+                ),
+              ],
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  FilledButton.icon(
+                    onPressed: _isImporting
+                        ? null
+                        : () => _showAddMachineDialog(
+                              showCameraScan: showCameraScan,
+                            ),
+                    icon: const Icon(Icons.add_rounded),
+                    label: Text(context.l10n.addMachine),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed:
+                        active == null || _isTesting ? null : _testActive,
+                    icon: _isTesting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.lan_outlined),
+                    label: Text(context.l10n.testMachine),
+                  ),
+                  if (_isImporting) const _ImportingStatusIndicator(),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+mixin _MachineCredentialActions<T extends StatefulWidget> on State<T> {
+  MachineCredentialsController get _machinesController;
+  bool get _notifyOnImport => true;
+
+  bool _isImporting = false;
+  bool _isTesting = false;
+
+  Future<void> _showAddMachineDialog({required bool showCameraScan}) async {
+    final _AddMachineMethod? method = await showDialog<_AddMachineMethod>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(context.l10n.addMachine),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 260),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (showCameraScan) ...<Widget>[
+                FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.of(ctx).pop(_AddMachineMethod.scan),
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: Text(context.l10n.scanQr),
+                ),
+                const SizedBox(height: 10),
+              ],
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(ctx).pop(_AddMachineMethod.paste),
+                icon: const Icon(Icons.content_paste_rounded),
+                label: Text(context.l10n.pasteCredential),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () =>
+                    Navigator.of(ctx).pop(_AddMachineMethod.upload),
+                icon: const Icon(Icons.image_search_rounded),
+                label: Text(context.l10n.uploadQrImage),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(context.l10n.cancel),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || method == null) return;
+    switch (method) {
+      case _AddMachineMethod.scan:
+        await _scanCredential();
+      case _AddMachineMethod.paste:
+        await _pasteCredential();
+      case _AddMachineMethod.upload:
+        await _uploadCredentialQr();
+    }
   }
 
   Future<void> _scanCredential() async {
@@ -211,7 +352,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
 
     late final MachineCredential credential;
     try {
-      credential = await widget.machinesController
+      credential = await _machinesController
           .decryptEncryptedBytes(bytes, passphrase: passphrase)
           .timeout(const Duration(seconds: 15));
     } on TimeoutException {
@@ -244,9 +385,9 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
     } finally {
       await client.close();
     }
-    await widget.machinesController.saveCredential(credential);
+    await _machinesController.saveCredential(credential);
     if (!mounted) return;
-    if (!widget.requireCredential) {
+    if (_notifyOnImport) {
       _showMessage(context.l10n.imported(credential.displayName));
     }
   }
@@ -299,40 +440,36 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   }
 
   Future<String?> _askCredentialPayload() async {
-    final TextEditingController controller = TextEditingController();
-    try {
-      return showDialog<String>(
-        context: context,
-        builder: (BuildContext ctx) => AlertDialog(
-          title: Text(context.l10n.pasteCredential),
-          content: SizedBox(
-            width: 460,
-            child: TextField(
-              controller: controller,
-              autofocus: true,
-              minLines: 5,
-              maxLines: 10,
-              decoration: InputDecoration(
-                labelText: context.l10n.credentialPayload,
-                hintText: context.l10n.credentialPayloadHint,
-              ),
+    String payload = '';
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(context.l10n.pasteCredential),
+        content: SizedBox(
+          width: 460,
+          child: TextField(
+            autofocus: true,
+            minLines: 5,
+            maxLines: 10,
+            decoration: InputDecoration(
+              labelText: context.l10n.credentialPayload,
+              hintText: context.l10n.credentialPayloadHint,
             ),
+            onChanged: (String value) => payload = value,
           ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(context.l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-              child: Text(context.l10n.importCredential),
-            ),
-          ],
         ),
-      );
-    } finally {
-      controller.dispose();
-    }
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(payload.trim()),
+            child: Text(context.l10n.importCredential),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<String?> _askPassphrase() async {
@@ -368,7 +505,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
   }
 
   Future<void> _testActive() async {
-    final MachineCredential? active = widget.machinesController.activeMachine;
+    final MachineCredential? active = _machinesController.activeMachine;
     setState(() => _isTesting = true);
     final BackendClient client = BackendClient();
     try {
@@ -414,7 +551,7 @@ class _MachineCredentialsScreenState extends State<MachineCredentialsScreen> {
       ),
     );
     if (ok == true) {
-      await widget.machinesController.delete(credential.id);
+      await _machinesController.delete(credential.id);
     }
   }
 
@@ -458,6 +595,7 @@ class _EmptyCredentialState extends StatelessWidget {
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
+    required this.onTryDemo,
     required this.settingsController,
   });
 
@@ -466,6 +604,7 @@ class _EmptyCredentialState extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
+  final VoidCallback onTryDemo;
   final AppSettingsController? settingsController;
 
   @override
@@ -517,15 +656,18 @@ class _EmptyCredentialState extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 22),
-                      _CredentialActionButtons(
-                        active: null,
+                      _OnboardingImportButtons(
                         isImporting: isImporting,
-                        isTesting: false,
                         showCameraScan: showCameraScan,
                         onScan: onScan,
                         onPaste: onPaste,
                         onUpload: onUpload,
-                        onTest: null,
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.tonalIcon(
+                        onPressed: isImporting ? null : onTryDemo,
+                        icon: const Icon(Icons.play_circle_outline_rounded),
+                        label: Text(context.l10n.tryDemo),
                       ),
                       const SizedBox(height: 18),
                       const Divider(height: 1),
@@ -533,12 +675,16 @@ class _EmptyCredentialState extends StatelessWidget {
                       TextButton.icon(
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => const DeployBackendScreen(),
+                            builder: (_) => const TutorialArticleScreen(
+                              slug: 'deploy-backend',
+                            ),
                           ),
                         ),
                         icon: const Icon(Icons.menu_book_outlined, size: 18),
                         label: Text(context.l10n.deployBackendGuide),
                       ),
+                      const SizedBox(height: 6),
+                      const AuthorContactLink(),
                     ],
                   ),
                 ),
@@ -575,26 +721,43 @@ class _InitialLanguageToggle extends StatelessWidget {
   }
 }
 
-class _CredentialActionButtons extends StatelessWidget {
-  const _CredentialActionButtons({
-    required this.active,
+class _ImportingStatusIndicator extends StatelessWidget {
+  const _ImportingStatusIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Text(context.l10n.testingCredentialConnection),
+        ],
+      ),
+    );
+  }
+}
+
+class _OnboardingImportButtons extends StatelessWidget {
+  const _OnboardingImportButtons({
     required this.isImporting,
-    required this.isTesting,
     required this.showCameraScan,
     required this.onScan,
     required this.onPaste,
     required this.onUpload,
-    required this.onTest,
   });
 
-  final MachineCredential? active;
   final bool isImporting;
-  final bool isTesting;
   final bool showCameraScan;
   final VoidCallback onScan;
   final VoidCallback onPaste;
   final VoidCallback onUpload;
-  final VoidCallback? onTest;
 
   @override
   Widget build(BuildContext context) {
@@ -624,34 +787,7 @@ class _CredentialActionButtons extends StatelessWidget {
           icon: const Icon(Icons.image_search_rounded),
           label: Text(context.l10n.uploadQrImage),
         ),
-        if (onTest != null)
-          OutlinedButton.icon(
-            onPressed: active == null || isTesting ? null : onTest,
-            icon: isTesting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.lan_outlined),
-            label: Text(context.l10n.testMachine),
-          ),
-        if (isImporting)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 10),
-                Text(context.l10n.testingCredentialConnection),
-              ],
-            ),
-          ),
+        if (isImporting) const _ImportingStatusIndicator(),
       ],
     );
   }
@@ -730,7 +866,7 @@ class _MachineTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
       leading: Icon(
         active ? Icons.radio_button_checked : Icons.radio_button_unchecked,
         color: active ? Theme.of(context).colorScheme.primary : null,

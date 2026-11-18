@@ -66,9 +66,10 @@ const { startQuotaWatch } = require('./lib/quota-watch');
 const { startClaudeQuotaKeepalive } = require('./lib/quota-keepalive');
 const { buildDiagnostics } = require('./lib/diagnostics');
 const { machineInfo } = require('./lib/machine-info');
+const { backendVersion, startBackendUpdate } = require('./lib/self-update');
 const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
-const { locateBin } = require('./lib/cli-paths');
+const { cliCommand } = require('./lib/cli-paths');
 const {
   listGroups,
   getGroup,
@@ -93,6 +94,7 @@ const {
 const {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  SCOPE_SEPARATOR,
   listChatSessions,
   resolveChatSession,
   createChatSession,
@@ -100,7 +102,8 @@ const {
   touchChatSession,
   deleteChatSession,
   renameChatSession,
-  sessionScopeKey,
+  sessionContextKeyFor,
+  scopeKeyFor,
 } = require('./lib/chat-sessions');
 const {
   agentPayload,
@@ -332,6 +335,8 @@ function warnIfPlaintextTokenExposure() {
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     /^169\.254\./.test(host) ||
+    // 100.64.0.0/10: Tailscale tailnet addresses (also carrier-grade NAT).
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
     host.endsWith('.local');
   console.warn('');
   console.warn('  ============================================================');
@@ -401,19 +406,6 @@ function normalizeDeviceId(value) {
   if (!text) return '';
   if (!/^[A-Za-z0-9._-]{8,128}$/.test(text)) return '';
   return text;
-}
-
-// Session context = work directory + agent. Individual chat sessions hang under
-// that context and each keeps its own history plus resumable CLI session. NUL
-// separates parts so no real path can collide with the agent/session suffix.
-const SCOPE_SEPARATOR = '\u0000';
-
-function sessionContextKeyFor(agentKey, workdir) {
-  return `${workdir}${SCOPE_SEPARATOR}${agentKey}`;
-}
-
-function scopeKeyFor(agentKey, workdir, sessionId) {
-  return sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
 }
 
 // The work directory for a request: the device's x-workdir header, or the
@@ -589,6 +581,7 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
+  backendVersion,
   backgroundTurnHandler,
   bearerToken,
   browserManager,
@@ -626,7 +619,7 @@ const routeContext = {
   listGroups,
   listQuotaSchedules,
   listTokenSummaries,
-  locateBin,
+  cliCommand,
   machineInfo,
   markdownForConversation,
   inspectCodexAccount,
@@ -662,6 +655,7 @@ const routeContext = {
   setActiveChatSession,
   setGroupMembers,
   setSettings,
+  startBackendUpdate,
   streamUploadToFile,
   terminalManager,
   touchChatSession,

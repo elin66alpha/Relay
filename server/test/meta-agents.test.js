@@ -32,12 +32,14 @@ before(async () => {
           authed: true,
           authKind: 'apiKeyOptional',
         },
+        agy: { installed: true, authed: null, authKind: 'hostManaged' },
         hermes: { installed: true, authed: false, authKind: 'apiKey' },
       }),
       listAgents: () => [
         { key: 'claude', label: 'Claude Code', description: 'Claude CLI' },
         { key: 'codex', label: 'Codex', description: 'Codex CLI' },
         { key: 'opencode', label: 'OpenCode', description: 'OpenCode CLI' },
+        { key: 'agy', label: 'Antigravity' },
         { key: 'hermes', label: 'Hermes', description: 'Hermes CLI' },
       ],
       inspectCodexAccount: async ({ refreshToken }) => {
@@ -77,7 +79,7 @@ test('/api/agents returns every agent with install/auth usability fields', async
   assert.equal(body.defaultAgent, 'claude');
   assert.deepEqual(
     body.agents.map((agent) => agent.key),
-    ['claude', 'codex', 'opencode', 'hermes'],
+    ['claude', 'codex', 'opencode', 'agy', 'hermes'],
   );
 
   const byKey = Object.fromEntries(
@@ -106,6 +108,8 @@ test('/api/agents returns every agent with install/auth usability fields', async
   assert.equal(Object.hasOwn(byKey.claude, 'credentialExpiresAt'), false);
   assert.equal(byKey.codex.usable, false);
   assert.equal(byKey.opencode.usable, true);
+  assert.equal(byKey.agy.authed, false); // boolean means confirmed login on /api/agents
+  assert.equal(byKey.agy.usable, true);
   assert.equal(byKey.hermes.authKind, 'apiKey');
   // hermes is managed out-of-band, so it is usable once installed even with no
   // key Relay can see.
@@ -134,6 +138,7 @@ test('/api/auth/status uses the same forced Codex verification', async () => {
   const body = await response.json();
   const codex = body.agents.find((agent) => agent.key === 'codex');
   assert.equal(codex.loggedIn, true);
+  assert.equal(body.agents.find((agent) => agent.key === 'agy').loggedIn, null);
   assert.equal(accountChecks, 2);
 });
 

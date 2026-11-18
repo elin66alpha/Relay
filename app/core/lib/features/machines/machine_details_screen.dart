@@ -10,6 +10,7 @@ import '../../core/util/format_bytes.dart';
 import '../../core/util/time_format.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
+import '../settings/update_check.dart';
 import '../ssh/ssh_terminal_controller.dart';
 import '../ssh/ssh_terminal_screen.dart';
 
@@ -21,12 +22,16 @@ class MachineDetailsScreen extends StatefulWidget {
     required this.machine,
     required this.backend,
     required this.agentsController,
+    this.latestVersion = fetchLatestVersion,
     super.key,
   });
 
   final MachineCredential machine;
   final BackendClient backend;
   final CliAgentsController agentsController;
+
+  /// The latest Relay release, which the backend is offered an update to.
+  final Future<String> Function() latestVersion;
 
   @override
   State<MachineDetailsScreen> createState() => _MachineDetailsScreenState();
@@ -95,6 +100,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
   Widget build(BuildContext context) {
     final AppStrings strings = context.l10n;
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool isDemo = isDemoMachine(widget.machine);
     _status ??= _loadStatus(strings);
     return Scaffold(
       appBar: AppBar(title: Text(strings.machineDetails)),
@@ -112,7 +118,7 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: FilledButton.icon(
-                        onPressed: _enterSsh,
+                        onPressed: isDemo ? null : _enterSsh,
                         icon: const Icon(Icons.terminal_rounded),
                         label: Text(strings.enterSsh),
                       ),
@@ -121,6 +127,8 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
                     _MachineInfoPanel(
                       backend: widget.backend,
                       title: widget.machine.displayName,
+                      latestVersion: widget.latestVersion,
+                      allowUpdate: !isDemo,
                     ),
                     const SizedBox(height: 20),
                     _AgentCredentialStatusSection(
@@ -183,24 +191,39 @@ class _MachineDetailsScreenState extends State<MachineDetailsScreen> {
 }
 
 class _MachineInfoPanel extends StatefulWidget {
-  const _MachineInfoPanel({required this.backend, required this.title});
+  const _MachineInfoPanel({
+    required this.backend,
+    required this.title,
+    required this.latestVersion,
+    this.allowUpdate = true,
+  });
 
   final BackendClient backend;
   final String title;
+  final Future<String> Function() latestVersion;
+  final bool allowUpdate;
 
   @override
   State<_MachineInfoPanel> createState() => _MachineInfoPanelState();
 }
 
 class _MachineInfoPanelState extends State<_MachineInfoPanel> {
+  // Long enough for the download and dependency install on a slow host.
+  static const Duration _updateWait = Duration(minutes: 10);
+
   Timer? _timer;
   MachineInfo? _info;
   Object? _error;
+  String _latest = '';
+  // The version an update was started from, until the backend reports another.
+  String _updatingFrom = '';
+  DateTime? _updateStarted;
 
   @override
   void initState() {
     super.initState();
     unawaited(_load());
+    if (widget.allowUpdate) unawaited(_loadLatest());
     // Temperatures change slowly; one sample every 10 seconds is enough.
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
@@ -211,14 +234,70 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
     super.dispose();
   }
 
+  Future<void> _loadLatest() async {
+    try {
+      final String latest = await widget.latestVersion();
+      if (mounted) setState(() => _latest = latest);
+    } catch (_) {
+      // Without the latest version there is simply no update offer.
+    }
+  }
+
+  Future<void> _updateBackend(String from) async {
+    final AppStrings strings = context.l10n;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(strings.backendUpdateAction(_latest)),
+        content: Text(strings.backendUpdateConfirm),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(strings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(strings.updateNow),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.backend.updateBackend();
+    } catch (err) {
+      messenger.showSnackBar(SnackBar(content: Text('$err')));
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _updatingFrom = from;
+      _updateStarted = DateTime.now();
+    });
+  }
+
   Future<void> _load() async {
     try {
       final MachineInfo info = await widget.backend.machineInfo();
       if (!mounted) return;
+      final bool updated =
+          _updatingFrom.isNotEmpty && info.version != _updatingFrom;
       setState(() {
         _info = info;
         _error = null;
+        if (updated ||
+            (_updateStarted != null &&
+                DateTime.now().difference(_updateStarted!) > _updateWait)) {
+          _updatingFrom = '';
+          _updateStarted = null;
+        }
       });
+      if (updated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.backendUpdated(info.version))),
+        );
+      }
     } catch (err) {
       // A backend older than /api/machine never will answer; stop asking.
       if (err is BackendException && err.status == 404) _timer?.cancel();
@@ -279,6 +358,40 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
                     disk.mount,
                     formatBytes(disk.usedBytes),
                     formatBytes(disk.totalBytes),
+                  ),
+                ),
+              if (info.version.isNotEmpty)
+                _HardwareRow(
+                  icon: Icons.system_update_outlined,
+                  label: strings.backendVersionLabel,
+                  value: info.version,
+                ),
+              if (_updatingFrom.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: <Widget>[
+                      const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(strings.backendUpdating),
+                    ],
+                  ),
+                )
+              else if (widget.allowUpdate &&
+                  info.version.isNotEmpty &&
+                  _latest.isNotEmpty &&
+                  isNewerVersion(_latest, info.version))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      onPressed: () => _updateBackend(info.version),
+                      child: Text(strings.backendUpdateAction(_latest)),
+                    ),
                   ),
                 ),
               const SizedBox(height: 12),

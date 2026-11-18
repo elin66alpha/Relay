@@ -30,6 +30,7 @@ class ChatInputBar extends StatefulWidget {
     required this.onCompress,
     required this.onExportMarkdown,
     this.onSettingsChanged,
+    this.allowAttachments = true,
     this.header,
     this.acrylic = false,
   });
@@ -38,6 +39,7 @@ class ChatInputBar extends StatefulWidget {
   final FocusNode focusNode;
 
   /// Pinned above the field: the active agent's quota.
+  final bool allowAttachments;
   final Widget? header;
   final bool acrylic;
   final BackendClient backend;
@@ -289,7 +291,9 @@ class _InputBarState extends State<ChatInputBar> {
                         agentKey: widget.agentKey,
                         sessionId: widget.sessionId,
                         busy: widget.isThinking,
-                        onAttachFile: _isUploading ? null : _attachFiles,
+                        onAttachFile: widget.allowAttachments && !_isUploading
+                            ? _attachFiles
+                            : null,
                         onOpenSettingsPage: _closeActions,
                         onSettingsChanged: widget.onSettingsChanged,
                         onClear: () => _runAction(widget.onClear),

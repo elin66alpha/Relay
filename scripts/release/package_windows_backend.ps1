@@ -60,8 +60,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not list tracked backend source files.' 
 $sources = @($tracked | Where-Object {
   $_ -match '^server/(server\.js|package(-lock)?\.json|\.env\.example|\.gitignore)$' -or
   $_ -match '^server/(lib|routes|scripts|test)/.*\.js$' -or
-  $_ -match '^scripts/install/windows/(lib/)?[^/]+\.ps1$' -or
-  $_ -eq 'scripts/install/windows/Setup.cs'
+  $_ -match '^scripts/install/windows/(lib/)?[^/]+\.ps1$'
 })
 foreach ($relative in $sources) {
   $destination = Join-Path $bundle $relative
@@ -77,7 +76,6 @@ foreach ($relative in @('LICENSE', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
 Copy-Item -LiteralPath (Join-Path $root 'docs\windows-package.md') -Destination (Join-Path $bundle 'README.md')
 New-Item -ItemType Directory -Path (Join-Path $bundle 'app\shell\build') -Force | Out-Null
 Copy-Item -LiteralPath $webSource -Destination (Join-Path $bundle 'app\shell\build\web') -Recurse
-& (Join-Path $PSScriptRoot 'build_windows_setup.ps1') -OutputPath (Join-Path $bundle 'Setup.exe')
 $runtime = Join-Path $bundle 'runtime\node'
 New-Item -ItemType Directory -Path (Join-Path $runtime 'node_modules') -Force | Out-Null
 foreach ($file in @('node.exe', 'LICENSE', 'npm.cmd', 'npm.ps1', 'npx.cmd', 'npx.ps1')) {
@@ -98,7 +96,7 @@ try {
 } finally { $env:PATH = $oldPath }
 
 $ascii = New-Object Text.ASCIIEncoding
-foreach ($command in @('setup', 'start', 'stop', 'status', 'uninstall')) {
+foreach ($command in @('setup', 'start', 'stop', 'status', 'update', 'uninstall')) {
   $commandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install\windows\' + $command + '.ps1" %*'
   $lines = @('@echo off', $commandLine, 'exit /b %errorlevel%')
   [IO.File]::WriteAllLines((Join-Path $bundle "$command.cmd"), $lines, $ascii)
@@ -117,7 +115,6 @@ $manifest = [ordered]@{
   platform = 'win32'
   architecture = 'x64'
   webClient = $true
-  setupGui = 'Setup.exe (.NET Framework 4.x / Windows Forms)'
   packageLockSha256 = (Get-FileHash -LiteralPath (Join-Path $bundle 'server\package-lock.json') -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 [IO.File]::WriteAllText((Join-Path $bundle 'bundle-info.json'), ($manifest | ConvertTo-Json) + "`n", (New-Object Text.UTF8Encoding($false)))
@@ -126,32 +123,34 @@ $manifest = [ordered]@{
 # files with names that resemble application state. No local config is copied.
 $allowed = @($sources) + @('LICENSE', 'README.md', 'docs/SECURITY.md', 'docs/CHANGELOG.md',
   'docs/install.md', 'docs/install.zh-CN.md', 'docs/handbook.md',
-  'setup.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'uninstall.cmd',
-  'credential.cmd', 'bundle-info.json', 'Setup.exe')
+  'setup.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'update.cmd', 'uninstall.cmd',
+  'credential.cmd', 'bundle-info.json')
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')
   if ($relative.StartsWith('runtime/node/') -or $relative.StartsWith('server/node_modules/')) { continue }
   if ($relative.StartsWith('app/shell/build/web/')) { continue }
   if ($relative -notin $allowed) { throw "Unexpected file in the release: $relative" }
 }
-# Extractors write entries in archive order, so dependency trees go first and
-# Setup.exe last: a user cannot open Setup.exe from a half-extracted folder that
-# lacks Relay's own scripts. Entry names use '/' as the ZIP format requires;
+# Extractors write entries in archive order: dependency trees first, then
+# Relay's own files, then the top-level .cmd launchers, so a half-extracted
+# folder has no setup.cmd yet. Entry names use '/' as the ZIP format requires;
 # .NET Framework's CreateFromDirectory writes '\'. -Force keeps .env.example.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $dependencies = New-Object Collections.Generic.List[string]
 $own = New-Object Collections.Generic.List[string]
+$launchers = New-Object Collections.Generic.List[string]
 foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File -Force) {
   $relative = $file.FullName.Substring($bundle.Length + 1).Replace('\', '/')
   if ($relative -match '^(runtime|server/node_modules|app/shell/build/web)/') { $dependencies.Add($relative) }
-  elseif ($relative -ne 'Setup.exe') { $own.Add($relative) }
+  elseif ($relative -match '^[^/]+\.cmd$') { $launchers.Add($relative) }
+  else { $own.Add($relative) }
 }
-$dependencies.Sort([StringComparer]::Ordinal); $own.Sort([StringComparer]::Ordinal)
+foreach ($list in @($dependencies, $own, $launchers)) { $list.Sort([StringComparer]::Ordinal) }
 $stream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
 try {
   $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
   try {
-    foreach ($relative in @($dependencies) + @($own) + @('Setup.exe')) {
+    foreach ($relative in @($dependencies) + @($own) + @($launchers)) {
       [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $bundle $relative), "$name/$relative",
         [IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }

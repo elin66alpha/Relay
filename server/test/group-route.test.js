@@ -16,13 +16,12 @@ process.env.RELAY_HISTORY_FILE = path.join(scratchDir, 'history.json');
 process.env.RELAY_SWARM_MAX_HOPS = '2';
 
 const history = require('../lib/history');
-const { sessionScopeKey } = require('../lib/chat-sessions');
+const { sessionContextKeyFor, scopeKeyFor } = require('../lib/chat-sessions');
 const { runAgentTurn } = require('../lib/agent-turn');
 const { normalizeSettings } = require('../lib/agent-options');
 const groups = require('../lib/groups');
 const createGroupRouter = require('../routes/group');
 
-const SEP = '\0';
 const WORKDIR = '/tmp/group-int';
 const AGENTS = {
   claude: { key: 'claude', label: 'Claude Code', run: () => {} },
@@ -42,9 +41,6 @@ const scriptedReplies = new Map();
 const heldReplies = new Map();
 
 function buildContext() {
-  const sessionContextKeyFor = (agentKey, workdir) => `${workdir}${SEP}${agentKey}`;
-  const scopeKeyFor = (agentKey, workdir, sessionId) =>
-    sessionScopeKey(sessionContextKeyFor(agentKey, workdir), sessionId);
   const runningScopes = new Set();
   const scopeChains = new Map();
 

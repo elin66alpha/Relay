@@ -208,6 +208,7 @@ class MachineInfo {
     required this.gpus,
     required this.disks,
     required this.temperatures,
+    this.version = '',
   });
 
   factory MachineInfo.fromJson(Map<String, Object?> json) {
@@ -215,6 +216,7 @@ class MachineInfo {
         (json['cpu'] as Map?)?.cast<String, Object?>() ??
             const <String, Object?>{};
     return MachineInfo(
+      version: json['version'] is String ? json['version']! as String : '',
       cpuModel: cpu['model']?.toString() ?? '',
       cpuThreads: (cpu['cores'] as num?)?.toInt() ?? 0,
       memoryBytes: (json['memoryBytes'] as num?)?.toInt() ?? 0,
@@ -250,6 +252,9 @@ class MachineInfo {
   final List<String> gpus;
   final List<StorageDisk> disks;
   final List<TemperatureReading> temperatures;
+
+  /// The backend's Relay version; empty from a backend older than 0.2.0.
+  final String version;
 }
 
 class PushConfig {

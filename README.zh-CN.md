@@ -113,7 +113,7 @@ flowchart LR
 | 🌐 | **localhost 浏览器** | 在任何网络下查看并操作后端机器 `localhost` 上的页面（比如正在开发的面板）：主机上的无头 Chrome 把画面推到 App，点击、拖动、滑块和输入都会转发回去，并按手机或桌面自动排版。见 [浏览器](docs/handbook.md#browser)。 |
 | 🤖 | **通过 MCP 接入个人 Agent** | `mcp/` 是一个零依赖的 stdio MCP server：机器人和 App 一样用凭证 JSON 加密码登录，可以调用所有 Agent、切换工作区、模型和思考深度、查看额度、管理会话、蜂群和文件，并使用终端。见 [Relay MCP](docs/handbook.md#relay-mcp)。 |
 | 🔔 | **通知** | App/浏览器提醒；配置后还可使用 Web Push 与 Android FCM。 |
-| 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”对比 GitHub Releases（只提示，不下载）。 |
+| 🎨 | **外观与更新** | 亮色/暗色主题、字体大小、设备本地壁纸、首页“新功能”，以及“设置 → 关于 → 检查更新”下载并安装新版本（Android、Windows、Linux、macOS；启动时也会提示）。机器详情页可更新并重启后端。 |
 
 Claude Code、Codex 与 Cursor 在后端主机上用各自 CLI 的登录；OpenCode 与 Hermes
 目前是由主机管理的实验性集成。凭据都留在后端主机上，Relay 不会代替你登录。
@@ -131,23 +131,16 @@ Antigravity 需在后端主机自行安装支持 `agy acp --process-per-session`
 模型和思考强度分别选择；订阅额度展示各模型组的独立额度。若额度服务未运行，先开始一次对话。
 
 Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/releases/latest)
-下载 `relay-backend-windows-x64-v<版本>.zip`，解压后双击 `Setup.exe`，或运行
-`.\setup.cmd` 打开命令行菜单。包内包含 Node.js、生产依赖和编译后的 Web 前端，
-Web 与 API 共用同一个 Node.js 服务。安装向导支持选装 agent CLI、开关 Web、配置网络和
-管理设备令牌；CLI 登录仍由你在主机上完成。
-`relay-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
+下载 `relay-backend-windows-x64-v<版本>.zip`，解压后在该目录运行 `.\setup.cmd`。
+安装是命令行菜单，与 Linux、macOS 相同。包内包含 Node.js、生产依赖和编译后的 Web 前端，
+Web 与 API 共用同一个 Node.js 服务。安装菜单支持选装 agent CLI、开关 Web、文件访问、
+配置网络和管理设备令牌；CLI 登录仍由你在主机上完成。
+`relay-client-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
 和 Ubuntu 客户端。
 
-在 Linux 和 macOS 上，一行命令即可把最新版本下载到 `~/relay`（也可以选别的目录），按发布的
-校验和核对后运行安装脚本；缺少的系统软件会在你确认后安装（Debian/Ubuntu 用 apt-get，macOS
-用 Homebrew）：
+Linux 和 macOS 共用一个后端包。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
-
-安装脚本还能替你安装缺少的 agent CLI（五个里任选），装完会打印各自的登录命令。再次运行
-这条命令就是原地升级，令牌、聊天和设置都会保留。
+需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。
 
 使用仓库副本时，在仓库根目录执行对应系统的安装命令：
 
@@ -157,7 +150,7 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 | macOS | `./scripts/install/macos/setup.sh` |
 | Windows PowerShell | `.\scripts\install\windows\setup.ps1` |
 
-安装器会引导你选择直连、正式 Cloudflare Tunnel 或临时 Quick Tunnel。直连服务公开
+安装器会引导你选择直连、正式 Cloudflare Tunnel、临时 Quick Tunnel 或本机的 Tailscale 地址。直连服务公开
 暴露前必须配置 HTTPS。Linux 还需要 PM2 和
 [后端前置要求](docs/install.zh-CN.md#前置要求)列出的本地工具；Unix 主机下载文件夹
 时需要 `zip`。在 Debian 和 Ubuntu 上，缺少这些工具或 Node.js 时，Linux 安装脚本会提出
@@ -180,8 +173,8 @@ curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install
 点击上级路径段可直接跳转，也可点击 `..`、向上箭头或在文件列表右滑返回上一级。
 浏览其他目录时，点击工作路径标签即可回到当前项目。文件浏览器顶部以一行可横向滑动的
 小标签显示最多五个最近工作区；点击标签会直接切换当前工作区，并显示该目录的文件。
-首页“教程”提供命名会话、
-智能体设置、蜂群、文件操作和手机终端快捷键的详细说明。服务命令、网络配置与各平台说明
+首页“教程”是一套可搜索的文章，
+每个功能一篇，从部署、会话到蜂群、文件、终端和额度。服务命令、网络配置与各平台说明
 见[后端安装指南](docs/install.zh-CN.md)。
 
 ## 安全边界

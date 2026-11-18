@@ -43,3 +43,23 @@ test('documentation check catches missing files and sections', (t) => {
     'README.md:3: missing none.md',
   ]);
 });
+
+test('documentation check pairs tutorial articles and resolves their links', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-tutorial-check-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'docs'));
+  for (const file of ['README.md', 'README.zh-CN.md', 'AGENTS.md', 'ENGINEERING.md']) {
+    fs.writeFileSync(path.join(root, file), '');
+  }
+  const tutorial = path.join(root, 'app/core/assets/tutorial');
+  fs.mkdirSync(path.join(tutorial, 'en'), { recursive: true });
+  fs.mkdirSync(path.join(tutorial, 'zh'), { recursive: true });
+  fs.writeFileSync(path.join(tutorial, 'en', 'a.md'), '[b](b.md)\n');
+  fs.writeFileSync(path.join(tutorial, 'en', 'b.md'), '[gone](gone.md)\n');
+  fs.writeFileSync(path.join(tutorial, 'zh', 'a.md'), '[b](b.md)\n');
+  assert.deepEqual(checkDocs(root), [
+    'app/core/assets/tutorial/zh/b.md: missing translation',
+    'app/core/assets/tutorial/en/b.md:1: missing gone.md',
+    'app/core/assets/tutorial/zh/a.md:1: missing b.md',
+  ]);
+});

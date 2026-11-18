@@ -30,21 +30,16 @@ same order; only the package manager and service manager differ.
   for a tunnel mode. Without Homebrew it names what to install. If the terminal's
   PTY module has to compile, it opens the Xcode Command Line Tools installer.
 - Before upgrading an existing Relay installation to 0.1.10 or later, update
-  Node.js to 22 or newer. The one-line installer checks this before replacing
+  Node.js to 22 or newer. The updater checks this before replacing
   files and leaves the existing installation untouched if it is too old.
 
 ## Install
 
-On Linux and macOS, one command downloads the latest release, verifies it
-against the release's `SHA256SUMS`, unpacks it into `~/relay` (asked at the
-prompt, or `RELAY_DIR`) and runs that system's setup. Running it again upgrades
-the code in place, keeps `server/.env`, tokens, chats and settings, and restarts
-the backend (the PM2 process on Linux, the LaunchAgent on macOS).
-`RELAY_VERSION=<VERSION>` installs a specific release.
+Linux and macOS share `relay-backend-linux-macos-v<VERSION>.tar.gz`. Download it from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) and compare its SHA-256 digest with its entry in `SHA256SUMS`. Extract it to a permanent writable directory and run `./install.sh` from the folder containing `server/`.
 
-```bash
-curl -fsSL https://github.com/elin66alpha/Relay/releases/latest/download/install.sh | bash
-```
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats.
+
+For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 
 From a copy of the repository, run one command from its root:
 
@@ -74,8 +69,7 @@ client at the backend address (default yes), and then for file access:
 - **Open** (the default): agents and the file browser reach every file the
   backend user can.
 - **Isolated**: work directories, the file browser and SSH's starting directory
-  stay inside `workspace/` in the installation directory (for the one-line
-  install, `~/relay/workspace`), and agents lose their full-auto / unsandboxed
+  stay inside `workspace/` in the installation directory, and agents lose their full-auto / unsandboxed
   permission tier. Setup writes the directory to `RELAY_WORKSPACE_ROOT` in
   `server/.env`. This is Relay's own path policy, not an operating-system
   sandbox: agent CLIs and the terminal still run as the backend user.
@@ -84,7 +78,7 @@ Rerunning install or reinstall offers the current choice as the default; the
 service status shows it as `File access`. Uninstall keeps `workspace/` and its
 files.
 
-The source setup package (`relay-backend-setup-v<VERSION>.tar.gz`) includes
+The source setup package (`relay-backend-linux-macos-v<VERSION>.tar.gz`) includes
 the compiled Web client, in `app/shell/build/web`; the backend serves it at `/`
 unless `server/.env` sets `RELAY_SERVE_WEB=0`. The API under `/api` always requires a
 device token. The Windows backend ZIP includes the same compiled Web client:
@@ -105,6 +99,7 @@ device token. The Windows backend ZIP includes the same compiled Web client:
    the credential when it rotates. Find the new URL in the service logs, then
    run `npm --prefix server run credential -- --url https://NEW-URL` from the
    repository root.
+4. **Tailscale.** Relay listens only on the detected tailnet IPv4. Native apps can use `http://<tailscale-ip>:<port>` over WireGuard. Relay Web needs HTTPS to store credentials. To use it, configure a reverse proxy with a trusted certificate on port 443 forwarding to that tailnet IP and backend port, then enter its hostname during setup. Open that HTTPS address and import the generated credential. Leaving the hostname blank configures native apps only and disables Web. If Tailscale is unavailable, setup returns to the network menu.
 
 ## Service management
 
@@ -159,16 +154,22 @@ tokens, and credentials in place.
 ### Windows
 
 `relay-backend-windows-x64-v<VERSION>.zip` from each release includes the Node.js
-runtime, npm, locked production dependencies, Web client and `Setup.exe`.
-Extract the whole ZIP to a permanent writable directory and double-click
-`Setup.exe`, or run `.\setup.cmd` for the console menu. Both provide install,
-reinstall, uninstall, status, agent CLI installation and device token management,
-using shared operations. Web defaults on. Missing `cloudflared` is downloaded
+runtime, npm, locked production dependencies and the Web client. Extract the
+whole ZIP to a permanent writable directory and run `.\setup.cmd` there. Setup
+is command-line only, like Linux and macOS: the same menu (install, reinstall,
+uninstall, status, agent CLI installation and device token management) and the
+same six install steps, including the open/isolated file access choice.
+Web defaults on. Missing `cloudflared` is downloaded
 for tunnel modes. The five CLIs can be selected for installation with official
-Windows installers; sign in/configure them yourself afterward.
+Windows installers; sign in/configure them yourself afterward. Setup appends
+the folders holding an agent CLI (such as `%APPDATA%\npm`) to your user PATH,
+plus the bundled Node when the host has none, so new terminals find them;
+menu choice `t` opens one right away. Uninstall removes only the entries setup
+added.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
-same service adapters below. The Scheduled Task starts at this user's login.
+same service adapters below, and `.\update.cmd` upgrades the installation in
+place to the latest release. The Scheduled Task starts at this user's login.
 
 ```powershell
 .\scripts\install\windows\status.ps1
@@ -177,8 +178,8 @@ same service adapters below. The Scheduled Task starts at this user's login.
 .\scripts\install\windows\uninstall.ps1
 ```
 
-Logs live in `logs\` inside the Relay directory (`setup.log` from Setup.exe,
-plus backend and tunnel `.out`/`.err` logs); PID files live under
+Logs live in `logs\` inside the Relay directory (backend and tunnel
+`.out`/`.err` logs); PID files live under
 `%LOCALAPPDATA%\Relay\runtime\`. If PowerShell blocks the setup script, allow it
 for the current shell only:
 

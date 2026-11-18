@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/web_link.dart';
 import 'browser_controller.dart';
 
 // Hardware keys the page needs by name; printable characters go as text.
@@ -85,6 +86,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   void _showNotice(BrowserNotice notice) {
     if (!mounted) return;
+    if (notice.kind == 'open') {
+      final Uri? uri = Uri.tryParse(notice.message);
+      if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+        confirmAndOpenWebLink(context, uri);
+      }
+      return;
+    }
     final AppStrings strings = context.l10n;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -224,6 +232,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onPressed: () => setState(() => _keyboardOpen = !_keyboardOpen),
                 icon: const Icon(Icons.keyboard_outlined),
               ),
+              IconButton(
+                tooltip: strings.browserInfo,
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (BuildContext context) => AlertDialog(
+                    title: Text(strings.browserInfo),
+                    content: SingleChildScrollView(
+                      child: Text(strings.browserInfoBody),
+                    ),
+                    actions: <Widget>[
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: Text(strings.close),
+                      ),
+                    ],
+                  ),
+                ),
+                icon: const Icon(Icons.info_outline_rounded),
+              ),
             ],
           ),
           body: SafeArea(
@@ -317,6 +344,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
               if (busy) const CircularProgressIndicator(),
               const SizedBox(height: 16),
               Text(message, textAlign: TextAlign.center),
+              if (busy) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  strings.browserLoadingHint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.outline,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
               if (!busy) ...<Widget>[
                 const SizedBox(height: 16),
                 FilledButton(

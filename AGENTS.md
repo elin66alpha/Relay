@@ -66,9 +66,12 @@ tests.
   when adding response fields. `mcp/` is also a client of the API: run its
   tests when a route it calls changes.
 - Documentation changes: verify local Markdown links, commands, environment
-  names, English/Chinese README parity, and the embedded guides in
-  `getting_started_screen.dart` and `deploy_backend_screen.dart` against code
-  rather than old docs.
+  names, English/Chinese README parity, and the in-app tutorial articles in
+  `app/core/assets/tutorial/{en,zh}/` against code rather than old docs.
+- Feature changes: update the tutorial article that describes the feature, in
+  both languages, in the same change; a new feature gets a new article (same
+  file name in `en/` and `zh/`, front matter as in `tutorial_screen.dart`).
+  `node scripts/release/check_docs.js` checks the pairing and links.
 - Release bumps update these files together:
   `app/shell/pubspec.yaml`, `server/package.json`, `mcp/package.json`, `_applicationVersion` in
   `app/core/lib/features/settings/app_settings_screen.dart`, a

@@ -15,6 +15,8 @@ import '../../core/platform/file_saver.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/wallpaper.dart';
+import '../settings/app_settings_screen.dart';
+import '../settings/update_check.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
@@ -37,9 +39,11 @@ class BotChatScreen extends StatefulWidget {
     required this.chatController,
     required this.machinesController,
     required this.settingsController,
+    this.latestVersion = fetchLatestVersion,
     super.key,
   });
 
+  final Future<String> Function() latestVersion;
   final CliAgentsController agentsController;
   final BotChatController chatController;
   final MachineCredentialsController machinesController;
@@ -90,6 +94,18 @@ class _BotChatScreenState extends State<BotChatScreen>
     _syncContext();
     // Open straight at the latest message rather than the top of the list.
     _onChatChanged();
+    // Once per app start: offer a newer release when this platform installs it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !isDemoMachine(widget.machinesController.activeMachine)) {
+        unawaited(
+          checkForAppUpdate(
+            context,
+            silent: true,
+            latestVersion: widget.latestVersion,
+          ),
+        );
+      }
+    });
   }
 
   @override
@@ -161,7 +177,13 @@ class _BotChatScreenState extends State<BotChatScreen>
     );
     final CliAgent active = widget.agentsController.activeAgent;
     final MachineCredential? machine = widget.machinesController.activeMachine;
-    if (machine == null) return;
+    if (machine == null) {
+      unawaited(widget.chatController.disconnectEvents());
+      if (widget.chatController.machine != null) {
+        widget.chatController.goHome();
+      }
+      return;
+    }
     // Pull the host's live agent list and install/auth status. Retries until it
     // lands.
     if (_agentsMachineId != machine.id) unawaited(_refreshAgents(machine.id));
@@ -187,6 +209,15 @@ class _BotChatScreenState extends State<BotChatScreen>
     widget.chatController.syncPushSubscription();
     // Register for FCM on mobile. Missing Firebase config is a graceful no-op.
     widget.chatController.syncFcmRegistration();
+  }
+
+  Future<void> _exitDemoMode() async {
+    final MachineCredential? active = widget.machinesController.activeMachine;
+    unawaited(widget.chatController.disconnectEvents());
+    widget.chatController.goHome();
+    if (active != null && isDemoMachine(active)) {
+      await widget.machinesController.delete(active.id);
+    }
   }
 
   Future<void> _send() async {
@@ -511,6 +542,17 @@ class _BotChatScreenState extends State<BotChatScreen>
                         onSearch: _showHistorySearch,
                       ),
                     ListenableBuilder(
+                      listenable: widget.machinesController,
+                      builder: (BuildContext context, Widget? _) {
+                        if (!isDemoMachine(
+                          widget.machinesController.activeMachine,
+                        )) {
+                          return const SizedBox.shrink();
+                        }
+                        return _DemoModeBanner(onExit: _exitDemoMode);
+                      },
+                    ),
+                    ListenableBuilder(
                       listenable: Listenable.merge(<Listenable>[
                         widget.agentsController,
                         widget.chatController,
@@ -673,6 +715,8 @@ class _BotChatScreenState extends State<BotChatScreen>
                           contextWindow: widget.chatController.contextWindow,
                         );
                         return ChatInputBar(
+                          allowAttachments:
+                              !isDemoMachine(widget.chatController.machine),
                           acrylic: acrylic,
                           controller: _input,
                           focusNode: _inputFocus,
@@ -890,6 +934,63 @@ class _SearchButton extends StatelessWidget {
           onPressed: chatController.isThinking ? null : onPressed,
         );
       },
+    );
+  }
+}
+
+class _DemoModeBanner extends StatelessWidget {
+  const _DemoModeBanner({required this.onExit});
+
+  final Future<void> Function() onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final AppStrings strings = context.l10n;
+    return ChatChromeSurface(
+      acrylic: WallpaperScope.enabledOf(context),
+      color: colors.secondaryContainer,
+      border: const Border(),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.science_outlined,
+              size: 18,
+              color: colors.onSecondaryContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    strings.demoMode,
+                    style: TextStyle(
+                      color: colors.onSecondaryContainer,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    strings.demoModeBannerHint,
+                    style: TextStyle(
+                      color: colors.onSecondaryContainer,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => onExit(),
+              child: Text(strings.exitDemo),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

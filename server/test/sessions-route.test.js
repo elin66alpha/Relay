@@ -37,8 +37,7 @@ before(async () => {
     },
     runningScopes,
     scopeChains,
-    scopeKeyFor: (agent, workdir, sessionId) =>
-      sessions.sessionScopeKey(`${workdir}\0${agent}`, sessionId),
+    scopeKeyFor: sessions.scopeKeyFor,
   }));
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve);
