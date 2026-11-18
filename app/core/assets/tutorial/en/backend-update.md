@@ -26,6 +26,8 @@ The app cannot update a backend when:
 | Linux / macOS | run `./scripts/install/unix/update.sh` in the Relay folder |
 | Windows | run `.\update.cmd` in the Relay folder |
 
+On Windows the update changes nothing while another process still runs from the Relay folder or holds the backend port (for example a backend started with `npm start`, or an agent left running); it names the process so you can stop it. If the new version does not start, the previous one is put back and started again.
+
 For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 
 ## Client versions

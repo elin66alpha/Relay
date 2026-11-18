@@ -76,6 +76,19 @@
 
 ### Fixed
 
+- On Windows, `update.cmd`, `start.cmd` and `setup.cmd` no longer hang after
+  "backend started" when their output is captured (a CI job, an agent, a pipe).
+  The backend used to inherit the caller's output pipe, so the caller waited
+  for the backend to exit. Background processes now inherit only their log
+  files. An upgrade from an earlier release still runs the old script once.
+- Windows `update.cmd` no longer half-deletes an installation: it refuses, and
+  changes nothing, while another process runs from the folder or holds the
+  backend port; it waits until the new backend listens and otherwise puts the
+  previous version back; and it removes scripts and modules a release no
+  longer ships instead of leaving them to load.
+- Windows PID files record the process start time. After a reboot a reused
+  PID no longer stops Relay from starting at logon, and `stop.cmd` or an
+  update no longer kills the unrelated process that received it.
 - A Windows backend runs CLIs that npm installed as `.cmd` launchers, such as
   Codex. Node cannot start a batch file without a shell, so chat failed with
   `spawn codex ENOENT`, the model page showed no CLI version, the model list

@@ -120,7 +120,39 @@ try {
   [IO.File]::WriteAllText((Join-Path $fakeBin 'tailscale.cmd'), "@echo off`r`nif `"%RELAY_FAKE_TS%`"==`"bad`" (`r`n  echo 100.200.1.2`r`n  exit /b 0`r`n)`r`nif `"%RELAY_FAKE_TS%`"==`"fail`" (`r`n  echo 100.101.102.103`r`n  exit /b 1`r`n)`r`necho 100.101.102.103`r`n")
   $tsResult = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-StrictMode -Version 2.0; `$env:PATH = '$fakeBin;' + `$env:PATH; . '$(Join-Path $fakeLib 'common.ps1')'; Test-RelayBrowser; `$env:RELAY_FAKE_TS='ok'; `$a = Get-TailscaleIPv4; `$env:RELAY_FAKE_TS='bad'; `$b = Get-TailscaleIPv4; `$env:RELAY_FAKE_TS='fail'; `$c = Get-TailscaleIPv4; if (`$a -ne '100.101.102.103' -or `$b -ne `$null -or `$c -ne `$null) { throw 'Tailscale contract failed' }; 'ok'"
   Assert-That (($tsResult | Select-Object -Last 1) -eq 'ok') 'Test-RelayBrowser and Get-TailscaleIPv4 contract.'
-  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, user PATH sync, browser/Tailscale checks, uninstall, retained state and incomplete bundles.'
+  # A started background process must not keep the caller's stdout pipe open:
+  # update.cmd run with captured output used to wait for the backend to exit.
+  $probePid = Join-Path $scratch 'probe.pid'
+  $probeOut = Join-Path $scratch 'probe.out.log'
+  $ping = Join-Path $env:SystemRoot 'System32\PING.EXE'
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  $probe = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "`$env:LOCALAPPDATA = '$scratch'; . '$(Join-Path $fakeLib 'common.ps1')'; Start-RelayProcess -Name probe -FilePath '$ping' -ArgumentList @('-n','30','127.0.0.1') -WorkingDirectory '$scratch' -PidFile '$probePid' -OutLog '$probeOut' -ErrLog '$(Join-Path $scratch 'probe.err.log')'; 'ok'"
+  $watch.Stop()
+  $probeId = [int](Get-Content -LiteralPath $probePid | Select-Object -First 1)
+  $probeAlive = [bool](Get-Process -Id $probeId -ErrorAction SilentlyContinue)
+  $probeLines = @(Get-Content -LiteralPath $probePid)
+  # After a reboot the recorded PID may belong to another process: a start time
+  # that does not match, or a PID-only file naming something other than node or
+  # cloudflared, is not Relay, so Stop-RelayProcess must leave it alone.
+  $probeRunning = Test-PidFile -PidFile $probePid
+  [IO.File]::WriteAllLines($probePid, @([string]$probeId, [string]([long]$probeLines[1] + 1)))
+  $reusedRunning = Test-PidFile -PidFile $probePid
+  Stop-RelayProcess -Name probe -PidFile $probePid | Out-Null
+  $reusedSurvived = [bool](Get-Process -Id $probeId -ErrorAction SilentlyContinue)
+  [IO.File]::WriteAllLines($probePid, @([string]$probeId))
+  $legacyRunning = Test-PidFile -PidFile $probePid
+  Start-Sleep -Seconds 1
+  & taskkill.exe /PID $probeId /T /F | Out-Null
+  Assert-That ($probeLines.Count -eq 2) 'A PID file must record the start time.'
+  Assert-That $probeRunning 'A matching PID file must report the process running.'
+  Assert-That (-not $reusedRunning) 'A reused PID must not count as running.'
+  Assert-That $reusedSurvived 'Stop must not kill a process that reused the PID.'
+  Assert-That (-not $legacyRunning) 'A PID-only file must not trust an unrelated process.'
+  Assert-That (($probe | Select-Object -Last 1) -eq 'ok') 'Start-RelayProcess must finish.'
+  Assert-That ($watch.Elapsed.TotalSeconds -lt 20) "A captured caller must not wait for the started process (took $([int]$watch.Elapsed.TotalSeconds)s)."
+  Assert-That $probeAlive 'The started process must keep running after the caller exits.'
+  Assert-That ((Get-Content -LiteralPath $probeOut -Raw) -match '127\.0\.0\.1') 'The started process must write to its log.'
+  Write-Host 'Windows setup contract passed: direct / quick / named tunnel, open / isolated file access, reinstall, input validation, UTF-8 .env rewrites, bundled Node first, user PATH sync, browser/Tailscale checks, uninstall, retained state, incomplete bundles and detached background processes.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($scratch)
   $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

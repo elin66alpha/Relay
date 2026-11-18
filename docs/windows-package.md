@@ -111,7 +111,9 @@ PID 文件位于 %LOCALAPPDATA%\Relay\runtime。卸载移除服务并删除 Web�
 From 0.1.13 on, run .\update.cmd, or use Update in the app's Machine details:
 it downloads the latest release, checks it against SHA256SUMS, replaces the
 code, runtime and Web client in this directory, keeps server/ configuration and
-state, and restarts the backend while the tunnel keeps running.
+state, and restarts the backend while the tunnel keeps running. If another process
+still runs from this directory or holds the backend port, it changes nothing;
+if the new backend does not start, it puts the previous version back.
 .\update.cmd -Archive <zip> installs a ZIP downloaded by hand. To move from an
 older release, stop it and back up server/, extract the new ZIP separately,
 copy your deployment configuration and generated state into its server/
@@ -122,7 +124,8 @@ runtime/node/LICENSE; package licenses remain in server/node_modules/.
 
 从 0.1.13 起，运行 .\update.cmd，或在 App 的机器详情页点击更新：它会下载最新版本并按
 SHA256SUMS 校验，原地替换本目录的代码、运行时和 Web 客户端，保留 server/ 下的配置与状态，
-然后重启后端，隧道保持运行。.\update.cmd -Archive <zip> 可安装手动下载的 ZIP。从更早的
+然后重启后端，隧道保持运行。若仍有其他进程从本目录运行或占用后端端口，它不做任何改动；
+新版本后端起不来时会自动恢复旧版本。.\update.cmd -Archive <zip> 可安装手动下载的 ZIP。从更早的
 版本升级时：先停止旧实例并备份 server/；把新 ZIP 解压到另一目录，将部署配置和生成的状态
 复制到新目录的 server/（不复制 node_modules），然后在新目录选择重装以更新计划任务路径。
 公网部署前阅读 docs/SECURITY.md。Node 许可证在
