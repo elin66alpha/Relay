@@ -435,9 +435,11 @@ function createBrowserManager(options = {}) {
         page.close();
         throw new Error('browser closed');
       }
+      // Attach listeners before enabling Page events so frames or navigations
+      // emitted in the same stdio chunk as the CDP response are not dropped.
+      wirePage(session, page);
       await page.send('Page.enable');
       await page.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
-      wirePage(session, page);
       return page;
     });
     session.ready.catch(() => {

@@ -355,6 +355,27 @@ test('frames go out as binary, are acked after sending, and replay on reattach',
   manager.closeAll();
 });
 
+test('captures an early screencast frame emitted synchronously while answering Page.startScreencast', async () => {
+  const { manager, page } = managerWithFakePage();
+  const send = page.send;
+  page.send = (method, params) => {
+    const result = send(method, params);
+    if (method === 'Page.startScreencast') {
+      // Chrome can emit the first frame in the same stdio chunk as the startScreencast response.
+      page.events.emit('Page.screencastFrame', {
+        data: Buffer.from('early-frame').toString('base64'),
+        sessionId: 1,
+      });
+    }
+    return result;
+  };
+  const client = await attached(manager);
+  assert.equal(client.frames.length > 0, true);
+  assert.equal(client.frames[0].toString(), 'early-frame');
+  assert.deepEqual(lastCall(page, 'Page.screencastFrameAck'), { sessionId: 1 });
+  await manager.closeAll();
+});
+
 test('a tab the page opens is closed and its address handed to the app once', async () => {
   const { manager, page } = managerWithFakePage();
   const client = await attached(manager);
@@ -475,8 +496,8 @@ test('a real headless browser streams a local page and takes touch and mouse inp
 }, async () => {
   // The slider and button write to the hash, which comes back as a `url` message.
   const html = `<!doctype html><meta name=viewport content="width=device-width">
-    <body style="margin:0">
-    <input id=s type=range min=0 max=100 value=0 style="position:absolute;left:20px;top:100px;width:360px;height:40px;margin:0"
+    <body style="margin:0" onload="location.hash='ready'">
+    <input id=s type=range min=0 max=100 value=0 style="position:absolute;left:20px;top:100px;width:360px;height:40px;margin:0;touch-action:none"
       oninput="location.hash='s'+this.value">
     <button style="position:absolute;left:20px;top:300px;width:200px;height:80px"
       onclick="location.hash='clicked'">x</button>`;
@@ -512,6 +533,7 @@ test('a real headless browser streams a local page and takes touch and mouse inp
     say({ type: 'resize', width: 400, height: 800, scale: 1, mobile: true });
     say({ type: 'navigate', url: String(site.address().port) });
     await waitFor(() => urls().some((url) => url.endsWith(`:${site.address().port}/`)), 'navigation');
+    await waitFor(() => urls().some((url) => url.endsWith('#ready')), 'page load');
     await waitFor(() => client.frames.length > 0, 'a frame');
     assert.equal(client.frames.at(-1)[0], 0xff, 'frames are JPEG');
 

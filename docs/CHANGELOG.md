@@ -76,6 +76,9 @@
 
 ### Fixed
 
+- Browser sessions no longer stall with no picture when Chrome emits the first
+  screencast frame (or early navigation event) in the same response as starting
+  the screencast.
 - Windows desktop SSH terminal accepts typed characters (`xterm` now passes the Flutter view id when attaching text input).
 - On Windows, `update.cmd`, `start.cmd` and `setup.cmd` no longer hang after
   "backend started" when their output is captured (a CI job, an agent, a pipe).
