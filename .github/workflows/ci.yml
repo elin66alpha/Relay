@@ -204,7 +204,11 @@ jobs:
     needs: [windows-setup, unix-setup, flutter, server, linux-client, windows-client, ios]
     runs-on: ubuntu-latest
     steps:
+      # Allow-list success: a job GitHub never starts (no runner) is not reported as failure or cancelled.
       - name: Require all jobs to pass
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
-        run: exit 1
-      - run: echo 'All CI jobs passed.'
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+          echo 'All CI jobs passed.'
