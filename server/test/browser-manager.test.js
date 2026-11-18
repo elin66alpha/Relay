@@ -519,7 +519,8 @@ test('a real headless browser streams a local page and takes touch and mouse inp
   });
   try {
     const client = await attached(manager);
-    assert.equal(client.json[0].type, 'ready', JSON.stringify(client.json[0]));
+    const first = client.json.find((m) => m.type !== 'ping');
+    assert.equal(first?.type, 'ready', JSON.stringify(client.json));
     const say = (message) => client.emit('message', Buffer.from(JSON.stringify(message)), false);
     const waitFor = async (predicate, what) => {
       for (let i = 0; i < 600; i += 1) {
