@@ -81,6 +81,9 @@ class BotChatController extends ChangeNotifier {
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _eventReconnectTimer;
   Timer? _historyPollTimer;
+  // Re-checks background turns against history, since the shared event stream
+  // can drop the agent_done edge and would leave a drawer spinner stuck.
+  Timer? _backgroundTurnCheckTimer;
   Timer? _remoteSettleTimer;
   Timer? _streamNotifyTimer;
   bool _wantsEvents = false;
@@ -729,6 +732,7 @@ class BotChatController extends ChangeNotifier {
 
   Future<void> disposeController() async {
     _historyPollTimer?.cancel();
+    _backgroundTurnCheckTimer?.cancel();
     _remoteSettleTimer?.cancel();
     _cancelStreamingNotifyTimer();
     _foregroundTurn?.detached = true;
@@ -941,6 +945,7 @@ class BotChatController extends ChangeNotifier {
       closeStream: foreground?.streamHandle.close,
     );
     _backgroundTurns.add(turn, started: foreground?.started ?? true);
+    _startBackgroundTurnCheck();
     _clearVisibleTurnStateForContextSwitch();
     turn.closeStream?.call();
     notifyListeners();
@@ -1692,7 +1697,46 @@ class BotChatController extends ChangeNotifier {
         sessionName: sessionName,
       ),
     );
+    _startBackgroundTurnCheck();
     notifyListeners();
+  }
+
+  void _startBackgroundTurnCheck() {
+    _backgroundTurnCheckTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_checkBackgroundTurns()),
+    );
+  }
+
+  Future<void> _checkBackgroundTurns() async {
+    final List<BackgroundTurn> turns = _backgroundTurns.list();
+    if (turns.isEmpty || _machine == null) {
+      _backgroundTurnCheckTimer?.cancel();
+      _backgroundTurnCheckTimer = null;
+      return;
+    }
+    for (final BackgroundTurn turn in turns) {
+      try {
+        final ChatHistory history = await _backendClient.fetchHistory(
+          turn.agentKey,
+          sessionId: turn.sessionId,
+        );
+        final bool finished = history.messages.any(
+          (ChatMessage m) =>
+              !m.isUser &&
+              m.metadata[_requestIdKey] == turn.requestId &&
+              m.metadata[_streamingKey] != true,
+        );
+        // Skip if the turn was taken or replaced while the fetch was in flight.
+        if (finished &&
+            _backgroundTurns.get(turn.agentKey, turn.sessionId)?.requestId ==
+                turn.requestId) {
+          _completeBackgroundTurn(turn.agentKey, turn.sessionId);
+        }
+      } catch (_) {
+        // Next tick or a terminal event may still settle it.
+      }
+    }
   }
 
   void _completeBackgroundTurn(String agentKey, String sessionId) {
