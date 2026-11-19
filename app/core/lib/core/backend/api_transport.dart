@@ -180,7 +180,8 @@ class ApiTransport {
       'Authorization': 'Bearer ${credential.token.trim()}',
       'X-Device-Id': deviceId,
       'X-Device-Name': deviceName,
-      if (workdir != null && workdir.isNotEmpty) 'X-Workdir': workdir,
+      if (workdir != null && workdir.isNotEmpty) // Header values must be ASCII; the backend decodes this.
+        'X-Workdir': Uri.encodeFull(workdir),
     };
   }
 

@@ -76,7 +76,7 @@ function createPeerClient({ name, baseUrl, token, deviceId, deviceName }) {
       Authorization: `Bearer ${token}`,
       'x-device-id': deviceId,
       'x-device-name': deviceName,
-      ...(workdir ? { 'x-workdir': workdir } : {}),
+      ...(workdir ? { 'x-workdir': encodeURI(workdir) } : {}),
     };
   }
 

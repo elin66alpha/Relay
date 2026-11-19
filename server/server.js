@@ -25,6 +25,7 @@ const {
   resolveWorkdir,
   getDefaultWorkdir,
   resolveRequestWorkdir,
+  decodeWorkdirHeader,
   validateWorkdir,
   getWorkspaceRoot,
   assertInsideWorkspace,
@@ -412,7 +413,7 @@ function normalizeDeviceId(value) {
 // default for a device that has not chosen one yet. The path is created if
 // missing. Throws WorkdirError for an invalid header, handled by the caller.
 function requestWorkdir(req) {
-  return resolveRequestWorkdir(req.get('x-workdir'));
+  return resolveRequestWorkdir(decodeWorkdirHeader(req.get('x-workdir')));
 }
 
 const agentRequiredError = () => ({ status: 400, body: { error: 'agent is required' } });
@@ -477,7 +478,7 @@ function resolveAgentScope(req, res, options = {}) {
 // Resolve a workdir for read-only contexts (SSE subscription, status) without
 // creating it; fall back to the default if the header is missing or invalid.
 function eventWorkdir(req) {
-  const raw = String(req.get('x-workdir') || '').trim();
+  const raw = decodeWorkdirHeader(req.get('x-workdir'));
   if (!raw) return getDefaultWorkdir();
   try {
     return resolveWorkdir(raw);

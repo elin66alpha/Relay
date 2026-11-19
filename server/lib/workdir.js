@@ -142,6 +142,18 @@ function ensureWorkdirExists(dir) {
   return dir;
 }
 
+// Clients percent-encode the x-workdir header because header values must be
+// ASCII (a path with Chinese characters is otherwise rejected before sending).
+// A value that is not valid percent-encoding is used as sent.
+function decodeWorkdirHeader(value) {
+  const raw = String(value || '').trim();
+  try {
+    return decodeURIComponent(raw);
+  } catch (_err) {
+    return raw;
+  }
+}
+
 // Resolve the workdir for a request: the device's `x-workdir` header when
 // present, otherwise the default. The path is created if missing so agent
 // execution and file browsing always have a real cwd. Returns the canonical
@@ -195,6 +207,7 @@ function validateWorkdir(value, { create = false } = {}) {
 }
 
 module.exports = {
+  decodeWorkdirHeader,
   WorkdirError,
   isInsideDir,
   getWorkspaceRoot,
