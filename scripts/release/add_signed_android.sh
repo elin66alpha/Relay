@@ -39,13 +39,15 @@ trap cleanup EXIT
 gh release download "$tag" --repo "$repo" --dir "$tmp" \
   --pattern SHA256SUMS --pattern "relay-backend-linux-macos-$tag.tar.gz" \
   --pattern "relay-client-windows-x64-$tag.zip" --pattern "relay-backend-windows-x64-$tag.zip" \
-  --pattern "relay-client-linux_${version}_amd64.deb" --pattern "relay-client-macos-$tag.zip"
+  --pattern "relay-client-linux_${version}_amd64.deb" --pattern "relay-client-macos-$tag.zip" \
+  --pattern "relay-client-ios-unsigned-$tag.ipa"
 (
   cd "$tmp"
   : > base-checksums
   for asset in "relay-backend-linux-macos-$tag.tar.gz" \
     "relay-client-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
-    "relay-client-linux_${version}_amd64.deb" "relay-client-macos-$tag.zip"; do
+    "relay-client-linux_${version}_amd64.deb" "relay-client-macos-$tag.zip" \
+    "relay-client-ios-unsigned-$tag.ipa"; do
     awk -v name="$asset" '$2 == name { print; found++ } END { if (found != 1) exit 1 }' SHA256SUMS >> base-checksums
   done
   sha256sum --check base-checksums
@@ -72,7 +74,7 @@ cp "$apk" "$tmp/relay-client-android-$tag.apk"
 (cd "$tmp" && sha256sum "relay-backend-linux-macos-$tag.tar.gz" \
   "relay-client-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
   "relay-client-linux_${version}_amd64.deb" "relay-client-macos-$tag.zip" \
-  "relay-client-android-$tag.apk" > SHA256SUMS && sha256sum --check SHA256SUMS)
+  "relay-client-ios-unsigned-$tag.ipa" "relay-client-android-$tag.apk" > SHA256SUMS && sha256sum --check SHA256SUMS)
 gh release upload "$tag" --repo "$repo" --clobber "$tmp/relay-client-android-$tag.apk" "$tmp/SHA256SUMS"
 gh release view "$tag" --repo "$repo" --json body --jq .body > "$tmp/notes.md"
 sed '1{/^> Android APK is pending local signing\. Do not publish this draft yet\.$/d;}' "$tmp/notes.md" > "$tmp/complete-notes.md"

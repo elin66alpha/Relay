@@ -25,8 +25,9 @@
   ID, notarizes and staples it. The signing material comes from nine Actions
   Secrets. The `apple_only` input does just this on any branch, without a
   draft. Pull requests still build both apps unsigned.
-- Releases no longer carry the unsigned iOS IPA; on iOS, **Check for updates**
-  points to TestFlight.
+- On iOS, **Check for updates** points to TestFlight. Releases still carry the
+  unsigned IPA, and their notes say in English and Chinese to ask the author
+  for the TestFlight link.
 
 ## 0.2.0 - 2026-11-18
 

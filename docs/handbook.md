@@ -864,7 +864,7 @@ To prepare a release after the changes merge and `CI complete` passes on
 and signed Android APK bundles (the Android keystore and passwords come from
 GitHub Actions Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`), uploads the signed iOS app to
-TestFlight, verifies the bundles' contents, certificates and checksums, and
+TestFlight, builds the unsigned iOS IPA, verifies the bundles' contents, certificates and checksums, and
 creates a draft for that exact commit. It refuses an existing version tag. From
 a terminal, the same workflow starts with `gh workflow run release.yml --ref main`.
 
@@ -916,10 +916,14 @@ A GitHub release `v<VERSION>` carries:
   (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
   Intel), signed with Developer ID, notarized and stapled, so it opens with a
   double-click. It keeps credentials in the login keychain;
+- `relay-client-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
+  it while installing, for example with Sideloadly or AltStore; an app signed
+  with a free Apple ID expires after seven days;
 - `SHA256SUMS` — `sha256sum` of every asset above.
 
-The iOS client is not a release asset: it is installed and updated through
-TestFlight.
+The signed iOS app is distributed through TestFlight. The draft's notes start
+with an English and Chinese iOS note: ask the author for the TestFlight link,
+and the IPA is unsigned.
 
 ## Configuration
 

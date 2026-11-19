@@ -136,7 +136,7 @@ Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/re
 Web 与 API 共用同一个 Node.js 服务。安装菜单支持选装 agent CLI、开关 Web、文件访问、
 配置网络和管理设备令牌；CLI 登录仍由你在主机上完成。
 `relay-client-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、macOS
-和 Ubuntu 客户端；iOS 版通过 TestFlight 发放。
+和 Ubuntu 客户端，以及未签名的 iOS IPA；签名版 iOS 通过 TestFlight 发放，可向作者索取链接。
 
 Linux 和 macOS 共用一个后端包。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 

@@ -159,6 +159,15 @@ jobs:
           cache: true
       - run: flutter pub get --enforce-lockfile
         working-directory: app/shell
+      # Releases also carry an unsigned IPA for sideloading; TestFlight gets the signed build.
+      - name: Build unsigned iOS client
+        run: |
+          set -euo pipefail
+          (cd app/shell && flutter build ios --release --no-pub --no-codesign)
+          version="$(node -p "require('./server/package.json').version")"
+          mkdir -p build/release build/ipa/Payload
+          cp -R app/shell/build/ios/iphoneos/Runner.app build/ipa/Payload/
+          (cd build/ipa && zip -qry "../release/relay-client-ios-unsigned-v$version.ipa" Payload)
       - name: Import Apple signing identities
         if: env.SIGN == 'true'
         env:
@@ -219,10 +228,6 @@ jobs:
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           printf '%s' "$ASC_KEY_P8_BASE64" | tr -d '\r\n' | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
           echo "PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
-      - name: Build iOS client
-        if: env.SIGN != 'true'
-        run: flutter build ios --release --no-pub --no-codesign
-        working-directory: app/shell
       # The build number must grow with every upload; this workflow's run number does.
       - name: Build and upload iOS client to TestFlight
         if: env.SIGN == 'true'
@@ -286,7 +291,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: apple-clients
-          path: build/release/relay-client-macos-v*.zip
+          path: |
+            build/release/relay-client-ios-unsigned-v*.ipa
+            build/release/relay-client-macos-v*.zip
           if-no-files-found: error
 
   android-client:
@@ -424,10 +431,18 @@ jobs:
           sha256sum "relay-backend-linux-macos-$tag.tar.gz" \
             "relay-client-windows-x64-$tag.zip" "relay-backend-windows-x64-$tag.zip" \
             "relay-client-linux_${version}_amd64.deb" "relay-client-macos-$tag.zip" \
-            "relay-client-android-$tag.apk" > SHA256SUMS
+            "relay-client-ios-unsigned-$tag.ipa" "relay-client-android-$tag.apk" > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ../..
-          awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md > build/release/notes.md
+          {
+            echo "> **iOS**: the iOS app is distributed through TestFlight. Ask the author for the TestFlight link: https://github.com/elin66alpha"
+            echo "> \`relay-client-ios-unsigned-$tag.ipa\` is **unsigned**: sign it while installing (for example with Sideloadly or AltStore)."
+            echo '>'
+            echo "> **iOS**：iOS 版通过 TestFlight 发放，请向作者索取 TestFlight 链接：https://github.com/elin66alpha"
+            echo "> \`relay-client-ios-unsigned-$tag.ipa\` **未签名**，需要在安装时自行签名（例如使用 Sideloadly 或 AltStore）。"
+            echo
+            awk -v version="$version" '$1 == "##" && $2 == version { copying=1; next } /^## / && copying { exit } copying { print }' docs/CHANGELOG.md
+          } > build/release/notes.md
           gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Relay $version" \
             --notes-file build/release/notes.md \
             "build/release/relay-backend-linux-macos-$tag.tar.gz" \
@@ -435,4 +450,5 @@ jobs:
             "build/release/relay-backend-windows-x64-$tag.zip" \
             "build/release/relay-client-linux_${version}_amd64.deb" \
             "build/release/relay-client-macos-$tag.zip" \
+            "build/release/relay-client-ios-unsigned-$tag.ipa" \
             "build/release/relay-client-android-$tag.apk" build/release/SHA256SUMS
