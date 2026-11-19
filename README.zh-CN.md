@@ -12,7 +12,7 @@
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
 [English](README.md) · [安装后端](docs/install.zh-CN.md) ·
-[安全模型](docs/SECURITY.md) · [技术手册](docs/handbook.md)
+[安全模型](docs/SECURITY.md) · [隐私政策](docs/PRIVACY.md) · [技术手册](docs/handbook.md)
 
 </div>
 
