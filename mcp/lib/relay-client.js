@@ -19,7 +19,7 @@ function createRelayClient({ baseUrl, token, deviceId, deviceName, getWorkdir })
       ...extra,
     };
     const dir = workdir || getWorkdir();
-    if (dir) out['x-workdir'] = dir;
+    if (dir) out['x-workdir'] = encodeURI(dir); // headers must be ASCII
     return out;
   }
 

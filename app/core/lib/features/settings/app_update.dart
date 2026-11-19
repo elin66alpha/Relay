@@ -4,7 +4,7 @@ import 'app_update_stub.dart' if (dart.library.io) 'app_update_io.dart'
     as platform;
 
 /// The release asset this build installs over itself, or null where the app
-/// cannot update itself: iOS (the release IPA is unsigned and sideloaded) and
+/// cannot update itself: iOS (installed and updated through TestFlight) and
 /// Web (served by the backend, so it updates with the backend).
 String? updateAssetName(
   String version, {

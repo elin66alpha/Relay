@@ -1,6 +1,35 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.1 - Unreleased
+
+### Fixed
+
+- **Non-ASCII work directories**: a work directory whose path holds Chinese or
+  other non-ASCII characters no longer disconnects the app. HTTP header values
+  must be ASCII, so the Flutter client, the backend peer client and Relay MCP
+  now percent-encode `X-Workdir` (`encodeURI`) and the backend decodes it,
+  falling back to the raw value.
+- **Drawer session spinner**: a session running in the background no longer
+  spins in the drawer after its reply finished when the shared event stream
+  dropped the `agent_done` event; the app re-checks background turns against
+  history every 5 seconds.
+
+### Changed
+
+- iOS and macOS use the bundle ID `io.github.elin66alpha.relay`; Android,
+  Linux and internal channel names keep `dev.relay.app`. macOS keeps app data
+  per bundle ID, so the macOS app starts without the machines saved by 0.2.0.
+- **Apple signing**: a manual **Prepare release draft** run signs the iOS app
+  with the Apple Distribution certificate and uploads it to TestFlight (build
+  number = the workflow's run number), and signs the macOS app with Developer
+  ID, notarizes and staples it. The signing material comes from nine Actions
+  Secrets. The `apple_only` input does just this on any branch, without a
+  draft. Pull requests still build both apps unsigned.
+- On iOS, **Check for updates** points to TestFlight. Releases still carry the
+  unsigned IPA, and their notes say in English and Chinese to ask the author
+  for the TestFlight link.
+
+## 0.2.0 - 2026-11-18
 
 ### Added
 

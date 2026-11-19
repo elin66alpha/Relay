@@ -11,6 +11,7 @@ const {
   resolveWorkdir,
   getDefaultWorkdir,
   resolveRequestWorkdir,
+  decodeWorkdirHeader,
   inspectWorkdir,
   validateWorkdir,
   getWorkspaceRoot,
@@ -267,4 +268,12 @@ test('a workspace root that is not absolute is an error, not open mode', () => {
 test('open mode leaves workdirs unrestricted', () => {
   assert.equal(getWorkspaceRoot(), null);
   assert.equal(assertInsideWorkspace(os.tmpdir()), os.tmpdir());
+});
+
+test('decodeWorkdirHeader decodes a percent-encoded non-ASCII path', () => {
+  const dir = '/home/u/workspace/补充材料 a%b';
+  assert.equal(decodeWorkdirHeader(encodeURI(dir)), dir);
+  assert.equal(decodeWorkdirHeader('/plain/path'), '/plain/path');
+  assert.equal(decodeWorkdirHeader('/bad/%E8'), '/bad/%E8');
+  assert.equal(decodeWorkdirHeader(undefined), '');
 });

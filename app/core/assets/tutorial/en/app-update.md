@@ -21,7 +21,7 @@ The app compares itself with the latest release on GitHub.
 | Windows | replaces the app's files and restarts |
 | Linux | downloads the `.deb` and opens it in the software installer |
 | macOS | unpacks the new app in Downloads |
-| iOS | only reports that a new version exists |
+| iOS | reports the new version; install it from TestFlight |
 | Web | updates with its backend |
 
 To update the backend see [Update the backend](backend-update.md). For what each version changes, see What's new on Home.

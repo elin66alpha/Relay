@@ -154,6 +154,25 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.2.1',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.folder_outlined,
+        title: '中文路径可以当工作区了',
+        body: '把带中文（或其他非英文字符）的文件夹设为工作区后，App 不会再连不上后端。',
+      ),
+      _Highlight(
+        icon: Icons.sync_rounded,
+        title: '抽屉里的转圈会自己停',
+        body: '后台会话的回复已经完成时，左侧抽屉里的加载圈会自动消失，不用再点进会话才停。',
+      ),
+    ],
+    changes: <String>[
+      'iOS 版改为通过 TestFlight 安装和更新，可向作者索取测试链接；Release 里仍附带未签名的 IPA。',
+      'macOS 版经过 Apple 签名和公证，双击即可打开；因为换了应用标识，需要重新添加一次机器。',
+    ],
+  ),
+  _Release(
     version: '0.2.0',
     highlights: <_Highlight>[
       _Highlight(
@@ -336,6 +355,27 @@ const List<_Release> _zhReleases = <_Release>[
 ];
 
 const List<_Release> _enReleases = <_Release>[
+  _Release(
+    version: '0.2.1',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.folder_outlined,
+        title: 'Folders with Chinese names work as workspaces',
+        body:
+            'Choosing a folder whose path has Chinese or other non-English characters as the workspace no longer disconnects the app from the backend.',
+      ),
+      _Highlight(
+        icon: Icons.sync_rounded,
+        title: 'Drawer spinners stop on their own',
+        body:
+            'When a background session\'s reply has finished, its spinner in the drawer goes away without opening the session.',
+      ),
+    ],
+    changes: <String>[
+      'The iOS app is now installed and updated through TestFlight: ask the author for the link. Releases still carry the unsigned IPA.',
+      'The macOS app is signed and notarized by Apple and opens with a double-click. Its app identifier changed, so add your machines again once.',
+    ],
+  ),
   _Release(
     version: '0.2.0',
     highlights: <_Highlight>[

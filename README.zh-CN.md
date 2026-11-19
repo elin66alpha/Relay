@@ -64,16 +64,16 @@ Relay 把源代码、shell 权限和 CLI 登录凭据留在你控制的电脑上
   </tr>
 </table>
 
-### 预览 localhost 页面和工作区图片
+### 设置与内置教程
 
 <table>
   <tr>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-browser-mobile-zh.png"><img src="docs/screenshots/relay-browser-mobile-zh.png" alt="Relay 浏览器显示后端 localhost 上运行的账单面板" width="100%"></a></td>
-    <td width="50%" align="center"><a href="docs/screenshots/relay-image-preview-mobile-zh.png"><img src="docs/screenshots/relay-image-preview-mobile-zh.png" alt="Relay 文件预览显示工作区中的 Ferrari 图片" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-settings-mobile-zh.png"><img src="docs/screenshots/relay-settings-mobile-zh.png" alt="Relay 移动端设置页：机器凭证、外观、壁纸与语言" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/screenshots/relay-tutorial-mobile-zh.png"><img src="docs/screenshots/relay-tutorial-mobile-zh.png" alt="Relay 移动端教程库，可搜索，按模块分类" width="100%"></a></td>
   </tr>
   <tr>
-    <td align="center"><strong>localhost 浏览器</strong><br>查看并操作后端机器上运行的开发页面。</td>
-    <td align="center"><strong>图片预览</strong><br>打开工作区图片，缩放查看细节。</td>
+    <td align="center"><strong>设置</strong><br>管理机器凭证、主题、字号、壁纸和语言。</td>
+    <td align="center"><strong>教程</strong><br>每个功能都有一篇可搜索的中英文教程。</td>
   </tr>
 </table>
 
@@ -135,8 +135,8 @@ Windows x64 用户可从[最新 release](https://github.com/elin66alpha/Relay/re
 安装是命令行菜单，与 Linux、macOS 相同。包内包含 Node.js、生产依赖和编译后的 Web 前端，
 Web 与 API 共用同一个 Node.js 服务。安装菜单支持选装 agent CLI、开关 Web、文件访问、
 配置网络和管理设备令牌；CLI 登录仍由你在主机上完成。
-`relay-client-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、iOS、macOS
-和 Ubuntu 客户端。
+`relay-client-windows-x64-v<版本>.zip` 是桌面客户端。同一页面还有 Android、macOS
+和 Ubuntu 客户端，以及未签名的 iOS IPA；签名版 iOS 通过 TestFlight 发放，可向作者索取链接。
 
 Linux 和 macOS 共用一个后端包。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载 `relay-backend-linux-macos-v<版本>.tar.gz`，解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 

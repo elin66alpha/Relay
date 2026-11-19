@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
@@ -9,7 +10,7 @@ import 'update_check.dart';
 import 'wallpaper_screen.dart';
 
 // Shown on the settings screen; keep in step with pubspec.yaml on every release.
-const String _applicationVersion = '0.2.0';
+const String _applicationVersion = '0.2.1';
 const int _fontScaleDivisions = 9;
 
 class AppSettingsScreen extends StatelessWidget {
@@ -401,7 +402,14 @@ Future<void> checkForAppUpdate(
     return report(strings.upToDate(currentVersion));
   }
   final String? asset = updateAssetName(latest);
-  if (asset == null) return report(strings.updateAvailable(latest));
+  if (asset == null) {
+    // iOS builds are installed and updated through TestFlight.
+    return report(
+      defaultTargetPlatform == TargetPlatform.iOS
+          ? strings.updateInTestFlight(latest)
+          : strings.updateAvailable(latest),
+    );
+  }
   if (!context.mounted) return;
   final bool? install = await showDialog<bool>(
     context: context,
