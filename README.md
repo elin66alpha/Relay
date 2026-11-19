@@ -12,7 +12,7 @@ A private, self-hosted remote cockpit for Claude Code, Codex, Cursor, OpenCode, 
 ![MIT License](https://img.shields.io/badge/license-MIT-2F855A)
 
 [中文](README.zh-CN.md) · [Install a backend](docs/install.md) ·
-[Security](docs/SECURITY.md) · [Handbook](docs/handbook.md)
+[Security](docs/SECURITY.md) · [Privacy](docs/PRIVACY.md) · [Handbook](docs/handbook.md)
 
 </div>
 
