@@ -860,13 +860,29 @@ bundles on the pull request without creating a release.
 
 To prepare a release after the changes merge and `CI complete` passes on
 `main`, run **Prepare release draft** from the repository's Actions tab, choosing
-`main`. It builds the source backend, Ubuntu desktop, Windows, macOS, unsigned
-iOS and signed Android APK bundles (the Android keystore and passwords come from
+`main`. It builds the source backend, Ubuntu desktop, Windows, notarized macOS
+and signed Android APK bundles (the Android keystore and passwords come from
 GitHub Actions Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`,
-`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`), verifies their contents,
-certificates and checksums, and creates a draft for that exact commit. It refuses
-an existing version tag. From a terminal, the same workflow starts with
-`gh workflow run release.yml --ref main`.
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`), uploads the signed iOS app to
+TestFlight, verifies the bundles' contents, certificates and checksums, and
+creates a draft for that exact commit. It refuses an existing version tag. From
+a terminal, the same workflow starts with `gh workflow run release.yml --ref main`.
+
+The Apple part reads nine Actions Secrets: `APPLE_TEAM_ID`;
+`IOS_CERT_P12_BASE64` and `IOS_CERT_PASSWORD` (Apple Distribution certificate
+with its key); `IOS_PROVISIONING_PROFILE_BASE64` (the App Store profile named
+`Relay App Store` for `io.github.elin66alpha.relay`; the Xcode project's Release
+configuration and `app/shell/ios/ExportOptions.plist` name it and the team);
+`MACOS_CERT_P12_BASE64` and `MACOS_CERT_PASSWORD` (Developer ID Application
+certificate with its key); and `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+`ASC_KEY_P8_BASE64` (an App Store Connect API key with the App Manager role,
+used by both the TestFlight upload and notarization). The iOS build number is
+the workflow's run number, so every upload is higher than the last. To try the
+Apple part alone on any branch, without a draft, run
+`gh workflow run release.yml --ref <branch> -f apple_only=true`. The build then
+appears in App Store Connect → TestFlight after Apple processes it. Because the
+Release configuration signs manually, a local `flutter build ipa` needs that
+certificate and profile; `flutter build ios --no-codesign` works without them.
 
 If you prefer to sign or re-sign the Android APK locally on the machine holding
 the Relay Android release key, check out the draft's commit, set `ANDROID_HOME`
@@ -898,14 +914,12 @@ A GitHub release `v<VERSION>` carries:
   [Windows backend release bundle](#windows-backend-release-bundle);
 - `relay-client-macos-v<VERSION>.zip` — the macOS desktop client
   (`app/shell/build/macos/Build/Products/Release/Relay.app`, Apple silicon and
-  Intel). It has only an ad-hoc signature, so macOS blocks the first launch:
-  open it from the context menu, or run
-  `xattr -dr com.apple.quarantine Relay.app`. It keeps credentials in the login
-  keychain, which may ask for access again after an update;
-- `relay-client-ios-unsigned-v<VERSION>.ipa` — the iOS client without a signature. Sign
-  it while installing, for example with Sideloadly or AltStore; an app signed
-  with a free Apple ID expires after seven days;
+  Intel), signed with Developer ID, notarized and stapled, so it opens with a
+  double-click. It keeps credentials in the login keychain;
 - `SHA256SUMS` — `sha256sum` of every asset above.
+
+The iOS client is not a release asset: it is installed and updated through
+TestFlight.
 
 ## Configuration
 

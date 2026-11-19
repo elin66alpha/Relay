@@ -577,6 +577,9 @@ class AppStrings {
   String updateAvailable(String version) => isZh
       ? '有新版本 $version，可在 GitHub Releases 下载'
       : 'Version $version is available on GitHub Releases';
+  String updateInTestFlight(String version) => isZh
+      ? '有新版本 $version，请在 TestFlight 中更新'
+      : 'Version $version is available: update in TestFlight';
   String get updateCheckFailed =>
       isZh ? '无法检查更新，请稍后再试' : 'Could not check for updates. Try again later.';
   String updateAvailableTitle(String version) =>

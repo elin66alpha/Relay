@@ -148,7 +148,7 @@ the API. Setup offers agent CLI installation, Web on/off, file access, network
 setup and device token management; sign in
 to the selected CLIs yourself on the host. The asset
 `relay-client-windows-x64-v<VERSION>.zip` is the desktop client. The same page has
-the Android, iOS, macOS and Ubuntu clients.
+the Android, macOS and Ubuntu clients; the iOS app is distributed through TestFlight.
 
 On Linux and macOS, download `relay-backend-linux-macos-v<VERSION>.tar.gz` from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest), extract it to a permanent writable directory, and run `./install.sh` from the extracted folder containing `server/`.
 

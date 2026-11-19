@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
@@ -401,7 +402,14 @@ Future<void> checkForAppUpdate(
     return report(strings.upToDate(currentVersion));
   }
   final String? asset = updateAssetName(latest);
-  if (asset == null) return report(strings.updateAvailable(latest));
+  if (asset == null) {
+    // iOS builds are installed and updated through TestFlight.
+    return report(
+      defaultTargetPlatform == TargetPlatform.iOS
+          ? strings.updateInTestFlight(latest)
+          : strings.updateAvailable(latest),
+    );
+  }
   if (!context.mounted) return;
   final bool? install = await showDialog<bool>(
     context: context,

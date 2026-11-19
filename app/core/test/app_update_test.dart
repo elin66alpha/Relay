@@ -86,13 +86,13 @@ void main() {
     expect(find.text('Version 0.1.14 is available'), findsNothing);
   });
 
-  testWidgets('iOS only reports the release', (WidgetTester tester) async {
+  testWidgets('iOS points to TestFlight', (WidgetTester tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     await check(tester, latest: '0.1.14');
     debugDefaultTargetPlatformOverride = null;
 
     expect(
-      find.text('Version 0.1.14 is available on GitHub Releases'),
+      find.text('Version 0.1.14 is available: update in TestFlight'),
       findsOneWidget,
     );
     expect(find.text('Update'), findsNothing);

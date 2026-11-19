@@ -21,7 +21,7 @@ App 会和 GitHub 上的最新版本比较。
 | Windows | 替换 App 的文件并重启 |
 | Linux | 下载 `.deb`，在软件安装器里打开 |
 | macOS | 在「下载」文件夹解压新版 App |
-| iOS | 只提示有新版本 |
+| iOS | 提示有新版本，请在 TestFlight 中安装 |
 | 网页 | 随后端一起更新 |
 
 后端的更新见[更新后端](backend-update.md)。每个版本的变化见首页的「新功能」。

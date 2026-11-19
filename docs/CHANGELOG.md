@@ -17,7 +17,16 @@
 ### Changed
 
 - iOS and macOS use the bundle ID `io.github.elin66alpha.relay`; Android,
-  Linux and internal channel names keep `dev.relay.app`.
+  Linux and internal channel names keep `dev.relay.app`. macOS keeps app data
+  per bundle ID, so the macOS app starts without the machines saved by 0.2.0.
+- **Apple signing**: a manual **Prepare release draft** run signs the iOS app
+  with the Apple Distribution certificate and uploads it to TestFlight (build
+  number = the workflow's run number), and signs the macOS app with Developer
+  ID, notarizes and staples it. The signing material comes from nine Actions
+  Secrets. The `apple_only` input does just this on any branch, without a
+  draft. Pull requests still build both apps unsigned.
+- Releases no longer carry the unsigned iOS IPA; on iOS, **Check for updates**
+  points to TestFlight.
 
 ## 0.2.0 - 2026-11-18
 

@@ -168,7 +168,8 @@ const List<_Release> _zhReleases = <_Release>[
       ),
     ],
     changes: <String>[
-      'iOS 和 macOS 版改用新的应用标识，方便签名和上架。',
+      'iOS 版改为通过 TestFlight 安装和更新，不再提供未签名的 IPA。',
+      'macOS 版经过 Apple 签名和公证，双击即可打开；因为换了应用标识，需要重新添加一次机器。',
     ],
   ),
   _Release(
@@ -371,7 +372,8 @@ const List<_Release> _enReleases = <_Release>[
       ),
     ],
     changes: <String>[
-      'The iOS and macOS apps use a new app identifier for signing and the App Store.',
+      'The iOS app is now installed and updated through TestFlight; the unsigned IPA is gone.',
+      'The macOS app is signed and notarized by Apple and opens with a double-click. Its app identifier changed, so add your machines again once.',
     ],
   ),
   _Release(
