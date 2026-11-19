@@ -176,7 +176,7 @@ class DemoHttpClient extends http.BaseClient {
         return _jsonResponse(200, const <String, Object?>{
           'ok': true,
           'hostname': 'demo-machine',
-          'version': '0.2.0',
+          'version': '0.2.1',
           'cpu': <String, Object?>{
             'model': 'Demo Virtual CPU',
             'cores': 8,
