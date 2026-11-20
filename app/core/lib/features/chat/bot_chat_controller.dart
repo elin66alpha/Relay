@@ -175,11 +175,14 @@ class BotChatController extends ChangeNotifier {
   /// Refreshes per-agent login state from the backend. Best-effort: a probe
   /// failure (offline, older backend without the endpoint) is ignored.
   Future<void> refreshAuthStatus({bool verifyCredentials = false}) async {
-    if (_machine == null) return;
+    final MachineCredential? machine = _machine;
+    if (machine == null) return;
     try {
       final Map<String, bool?> status = await _backendClient.fetchAuthStatus(
         verifyCredentials: verifyCredentials,
       );
+      // A reply from the machine switched away from describes other logins.
+      if (_machine?.id != machine.id) return;
       _authStatus
         ..clear()
         ..addAll(status);
@@ -581,9 +584,10 @@ class BotChatController extends ChangeNotifier {
   /// Pulls this device's current work directory: its stored path, or the
   /// backend default before one is chosen. Best-effort.
   Future<void> refreshWorkdir() async {
+    final String? machineId = _machine?.id;
     try {
       final WorkdirInfo info = await _backendClient.workdir();
-      if (info.dir == _activeWorkdir) return;
+      if (_machine?.id != machineId || info.dir == _activeWorkdir) return;
       _activeWorkdir = info.dir;
       notifyListeners();
     } catch (_) {
@@ -725,9 +729,12 @@ class BotChatController extends ChangeNotifier {
   Future<void> reconnectEvents() async {
     _eventReconnectTimer?.cancel();
     _eventReconnectTimer = null;
-    await _eventsSub?.cancel();
+    // Open the new stream before the old host has closed its connection: a
+    // cancelled subscription delivers no further events either way.
+    final StreamSubscription<BackendEvent>? old = _eventsSub;
     _eventsSub = null;
     if (_wantsEvents) _connectEventsNow();
+    await old?.cancel();
   }
 
   Future<void> disposeController() async {

@@ -725,6 +725,11 @@ class _BotChatScreenState extends State<BotChatScreen>
                               Expanded(
                                 child: showQuota
                                     ? QuotaStrip(
+                                        // A new host starts a fresh strip that
+                                        // fetches its own quota at once.
+                                        key: ValueKey<String?>(
+                                          widget.chatController.machine?.id,
+                                        ),
                                         quotaController: widget
                                             .chatController.quotaController,
                                         agentKey: agentKey,

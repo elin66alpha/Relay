@@ -16,7 +16,9 @@ class MachineCredentialsStore {
 
   static const String _credentialsKey = 'relay.machine_credentials.v1';
   static const String _activeMachineKey = 'relay.active_machine_id.v1';
-  static List<MachineCredential>? _cachedCredentials;
+  // One read serves every concurrent caller: a switch fans out several
+  // requests at once, and each storage read goes through the system keychain.
+  static Future<List<MachineCredential>>? _credentialsRead;
   static bool _activeIdLoaded = false;
   static String? _cachedActiveId;
 
@@ -28,24 +30,30 @@ class MachineCredentialsStore {
   // drop it for all readers — multiple components hold their own instances of
   // this store.
   static void _invalidateCache() {
-    _cachedCredentials = null;
+    _credentialsRead = null;
     _activeIdLoaded = false;
     _cachedActiveId = null;
   }
 
   Future<List<MachineCredential>> readAll() async {
-    final List<MachineCredential>? cached = _cachedCredentials;
-    if (cached != null) return cached;
-
-    final String? raw = await _secureStorage.read(key: _credentialsKey);
-    if (raw == null || raw.trim().isEmpty) {
-      _cachedCredentials = const <MachineCredential>[];
-      return _cachedCredentials!;
+    final Future<List<MachineCredential>> read =
+        _credentialsRead ??= _readFromStorage();
+    try {
+      return await read;
+    } catch (_) {
+      // A failed read is not cached: the next caller tries the storage again.
+      if (identical(_credentialsRead, read)) _credentialsRead = null;
+      rethrow;
     }
+  }
+
+  Future<List<MachineCredential>> _readFromStorage() async {
+    final String? raw = await _secureStorage.read(key: _credentialsKey);
+    if (raw == null || raw.trim().isEmpty) return const <MachineCredential>[];
     try {
       final Object? decoded = jsonDecode(raw);
       if (decoded is List) {
-        _cachedCredentials = List<MachineCredential>.unmodifiable(
+        return List<MachineCredential>.unmodifiable(
           decoded
               .whereType<Map>()
               .map(
@@ -54,14 +62,11 @@ class MachineCredentialsStore {
               )
               .where(_isUsable),
         );
-        return _cachedCredentials!;
       }
     } on FormatException {
-      _cachedCredentials = const <MachineCredential>[];
-      return _cachedCredentials!;
+      return const <MachineCredential>[];
     }
-    _cachedCredentials = const <MachineCredential>[];
-    return _cachedCredentials!;
+    return const <MachineCredential>[];
   }
 
   Future<MachineCredential?> readActive() async {
@@ -121,7 +126,9 @@ class MachineCredentialsStore {
     if (!credentials.any((MachineCredential item) => item.id == id)) return;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString(_activeMachineKey, id);
-    _invalidateCache();
+    // Only the active id changed: keep the credential list cached.
+    _cachedActiveId = id;
+    _activeIdLoaded = true;
   }
 
   Future<void> delete(String id) async {
