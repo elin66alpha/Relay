@@ -154,6 +154,20 @@ class _Highlight {
 
 const List<_Release> _zhReleases = <_Release>[
   _Release(
+    version: '0.2.2',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.laptop_mac_rounded,
+        title: 'macOS 后端能认出 Claude 的登录了',
+        body:
+            'macOS 上 Claude Code 把登录信息存在钥匙串里。现在 macOS 后端能正确显示 Claude 已登录，也能查到它的额度。',
+      ),
+    ],
+    changes: <String>[
+      '第一次读取时，Mac 会弹窗询问是否允许访问钥匙串，点“始终允许”即可。',
+    ],
+  ),
+  _Release(
     version: '0.2.1',
     highlights: <_Highlight>[
       _Highlight(
@@ -170,7 +184,6 @@ const List<_Release> _zhReleases = <_Release>[
     changes: <String>[
       'iOS 版改为通过 TestFlight 安装和更新，可向作者索取测试链接；Release 里仍附带未签名的 IPA。',
       'macOS 版经过 Apple 签名和公证，双击即可打开；因为换了应用标识，需要重新添加一次机器。',
-      'macOS 后端能正确显示 Claude 的登录状态和额度了。',
     ],
   ),
   _Release(
@@ -357,6 +370,20 @@ const List<_Release> _zhReleases = <_Release>[
 
 const List<_Release> _enReleases = <_Release>[
   _Release(
+    version: '0.2.2',
+    highlights: <_Highlight>[
+      _Highlight(
+        icon: Icons.laptop_mac_rounded,
+        title: 'macOS backends recognize the Claude login',
+        body:
+            'On macOS, Claude Code keeps its login in the Keychain. A macOS backend now shows Claude as logged in and can read its quota.',
+      ),
+    ],
+    changes: <String>[
+      'The first time, the Mac asks whether Relay may use the Keychain: choose Always Allow.',
+    ],
+  ),
+  _Release(
     version: '0.2.1',
     highlights: <_Highlight>[
       _Highlight(
@@ -375,7 +402,6 @@ const List<_Release> _enReleases = <_Release>[
     changes: <String>[
       'The iOS app is now installed and updated through TestFlight: ask the author for the link. Releases still carry the unsigned IPA.',
       'The macOS app is signed and notarized by Apple and opens with a double-click. Its app identifier changed, so add your machines again once.',
-      'A macOS backend now shows Claude\'s login status and quota correctly.',
     ],
   ),
   _Release(
