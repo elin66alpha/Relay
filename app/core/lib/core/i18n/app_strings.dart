@@ -43,6 +43,10 @@ class AppStrings {
   String get groupName => isZh ? '蜂群名称' : 'Swarm name';
   String get groupMembers => isZh ? '成员' : 'Members';
   String get manageMembers => isZh ? '管理成员' : 'Manage members';
+  String get changeWorkDirectory => isZh ? '更改工作目录' : 'Change work directory';
+  String get changeWorkDirectoryHint => isZh
+      ? '更改目录会重置受影响成员的会话。'
+      : "Changing a directory resets the affected members' sessions.";
   String get deleteGroup => isZh ? '删除蜂群' : 'Delete swarm';
   String get deleteGroupConfirm =>
       isZh ? '删除该蜂群及其聊天记录？' : 'Delete this swarm and its transcript?';

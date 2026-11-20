@@ -236,6 +236,68 @@ void main() {
     await pumpEventQueue();
     expect(controller.sending, isFalse);
   });
+
+  test('running state and Stop are tracked independently per swarm', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.history['reviewers'] = <ChatMessage>[];
+    await controller.start();
+
+    // Start a round in builders (A).
+    final Completer<void> roundA = Completer<void>();
+    final Completer<void> roundB = Completer<void>();
+    backend.roundsByGroup['builders'] = roundA;
+    backend.roundsByGroup['reviewers'] = roundB;
+
+    final Future<bool> sendA = controller.send('@claude work in A');
+    final String reqA = backend.sent.last['requestId']!;
+    expect(reqA, isNotEmpty);
+    expect(controller.sending, isTrue);
+
+    // Switch to reviewers (B): B is NOT sending and accepts a concurrent round.
+    await controller.selectGroup(_reviewers);
+    expect(controller.sending, isFalse);
+    final Future<bool> sendB = controller.send('@codex work in B');
+    final String reqB = backend.sent.last['requestId']!;
+    expect(controller.sending, isTrue);
+
+    // Cancel in B cancels ONLY B's request, not A's.
+    await controller.cancel();
+    expect(backend.cancelled, <String>[reqB]);
+
+    // Finish A while still viewing B: B must stay sending.
+    roundA.complete();
+    expect(await sendA, isTrue);
+    expect(controller.sending, isTrue);
+
+    // Finish B.
+    roundB.complete();
+    expect(await sendB, isTrue);
+    expect(controller.sending, isFalse);
+
+    // Switching back to A shows A is no longer sending.
+    await controller.selectGroup(_builders);
+    expect(controller.sending, isFalse);
+  });
+
+  test(
+      'createGroup selects the newly created swarm by id even when names repeat',
+      () async {
+    await controller.start();
+    const ChatGroup duplicate = ChatGroup(
+      id: 'builders-new',
+      name: 'Builders',
+      members: <String>['claude'],
+    );
+    backend.createdGroup = duplicate;
+    backend.createdList = <ChatGroup>[_builders, duplicate, _reviewers];
+
+    final ChatGroup? result = await controller.createGroup(
+      'Builders',
+      const <String>['claude'],
+    );
+    expect(result?.id, 'builders-new');
+    expect(controller.selected?.id, 'builders-new');
+  });
 }
 
 const ChatGroup _builders = ChatGroup(
@@ -290,7 +352,11 @@ class _GroupBackendClient extends BackendClient {
   final List<List<MachineCredential>> sentPeers = <List<MachineCredential>>[];
   final List<String> cancelled = <String>[];
   final Completer<void> round = Completer<void>();
+  final Map<String, Completer<void>> roundsByGroup =
+      <String, Completer<void>>{};
   String? running;
+  ChatGroup? createdGroup;
+  List<ChatGroup>? createdList;
 
   void emit(String type, Map<String, Object?> data) {
     events.add(
@@ -327,6 +393,26 @@ class _GroupBackendClient extends BackendClient {
   }
 
   @override
+  Future<({ChatGroup group, List<ChatGroup> groups})> createGroup(
+    String name,
+    List<String> members, {
+    String workdir = '',
+    Map<String, Map<String, String>> configs =
+        const <String, Map<String, String>>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
+    final ChatGroup group = createdGroup ??
+        ChatGroup(
+          id: 'created',
+          name: name,
+          members: members,
+          workdir: workdir,
+        );
+    final List<ChatGroup> list = createdList ?? <ChatGroup>[group];
+    return (group: group, groups: list);
+  }
+
+  @override
   Future<void> sendGroupMessage({
     required String groupId,
     required String prompt,
@@ -339,7 +425,7 @@ class _GroupBackendClient extends BackendClient {
       'prompt': prompt,
       'requestId': requestId,
     });
-    return round.future;
+    return (roundsByGroup[groupId] ?? round).future;
   }
 
   @override

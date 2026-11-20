@@ -12,6 +12,10 @@ const MAIN_SESSION_ID = 'default';
 // Upper bound on named chat sessions per workdir+agent (includes the default
 // "Main" session). Keeps chat-sessions.json bounded and the drawer manageable.
 const MAX_SESSIONS = 8;
+// Separate cap for hidden swarm-member sessions hosted on this machine for a
+// remote coordinator, so swarms never crowd out the user's own chat sessions.
+const MAX_SWARM_SESSIONS = 32;
+const SWARM_SESSION_KIND = 'swarm';
 
 // Cached, atomic store. Read paths (list/resolve) normalize in memory and never
 // write; only explicit mutations (create/activate/touch/rename/delete) persist. This
@@ -48,6 +52,10 @@ function defaultSession(now) {
   };
 }
 
+function isSwarmSession(session) {
+  return Boolean(session && session.kind === SWARM_SESSION_KIND);
+}
+
 function normalizeContext(raw, now = new Date().toISOString()) {
   const list = Array.isArray(raw && raw.sessions) ? raw.sessions : [];
   const sessions = [];
@@ -57,20 +65,23 @@ function normalizeContext(raw, now = new Date().toISOString()) {
     const id = validSessionId(item.id);
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    sessions.push({
+    const entry = {
       id,
       name: normalizeName(item.name, id === MAIN_SESSION_ID ? 'Main' : 'Session'),
       createdAt: String(item.createdAt || now),
       updatedAt: String(item.updatedAt || item.createdAt || now),
-    });
+    };
+    if (item.kind === SWARM_SESSION_KIND) entry.kind = SWARM_SESSION_KIND;
+    sessions.push(entry);
   }
-  if (sessions.length === 0) {
+  if (!sessions.some((session) => !isSwarmSession(session))) {
     sessions.push(defaultSession(now));
   }
+  const regular = sessions.filter((session) => !isSwarmSession(session));
   const active = validSessionId(raw && raw.activeSessionId);
-  const activeSessionId = sessions.some((session) => session.id === active)
+  const activeSessionId = regular.some((session) => session.id === active)
     ? active
-    : sessions[0].id;
+    : regular[0].id;
   sessions.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   return { activeSessionId, sessions };
 }
@@ -96,7 +107,9 @@ function scopeKeyFor(agentKey, workdir, sessionId) {
 function contextPayload(context) {
   return {
     activeSessionId: context.activeSessionId,
-    sessions: context.sessions.map((session) => ({ ...session })),
+    sessions: context.sessions
+      .filter((session) => !isSwarmSession(session))
+      .map((session) => ({ ...session })),
   };
 }
 
@@ -130,22 +143,31 @@ function resolveChatSession(contextKey, requestedSessionId) {
   return session ? { ...session } : null;
 }
 
-function createChatSession(contextKey, rawName) {
+function createChatSession(contextKey, rawName, options = {}) {
   const context = contextFor(contextKey);
-  if (context.sessions.length >= MAX_SESSIONS) {
+  const swarm = options && options.kind === SWARM_SESSION_KIND;
+  const regular = context.sessions.filter((session) => !isSwarmSession(session));
+  if (swarm) {
+    const swarmCount = context.sessions.length - regular.length;
+    if (swarmCount >= MAX_SWARM_SESSIONS) return null;
+  } else if (regular.length >= MAX_SESSIONS) {
     return null;
   }
   const now = new Date().toISOString();
   const session = {
     id: crypto.randomUUID(),
-    name: normalizeName(rawName, nextSessionName(context.sessions)),
+    name: normalizeName(rawName, nextSessionName(regular)),
+    ...(swarm ? { kind: SWARM_SESSION_KIND } : {}),
     createdAt: now,
     updatedAt: now,
   };
   context.sessions.unshift(session);
-  context.activeSessionId = session.id;
+  if (!swarm) {
+    context.activeSessionId = session.id;
+  }
   saveContext(contextKey, context);
-  return contextPayload(context);
+  const payload = contextPayload(context);
+  return swarm ? { ...payload, session: { ...session } } : payload;
 }
 
 function setActiveChatSession(contextKey, sessionId) {
@@ -153,7 +175,7 @@ function setActiveChatSession(contextKey, sessionId) {
   if (!id) return null;
   const context = contextFor(contextKey);
   const session = context.sessions.find((item) => item.id === id);
-  if (!session) return null;
+  if (!session || isSwarmSession(session)) return null;
   context.activeSessionId = id;
   saveContext(contextKey, context);
   return contextPayload(context);
@@ -166,7 +188,9 @@ function touchChatSession(contextKey, sessionId) {
   const session = context.sessions.find((item) => item.id === id);
   if (!session) return null;
   session.updatedAt = new Date().toISOString();
-  context.activeSessionId = id;
+  if (!isSwarmSession(session)) {
+    context.activeSessionId = id;
+  }
   saveContext(contextKey, context);
   return { ...session };
 }
@@ -178,11 +202,12 @@ function deleteChatSession(contextKey, sessionId) {
   const index = context.sessions.findIndex((session) => session.id === id);
   if (index === -1) return null;
   const [deleted] = context.sessions.splice(index, 1);
-  if (context.sessions.length === 0) {
+  if (!context.sessions.some((session) => !isSwarmSession(session))) {
     context.sessions.push(defaultSession(new Date().toISOString()));
   }
   if (context.activeSessionId === id) {
-    context.activeSessionId = context.sessions[0].id;
+    const firstRegular = context.sessions.find((session) => !isSwarmSession(session));
+    context.activeSessionId = firstRegular.id;
   }
   saveContext(contextKey, context);
   return {
@@ -203,6 +228,7 @@ function renameChatSession(contextKey, sessionId, rawName) {
 module.exports = {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  MAX_SWARM_SESSIONS,
   SCOPE_SEPARATOR,
   listChatSessions,
   resolveChatSession,

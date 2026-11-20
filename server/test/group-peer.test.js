@@ -46,12 +46,14 @@ for (const method of ['log', 'warn', 'error', 'info']) {
   };
 }
 
-function createFakePeer({ token = PEER_TOKEN } = {}) {
+function createFakePeer({ token = PEER_TOKEN, swarmSessions = false } = {}) {
   const state = {
     requests: [],
     sessions: new Map(),
     replies: new Map(),
     held: null,
+    chatDelayMs: 0,
+    rejectWorkdir: '',
     created: 0,
   };
   const contextFor = (agent) => {
@@ -85,14 +87,29 @@ function createFakePeer({ token = PEER_TOKEN } = {}) {
     ],
   }));
   app.get('/api/sessions', (req, res) =>
-    res.json({ ok: true, workdir: workdirOf(req), ...contextFor(req.query.agent) }));
+    res.json({
+      ok: true,
+      workdir: workdirOf(req),
+      ...(swarmSessions ? { features: ['swarm-sessions'] } : {}),
+      ...contextFor(req.query.agent),
+    }));
   app.post('/api/sessions', (req, res) => {
+    const dir = workdirOf(req);
+    if (state.rejectWorkdir && dir === state.rejectWorkdir) {
+      return res.status(403).json({ error: 'workdir is outside the isolated workspace', code: 'WORKDIR_OUTSIDE_WORKSPACE' });
+    }
     const context = contextFor(req.body.agent);
     state.created += 1;
-    const session = { id: `peer-session-${state.created}`, name: req.body.name };
+    const isSwarm = swarmSessions && req.body.kind === 'swarm';
+    const session = { id: `peer-session-${state.created}`, name: req.body.name, ...(isSwarm ? { kind: 'swarm' } : {}) };
     context.sessions.unshift(session);
-    context.activeSessionId = session.id;
-    res.json({ ok: true, workdir: workdirOf(req), ...context });
+    if (!isSwarm) context.activeSessionId = session.id;
+    return res.json({
+      ok: true,
+      workdir: dir,
+      ...(isSwarm ? { sessionId: session.id, session } : {}),
+      ...context,
+    });
   });
   app.post('/api/sessions/active', (req, res) => {
     const context = contextFor(req.body.agent);
@@ -110,8 +127,12 @@ function createFakePeer({ token = PEER_TOKEN } = {}) {
     res.json({ ok: true, requestId: req.body.requestId });
   });
   app.post('/api/chat', async (req, res) => {
-    // A real backend makes the conversation's session the active one.
-    contextFor(req.body.agent).activeSessionId = req.body.sessionId;
+    const context = contextFor(req.body.agent);
+    const targetSession = context.sessions.find((s) => s.id === req.body.sessionId);
+    // A real backend only activates non-swarm sessions.
+    if (!swarmSessions || !(targetSession && targetSession.kind === 'swarm')) {
+      context.activeSessionId = req.body.sessionId;
+    }
     const write = (type, payload) =>
       res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -122,6 +143,9 @@ function createFakePeer({ token = PEER_TOKEN } = {}) {
       state.held = null;
       write('agent_cancelled', { requestId: req.body.requestId });
       return res.end();
+    }
+    if (state.chatDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, state.chatDelayMs));
     }
     const reply = state.replies.get(req.body.agent) || `peer reply from ${req.body.agent}`;
     write('agent_progress', { line: 'thinking on the peer' });
@@ -174,6 +198,7 @@ function buildContext() {
     purgeSession: async () => true,
     finalizeStaleStreamingHistory: history.finalizeStaleStreamingHistory,
     getAgent: (key) => AGENTS[key] || null,
+    localMachineName: 'Desk',
     normalizeDeviceId: (value) => String(value || ''),
     notifyTaskCompletion: () => {},
     readHistory: history.readHistory,
@@ -444,4 +469,111 @@ test('the peer token never reaches state, history, events, responses or logs', (
   for (const text of leakSinks) assert.ok(!text.includes(PEER_TOKEN), text);
   // The token did travel to the peer, so the check above is not vacuous.
   assert.ok(peer.state.requests.some((r) => r.authorization === `Bearer ${PEER_TOKEN}`));
+});
+
+test('concurrent rounds on a legacy peer do not leave its active session on a swarm session', async () => {
+  const swarmA = await createSwarm('Swarm A', [remote('claude')]);
+  const swarmB = await createSwarm('Swarm B', [remote('claude')]);
+  assert.equal(peer.state.sessions.get('claude').activeSessionId, 'main');
+  peer.state.chatDelayMs = 300;
+  try {
+    const roundA = api('POST', '/api/group/chat', {
+      groupId: swarmA.id,
+      prompt: `@${remote('claude')} from A`,
+      peers: [credential()],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const roundB = api('POST', '/api/group/chat', {
+      groupId: swarmB.id,
+      prompt: `@${remote('claude')} from B`,
+      peers: [credential()],
+    });
+    const [resA, resB] = await Promise.all([roundA, roundB]);
+    assert.equal(resA.status, 200);
+    assert.equal(resB.status, 200);
+  } finally {
+    peer.state.chatDelayMs = 0;
+  }
+  assert.equal(peer.state.sessions.get('claude').activeSessionId, 'main');
+});
+
+test('a peer advertising swarm-sessions receives kind=swarm and skips active-session save/restore', async () => {
+  const modernPeer = await createFakePeer({ swarmSessions: true }).listen();
+  try {
+    const { status, body } = await api('POST', '/api/groups', {
+      name: 'Modern Peer',
+      members: [remote('claude', modernPeer)],
+      peers: [credential(modernPeer)],
+      configs: { [remote('claude', modernPeer)]: { workdir: '/modern/proj' } },
+    });
+    assert.equal(status, 200);
+    const createdReq = modernPeer.state.requests.find((r) => r.method === 'POST' && r.path === '/api/sessions');
+    assert.equal(createdReq.body.kind, 'swarm');
+    assert.equal(
+      modernPeer.state.requests.filter((r) => r.path === '/api/sessions/active').length,
+      0,
+      'never calls /api/sessions/active on a modern peer',
+    );
+    const beforeChat = modernPeer.state.requests.length;
+    const round = await api('POST', '/api/group/chat', {
+      groupId: body.group.id,
+      prompt: `@${remote('claude', modernPeer)} hello`,
+      peers: [credential(modernPeer)],
+    });
+    assert.equal(round.status, 200);
+    const chatPaths = modernPeer.state.requests.slice(beforeChat).map((r) => `${r.method} ${r.path}`);
+    assert.deepEqual(chatPaths, ['POST /api/chat']);
+    assert.equal(modernPeer.state.sessions.get('claude').activeSessionId, 'main');
+  } finally {
+    await modernPeer.close();
+  }
+});
+
+test('same-agent members get machine names, readable @peer-slug:agent handles, and nicknames win', async () => {
+  const group = await createSwarm('Dual Claude', ['claude', remote('claude')]);
+  const callsBefore = localCalls.length;
+  const { status, body } = await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: 'hi @claude and @peer-b:claude',
+    peers: [credential()],
+  });
+  assert.equal(status, 200);
+  assert.deepEqual(body.turns.map((t) => t.agent), ['claude', remote('claude')]);
+  const msgs = messagesOf(group).filter((m) => m.role === 'assistant');
+  assert.equal(msgs[0].metadata.agentLabel, 'Claude Code (Desk)');
+  assert.equal(msgs[1].metadata.agentLabel, 'Claude Code (Peer B)');
+  const localPrompt = localCalls[callsBefore].prompt;
+  assert.match(localPrompt, /Other members of this swarm: Claude Code \(Peer B\) \(@peer-b:claude\) \[on Peer B in \/peer\/project\]/);
+  assert.match(localPrompt, /You are running on Desk in \/tmp\/group-peer\./);
+  assert.match(localPrompt, /cannot read or edit files on another machine/i);
+});
+
+test('POST /api/groups/workdir changes a remote member workdir, deletes old session, and rolls back on failure', async () => {
+  const group = await createSwarm('Remote Move', [remote('claude')]);
+  const oldSessionId = group.memberConfigs[remote('claude')].sessionId;
+
+  // Peer rejects an outside-workspace directory -> fails cleanly, old session stays intact.
+  peer.state.rejectWorkdir = '/forbidden/dir';
+  const failed = await api('POST', '/api/groups/workdir', {
+    groupId: group.id,
+    memberWorkdirs: { [remote('claude')]: '/forbidden/dir' },
+    peers: [credential()],
+  });
+  peer.state.rejectWorkdir = '';
+  assert.equal(failed.status, 502);
+  assert.equal(groups.findGroup(group.id).group.memberConfigs[remote('claude')].workdir, '/peer/project');
+  assert.ok(peer.state.sessions.get('claude').sessions.some((s) => s.id === oldSessionId));
+
+  // Valid new dir -> creates new session and deletes the old one.
+  const moved = await api('POST', '/api/groups/workdir', {
+    groupId: group.id,
+    memberWorkdirs: { [remote('claude')]: '/peer/new-project' },
+    peers: [credential()],
+  });
+  assert.equal(moved.status, 200);
+  const nextConfig = moved.body.group.memberConfigs[remote('claude')];
+  assert.equal(nextConfig.workdir, '/peer/new-project');
+  assert.notEqual(nextConfig.sessionId, oldSessionId);
+  assert.ok(!peer.state.sessions.get('claude').sessions.some((s) => s.id === oldSessionId));
+  assert.ok(peer.state.sessions.get('claude').sessions.some((s) => s.id === nextConfig.sessionId));
 });

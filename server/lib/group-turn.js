@@ -23,6 +23,14 @@ function slug(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+// Machine/peer slug for readable @mentions: lowercase, non-alphanumerics -> '-'.
+function handleSlug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 // The author of a transcript message: explicit metadata.author wins (that is how
 // the orchestrator records it), otherwise fall back to role/agent so a message
 // written before attribution metadata still resolves sensibly.
@@ -35,11 +43,13 @@ function authorOf(message) {
   return (message && message.agent) || '';
 }
 
-// Ordered, de-duplicated list of member agent keys the human summoned in this
-// message. Tokens match a member by its agent key or by the slug of its display
-// label, so both `@claude` and `@Claude Code` resolve. Only current members can
-// be summoned; broad aliases such as `@all` are intentionally ignored.
-function parseMentions(prompt, members, labelFor) {
+// Ordered, de-duplicated list of member agent keys summoned in this message.
+// Tokens match a member by its agent key, by its readable handle
+// (`@<peer-slug>:<agent>`), or by the slug of its display label/nickname, so
+// `@claude`, `@studio:claude`, `@<peerId>:claude`, and `@ClaudeCode` all
+// resolve. Only current members can be summoned; broad aliases such as `@all`
+// are intentionally ignored.
+function parseMentions(prompt, members, labelFor, handleFor) {
   const text = String(prompt || '');
   const list = Array.isArray(members) ? members : [];
   const order = [];
@@ -57,6 +67,8 @@ function parseMentions(prompt, members, labelFor) {
     const target = list.find(
       (member) =>
         member.toLowerCase() === token ||
+        (typeof handleFor === 'function' &&
+          String(handleFor(member) || '').toLowerCase() === token) ||
         slug(typeof labelFor === 'function' ? labelFor(member) : member) === slug(token),
     );
     if (target) add(target);
@@ -100,8 +112,19 @@ function lineFor(message, labelFor) {
 // each delta message labeled with its speaker. Bounded to maxBytes by keeping the
 // most recent messages and noting any omission, so a long silence cannot produce
 // a prompt that exceeds the request budget.
+function formatLocation(machine, workdir) {
+  const m = typeof machine === 'string' ? machine.trim() : '';
+  const w = typeof workdir === 'string' ? workdir.trim() : '';
+  if (m && w) return `on ${m} in ${w}`;
+  if (m) return `on ${m}`;
+  if (w) return `in ${w}`;
+  return '';
+}
+
 function buildGroupPrompt({
   selfLabel,
+  selfMachine,
+  selfWorkdir,
   persona,
   delta,
   labelFor,
@@ -110,22 +133,40 @@ function buildGroupPrompt({
 }) {
   const name = String(selfLabel || 'this agent');
   const role = typeof persona === 'string' ? persona.trim() : '';
+  const selfLoc = formatLocation(selfMachine, selfWorkdir);
+  const selfLocationLine = selfLoc ? `\n\nYou are running ${selfLoc}.` : '';
   // Summoning only happens if the agent knows it can, and knows the exact token
-  // that resolves. Each entry is `Label (@key)`: the key always parses, while a
-  // nickname only does when it is a single word.
-  const others = (Array.isArray(roster) ? roster : [])
-    .filter((member) => member && member.key)
-    .map((member) => `${member.label || member.key} (@${member.key})`);
+  // that resolves. Each entry is `Label (@handle)` (with machine/workdir when
+  // known): the handle always parses, while a nickname only does when it is a
+  // single word.
+  const rosterEntries = (Array.isArray(roster) ? roster : []).filter(
+    (member) => member && member.key,
+  );
+  const hasLocations = Boolean(selfLoc) || rosterEntries.some(
+    (member) => member.machine || member.workdir,
+  );
+  const others = rosterEntries.map((member) => {
+    const handle = member.handle || member.key;
+    const loc = formatLocation(member.machine, member.workdir);
+    return loc
+      ? `${member.label || member.key} (@${handle}) [${loc}]`
+      : `${member.label || member.key} (@${handle})`;
+  });
+  const remoteNote = hasLocations
+    ? ' You cannot read or edit files on another machine; ask that machine\'s member instead.'
+    : '';
   const rosterLine = others.length
     ? `\n\nOther members of this swarm: ${others.join(', ')}. ` +
       'Mentioning one of them by that @name hands them the floor once you ' +
       'finish, and they will see this exchange. Only do it when you actually ' +
-      'need them; say nothing of the sort to end the exchange.'
+      'need them; say nothing of the sort to end the exchange.' +
+      remoteNote
     : '';
   const header =
     `You are "${name}" in a group chat with a human and possibly other AI agents. ` +
     'Each line below is prefixed with its speaker. Reply only as yourself, ' +
     'addressing the conversation; it is now your turn to respond.' +
+    selfLocationLine +
     rosterLine +
     (role ? `\n\nYour role in this swarm: ${role}` : '');
   const footer = `(It is now your turn, ${name}.)`;
@@ -170,6 +211,7 @@ function buildGroupPrompt({
 
 module.exports = {
   HUMAN_AUTHOR,
+  handleSlug,
   authorOf,
   parseMentions,
   deltaSince,

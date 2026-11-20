@@ -39,6 +39,8 @@ const sentEvents = [];
 const scriptedReplies = new Map();
 // Per-agent promises a turn waits on, so a test can hold a round open.
 const heldReplies = new Map();
+const purgedCalls = [];
+let validateWorkdirOverride = null;
 
 function buildContext() {
   const runningScopes = new Set();
@@ -76,7 +78,10 @@ function buildContext() {
     activeRequests: new Map(),
     agentTurnDependencies,
     clearHistory: history.clearHistory,
-    purgeSession: async () => true,
+    purgeSession: async (sessionKey, opts) => {
+      purgedCalls.push({ sessionKey, ...opts });
+      return true;
+    },
     finalizeStaleStreamingHistory: history.finalizeStaleStreamingHistory,
     getAgent: (key) => AGENTS[key] || null,
     normalizeDeviceId: () => '',
@@ -93,7 +98,8 @@ function buildContext() {
     upsertHistoryMessage: history.upsertHistoryMessage,
     // The real resolver canonicalizes + checks the path exists; the route only
     // needs the resolved dir, so echo it back for the test.
-    validateWorkdir: (value) => ({ dir: String(value), created: false }),
+    validateWorkdir: (value, opts) =>
+      validateWorkdirOverride ? validateWorkdirOverride(value, opts) : { dir: String(value), created: false },
   };
 }
 
@@ -116,10 +122,10 @@ after(() => {
   fs.rmSync(scratchDir, { recursive: true, force: true });
 });
 
-function api(method, urlPath, body) {
+function api(method, urlPath, body, workdir = WORKDIR) {
   return fetch(`${base}${urlPath}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Workdir': WORKDIR },
+    headers: { 'Content-Type': 'application/json', 'X-Workdir': workdir },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
@@ -179,7 +185,7 @@ test('each member resumes its own group session key, not the group transcript ke
   assert.ok(!codexCall.sessionKey.includes('group:'));
 });
 
-test('same-message mentions run in parallel off one snapshot, not seeing each other', () => {
+test('same-message mentions run in order, each seeing earlier replies in the same wave', () => {
   const codexCall = runCalls.find((c) => c.agentKey === 'codex');
   const claudeCall = runCalls.find((c) => c.agentKey === 'claude');
   // Both see the human turn and are told it is their turn.
@@ -187,11 +193,29 @@ test('same-message mentions run in parallel off one snapshot, not seeing each ot
   assert.match(claudeCall.prompt, /Human: please .*build the thing/);
   assert.match(codexCall.prompt, /your turn, Codex/);
   assert.match(claudeCall.prompt, /your turn, Claude Code/);
-  // Because they were summoned together they share the pre-round snapshot, so
-  // neither is fed the sibling's reply — that independence is what lets them run
-  // concurrently instead of one-after-another.
+  // Codex ran first so it did not see Claude; Claude ran second so it sees Codex's reply.
   assert.ok(!codexCall.prompt.includes('reply from claude'));
-  assert.ok(!claudeCall.prompt.includes('reply from codex'));
+  assert.match(claudeCall.prompt, /Codex: reply from codex/);
+});
+
+test('a member that already ran after a mentioning reply in the same wave is not re-summoned', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'No Stale Re-summon',
+    members: ['claude', 'codex'],
+  })).json();
+  const group = created.group;
+  // Codex runs first and mentions @claude; Claude runs second in the same wave,
+  // already sees Codex's reply, and finishes without mentioning anyone.
+  scriptedReplies.set('codex', 'hey @claude what do you think?');
+  scriptedReplies.set('claude', 'looks good, we are done');
+
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@codex and @claude check this',
+  })).json();
+  scriptedReplies.clear();
+
+  assert.deepEqual(round.turns.map((t) => t.agent), ['codex', 'claude']);
 });
 
 test('a member @mentioned by another member takes the next turn', async () => {
@@ -403,4 +427,91 @@ test('a second message while a round runs is refused and history names the round
     1,
     'the refused message is not recorded',
   );
+});
+
+test('default swarm name uses the lowest unused Swarm N', async () => {
+  const first = await (await api('POST', '/api/groups', { members: ['claude'] })).json();
+  const second = await (await api('POST', '/api/groups', { members: ['claude'] })).json();
+  assert.equal(first.group.name, 'Swarm 1');
+  assert.equal(second.group.name, 'Swarm 2');
+  await api('POST', '/api/groups/delete', { groupId: first.group.id });
+  const third = await (await api('POST', '/api/groups', { members: ['claude'] })).json();
+  assert.equal(third.group.name, 'Swarm 1');
+});
+
+test('GET /api/groups lists swarms across workdirs and routes find them from any solo workdir', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'Cross Workdir',
+    members: ['claude'],
+  }, '/tmp/wd-alpha')).json();
+  const group = created.group;
+  const listed = await (await api('GET', '/api/groups', undefined, '/tmp/wd-beta')).json();
+  assert.ok(listed.groups.some((g) => g.id === group.id));
+
+  const eventsBefore = sentEvents.length;
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: '@claude hello from beta',
+  }, '/tmp/wd-beta')).json();
+  assert.equal(round.ok, true);
+  assert.deepEqual(round.turns, [{ agent: 'claude', status: 'done' }]);
+  const emitted = sentEvents.slice(eventsBefore).filter((e) => e.payload.groupId === group.id);
+  assert.ok(emitted.some((e) => e.type === 'group_message'));
+  assert.ok(emitted.some((e) => e.type === 'group_done'));
+  assert.ok(emitted.every((e) => e.payload.scopeWorkdir === undefined));
+
+  const hist = await (await api('GET', `/api/group/history?groupId=${group.id}`, undefined, '/tmp/wd-gamma')).json();
+  assert.equal(hist.messages.length, 2);
+});
+
+test('POST /api/groups/workdir changes local work tree, moves transcript, purges sessions, and validates', async () => {
+  const created = await (await api('POST', '/api/groups', {
+    name: 'Move Tree',
+    members: ['claude'],
+    workdir: '/tmp/old-tree',
+  })).json();
+  const group = created.group;
+  await api('POST', '/api/group/chat', { groupId: group.id, prompt: '@claude hi' });
+
+  // Invalid workdir is rejected and leaves the swarm unchanged.
+  validateWorkdirOverride = () => {
+    throw new Error('workdir path does not exist');
+  };
+  const bad = await api('POST', '/api/groups/workdir', {
+    groupId: group.id,
+    workdir: '/tmp/missing-tree',
+  });
+  validateWorkdirOverride = null;
+  assert.equal(bad.status, 400);
+
+  const purgedBefore = purgedCalls.length;
+  const moved = await (await api('POST', '/api/groups/workdir', {
+    groupId: group.id,
+    workdir: '/tmp/new-tree',
+  })).json();
+  assert.equal(moved.ok, true);
+  assert.equal(moved.group.workdir, '/tmp/new-tree');
+  assert.ok(purgedCalls.slice(purgedBefore).some((c) => c.workdir === '/tmp/old-tree' && c.agentKey === 'claude'));
+  const hist = await (await api('GET', `/api/group/history?groupId=${group.id}`)).json();
+  assert.equal(hist.messages.length, 2, 'transcript is preserved across workdir change');
+
+  // Refused while a round is running (409 GROUP_BUSY).
+  let release;
+  heldReplies.set('claude', new Promise((resolve) => { release = resolve; }));
+  const running = api('POST', '/api/group/chat', { groupId: group.id, prompt: '@claude hold' });
+  try {
+    for (let i = 0; i < 400 && !runCalls.some((c) => c.prompt.includes('hold')); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const busy = await api('POST', '/api/groups/workdir', {
+      groupId: group.id,
+      workdir: '/tmp/another-tree',
+    });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).code, 'GROUP_BUSY');
+  } finally {
+    release();
+    heldReplies.clear();
+  }
+  await running;
 });

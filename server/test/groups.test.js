@@ -148,3 +148,48 @@ test('validGroupId rejects separator-injection attempts', () => {
   assert.equal(groups.validGroupId('group:other'), '');
   assert.equal(groups.validGroupId(''), '');
 });
+
+test('listAllGroups and findGroup see swarms across workspace buckets', () => {
+  const a = groups.createGroup('/tmp/wd-all-1', 'Alpha', ['claude']);
+  const b = groups.createGroup('/tmp/wd-all-2', 'Beta', ['codex']);
+  const all = groups.listAllGroups();
+  assert.ok(all.some((g) => g.id === a.id));
+  assert.ok(all.some((g) => g.id === b.id));
+  const foundA = groups.findGroup(a.id);
+  assert.equal(foundA.workspace, '/tmp/wd-all-1');
+  assert.equal(foundA.group.name, 'Alpha');
+  const foundB = groups.findGroup(b.id);
+  assert.equal(foundB.workspace, '/tmp/wd-all-2');
+  assert.equal(foundB.group.name, 'Beta');
+  assert.equal(groups.findGroup('does-not-exist'), null);
+});
+
+test('nextGroupName picks the lowest unused Swarm N', () => {
+  assert.equal(groups.nextGroupName([]), 'Swarm 1');
+  assert.equal(groups.nextGroupName([{ name: 'Swarm 1' }, { name: 'Swarm 3' }]), 'Swarm 2');
+  assert.equal(groups.nextGroupName([{ name: 'Swarm 2' }]), 'Swarm 1');
+});
+
+test('setGroupWorkdir updates local workdir and remote member workdir/sessionId', () => {
+  const ws = '/tmp/wd-update-tree';
+  const peerKey = '0123456789ab:claude';
+  const created = groups.createGroup(ws, 'Trees', ['claude', peerKey], {
+    workdir: '/old/local',
+    memberConfigs: {
+      claude: { model: 'opus', nickname: 'Local' },
+      [peerKey]: { workdir: '/old/peer', sessionId: 'old-s', nickname: 'Remote' },
+    },
+    peers: { '0123456789ab': { name: 'Studio', baseUrl: 'http://studio' } },
+  });
+  const updated = groups.setGroupWorkdir(ws, created.id, {
+    workdir: '/new/local',
+    remoteUpdates: { [peerKey]: { workdir: '/new/peer', sessionId: 'new-s' } },
+  });
+  assert.equal(updated.workdir, '/new/local');
+  assert.deepEqual(updated.memberConfigs.claude, { model: 'opus', nickname: 'Local' });
+  assert.deepEqual(updated.memberConfigs[peerKey], {
+    workdir: '/new/peer',
+    sessionId: 'new-s',
+    nickname: 'Remote',
+  });
+});

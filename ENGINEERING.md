@@ -339,28 +339,46 @@ architecture change (see Changes).
   always applies the precise sensitive-path denylist and optional
   `RELAY_FS_ROOTS` allowlist in `server/lib/filesystem.js`.
 - A Swarm owns one canonical transcript and private resumable sessions per
-  member. A round runs in waves: each wave snapshots the transcript once and
-  runs everyone summoned in it in parallel from their own delta prompts. The
-  human's `@mentions` open wave one; `@mentions` inside a member's reply summon
-  the next wave, bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since
-  two members naming each other would otherwise never stop. A member never
-  summons itself, and a failed or cancelled turn summons no one. One round runs
-  at a time: a message sent meanwhile is refused (`GROUP_BUSY`), and the Swarm
-  history reports the running round (`runningRequestId`) so a reopened screen
-  still offers Stop. The app shows a member as working until its reply is
-  complete; Swarm replies are not streamed.
-- Swarm configuration is stored under the workspace that lists it, while its
-  chosen work tree is the directory members actually use.
+  member. A round runs in waves: within a wave, summoned members run one after
+  another in mention order, each planned right before it runs so its delta
+  includes replies already given earlier in the same wave. The human's
+  `@mentions` open wave one; `@mentions` inside a member's reply summon the next
+  wave (skipping any member that already ran after that reply in the same wave),
+  bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since two members
+  naming each other would otherwise never stop. A member never summons itself,
+  and a failed or cancelled turn summons no one. One round runs at a time per
+  Swarm: a second message to that Swarm is refused (`GROUP_BUSY`), while
+  different Swarms run independently (tracked per group id in
+  `GroupChatController`), and the Swarm history reports the running round
+  (`runningRequestId`) so a reopened screen still offers Stop. The app shows a
+  member as working until its reply is complete; Swarm replies are not streamed.
+- Swarms are stored bucketed by workspace in `groups.json`, while
+  `GET /api/groups` lists every Swarm on the backend regardless of the device's
+  current solo-chat directory and every group route resolves a Swarm by id
+  across buckets; Swarm events (`group_message`, `group_done`,
+  `group_cancelled`, `group_agent_*`) omit `scopeWorkdir` so any device viewing
+  the Swarm sees them. Each machine's default work directory (`GET /api/workdir`
+  `defaultDir`) is used as the Swarm form's default (rather than the device's
+  last-used directory). Work directories are validated on creation and on change
+  (`POST /api/groups/workdir`, refused with `GROUP_BUSY` while a round runs),
+  which resets only the affected members' sessions (purging local member
+  sessions, or creating new peer sessions and deleting the old ones with
+  rollback on failure). Each member's prompt states its own machine and work
+  directory, every other member's machine and work directory, and that it cannot
+  read or edit files on another machine.
 - A Swarm member is a local agent key or a remote member `<peerId>:<agentKey>`
   on another Relay backend (B); `peerId` is the first 12 hex digits of the
   SHA-256 of B's normalized `baseUrl`, not the credential's machine id, which
-  is random per generated credential. The Swarm record keeps `peers`
-  (`name`, `baseUrl`) and each remote member's B `workdir` and dedicated
-  `sessionId`; a peer no member references is dropped. A remote turn is the
-  same runAgentTurn with only `runAgent` replaced by B's `/api/chat`, so
-  history, events, mentions, Stop and notifications need no second path.
-  Remote members use B's own model/effort/permission. B is used only through
-  its existing API, so B needs no change and may be older.
+  is random per generated credential. When two members share an agent label,
+  local members also append `(<hostname>)` alongside remote members'
+  `(<peer name>)`; mentions accept readable `@<peer-slug>:<agent>` handles in
+  addition to `@<peerId>:<agent>` (nicknames keep working and win). The Swarm
+  record keeps `peers` (`name`, `baseUrl`) and each remote member's B `workdir`
+  and dedicated `sessionId`; a peer no member references is dropped. A remote
+  turn is the same runAgentTurn with only `runAgent` replaced by B's
+  `/api/chat`, so history, events, mentions, Stop and notifications need no
+  second path. Remote members use B's own model/effort/permission. B is used
+  only through its existing API, so B needs no change and may be older.
 - B's token never reaches A's disk: the app sends `peers: [{ baseUrl, token }]`
   in each Swarm request that reaches B, and A keeps it in memory for that
   request only — not in `groups.json`, history, events, responses, errors or
@@ -369,9 +387,15 @@ architecture change (see Changes).
   member without a credential in the request ends its turn with
   `PEER_NOT_LINKED`; unreachable/refused peers end it with `PEER_UNREACHABLE`/
   `PEER_UNAUTHORIZED`; the other members still run.
-- Creating a session or running a turn makes it B's active session, so the peer
-  client restores B's previous active session afterwards, keeping B's own user
-  where they were.
+- Peer Swarm sessions: `POST /api/sessions` accepts `kind: 'swarm'` (advertised
+  on `GET /api/sessions` via `features: ['swarm-sessions']`). Swarm sessions are
+  hidden from `GET /api/sessions`, have their own cap (32 per context, separate
+  from `MAX_SESSIONS` 8), never become active on create or `touchChatSession`,
+  still resolve by explicit id for `/api/chat`, delete and clear, and are
+  excluded from history search. When B advertises `swarm-sessions`, `peer-client`
+  skips active-session save/restore; against older peers, `peer-client` uses a
+  process-wide reference-counted guard per `(peer, agent, workdir)` so
+  concurrent rounds capture B's active session on 0→1 and restore it on 1→0.
 - The SSH terminal exchanges the bearer credential for a short-lived,
   single-use WebSocket ticket. Never put the bearer token in a socket URL,
   because URLs can expose it through access logs. A token record owns one

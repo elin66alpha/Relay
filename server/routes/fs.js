@@ -14,6 +14,7 @@ module.exports = function createFsRouter(ctx) {
     MAX_UPLOAD_BYTES,
     createAbsoluteDirectory,
     eventWorkdir,
+    getDefaultWorkdir,
     listAbsoluteDirectory,
     prepareDownload,
     prepareDownloadAbsolute,
@@ -34,7 +35,8 @@ module.exports = function createFsRouter(ctx) {
   router.get('/api/workdir', (req, res) => {
     try {
       const dir = requestWorkdir(req);
-      return res.json({ dir, busy: workdirBusy(dir) });
+      const defaultDir = typeof getDefaultWorkdir === 'function' ? getDefaultWorkdir() : '';
+      return res.json({ dir, defaultDir, busy: workdirBusy(dir) });
     } catch (err) {
       return sendWorkdirError(res, err);
     }

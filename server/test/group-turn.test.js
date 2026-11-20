@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
 const {
+  handleSlug,
   authorOf,
   parseMentions,
   deltaSince,
@@ -139,4 +140,42 @@ test('buildGroupPrompt bounds the prompt and notes omitted history', () => {
   assert.match(prompt, /\[earlier messages omitted\]/);
   // The most recent message must survive the truncation.
   assert.match(prompt, /Human: 49 /);
+});
+
+test('handleSlug normalizes peer names and parseMentions resolves readable handles', () => {
+  assert.equal(handleSlug('Peer B'), 'peer-b');
+  assert.equal(handleSlug('My Mac Studio!'), 'my-mac-studio');
+  const members = ['claude', '4e7eeaf61885:claude'];
+  const labels = { claude: 'Claude Code (Desk)', '4e7eeaf61885:claude': 'Claude Code (Peer B)' };
+  const handles = { claude: 'claude', '4e7eeaf61885:claude': 'peer-b:claude' };
+  assert.deepEqual(
+    parseMentions('ask @peer-b:claude and @claude', members, (k) => labels[k], (k) => handles[k]),
+    ['4e7eeaf61885:claude', 'claude'],
+  );
+  assert.deepEqual(
+    parseMentions('legacy @4e7eeaf61885:claude still works', members, (k) => labels[k], (k) => handles[k]),
+    ['4e7eeaf61885:claude'],
+  );
+});
+
+test('buildGroupPrompt shows readable handles, machine/workdir locations, and cross-machine note', () => {
+  const prompt = buildGroupPrompt({
+    selfLabel: 'Claude Code (Desk)',
+    selfMachine: 'Desk',
+    selfWorkdir: '/work/desk',
+    delta: [human('check both repos')],
+    labelFor,
+    roster: [
+      {
+        key: '4e7eeaf61885:claude',
+        handle: 'peer-b:claude',
+        label: 'Claude Code (Peer B)',
+        machine: 'Peer B',
+        workdir: '/srv/peer',
+      },
+    ],
+  });
+  assert.match(prompt, /You are running on Desk in \/work\/desk\./);
+  assert.match(prompt, /Claude Code \(Peer B\) \(@peer-b:claude\) \[on Peer B in \/srv\/peer\]/);
+  assert.match(prompt, /cannot read or edit files on another machine/i);
 });

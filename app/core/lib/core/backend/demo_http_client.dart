@@ -197,6 +197,7 @@ class DemoHttpClient extends http.BaseClient {
       case '/api/workdir':
         return _jsonResponse(200, const <String, Object?>{
           'dir': _demoWorkdir,
+          'defaultDir': _demoWorkdir,
           'busy': false,
         });
       case '/api/workdirs/recent':

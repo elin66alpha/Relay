@@ -48,11 +48,12 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? _selected;
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _loadingGroups = false;
-  // The running round: the one this device sent, or one the backend reports
-  // running when the screen opens, so Stop survives leaving and returning.
-  String? _activeRequestId;
-  // True while this device's own send is waiting for its round to end.
-  bool _posting = false;
+  // Running rounds keyed by group id: either started by this device or
+  // reported running by the backend on load, so Stop is per swarm and survives
+  // switching swarms or leaving and returning.
+  final Map<String, String> _activeRequestIds = <String, String>{};
+  // Group ids whose send() call from this device is currently in flight.
+  final Set<String> _postingGroups = <String>{};
   String? _error;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _reconnectTimer;
@@ -66,7 +67,8 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? get selected => _selected;
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   bool get loadingGroups => _loadingGroups;
-  bool get sending => _activeRequestId != null;
+  bool get sending =>
+      _selected != null && _activeRequestIds.containsKey(_selected!.id);
   String? get error => _error;
 
   List<MachineCredential> _peersFor(Iterable<String> members) =>
@@ -133,16 +135,18 @@ class GroupChatController extends ChangeNotifier {
   }) async {
     _error = null;
     try {
-      _groups = await _client.createGroup(
+      final (:ChatGroup group, :List<ChatGroup> groups) =
+          await _client.createGroup(
         name,
         members,
         workdir: workdir,
         configs: configs,
         peers: _peersFor(members),
       );
+      _groups = groups;
       final ChatGroup created = _groups.firstWhere(
-        (ChatGroup g) => g.name == name,
-        orElse: () => _groups.first,
+        (ChatGroup g) => g.id == group.id,
+        orElse: () => group,
       );
       _selected = created;
       _messages.clear();
@@ -182,6 +186,32 @@ class GroupChatController extends ChangeNotifier {
     }
   }
 
+  Future<bool> updateWorkdir(
+    ChatGroup group, {
+    String workdir = '',
+    Map<String, String> memberWorkdirs = const <String, String>{},
+  }) async {
+    _error = null;
+    try {
+      _groups = await _client.setGroupWorkdir(
+        group.id,
+        workdir: workdir,
+        memberWorkdirs: memberWorkdirs,
+        peers: _peersFor(group.members),
+      );
+      _selected = _groups.firstWhere(
+        (ChatGroup g) => g.id == group.id,
+        orElse: () => _selected ?? group,
+      );
+      _safeNotify();
+      return true;
+    } on BackendException catch (err) {
+      _error = friendlyErrorText(_strings, err);
+      _safeNotify();
+      return false;
+    }
+  }
+
   Future<void> deleteGroup(ChatGroup group) async {
     _error = null;
     try {
@@ -189,6 +219,8 @@ class GroupChatController extends ChangeNotifier {
         group.id,
         peers: _peersFor(group.members),
       );
+      _activeRequestIds.remove(group.id);
+      _postingGroups.remove(group.id);
       if (_selected?.id == group.id) {
         _selected = _groups.isNotEmpty ? _groups.first : null;
         _messages.clear();
@@ -218,11 +250,16 @@ class GroupChatController extends ChangeNotifier {
   Future<bool> send(String rawText) async {
     final ChatGroup? group = _selected;
     final String text = rawText.trim();
-    if (group == null || text.isEmpty || sending) return false;
+    if (group == null ||
+        text.isEmpty ||
+        _activeRequestIds.containsKey(group.id)) {
+      return false;
+    }
+    final String groupId = group.id;
     final String requestId = _newRequestId();
     bool sent = false;
-    _activeRequestId = requestId;
-    _posting = true;
+    _activeRequestIds[groupId] = requestId;
+    _postingGroups.add(groupId);
     _error = null;
     // Optimistic human bubble with the id the backend will use, so the echoed
     // group_message event upserts in place instead of duplicating.
@@ -238,7 +275,7 @@ class GroupChatController extends ChangeNotifier {
     _safeNotify();
     try {
       await _client.sendGroupMessage(
-        groupId: group.id,
+        groupId: groupId,
         prompt: text,
         requestId: requestId,
         peers: _peersFor(group.members),
@@ -251,16 +288,20 @@ class GroupChatController extends ChangeNotifier {
         sent = true;
       }
     } finally {
-      _activeRequestId = null;
-      _posting = false;
+      if (_activeRequestIds[groupId] == requestId) {
+        _activeRequestIds.remove(groupId);
+      }
+      _postingGroups.remove(groupId);
       _safeNotify();
-      await _loadHistory(group.id);
+      await _loadHistory(groupId);
     }
     return sent;
   }
 
   Future<void> cancel() async {
-    final String? requestId = _activeRequestId;
+    final String? groupId = _selected?.id;
+    final String? requestId =
+        groupId == null ? null : _activeRequestIds[groupId];
     if (requestId == null) return;
     try {
       await _client.cancelGroupMessage(requestId);
@@ -273,13 +314,22 @@ class GroupChatController extends ChangeNotifier {
     _safeNotify();
     try {
       final GroupHistory history = await _client.fetchGroupHistory(groupId);
+      if (!_postingGroups.contains(groupId)) {
+        final String? running = history.runningRequestId;
+        if (running != null && running.isNotEmpty) {
+          _activeRequestIds[groupId] = running;
+        } else {
+          _activeRequestIds.remove(groupId);
+        }
+      }
       if (_selected?.id != groupId) return;
       _messages
         ..clear()
         ..addAll(history.messages);
-      if (!_posting) _activeRequestId = history.runningRequestId;
     } on BackendException catch (err) {
-      _error = friendlyErrorText(_strings, err);
+      if (_selected?.id == groupId) {
+        _error = friendlyErrorText(_strings, err);
+      }
     } finally {
       _safeNotify();
     }
@@ -306,11 +356,29 @@ class GroupChatController extends ChangeNotifier {
   void _handleEvent(BackendEvent event) {
     final Map<String, Object?> data = event.data;
     final String? groupId = data['groupId'] as String?;
+    if (groupId == null) return;
     final ChatGroup? group = _selected;
-    if (group == null || groupId == null || groupId != group.id) return;
+    final bool isSelected = group != null && groupId == group.id;
 
     switch (event.type) {
+      case 'group_done':
+      case 'group_cancelled':
+        final String? eventRequestId = data['requestId'] as String?;
+        final bool ownPosting = _postingGroups.contains(groupId) &&
+            eventRequestId == _activeRequestIds[groupId];
+        if (!ownPosting &&
+            (eventRequestId == null ||
+                _activeRequestIds[groupId] == eventRequestId)) {
+          _activeRequestIds.remove(groupId);
+        }
+        if (isSelected && !ownPosting) {
+          _loadHistory(groupId);
+        } else if (!ownPosting) {
+          _safeNotify();
+        }
+        break;
       case 'group_message':
+        if (!isSelected) return;
         final Map<String, Object?> message =
             (data['message'] as Map?)?.cast<String, Object?>() ??
                 const <String, Object?>{};
@@ -327,21 +395,21 @@ class GroupChatController extends ChangeNotifier {
         );
         _safeNotify();
         break;
+      case 'group_agent_start':
       case 'agent_start':
+        if (!isSelected) return;
         _ensureBubble(data);
         _safeNotify();
         break;
+      case 'group_agent_done':
+      case 'group_agent_error':
+      case 'group_agent_cancelled':
       case 'agent_done':
       case 'agent_error':
       case 'agent_cancelled':
+        if (!isSelected) return;
         // The member's whole reply is in the transcript now.
-        _loadHistory(group.id);
-        break;
-      case 'group_done':
-      case 'group_cancelled':
-        // This device's own send reconciles when its request returns.
-        if (_posting && data['requestId'] == _activeRequestId) break;
-        _loadHistory(group.id);
+        _loadHistory(groupId);
         break;
       default:
         break;

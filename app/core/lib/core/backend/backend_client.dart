@@ -729,7 +729,7 @@ class BackendClient {
     };
   }
 
-  Future<List<ChatGroup>> createGroup(
+  Future<({ChatGroup group, List<ChatGroup> groups})> createGroup(
     String name,
     List<String> members, {
     String workdir = '',
@@ -749,7 +749,12 @@ class BackendClient {
       },
       timeout: const Duration(seconds: 60),
     );
-    return _groupsFrom(decoded);
+    final List<ChatGroup> groups = _groupsFrom(decoded);
+    final Object? rawGroup = decoded is Map ? decoded['group'] : null;
+    final ChatGroup group = rawGroup is Map
+        ? ChatGroup.fromJson(rawGroup.cast<String, Object?>())
+        : groups.first;
+    return (group: group, groups: groups);
   }
 
   Future<List<ChatGroup>> setGroupMembers(
@@ -766,6 +771,26 @@ class BackendClient {
         'groupId': groupId,
         'members': members,
         if (configs.isNotEmpty) 'configs': configs,
+        ..._peersBody(peers),
+      },
+      timeout: const Duration(seconds: 60),
+    );
+    return _groupsFrom(decoded);
+  }
+
+  Future<List<ChatGroup>> setGroupWorkdir(
+    String groupId, {
+    String workdir = '',
+    Map<String, String> memberWorkdirs = const <String, String>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/groups/workdir',
+      body: <String, Object?>{
+        'groupId': groupId,
+        if (workdir.isNotEmpty) 'workdir': workdir,
+        if (memberWorkdirs.isNotEmpty) 'memberWorkdirs': memberWorkdirs,
         ..._peersBody(peers),
       },
       timeout: const Duration(seconds: 60),

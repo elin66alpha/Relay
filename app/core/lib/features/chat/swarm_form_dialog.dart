@@ -276,6 +276,7 @@ class SwarmFormDialog extends StatefulWidget {
     required this.nameEditable,
     required this.workTreeEditable,
     this.machineBackend,
+    this.onSubmit,
   });
 
   final String title;
@@ -295,6 +296,10 @@ class SwarmFormDialog extends StatefulWidget {
 
   /// The client for another machine; a test replaces it.
   final BackendClient Function(MachineCredential machine)? machineBackend;
+
+  /// Optional async submit handler. When non-null, returning a non-null error
+  /// string keeps the dialog open and displays the error in the form.
+  final Future<String?> Function(SwarmForm form)? onSubmit;
 
   @override
   State<SwarmFormDialog> createState() => _SwarmFormDialogState();
@@ -323,12 +328,27 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
       ),
   ];
   String? _validationError;
+  bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.workTreeEditable && _workdir.isEmpty) {
+      unawaited(_loadLocalDefaultWorkdir());
+    }
     for (final _Machine machine in _machines) {
       unawaited(_loadMachine(machine));
+    }
+  }
+
+  Future<void> _loadLocalDefaultWorkdir() async {
+    try {
+      final WorkdirInfo info = await widget.backend.workdir();
+      if (mounted && _workdir.isEmpty && info.defaultDir.isNotEmpty) {
+        setState(() => _workdir = info.defaultDir);
+      }
+    } on BackendException {
+      // Old backend or unreachable: leave empty so backend uses its default.
     }
   }
 
@@ -350,7 +370,9 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
     }
     if (machine.agents != null) {
       try {
-        machine.workdir = (await machine.client.workdir()).dir;
+        // Default to the peer's own defaultDir, not the last-used solo dir.
+        // Older peers omit defaultDir -> empty -> peer uses its default.
+        machine.workdir = (await machine.client.workdir()).defaultDir;
       } on BackendException {
         // The member then starts in that machine's default work directory.
       }
@@ -460,7 +482,8 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
     });
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_submitting) return;
     final AppStrings strings = context.l10n;
     if (_selected.isEmpty) {
       setState(() => _validationError = strings.selectMembers);
@@ -488,14 +511,28 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
       if (catalog != null) _normalizeConfig(catalog, config);
       if (config.isNotEmpty) configs[key] = <String, String>{...config};
     }
-    Navigator.of(context).pop(
-      SwarmForm(
-        name: _nameController.text.trim(),
-        members: members,
-        workdir: _workdir.trim(),
-        configs: configs,
-      ),
+    final SwarmForm form = SwarmForm(
+      name: _nameController.text.trim(),
+      members: members,
+      workdir: _workdir.trim(),
+      configs: configs,
     );
+    if (widget.onSubmit != null) {
+      setState(() {
+        _submitting = true;
+        _validationError = null;
+      });
+      final String? error = await widget.onSubmit!(form);
+      if (!mounted) return;
+      if (error != null) {
+        setState(() {
+          _submitting = false;
+          _validationError = error;
+        });
+        return;
+      }
+    }
+    if (mounted) Navigator.of(context).pop(form);
   }
 
   @override
@@ -603,11 +640,11 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
       ),
       actions: <Widget>[
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
           child: Text(strings.cancel),
         ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: _submitting ? null : _submit,
           child: Text(widget.nameEditable ? strings.create : strings.ok),
         ),
       ],
@@ -940,5 +977,229 @@ class _MemberEditDialogState extends State<_MemberEditDialog> {
       default:
         return group;
     }
+  }
+}
+
+/// Change a swarm's pinned local work tree and/or its remote members' peer work
+/// directories. Calls [onSubmit] and stays open with the error message on failure.
+class SwarmWorkdirDialog extends StatefulWidget {
+  const SwarmWorkdirDialog({
+    super.key,
+    required this.group,
+    required this.backend,
+    required this.localMachineName,
+    required this.machines,
+    required this.onSubmit,
+    this.machineBackend,
+  });
+
+  final ChatGroup group;
+  final BackendClient backend;
+  final String localMachineName;
+  final List<MachineCredential> machines;
+  final Future<String?> Function(
+    String workdir,
+    Map<String, String> memberWorkdirs,
+  ) onSubmit;
+  final BackendClient Function(MachineCredential machine)? machineBackend;
+
+  @override
+  State<SwarmWorkdirDialog> createState() => _SwarmWorkdirDialogState();
+}
+
+class _SwarmWorkdirDialogState extends State<SwarmWorkdirDialog> {
+  late String _localWorkdir = widget.group.workdir;
+  late final Map<String, String> _remoteWorkdirs = <String, String>{
+    for (final String member in widget.group.members)
+      if (memberPeerId(member) != null)
+        member: widget.group.memberConfigs[member]?['workdir'] ?? '',
+  };
+  late final Map<String, BackendClient> _peerClients = <String, BackendClient>{
+    for (final MachineCredential machine in widget.machines)
+      peerIdForBaseUrl(machine.baseUrl): (widget.machineBackend ??
+          (MachineCredential m) => BackendClient(machine: m))(machine),
+  };
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    for (final BackendClient client in _peerClients.values) {
+      client.close();
+    }
+    super.dispose();
+  }
+
+  Future<void> _pickLocal() async {
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) =>
+          WorkTreePickerDialog(backend: widget.backend, start: _localWorkdir),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _localWorkdir = picked;
+        _error = null;
+      });
+    }
+  }
+
+  Future<void> _pickRemote(String member, BackendClient client) async {
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => WorkTreePickerDialog(
+        backend: client,
+        start: _remoteWorkdirs[member] ?? '',
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _remoteWorkdirs[member] = picked;
+        _error = null;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (_submitting) return;
+    final String nextLocal = _localWorkdir.trim() != widget.group.workdir
+        ? _localWorkdir.trim()
+        : '';
+    final Map<String, String> changedRemotes = <String, String>{};
+    for (final MapEntry<String, String> entry in _remoteWorkdirs.entries) {
+      final String prev =
+          widget.group.memberConfigs[entry.key]?['workdir'] ?? '';
+      final String next = entry.value.trim();
+      if (next.isNotEmpty && next != prev) {
+        changedRemotes[entry.key] = next;
+      }
+    }
+    if (nextLocal.isEmpty && changedRemotes.isEmpty) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final String? error = await widget.onSubmit(nextLocal, changedRemotes);
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _submitting = false;
+        _error = error;
+      });
+      return;
+    }
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    final ThemeData theme = Theme.of(context);
+    final List<String> remoteMembers = widget.group.members
+        .where((String m) => memberPeerId(m) != null)
+        .toList();
+    return AlertDialog(
+      title: Text(strings.changeWorkDirectory),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                strings.changeWorkDirectoryHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                strings.swarmThisMachine(widget.localMachineName),
+                style: theme.textTheme.labelLarge,
+              ),
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(
+                  _localWorkdir.isEmpty
+                      ? strings.swarmWorkTreeDefault
+                      : _localWorkdir,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: TextButton(
+                  onPressed: _submitting ? null : _pickLocal,
+                  child: Text(strings.browse),
+                ),
+                onTap: _submitting ? null : _pickLocal,
+              ),
+              for (final String member in remoteMembers) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  widget.group.memberLabel(member),
+                  style: theme.textTheme.labelLarge,
+                ),
+                Builder(
+                  builder: (BuildContext context) {
+                    final String peerId = memberPeerId(member)!;
+                    final BackendClient? client = _peerClients[peerId];
+                    final String dir = _remoteWorkdirs[member] ?? '';
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        client == null ? Icons.link_off : Icons.folder_outlined,
+                      ),
+                      title: Text(
+                        dir.isEmpty ? strings.swarmMemberWorkdirDefault : dir,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: client == null
+                          ? Text(strings.swarmMemberNotLinked)
+                          : null,
+                      trailing: client == null
+                          ? null
+                          : TextButton(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => _pickRemote(member, client),
+                              child: Text(strings.browse),
+                            ),
+                      onTap: client == null || _submitting
+                          ? null
+                          : () => _pickRemote(member, client),
+                    );
+                  },
+                ),
+              ],
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _save,
+          child: Text(strings.ok),
+        ),
+      ],
+    );
   }
 }

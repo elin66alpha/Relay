@@ -6,6 +6,7 @@ module.exports = function createSessionsRouter(ctx) {
   const {
     MAIN_SESSION_ID,
     MAX_SESSIONS,
+    MAX_SWARM_SESSIONS = 32,
     agentPayload,
     agentRequiredOrUnknownError,
     clearHistory,
@@ -17,6 +18,7 @@ module.exports = function createSessionsRouter(ctx) {
     listChatSessions,
     renameChatSession,
     resolveAgentScope,
+    resolveChatSession,
     runningScopes,
     scopeChains,
     scopeKeyFor,
@@ -38,6 +40,7 @@ module.exports = function createSessionsRouter(ctx) {
       ok: true,
       agent: agentPayload(agent),
       workdir,
+      features: ['swarm-sessions'],
       ...listChatSessions(contextKey),
     });
   });
@@ -51,18 +54,21 @@ module.exports = function createSessionsRouter(ctx) {
     });
     if (!scope) return;
     const { agent, workdir, contextKey } = scope;
-    const created = createChatSession(contextKey, req.body.name);
+    const kind = req.body.kind === 'swarm' ? 'swarm' : undefined;
+    const created = createChatSession(contextKey, req.body.name, kind ? { kind } : undefined);
     if (!created) {
+      const cap = kind === 'swarm' ? MAX_SWARM_SESSIONS : MAX_SESSIONS;
       return res.status(409).json({
-        error: `session limit reached (max ${MAX_SESSIONS})`,
+        error: `session limit reached (max ${cap})`,
         code: 'SESSION_LIMIT_REACHED',
       });
     }
+    const newSessionId = created.session ? created.session.id : created.activeSessionId;
     // A new session starts from a copy of the settings of the session it was
     // created from (Main when none is named) and is independent after that.
     setSettings(
       agent.key,
-      scopeKeyFor(agent.key, workdir, created.activeSessionId),
+      scopeKeyFor(agent.key, workdir, newSessionId),
       getSettings(
         agent.key,
         scopeKeyFor(agent.key, workdir, req.body.copySettingsFrom),
@@ -73,6 +79,7 @@ module.exports = function createSessionsRouter(ctx) {
       ok: true,
       agent: agentPayload(agent),
       workdir,
+      ...(created.session ? { sessionId: created.session.id } : {}),
       ...created,
     });
   });
@@ -172,9 +179,7 @@ module.exports = function createSessionsRouter(ctx) {
     });
     if (!scope) return;
     const { agent, workdir, contextKey } = scope;
-    const existing = listChatSessions(contextKey).sessions.find(
-      (session) => session.id === sessionId,
-    );
+    const existing = resolveChatSession(contextKey, sessionId);
     if (!existing) {
       return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
     }

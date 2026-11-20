@@ -72,10 +72,14 @@ const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
 const { cliCommand } = require('./lib/cli-paths');
 const {
+  nextGroupName,
   listGroups,
+  listAllGroups,
   getGroup,
+  findGroup,
   createGroup,
   setGroupMembers,
+  setGroupWorkdir,
   touchGroup,
   deleteGroup,
 } = require('./lib/groups');
@@ -95,6 +99,7 @@ const {
 const {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  MAX_SWARM_SESSIONS,
   SCOPE_SEPARATOR,
   listChatSessions,
   resolveChatSession,
@@ -572,6 +577,7 @@ const routeContext = {
   MAX_DOWNLOAD_BYTES,
   MAX_PROMPT_BYTES,
   MAX_SESSIONS,
+  MAX_SWARM_SESSIONS,
   MAX_UPLOAD_BYTES,
   PORT,
   PUBLIC_BASE_URL,
@@ -609,6 +615,7 @@ const routeContext = {
   eventWorkdir,
   fcm,
   finalizeStaleStreamingHistory,
+  findGroup,
   getAgent,
   getAgentStatuses,
   getDefaultWorkdir,
@@ -616,6 +623,7 @@ const routeContext = {
   getSettings,
   listAbsoluteDirectory,
   listAgents,
+  listAllGroups,
   listChatSessions,
   listGroups,
   listQuotaSchedules,
@@ -623,6 +631,7 @@ const routeContext = {
   cliCommand,
   machineInfo,
   markdownForConversation,
+  nextGroupName,
   inspectCodexAccount,
   refreshAgentModels,
   normalizeDeviceId,
@@ -655,6 +664,7 @@ const routeContext = {
   sessionPayload,
   setActiveChatSession,
   setGroupMembers,
+  setGroupWorkdir,
   setSettings,
   startBackendUpdate,
   streamUploadToFile,

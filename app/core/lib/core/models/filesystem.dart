@@ -3,6 +3,7 @@ import 'dart:async';
 class WorkdirInfo {
   const WorkdirInfo({
     required this.dir,
+    this.defaultDir = '',
     this.exists = true,
     this.isDirectory = true,
     this.busy = false,
@@ -12,6 +13,7 @@ class WorkdirInfo {
   factory WorkdirInfo.fromJson(Map<String, Object?> json) {
     return WorkdirInfo(
       dir: json['dir'] as String? ?? '',
+      defaultDir: json['defaultDir'] as String? ?? '',
       exists: json['exists'] as bool? ?? true,
       isDirectory: json['isDirectory'] as bool? ?? true,
       busy: json['busy'] as bool? ?? false,
@@ -20,6 +22,7 @@ class WorkdirInfo {
   }
 
   final String dir;
+  final String defaultDir;
   final bool exists;
   final bool isDirectory;
   final bool busy;

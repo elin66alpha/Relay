@@ -10,25 +10,23 @@ A Swarm is one shared transcript over several independent CLI sessions. Agents g
 
 ## Where
 
-**Swarm**, under Quota usage in the drawer, shows how many Swarms the current workspace has. It opens the Swarm list, where you can create a Swarm or import a template.
+**Swarm**, under Quota usage in the drawer, opens the Swarm list showing every Swarm on this backend regardless of your current solo-chat directory. From there you can switch Swarms, create a new one, or import a template.
 
-Each workspace holds up to 20 Swarms, each with up to 8 members.
+Each workspace bucket holds up to 20 Swarms, each with up to 8 members.
 
 ## Create
 
-1. Select **New swarm**. The name is optional; the default is "Swarm N".
-2. Agents are grouped by machine: this machine first, then the other machines in Settings → Machine credentials. Tap an agent to add it as a member; the same agent can be added more than once.
+1. Select **New swarm**. The name is optional; the default is the lowest unused "Swarm N".
+2. Agents are grouped by machine: this machine first, then the other machines in Settings → Machine credentials. Tap an agent to add it as a member; the same agent can be added on multiple machines.
 3. Tap a member again to configure it:
    - **Nickname**: used only in this Swarm, and the name that @ summons it with.
    - **Task / prompt**: this member's role or job in this Swarm.
    - **Model** (main models only), **Effort** and **Permission**.
-4. Choose the **Work tree**: the current workspace by default, or another directory.
+4. Choose the **Work tree**: each machine defaults to its own default directory, and you can browse to another directory on that machine.
 
-## The work tree is fixed
+## Work directories
 
-The work tree is part of the Swarm transcript's key and of each member's session, so it **cannot change** after creation. Choosing it also leaves this device's current workspace unchanged.
-
-The Swarm is listed under the current workspace, while its members run in the work tree it chose.
+Each Swarm keeps its chosen work tree (and each remote member's directory on its machine) pinned for its life, and choosing one leaves your solo-chat workspace unchanged. You can change them later from the Swarm menu (**Change work directory**): Relay validates the new directory and resets only the affected members' sessions. You cannot change work directories while a round is running.
 
 ## Settings
 

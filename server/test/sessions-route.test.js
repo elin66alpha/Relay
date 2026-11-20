@@ -26,6 +26,11 @@ before(async () => {
   app.use(createSessionsRouter({
     ...sessions,
     agentPayload: (agent) => agent,
+    clearHistory: () => {},
+    deleteSettings: () => {},
+    getSettings: () => ({}),
+    purgeSession: async () => true,
+    setSettings: () => {},
     resolveAgentScope(req, res, { agentKey, beforeWorkdir }) {
       if (beforeWorkdir && !beforeWorkdir()) return null;
       const workdir = req.get('x-workdir');
@@ -136,4 +141,46 @@ test('rename reports sessions missing from the requested agent or workdir', asyn
     assert.equal((await response.json()).code, 'SESSION_NOT_FOUND');
   }
   assert.deepEqual(sessions.listChatSessions(CONTEXT), before);
+});
+
+test('swarm sessions are hidden from GET /api/sessions, never become active, have their own cap, and can be deleted', async () => {
+  const swarmCtx = `${WORKDIR}\0swarm-test`;
+  const listed = await (await fetch(`${base}/api/sessions?agent=swarm-test`, {
+    headers: { 'X-Workdir': WORKDIR },
+  })).json();
+  assert.ok(Array.isArray(listed.features) && listed.features.includes('swarm-sessions'));
+  const mainId = listed.activeSessionId;
+
+  const createRes = await fetch(`${base}/api/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Workdir': WORKDIR },
+    body: JSON.stringify({ agent: 'swarm-test', name: 'Swarm: Alpha', kind: 'swarm' }),
+  });
+  assert.equal(createRes.status, 200);
+  const created = await createRes.json();
+  assert.ok(created.sessionId);
+  assert.equal(created.activeSessionId, mainId, 'creating a swarm session does not activate it');
+  assert.ok(!created.sessions.some((s) => s.id === created.sessionId), 'swarm session is hidden from list');
+
+  // touchChatSession must not activate a swarm session either.
+  sessions.touchChatSession(swarmCtx, created.sessionId);
+  assert.equal(sessions.listChatSessions(swarmCtx).activeSessionId, mainId);
+  // Explicitly resolvable by id.
+  assert.equal(sessions.resolveChatSession(swarmCtx, created.sessionId).kind, 'swarm');
+
+  // Swarm sessions do not count toward MAX_SESSIONS (8).
+  for (let i = 0; i < sessions.MAX_SESSIONS; i += 1) {
+    assert.ok(sessions.createChatSession(swarmCtx, `Swarm ${i}`, { kind: 'swarm' }));
+  }
+  // Regular sessions can still be created up to MAX_SESSIONS.
+  assert.ok(sessions.createChatSession(swarmCtx, 'Regular 1'));
+
+  // Deleting a swarm session by explicit id succeeds.
+  const delRes = await fetch(`${base}/api/sessions/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Workdir': WORKDIR },
+    body: JSON.stringify({ agent: 'swarm-test', sessionId: created.sessionId }),
+  });
+  assert.equal(delRes.status, 200);
+  assert.equal(sessions.resolveChatSession(swarmCtx, created.sessionId), null);
 });

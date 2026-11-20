@@ -188,8 +188,33 @@ function groupPayload(group) {
   };
 }
 
+function nextGroupName(groups) {
+  const names = new Set((Array.isArray(groups) ? groups : []).map((group) => group && group.name));
+  for (let i = 1; i < 1000; i += 1) {
+    const candidate = `Swarm ${i}`;
+    if (!names.has(candidate)) return candidate;
+  }
+  return `Swarm ${(Array.isArray(groups) ? groups.length : 0) + 1}`;
+}
+
 function listGroups(workdir) {
   return bucketFor(workdir).groups.map(groupPayload);
+}
+
+// Every swarm stored on this backend across all workspace buckets, newest first.
+function listAllGroups() {
+  const all = store.load();
+  const groups = [];
+  const seen = new Set();
+  for (const workspace of Object.keys(all)) {
+    for (const group of bucketFor(workspace).groups) {
+      if (seen.has(group.id)) continue;
+      seen.add(group.id);
+      groups.push(groupPayload(group));
+    }
+  }
+  groups.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  return groups;
 }
 
 function getGroup(workdir, groupId) {
@@ -197,6 +222,19 @@ function getGroup(workdir, groupId) {
   if (!id) return null;
   const group = bucketFor(workdir).groups.find((item) => item.id === id);
   return group ? groupPayload(group) : null;
+}
+
+// Locate a swarm by id across all workspace buckets. Returns `{ workspace, group }`
+// or null when missing.
+function findGroup(groupId) {
+  const id = validGroupId(groupId);
+  if (!id) return null;
+  const all = store.load();
+  for (const workspace of Object.keys(all)) {
+    const group = bucketFor(workspace).groups.find((item) => item.id === id);
+    if (group) return { workspace, group: groupPayload(group) };
+  }
+  return null;
 }
 
 // Create a swarm in `workspace`. `members` must already be known-agent keys (the
@@ -213,7 +251,7 @@ function createGroup(workspace, rawName, members, options = {}) {
   const now = new Date().toISOString();
   const group = {
     id: crypto.randomUUID(),
-    name: normalizeName(rawName, `Swarm ${bucket.groups.length + 1}`),
+    name: normalizeName(rawName, nextGroupName(bucket.groups)),
     members: normalizedMembers,
     workdir: typeof options.workdir === 'string' ? options.workdir : '',
     memberConfigs: normalizeMemberConfigs(options.memberConfigs, normalizedMembers),
@@ -248,6 +286,32 @@ function setGroupMembers(workspace, groupId, members, options = {}) {
   return groupPayload(group);
 }
 
+// Update a swarm's local work tree and/or remote members' peer workdir + sessionId.
+// Preserves all other member config fields (model/effort/permission/nickname/prompt).
+function setGroupWorkdir(workspace, groupId, { workdir, remoteUpdates = {} } = {}) {
+  const id = validGroupId(groupId);
+  if (!id) return null;
+  const bucket = bucketFor(workspace);
+  const group = bucket.groups.find((item) => item.id === id);
+  if (!group) return null;
+  if (typeof workdir === 'string' && workdir) {
+    group.workdir = workdir;
+  }
+  const nextConfigs = { ...group.memberConfigs };
+  for (const [memberKey, update] of Object.entries(remoteUpdates || {})) {
+    if (!group.members.includes(memberKey) || !remotePeerId(memberKey)) continue;
+    nextConfigs[memberKey] = {
+      ...(nextConfigs[memberKey] || {}),
+      workdir: update.workdir,
+      sessionId: update.sessionId,
+    };
+  }
+  group.memberConfigs = normalizeMemberConfigs(nextConfigs, group.members);
+  group.updatedAt = new Date().toISOString();
+  saveBucket(workspace, bucket);
+  return groupPayload(group);
+}
+
 function touchGroup(workdir, groupId) {
   const id = validGroupId(groupId);
   if (!id) return null;
@@ -274,10 +338,14 @@ module.exports = {
   MAX_GROUPS_PER_WORKDIR,
   MAX_MEMBERS,
   validGroupId,
+  nextGroupName,
   listGroups,
+  listAllGroups,
   getGroup,
+  findGroup,
   createGroup,
   setGroupMembers,
+  setGroupWorkdir,
   touchGroup,
   deleteGroup,
 };

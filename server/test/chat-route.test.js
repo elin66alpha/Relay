@@ -15,6 +15,7 @@ const agents = {
 const sessions = [
   { id: 'default', name: 'Main' },
   { id: 'review', name: 'Review' },
+  { id: 'swarm-1', name: 'Swarm: Alpha', kind: 'swarm' },
 ];
 const histories = new Map();
 const runCalls = [];
@@ -40,7 +41,21 @@ before(async () => {
     sessionContextKeyFor,
     scopeKeyFor,
     resolveChatSession,
-    listChatSessions: () => ({ sessions }),
+    listChatSessions: () => ({ sessions: sessions.filter((s) => s.kind !== 'swarm') }),
+    searchHistory({ workdir, query, includeScope }) {
+      const out = [];
+      for (const [scopeKey, list] of histories.entries()) {
+        const [wd, agentKey, sessionId = 'default'] = scopeKey.split('\0');
+        if (wd !== workdir) continue;
+        if (includeScope && !includeScope(agentKey, sessionId)) continue;
+        for (const m of list) {
+          if (String(m.content || '').includes(query)) {
+            out.push({ agentKey, sessionId, messageId: m.id });
+          }
+        }
+      }
+      return out;
+    },
     sessionPayload: (session) => session,
     touchChatSession: () => {},
     agentRequiredOrUnknownError: (key) => ({
@@ -215,4 +230,24 @@ test('a compaction moves its context reading onto the latest reply', async () =>
     { used: 80, size: 100 },
     'only a turn recorded nowhere moves it',
   );
+});
+
+test('swarm sessions are excluded from history search and can be cleared by explicit id', async () => {
+  const mainKey = scopeKeyFor('claude', WORKDIR, 'default');
+  const swarmKey = scopeKeyFor('claude', WORKDIR, 'swarm-1');
+  histories.set(mainKey, [{ id: 'm1', role: 'user', content: 'needle in main' }]);
+  histories.set(swarmKey, [{ id: 's1', role: 'user', content: 'needle in swarm' }]);
+
+  const searchRes = await api('GET', '/api/history/search?q=needle');
+  assert.equal(searchRes.status, 200);
+  const { matches } = await searchRes.json();
+  assert.deepEqual(matches.map((m) => m.sessionId), ['default']);
+
+  const clearRes = await api('POST', '/api/session/clear', {
+    agent: 'claude',
+    sessionId: 'swarm-1',
+  });
+  assert.equal(clearRes.status, 200);
+  assert.equal(histories.has(swarmKey), false);
+  assert.equal(histories.has(mainKey), true);
 });

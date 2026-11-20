@@ -226,6 +226,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         child: Text(strings.manageMembers),
                       ),
                       PopupMenuItem<String>(
+                        value: 'workdir',
+                        child: Text(strings.changeWorkDirectory),
+                      ),
+                      PopupMenuItem<String>(
                         value: 'clear',
                         child: Text(strings.clearTranscript),
                       ),
@@ -377,6 +381,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       case 'members':
         _manageMembers(group);
         break;
+      case 'workdir':
+        _changeWorkdir(group);
+        break;
       case 'clear':
         _controller.clearTranscript();
         break;
@@ -442,18 +449,22 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   Future<void> _createGroup() async {
-    final SwarmForm? result = await _showSwarmForm(context.l10n.newGroup);
-    if (result == null) return;
-    await _controller.createGroup(
-      result.name,
-      result.members,
-      workdir: result.workdir,
-      configs: result.configs,
+    await _showSwarmForm(
+      context.l10n.newGroup,
+      onSubmit: (SwarmForm result) async {
+        final ChatGroup? created = await _controller.createGroup(
+          result.name,
+          result.members,
+          workdir: result.workdir,
+          configs: result.configs,
+        );
+        return created == null ? (_controller.error ?? '') : null;
+      },
     );
   }
 
   Future<void> _manageMembers(ChatGroup group) async {
-    final SwarmForm? result = await _showSwarmForm(
+    await _showSwarmForm(
       context.l10n.manageMembers,
       initialName: group.name,
       initialMembers: group.members,
@@ -462,12 +473,37 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       initialPeers: group.peers,
       nameEditable: false,
       workTreeEditable: false,
+      onSubmit: (SwarmForm result) async {
+        final bool ok = await _controller.updateMembers(
+          group,
+          result.members,
+          configs: result.configs,
+        );
+        return ok ? null : (_controller.error ?? '');
+      },
     );
-    if (result == null) return;
-    await _controller.updateMembers(
-      group,
-      result.members,
-      configs: result.configs,
+  }
+
+  Future<void> _changeWorkdir(ChatGroup group) async {
+    final MachineCredential? current = widget.machinesController.activeMachine;
+    await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => SwarmWorkdirDialog(
+        group: group,
+        backend: _controller.backend,
+        localMachineName: current?.displayName ?? '',
+        machines: widget.machinesController.credentials
+            .where((MachineCredential m) => m.id != current?.id)
+            .toList(growable: false),
+        onSubmit: (String workdir, Map<String, String> memberWorkdirs) async {
+          final bool ok = await _controller.updateWorkdir(
+            group,
+            workdir: workdir,
+            memberWorkdirs: memberWorkdirs,
+          );
+          return ok ? null : (_controller.error ?? '');
+        },
+      ),
     );
   }
 
@@ -572,6 +608,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     Map<String, SwarmPeer> initialPeers = const <String, SwarmPeer>{},
     bool nameEditable = true,
     bool workTreeEditable = true,
+    Future<String?> Function(SwarmForm form)? onSubmit,
   }) {
     final MachineCredential? current = widget.machinesController.activeMachine;
     return showDialog<SwarmForm>(
@@ -591,6 +628,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         initialConfigs: initialConfigs,
         nameEditable: nameEditable,
         workTreeEditable: workTreeEditable,
+        onSubmit: onSubmit,
       ),
     );
   }

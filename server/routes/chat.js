@@ -231,11 +231,18 @@ module.exports = function createChatRouter(ctx) {
       );
       return session ? session.name : sessionId;
     };
+    const includeScope = (matchAgentKey, sessionId) => {
+      if (matchAgentKey.startsWith('group:')) return false;
+      const contextKey = sessionContextKeyFor(matchAgentKey, workdir);
+      const session = resolveChatSession(contextKey, sessionId);
+      return !(session && session.kind === 'swarm');
+    };
     const matches = searchHistory({
       workdir,
       query,
       agentKey,
       sessionNameFor,
+      includeScope,
     });
     return res.json({ workdir, query, matches });
   });
@@ -287,10 +294,7 @@ module.exports = function createChatRouter(ctx) {
         return res.status(400).json({ error: `unknown agent: ${agentKey}` });
       }
       const contextKey = sessionContextKeyFor(agent.key, workdir);
-      const sessions = listChatSessions(contextKey).sessions;
-      const chatSession = requestedSessionId
-        ? sessions.find((session) => session.id === requestedSessionId)
-        : resolveChatSession(contextKey, '');
+      const chatSession = resolveChatSession(contextKey, requestedSessionId);
       if (!chatSession) {
         return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
       }
