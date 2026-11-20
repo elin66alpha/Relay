@@ -347,3 +347,13 @@ test('Antigravity reads a host token file, else defers to the keyring, and never
   assert.deepEqual(status, { installed: true, authed: true, authKind: 'oauth' });
   assert.equal(JSON.stringify(status).includes('private-agy-token'), false);
 });
+
+test('reads a macOS Claude login from the Keychain when there is no credentials file', () => {
+  const home = makeHome();
+  const claude = (options) =>
+    statuses(home, new Set(['claude']), { env: {}, ...options }).claude.authed;
+  assert.equal(claude({ platform: 'darwin', keychainHas: () => true }), true);
+  assert.equal(claude({ platform: 'darwin', keychainHas: () => false }), false);
+  // Only macOS keeps the login in the Keychain.
+  assert.equal(claude({ platform: 'linux', keychainHas: () => true }), false);
+});

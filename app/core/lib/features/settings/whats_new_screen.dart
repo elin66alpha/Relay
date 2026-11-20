@@ -170,6 +170,7 @@ const List<_Release> _zhReleases = <_Release>[
     changes: <String>[
       'iOS 版改为通过 TestFlight 安装和更新，可向作者索取测试链接；Release 里仍附带未签名的 IPA。',
       'macOS 版经过 Apple 签名和公证，双击即可打开；因为换了应用标识，需要重新添加一次机器。',
+      'macOS 后端能正确显示 Claude 的登录状态和额度了。',
     ],
   ),
   _Release(
@@ -374,6 +375,7 @@ const List<_Release> _enReleases = <_Release>[
     changes: <String>[
       'The iOS app is now installed and updated through TestFlight: ask the author for the link. Releases still carry the unsigned IPA.',
       'The macOS app is signed and notarized by Apple and opens with a double-click. Its app identifier changed, so add your machines again once.',
+      'A macOS backend now shows Claude\'s login status and quota correctly.',
     ],
   ),
   _Release(

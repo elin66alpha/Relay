@@ -8,8 +8,10 @@ const https = require('https');
 const http = require('http');
 const { createJsonStore } = require('./json-store');
 const { cursorAuthFile, agyAuthFile, cliCommand } = require('./cli-paths');
+const { createClaudeCredentialStore } = require('./claude-credentials');
 
 const CLAUDE_CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const claudeCredStore = createClaudeCredentialStore({ filePath: CLAUDE_CREDS_PATH });
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
@@ -88,6 +90,7 @@ const USAGE_CRED_FILES = {
 };
 
 function credentialMtimeMs(key) {
+  if (key === 'claude') return claudeCredStore.mtimeMs();
   const file = USAGE_CRED_FILES[key];
   if (!file) return 0;
   try {
@@ -257,8 +260,7 @@ async function cachedUsage({
 }
 
 function readClaudeCreds() {
-  const raw = fs.readFileSync(CLAUDE_CREDS_PATH, 'utf-8');
-  return JSON.parse(raw);
+  return claudeCredStore.readCreds();
 }
 
 function httpJson(method, url, headers, body, timeoutMs) {
@@ -294,7 +296,8 @@ function httpJson(method, url, headers, body, timeoutMs) {
 }
 
 async function refreshClaudeToken() {
-  const creds = readClaudeCreds();
+  const origin = claudeCredStore.read();
+  const creds = origin.creds;
   const oauth = creds.claudeAiOauth || {};
   if (!oauth.refreshToken) {
     throw new Error('Claude credentials are missing refreshToken. Run claude login again.');
@@ -315,9 +318,7 @@ async function refreshClaudeToken() {
   if (body.expires_in) oauth.expiresAt = Date.now() + body.expires_in * 1000;
   creds.claudeAiOauth = oauth;
 
-  const tmp = `${CLAUDE_CREDS_PATH}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(creds), { mode: 0o600 });
-  fs.renameSync(tmp, CLAUDE_CREDS_PATH);
+  claudeCredStore.write(creds, origin);
   return oauth.accessToken;
 }
 

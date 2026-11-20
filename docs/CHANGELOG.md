@@ -13,6 +13,13 @@
   spins in the drawer after its reply finished when the shared event stream
   dropped the `agent_done` event; the app re-checks background turns against
   history every 5 seconds.
+- **Claude on macOS**: Claude Code keeps its login in the macOS login Keychain
+  instead of `~/.claude/.credentials.json`, so a macOS backend showed Claude as
+  not logged in and could not read its quota. Login status now checks the
+  Keychain item (attributes only), and quota and keepalive read the token from
+  the Keychain and write a refreshed one back there
+  (`server/lib/claude-credentials.js`). The first read asks the Mac to allow
+  `security` access.
 
 ### Changed
 
