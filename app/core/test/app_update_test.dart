@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +8,7 @@ import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/features/settings/app_settings_screen.dart';
 import 'package:relay_core/features/settings/app_update.dart';
 import 'package:relay_core/features/settings/app_update_io.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
   test('each platform installs its own release asset', () {
@@ -30,18 +33,95 @@ void main() {
   });
 
   test('the Windows replacement waits, unpacks over the app and restarts', () {
+    final String script = windowsReplaceScript(
+      pid: 42,
+      archive: r"C:\Temp\it's\relay.zip",
+      executable: r'D:\Apps\Relay\relay.exe',
+      log: r'C:\Temp\relay-client-update.log',
+    );
     expect(
-      windowsReplaceScript(
-        pid: 42,
-        archive: r"C:\Temp\it's\relay.zip",
-        executable: r'D:\Apps\Relay\relay.exe',
+      script,
+      contains('Wait-Process -Id 42 -ErrorAction SilentlyContinue'),
+    );
+    expect(
+      script,
+      contains(r'Import-Module "$PSHOME\Modules\Microsoft.PowerShell.Archive"'),
+    );
+    expect(
+      script,
+      contains(
+        r"Expand-Archive -LiteralPath 'C:\Temp\it''s\relay.zip' "
+        r"-DestinationPath 'D:\Apps\Relay' -Force -ErrorAction Stop",
       ),
-      'Wait-Process -Id 42 -ErrorAction SilentlyContinue; '
-      r"Expand-Archive -LiteralPath 'C:\Temp\it''s\relay.zip' "
-      r"-DestinationPath 'D:\Apps\Relay' -Force; "
-      r"Start-Process -FilePath 'D:\Apps\Relay\relay.exe'",
+    );
+    expect(
+      script,
+      contains(r"Out-File -LiteralPath 'C:\Temp\relay-client-update.log'"),
+    );
+    expect(
+      script.trimRight(),
+      endsWith(r"Start-Process -FilePath 'D:\Apps\Relay\relay.exe'"),
+    );
+    // Windows PowerShell does nothing in a process without a console, which
+    // is how Dart starts detached programs; `start` gives it its own.
+    expect(
+      windowsReplaceCommand(r'C:\Temp\relay-client-update.ps1').take(4),
+      <String>['/c', 'start', '/min', 'powershell.exe'],
     );
   });
+
+  test(
+    'the Windows replacement really replaces the files after the app exits',
+    () async {
+      final Directory root =
+          await Directory.systemTemp.createTemp('relay update ünïcode ');
+      addTearDown(() => root.delete(recursive: true));
+      final Directory app = await Directory(p.join(root.path, 'app')).create();
+      final File version = File(p.join(app.path, 'version.txt'));
+      await version.writeAsString('0.2.0');
+      // rundll32 without arguments exits at once and shows nothing.
+      await File(r'C:\Windows\System32\rundll32.exe')
+          .copy(p.join(app.path, 'relay.exe'));
+      final Directory release =
+          await Directory(p.join(root.path, 'release', 'data')).create(
+        recursive: true,
+      );
+      await File(p.join(release.path, 'asset.txt')).writeAsString('new');
+      await File(p.join(release.parent.path, 'version.txt'))
+          .writeAsString('0.2.1');
+      final String archive = p.join(root.path, 'update.zip');
+      final ProcessResult zip = await Process.run('powershell.exe', <String>[
+        '-NoProfile',
+        '-Command',
+        "Compress-Archive -Path '${release.parent.path}\\*' "
+            "-DestinationPath '$archive'",
+      ]);
+      expect(zip.exitCode, 0, reason: '${zip.stderr}');
+
+      // Stands in for the app: the script waits for it to exit.
+      final Process running =
+          await Process.start('ping.exe', <String>['-n', '3', '127.0.0.1']);
+      await startWindowsReplace(
+        pid: running.pid,
+        archive: archive,
+        executable: p.join(app.path, 'relay.exe'),
+      );
+      await running.exitCode;
+
+      final DateTime deadline = DateTime.now().add(const Duration(seconds: 60));
+      while (File(archive).existsSync() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      expect(File(archive).existsSync(), isFalse, reason: 'ZIP not consumed');
+      expect(await version.readAsString(), '0.2.1');
+      expect(
+        await File(p.join(app.path, 'data', 'asset.txt')).readAsString(),
+        'new',
+      );
+    },
+    skip: !Platform.isWindows,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
   Future<void> check(
     WidgetTester tester, {

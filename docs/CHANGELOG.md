@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- **Windows app update**: Update on Windows downloaded the release and closed
+  the app, which then stayed closed and reopened on the old version, so 0.2.0
+  and 0.2.1 could never update themselves. Dart's detached mode starts programs without a
+  console, and Windows PowerShell then exits without running anything. The app
+  now starts the replacement script through `cmd start`, which gives it its own
+  hidden console. The script is a UTF-8 `.ps1` with a BOM so non-ASCII folder
+  names survive, imports Windows PowerShell's own Archive module (an app
+  started from PowerShell 7 otherwise loads PowerShell 7's, which fails), retries
+  unpacking, and logs failures to `relay-client-update.log` in the temp folder.
+  Windows clients on 0.2.0 or 0.2.1 need to install 0.2.2 by hand once.
 - **Claude on macOS**: Claude Code keeps its login in the macOS login Keychain
   instead of `~/.claude/.credentials.json`, so a macOS backend showed Claude as
   not logged in and could not read its quota. Login status now checks the

@@ -24,4 +24,6 @@ App 会和 GitHub 上的最新版本比较。
 | iOS | 提示有新版本，请在 TestFlight 中安装 |
 | 网页 | 随后端一起更新 |
 
+Windows 上的 0.2.0 和 0.2.1 点「更新」后 App 会直接关闭，重新打开仍是旧版本。请手动安装一次 0.2.2：从 GitHub Releases 下载 `relay-client-windows-x64-v0.2.2.zip`，退出 Relay，把它解压覆盖到 App 所在的文件夹。之后如果更新失败，原因记录在临时文件夹（`%TEMP%`）的 `relay-client-update.log` 里。
+
 后端的更新见[更新后端](backend-update.md)。每个版本的变化见首页的「新功能」。

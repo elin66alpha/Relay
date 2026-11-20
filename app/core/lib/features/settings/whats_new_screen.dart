@@ -165,6 +165,7 @@ const List<_Release> _zhReleases = <_Release>[
     ],
     changes: <String>[
       '第一次读取时，Mac 会弹窗询问是否允许访问钥匙串，点“始终允许”即可。',
+      'Windows 版的“更新”现在会真正装上新版本。0.2.0 和 0.2.1 需要手动下载安装一次 0.2.2，之后就能自动更新。',
     ],
   ),
   _Release(
@@ -381,6 +382,7 @@ const List<_Release> _enReleases = <_Release>[
     ],
     changes: <String>[
       'The first time, the Mac asks whether Relay may use the Keychain: choose Always Allow.',
+      'Update on Windows now really installs the new version. On 0.2.0 or 0.2.1, download and install 0.2.2 by hand once; later versions update themselves.',
     ],
   ),
   _Release(
