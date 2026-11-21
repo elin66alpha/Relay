@@ -162,10 +162,19 @@ const List<_Release> _zhReleases = <_Release>[
         body:
             'macOS 上 Claude Code 把登录信息存在钥匙串里。现在 macOS 后端能正确显示 Claude 已登录，也能查到它的额度。',
       ),
+      _Highlight(
+        icon: Icons.restart_alt_rounded,
+        title: '后端出问题后会自己恢复',
+        body: 'Linux 后端可以开机自动启动，Windows 后端崩溃后几秒内会重新启动。从这个版本起，后端更新失败时会自动换回旧版本。',
+      ),
     ],
     changes: <String>[
       '第一次读取时，Mac 会弹窗询问是否允许访问钥匙串，点“始终允许”即可。',
       'Windows 版的“更新”现在会真正装上新版本。0.2.0 和 0.2.1 需要手动下载安装一次 0.2.2，之后就能自动更新。',
+      '使用 Quick Tunnel 时，在安装菜单里重新显示的二维码会用隧道当前的地址。',
+      '在 macOS 上，用 nvm 等工具装的 Node.js 也能运行后端。',
+      'Linux 和 macOS 的安装菜单会询问端口，也能安装 Antigravity。',
+      'App 里的后端更新十分钟后还没完成时，会明确告诉你。',
     ],
   ),
   _Release(
@@ -379,10 +388,20 @@ const List<_Release> _enReleases = <_Release>[
         body:
             'On macOS, Claude Code keeps its login in the Keychain. A macOS backend now shows Claude as logged in and can read its quota.',
       ),
+      _Highlight(
+        icon: Icons.restart_alt_rounded,
+        title: 'Backends recover on their own',
+        body:
+            'A Linux backend can start at boot, and a Windows backend starts again within seconds after a crash. From this version on, a backend update that fails puts the previous version back.',
+      ),
     ],
     changes: <String>[
       'The first time, the Mac asks whether Relay may use the Keychain: choose Always Allow.',
       'Update on Windows now really installs the new version. On 0.2.0 or 0.2.1, download and install 0.2.2 by hand once; later versions update themselves.',
+      'With a Quick Tunnel, a QR shown again from the setup menu carries the tunnel\'s current address.',
+      'On macOS, a Node.js installed with nvm or a similar tool runs the backend.',
+      'Setup on Linux and macOS asks for the port and can install Antigravity.',
+      'When a backend update from the app has not finished after ten minutes, the app says so.',
     ],
   ),
   _Release(

@@ -53,7 +53,7 @@ Options:
   --qr-out <path>      Output path for the QR PNG
   --json-out <path>    Output path for the copy/paste credential JSON
   --passphrase <text>  Credential password (min 6 chars; prompts interactively if omitted)
-  --tunnel-name <name> PM2 process name of the cloudflared tunnel (default: relay-tunnel, then bot-app-tunnel)
+  --tunnel-name <name> PM2 process name of the cloudflared tunnel on Linux (default: relay-tunnel, then bot-app-tunnel)
   --list-tokens        List all tokens and their revocation state
   --revoke <id|token>  Revoke a token
   --delete <id>        Revoke a token and remove it from server/tokens.json
@@ -65,13 +65,15 @@ does not revoke existing device tokens. Revoke tokens explicitly with --revoke.
 }
 
 // Auto-detect the Cloudflare Quick Tunnel public URL. cloudflared prints the URL
-// to stderr, which PM2 captures in per-process logs. Quick Tunnel URLs rotate
-// on every restart, so use the newest matching URL in the newest known log. A
-// named Cloudflare Tunnel normally uses PUBLIC_BASE_URL instead.
-const PM2_LOG_DIR = path.join(os.homedir(), '.pm2', 'logs');
+// to stderr, which each service manager logs: PM2 on Linux, the LaunchAgent on
+// macOS (scripts/install/unix/lib/macos.sh), Windows setup in <install>/logs.
+// Quick Tunnel URLs rotate on every restart, so use the newest matching URL in
+// the newest known log. A named Cloudflare Tunnel normally uses PUBLIC_BASE_URL
+// instead.
 const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 
-function detectTunnelUrl(args) {
+function detectTunnelUrl(args, { home = os.homedir(), serverDir = SERVER_DIR } = {}) {
+  const pm2Logs = path.join(home, '.pm2', 'logs');
   const names = [];
   const override = String(
     args['tunnel-name'] || process.env.TUNNEL_PM2_NAME || '',
@@ -81,8 +83,11 @@ function detectTunnelUrl(args) {
 
   const files = [];
   for (const name of names) {
-    files.push(path.join(PM2_LOG_DIR, `${name}-error.log`));
-    files.push(path.join(PM2_LOG_DIR, `${name}-out.log`));
+    files.push(path.join(pm2Logs, `${name}-error.log`));
+    files.push(path.join(pm2Logs, `${name}-out.log`));
+  }
+  for (const dir of [path.join(home, 'Library', 'Logs', 'Relay'), path.join(serverDir, '..', 'logs')]) {
+    files.push(path.join(dir, 'tunnel.err.log'), path.join(dir, 'tunnel.out.log'));
   }
   const existing = files
     .filter((file) => fs.existsSync(file))
@@ -343,7 +348,11 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = { detectTunnelUrl };

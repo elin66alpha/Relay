@@ -12,7 +12,8 @@ same order; only the package manager and service manager differ.
 
 - Node.js 22 or newer.
 - At least one supported CLI installed on the backend: Claude Code, Codex,
-  Cursor (the `agent` CLI, signed in with `agent login`), OpenCode, or Hermes.
+  Cursor (the `agent` CLI, signed in with `agent login`), OpenCode,
+  Antigravity, or Hermes.
 - Every CLI must be authenticated or configured on the backend host itself.
   Relay reports status but does not perform OAuth login or collect provider
   keys.
@@ -20,15 +21,17 @@ same order; only the package manager and service manager differ.
   Python 3, `make`, and a C++ compiler for the terminal PTY dependency.
 - `cloudflared` is required only for named or Quick Tunnel mode.
 - On Debian and Ubuntu, Linux setup checks all of the above except the agent
-  CLIs, including the Node.js version, and after one confirmation installs
-  what is missing with `sudo apt-get`: Node.js 24 from NodeSource when Node.js
-  is missing or older than 22, and `cloudflared` from Cloudflare's release
-  `.deb` when a tunnel mode needs it. Run it as the user who will run Relay,
-  not with `sudo`.
+  CLIs, including the Node.js version, and after one confirmation that names
+  what it installs, installs what is missing with `sudo apt-get`: Node.js 24
+  from NodeSource when Node.js is missing or older than 22, and `cloudflared`
+  from Cloudflare's release `.deb` when a tunnel mode needs it. Other
+  distributions get the name of what to install. Run it as the user who will
+  run Relay, not with `sudo`.
 - On macOS, setup does the same with Homebrew after one confirmation: the
   current Node.js when it is missing or older than 22, `zip`, and `cloudflared`
-  for a tunnel mode. Without Homebrew it names what to install. If the terminal's
-  PTY module has to compile, it opens the Xcode Command Line Tools installer.
+  for a tunnel mode. Without Homebrew it names what to install. The terminal's
+  PTY module ships prebuilt for macOS; only if that binary does not load does
+  setup open the Xcode Command Line Tools installer to compile it.
 - Before upgrading an existing Relay installation to 0.1.10 or later, update
   Node.js to 22 or newer. The updater checks this before replacing
   files and leaves the existing installation untouched if it is too old.
@@ -37,7 +40,9 @@ same order; only the package manager and service manager differ.
 
 Linux and macOS share `relay-backend-linux-macos-v<VERSION>.tar.gz`. Download it from [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) and compare its SHA-256 digest with its entry in `SHA256SUMS`. Extract it to a permanent writable directory and run `./install.sh` from the folder containing `server/`.
 
-To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats.
+To upgrade in place, run `./scripts/install/unix/update.sh` from the installation directory or use **Update and restart** in Machine details. The updater checks the archive against the release’s `SHA256SUMS` and keeps your configuration, tokens and chats. It exits without changes when the installation already has the latest release (`RELAY_VERSION=<version>` installs a given one anyway). It unpacks the release and runs `npm ci --omit=dev` in `.relay-update-new/` first, so a failed download or dependency install changes nothing; then it moves the previous version to `.relay-update-old/`, restarts only the backend through the new release's service adapter, and puts the previous version back when the backend does not answer on its port within 30 seconds. A run interrupted mid-way is undone by the next one.
+
+If setup reports that Relay is installed from another folder (a newer release extracted beside the old one), upgrade that installation with the `RELAY_DIR=... update.sh` command it prints. Reinstalling in the new folder moves the service there with a fresh `server/.env` and no tokens or chats.
 
 For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 
@@ -58,12 +63,13 @@ On Linux and macOS, `setup.sh` opens the same menu: install, reinstall (keeps to
 settings), uninstall, service status (address, tunnel hostnames, Web client,
 agent install and sign-in state, tokens), install agent CLIs, and create,
 delete, list or re-show a device token. Installing agent CLIs lists Claude Code,
-Codex, Cursor, OpenCode and Hermes with their install state, looking where the
-backend does (PATH, `~/.local/bin`, `~/.opencode/bin`), installs the ones you
+Codex, Cursor, OpenCode, Antigravity and Hermes with the install state the
+backend itself reports (`server/scripts/setup-status.js`), installs the ones you
 pick with each CLI's official installer (`npm install -g @openai/codex` for
 Codex), and prints their login commands; Relay never signs a CLI in. Install
 runs the same step. Re-showing reuses the token and asks for a new QR password, since
-the old one is not stored. Install and reinstall ask whether to serve the Web
+the old one is not stored; with a Quick Tunnel it uses the tunnel's current
+address from its log. Install and reinstall ask whether to serve the Web
 client at the backend address (default yes), and then for file access:
 
 - **Open** (the default): agents and the file browser reach every file the
@@ -95,11 +101,11 @@ device token. The Windows backend ZIP includes the same compiled Web client:
 2. **Named Cloudflare Tunnel:** use a stable hostname in a Cloudflare zone. The
    server stays on `127.0.0.1`.
 3. **Cloudflare Quick Tunnel:** useful for a trial. The generated
-   `trycloudflare.com` URL may change after restart, so regenerate and re-import
-   the credential when it rotates. Find the new URL in the service logs, then
-   run `npm --prefix server run credential -- --url https://NEW-URL` from the
-   repository root.
-4. **Tailscale.** Relay listens only on the detected tailnet IPv4. Native apps can use `http://<tailscale-ip>:<port>` over WireGuard. Relay Web needs HTTPS to store credentials. To use it, configure a reverse proxy with a trusted certificate on port 443 forwarding to that tailnet IP and backend port, then enter its hostname during setup. Open that HTTPS address and import the generated credential. Leaving the hostname blank configures native apps only and disables Web. If Tailscale is unavailable, setup returns to the network menu.
+   `trycloudflare.com` URL changes whenever the tunnel restarts, and setup says
+   so when it finishes. Show a token's QR again from the setup menu (choice 9),
+   which reads the current URL from the tunnel log on every OS, and re-import
+   it on each device.
+4. **Tailscale.** The default when this machine is on a tailnet. Relay listens only on the detected tailnet IPv4. Native apps can use `http://<tailscale-ip>:<port>` over WireGuard. Relay Web needs HTTPS to store credentials. To use it, configure a reverse proxy with a trusted certificate on port 443 forwarding to that tailnet IP and backend port, then enter its hostname during setup. Open that HTTPS address and import the generated credential. Leaving the hostname blank configures native apps only and disables Web. If Tailscale is unavailable, setup returns to the network menu.
 
 ## Service management
 
@@ -122,7 +128,9 @@ pm2 logs relay-tunnel
 ```
 
 Linux setup requires PM2 (`npm install -g pm2`). It creates `relay-server` and,
-for tunnel modes, `relay-tunnel`. Logs are under `~/.pm2/logs/` as
+for tunnel modes, `relay-tunnel`, and offers to register PM2's systemd service
+(`pm2 startup systemd`, with `sudo` once) so both come back after a reboot; on a
+host without systemd, run `start.sh` after each boot. Logs are under `~/.pm2/logs/` as
 `relay-server-*.log` and `relay-tunnel-*.log`. `uninstall.sh` removes the PM2
 processes and the Web client, offers to delete the named Cloudflare Tunnel, and
 asks before removing PM2, `cloudflared` or Node.js. It leaves backend data,
@@ -143,10 +151,12 @@ compiler (for example the Debian/Ubuntu `build-essential` package). Install
 
 These are the Linux scripts with launchd in place of PM2: the backend and,
 for tunnel modes, the tunnel run as the LaunchAgents `dev.relay.app.backend`
-and `dev.relay.app.tunnel` under `~/Library/LaunchAgents`, start at login, and
-restart when they exit. Logs are under `~/Library/Logs/Relay/` as
-`backend.*.log` and `tunnel.*.log`. The generated service PATH includes common
-Homebrew and per-user binary locations. `uninstall.sh` removes the LaunchAgents
+and `dev.relay.app.tunnel` under `~/Library/LaunchAgents`, start at login (so
+after a restart Relay waits for a login), and restart when they exit. Logs are
+under `~/Library/Logs/Relay/` as `backend.*.log` and `tunnel.*.log`. The backend
+LaunchAgent runs the `node` setup found by its full path, with that node's
+folder first on the generated service PATH, so a Node.js from nvm, fnm or Volta
+works; the PATH also includes common Homebrew and per-user binary locations. `uninstall.sh` removes the LaunchAgents
 and the Web client, offers to delete the named Cloudflare Tunnel, and asks
 before removing a Homebrew `cloudflared` or Node.js. It leaves backend data,
 tokens, and credentials in place.
@@ -160,7 +170,7 @@ is command-line only, like Linux and macOS: the same menu (install, reinstall,
 uninstall, status, agent CLI installation and device token management) and the
 same six install steps, including the open/isolated file access choice.
 Web defaults on. Missing `cloudflared` is downloaded
-for tunnel modes. The five CLIs can be selected for installation with official
+for tunnel modes. The six CLIs can be selected for installation with official
 Windows installers; sign in/configure them yourself afterward. Setup appends
 the folders holding an agent CLI (such as `%APPDATA%\npm`) to your user PATH,
 plus the bundled Node when the host has none, so new terminals find them;
@@ -169,7 +179,12 @@ added.
 The bundle's `README.md` explains setup and updates; `.\start.cmd`,
 `.\stop.cmd`, `.\status.cmd`, `.\credential.cmd`, and `.\uninstall.cmd` wrap the
 same service adapters below, and `.\update.cmd` upgrades the installation in
-place to the latest release. The Scheduled Task starts at this user's login.
+place to the latest release. The Scheduled Task starts at this user's login, so
+after a restart Relay waits for a sign-in. The backend runs through
+`server/scripts/keep-running.js`, which starts it again five seconds after it
+exits, as PM2 and launchd do. Like Linux and macOS, setup defaults the network
+mode to Tailscale on a tailnet, warns that a Quick Tunnel's URL changes, and
+says when Relay is already installed from another folder.
 
 ```powershell
 .\scripts\install\windows\status.ps1
@@ -179,7 +194,7 @@ place to the latest release. The Scheduled Task starts at this user's login.
 ```
 
 Logs live in `logs\` inside the Relay directory (backend and tunnel
-`.out`/`.err` logs); PID files live under
+`.out`/`.err` logs; a restart appends to them); PID files live under
 `%LOCALAPPDATA%\Relay\runtime\`. If PowerShell blocks the setup script, allow it
 for the current shell only:
 

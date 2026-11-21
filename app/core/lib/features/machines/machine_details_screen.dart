@@ -208,8 +208,9 @@ class _MachineInfoPanel extends StatefulWidget {
 }
 
 class _MachineInfoPanelState extends State<_MachineInfoPanel> {
-  // Long enough for the download and dependency install on a slow host.
-  static const Duration _updateWait = Duration(minutes: 10);
+  // Ten minutes of polls, one every 10 s: long enough for the download and
+  // dependency install on a slow host.
+  static const int _updatePolls = 60;
 
   Timer? _timer;
   MachineInfo? _info;
@@ -217,7 +218,7 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
   String _latest = '';
   // The version an update was started from, until the backend reports another.
   String _updatingFrom = '';
-  DateTime? _updateStarted;
+  int _updatePollsLeft = 0;
 
   @override
   void initState() {
@@ -273,8 +274,18 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
     if (!mounted) return;
     setState(() {
       _updatingFrom = from;
-      _updateStarted = DateTime.now();
+      _updatePollsLeft = _updatePolls;
     });
+  }
+
+  // Counts one poll during an update; true when its wait has just run out, so
+  // a failed update says so instead of quietly offering the button again.
+  bool _updateTimedOut() => _updatingFrom.isNotEmpty && --_updatePollsLeft <= 0;
+
+  void _showUpdateUnfinished() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.backendUpdateUnfinished)),
+    );
   }
 
   Future<void> _load() async {
@@ -283,26 +294,29 @@ class _MachineInfoPanelState extends State<_MachineInfoPanel> {
       if (!mounted) return;
       final bool updated =
           _updatingFrom.isNotEmpty && info.version != _updatingFrom;
+      final bool timedOut = !updated && _updateTimedOut();
       setState(() {
         _info = info;
         _error = null;
-        if (updated ||
-            (_updateStarted != null &&
-                DateTime.now().difference(_updateStarted!) > _updateWait)) {
-          _updatingFrom = '';
-          _updateStarted = null;
-        }
+        if (updated || timedOut) _updatingFrom = '';
       });
       if (updated) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.backendUpdated(info.version))),
         );
+      } else if (timedOut) {
+        _showUpdateUnfinished();
       }
     } catch (err) {
       // A backend older than /api/machine never will answer; stop asking.
       if (err is BackendException && err.status == 404) _timer?.cancel();
       if (!mounted) return;
-      setState(() => _error = err);
+      final bool timedOut = _updateTimedOut();
+      setState(() {
+        _error = err;
+        if (timedOut) _updatingFrom = '';
+      });
+      if (timedOut) _showUpdateUnfinished();
     }
   }
 

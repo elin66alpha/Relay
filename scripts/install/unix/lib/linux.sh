@@ -30,7 +30,14 @@ install_prerequisites() {
     if need node; then
       c_warn "Node.js $(node -v) is older than $NODE_MIN_MAJOR; installing Node.js $NODE_INSTALL_MAJOR."
     fi
-    system_install curl
+    need apt-get || {
+      c_err "Node.js $NODE_MIN_MAJOR+ is required. Install it with your package manager (https://nodejs.org/en/download), then rerun setup."
+      exit 1
+    }
+    # The one confirmation names what is installed, not the curl used to fetch it.
+    require_sudo nodejs
+    confirm_system_install sudo "Node.js $NODE_INSTALL_MAJOR from the NodeSource apt repository"
+    need curl || system_install curl
     nodesource="$(mktemp)"
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" -o "$nodesource"
     as_root bash "$nodesource"
@@ -67,7 +74,9 @@ ensure_cloudflared() {
   need cloudflared && return
   local arch deb
   if need dpkg && arch="$(dpkg --print-architecture)"; then
-    system_install curl
+    require_sudo cloudflared
+    confirm_system_install sudo "cloudflared from Cloudflare's .deb"
+    need curl || system_install curl
     deb="$(mktemp --suffix=.deb)"
     curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}.deb" -o "$deb"
     as_root dpkg -i "$deb"
@@ -98,6 +107,52 @@ svc_start() {
   [ "${1:-}" != fresh ] || pm2 delete "$SERVER_PROC" "$TUNNEL_PROC" >/dev/null 2>&1 || true
   (cd "$SERVER_DIR" && pm2 start ecosystem.config.js --update-env)
   pm2 save >/dev/null 2>&1 || true
+  [ "${1:-}" != fresh ] || ensure_pm2_boot
+}
+
+# The backend alone, re-read from ecosystem.config.js and server/.env. The
+# tunnel keeps running, so a Quick Tunnel keeps its URL.
+svc_restart_server() {
+  require_pm2
+  pm2 delete "$SERVER_PROC" >/dev/null 2>&1 || true
+  (cd "$SERVER_DIR" && pm2 start ecosystem.config.js --only "$SERVER_PROC" --update-env)
+  pm2 save >/dev/null 2>&1 || true
+}
+
+# pm2 save records the processes; PM2's systemd unit restores them at boot.
+ensure_pm2_boot() {
+  local user answer
+  user="$(id -un)"
+  if ! need systemctl || [ ! -d /run/systemd/system ]; then
+    c_warn "This host has no systemd, so Relay does not start after a reboot. Run $(script_path start.sh) after each boot."
+    return 0
+  fi
+  systemctl is-enabled "pm2-$user" >/dev/null 2>&1 && return 0
+  if [ "$(id -u)" -ne 0 ] && ! need sudo; then
+    c_warn "Starting Relay at boot needs sudo. Without it, run $(script_path start.sh) after each reboot."
+    return 0
+  fi
+  read -rp "${ASK}Start Relay when this machine boots (a pm2-$user systemd service, needs sudo)? [Y/n]: " answer || true
+  case "${answer:-y}" in
+    [Yy]*) ;;
+    *) c_warn "Relay will not start after a reboot. Run $(script_path start.sh) after each boot."; return 0 ;;
+  esac
+  as_root env PATH="$PATH" "$(command -v pm2)" startup systemd -u "$user" --hp "$HOME" >/dev/null ||
+    c_warn "Could not register the boot service. Run pm2 startup and follow its instructions."
+}
+
+# The installation the registered backend runs from, or nothing.
+svc_root() {
+  need pm2 || return 0
+  pm2 jlist 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try {
+    const app = JSON.parse(s).find((p) => p.name === process.argv[1]);
+    if (app && app.pm2_env && app.pm2_env.pm_cwd) process.stdout.write(require("path").dirname(app.pm2_env.pm_cwd));
+  } catch (_) {}
+});
+' "$SERVER_PROC"
 }
 
 # The tunnel stops first so it stops advertising a backend that is going away.
@@ -145,6 +200,9 @@ remove_system_software() {
     if [ "${others:-0}" -gt 0 ]; then
       c_warn "PM2 still manages $others other process(es); keeping PM2."
     elif ask_no "Remove PM2?"; then
+      if need systemctl && systemctl is-enabled "pm2-$(id -un)" >/dev/null 2>&1; then
+        as_root env PATH="$PATH" "$(command -v pm2)" unstartup systemd -u "$(id -un)" --hp "$HOME" >/dev/null || true
+      fi
       pm2 kill >/dev/null 2>&1 || true
       if [ -w "$(npm prefix -g)" ]; then npm uninstall -g pm2; else as_root npm uninstall -g pm2; fi
     fi

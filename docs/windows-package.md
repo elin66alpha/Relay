@@ -54,14 +54,15 @@ Windows 桌面客户端在单独的客户端 ZIP 中。
 
 For local testing choose Direct and http://127.0.0.1:8787. Other devices need
 the Windows host's reachable address and an open firewall port. Public access
-needs HTTPS (a Cloudflare tunnel provides it). Quick Tunnel URLs can change on
-restart; generate/import a credential for the new URL when that happens.
+needs HTTPS (a Cloudflare tunnel provides it). A Quick Tunnel URL changes
+whenever the tunnel restarts; then choose 9 in setup.cmd, which shows a token's
+QR with the current URL, and import it on each device.
 Named tunnel setup may open a browser for Cloudflare login. Replacing an
 existing DNS record is an explicit yes, off by default.
 
 本机测试可选择直连并填 http://127.0.0.1:8787。其他设备需要使用主机可达的地址并放行
-防火墙端口。公网访问需要 HTTPS（Cloudflare 隧道自带）。Quick Tunnel 重启后地址
-可能变化，变化后需重新生成并导入凭证。正式隧道可能打开浏览器进行 Cloudflare 登录。
+防火墙端口。公网访问需要 HTTPS（Cloudflare 隧道自带）。Quick Tunnel 每次重启后地址
+都会变，这时在 setup.cmd 里选 9，用当前地址重新显示令牌二维码，再在每台设备上导入。正式隧道可能打开浏览器进行 Cloudflare 登录。
 覆盖已有 DNS 记录需要明确回答 y，默认不覆盖。
 
 ## Management / 管理
@@ -90,8 +91,11 @@ Console commands from the extracted directory / 解压目录的命令：
 .\uninstall.cmd
 ~~~
 
-Setup registers a current-user login Scheduled Task, not a system service.
-Only one managed Relay installation per Windows user is supported. Logs are in
+Setup registers a current-user login Scheduled Task, not a system service, so
+after a restart Relay waits for a sign-in; a backend that exits starts again
+within five seconds. Only one managed Relay installation per Windows user is
+supported: setup in another folder says where Relay is installed, and that
+folder's update.cmd upgrades it with its tokens and chats. Logs are in
 logs\ inside the extracted directory: backend/tunnel .out/.err logs hold
 service output. PID files are in %LOCALAPPDATA%\Relay\runtime.
 Uninstall removes services and Web; the setup.cmd menu also offers deleting
@@ -100,8 +104,9 @@ configuration, tokens, encrypted credentials, chats, settings and logs remain.
 Shared host runtimes and agent CLIs remain. Extract the bundle again to
 restore Web after uninstall.
 
-安装会创建当前用户登录计划任务，不是系统服务。每个 Windows 用户支持一个受管理的
-Relay 实例。日志位于解压目录下的 logs\：backend/tunnel 的 .out/.err 日志保存服务输出。
+安装会创建当前用户登录计划任务，不是系统服务，所以重启后要等有人登录；后端退出后
+五秒内会自动重新启动。每个 Windows 用户支持一个受管理的 Relay 实例：在别的文件夹运行
+setup 会提示 Relay 装在哪里，用那个文件夹的 update.cmd 升级可保留令牌和聊天。日志位于解压目录下的 logs\：backend/tunnel 的 .out/.err 日志保存服务输出。
 PID 文件位于 %LOCALAPPDATA%\Relay\runtime。卸载移除服务并删除 Web；setup.cmd 菜单还可选择删除
 正式 Cloudflare 隧道和本包下载的 cloudflared。后端配置、设备令牌、加密凭证、
 聊天、设置和日志保留，共用的主机运行时和 CLI 也会保留；卸载后重新解压可恢复 Web。

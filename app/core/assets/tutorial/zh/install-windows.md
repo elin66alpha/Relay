@@ -22,7 +22,11 @@ keywords: windows, setup.cmd, powershell, 计划任务, update.cmd, 安装
 - 把智能体 CLI 所在的文件夹（例如 Codex 和 OpenCode 所在的 `%APPDATA%\npm`）加入**用户 PATH**；主机没有 Node.js 时也会加入自带的 Node（npm 的命令垫片需要它）。卸载只删除它添加的条目。
 - 菜单选项 `t` 会打开一个带后端 PATH 的 PowerShell，并列出每个 CLI 的登录命令。
 
-后端以当前用户的**计划任务**运行，登录 Windows 后自动启动。
+后端以当前用户的**计划任务**运行，登录 Windows 后自动启动，所以电脑重启后要等有人登录。后端退出时（比如崩溃），会在五秒内自动重新启动。
+
+本机已连上 Tailscale 时，网络方式默认选 Tailscale，否则默认 Quick Tunnel。Quick Tunnel 的 `trycloudflare.com` 地址在隧道每次重启后都会变；在 `setup.cmd` 里选 **9**，用当前地址重新显示令牌的二维码。
+
+如果 `setup.cmd` 提示 Relay 是从另一个文件夹安装的（比如把新版本解压到了旧版本旁边），请改在那个文件夹运行 `update.cmd`。在新文件夹里重装会从头开始，没有原来的令牌和聊天。
 
 ## 常用命令
 
@@ -45,7 +49,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## 日志
 
-Relay 目录下的 `logs\`：后端和隧道的 `.out` / `.err` 日志。安装过程直接显示在命令行窗口中。PID 文件在 `%LOCALAPPDATA%\Relay\runtime\`。
+Relay 目录下的 `logs\`：后端和隧道的 `.out` / `.err` 日志。重新启动时后端日志是追加写入的，崩溃前的输出会保留。安装过程直接显示在命令行窗口中。PID 文件在 `%LOCALAPPDATA%\Relay\runtime\`。
 
 ## 磁盘
 

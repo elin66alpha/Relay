@@ -15,8 +15,8 @@ TUNNEL_PLIST="$LAUNCH_AGENTS_DIR/$TUNNEL_LABEL.plist"
 RELAY_PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.opencode/bin:$HOME/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # Homebrew's prefix is missing from PATH in shells that skipped its shellenv.
-for dir in /opt/homebrew/bin /usr/local/bin; do
-  case ":$PATH:" in *":$dir:"*) ;; *) [ ! -d "$dir" ] || PATH="$PATH:$dir" ;; esac
+for brew_bin in /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$brew_bin:"*) ;; *) [ ! -d "$brew_bin" ] || PATH="$PATH:$brew_bin" ;; esac
 done
 
 system_install() {
@@ -46,8 +46,11 @@ install_prerequisites() {
   need zip || system_install zip
 }
 
-# node-pty compiles with the Xcode Command Line Tools when no prebuilt binary fits.
+# node-pty ships prebuilt darwin-x64 and darwin-arm64 binaries, so before npm
+# has installed it nothing is needed; the Xcode Command Line Tools matter only
+# when that binary does not load and it has to compile.
 ensure_pty_build_tools() {
+  [ -d "$SERVER_DIR/node_modules/node-pty" ] || return 0
   xcode-select -p >/dev/null 2>&1 && return
   c_warn "The terminal's PTY module needs the Xcode Command Line Tools."
   xcode-select --install >/dev/null 2>&1 || true
@@ -117,18 +120,31 @@ start_agent() {
   local label="$1" plist="$2" domain
   domain="$(launch_domain)"
   launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
-  launchctl bootstrap "$domain" "$plist"
+  # bootout can return before launchd has let go of the label ("Bootstrap
+  # failed: 5"); update.sh restarts through here, so retry once.
+  launchctl bootstrap "$domain" "$plist" 2>/dev/null || { sleep 2; launchctl bootstrap "$domain" "$plist"; }
   launchctl enable "$domain/$label" >/dev/null 2>&1 || true
   launchctl kickstart -k "$domain/$label"
 }
 
 stop_agent() { launchctl bootout "$(launch_domain)/$1" >/dev/null 2>&1 || true; }
 
+# The backend alone; the tunnel keeps running, so a Quick Tunnel keeps its URL.
+svc_restart_server() {
+  local node
+  node="$(command -v node)" || { c_err "Node.js is not on PATH."; exit 1; }
+  # The Node running setup goes first: nvm, fnm and Volta keep it, and the CLIs
+  # npm installs beside it, outside the fixed directories. (local: write_plist
+  # reads it.)
+  local RELAY_PATH="${node%/*}:$RELAY_PATH"
+  write_plist "$SERVER_LABEL" "$SERVER_PLIST" backend "$SERVER_DIR" "$node" "$SERVER_DIR/server.js"
+  start_agent "$SERVER_LABEL" "$SERVER_PLIST"
+}
+
 # Both LaunchAgents are rewritten from server/.env, as PM2 reads it on Linux.
 svc_start() {
   local bin args=()
-  write_plist "$SERVER_LABEL" "$SERVER_PLIST" backend "$SERVER_DIR" /usr/bin/env node "$SERVER_DIR/server.js"
-  start_agent "$SERVER_LABEL" "$SERVER_PLIST"
+  svc_restart_server
   if [ "$(tunnel_mode)" = cloudflare ] && [ -z "$(get_env CLOUDFLARED_ARGS)" ] && [ -f "$TUNNEL_PLIST" ]; then
     # Named tunnels set up before 0.1.12 kept their arguments only in the plist.
     start_agent "$TUNNEL_LABEL" "$TUNNEL_PLIST"
@@ -187,6 +203,14 @@ tunnel_log_files() { printf '%s\n' "$LOG_DIR/tunnel.err.log" "$LOG_DIR/tunnel.ou
 service_hint() {
   printf 'Backend runs as the LaunchAgent %s; logs are in %s (tail -f %s/backend.err.log).\n' \
     "$SERVER_LABEL" "$LOG_DIR" "$LOG_DIR"
+  printf 'It starts when you log in to this Mac, so after a restart Relay waits for a login.\n'
+}
+
+# The installation the registered backend runs from, or nothing.
+svc_root() {
+  [ -f "$SERVER_PLIST" ] || return 0
+  sed -n '/<key>WorkingDirectory<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}' "$SERVER_PLIST" |
+    sed 's/&lt;/</g; s/&gt;/>/g; s/&amp;/\&/g; s,/server$,,'
 }
 
 brew_has() { need brew && brew list --formula "$1" >/dev/null 2>&1; }

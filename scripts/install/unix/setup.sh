@@ -29,8 +29,11 @@ install_server_deps() {
      [ ! -d node_modules/ws ]; then
     node -e "require('node-pty')" >/dev/null 2>&1 || ensure_pty_build_tools
     c_info "Installing server dependencies..."
-    npm install
+    # A release installs exactly its lock file, without the development tools
+    # a source checkout keeps for lint and tests.
+    if [ -e "$ROOT_DIR/.git" ]; then npm install; else npm ci --omit=dev; fi
     if ! node -e "require('node-pty')" >/dev/null 2>&1; then
+      ensure_pty_build_tools
       npm rebuild node-pty
     fi
     node -e "require('node-pty')"
@@ -38,81 +41,89 @@ install_server_deps() {
 }
 
 # ---- agent CLIs ----
-# Each CLI's official installer. Codex ships on npm; the rest publish a script.
-# Relay never signs an agent in: the login command is printed for the user.
-AGENT_LABELS=("Claude Code" "Codex" "Cursor" "OpenCode" "Hermes")
-AGENT_BINS=(claude codex agent opencode hermes)
-AGENT_SCRIPTS=(
-  "https://claude.ai/install.sh"
-  ""
-  "https://cursor.com/install"
-  "https://opencode.ai/install"
-  "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
-)
-AGENT_LOGINS=("claude" "codex login --device-auth" "agent login" "opencode auth login" "hermes setup")
-
-# The same places the backend looks (server/lib/cli-paths.js): PATH, then the
-# per-user dirs the installers use, which this shell's PATH may lack.
-agent_cli_installed() {
-  need "$1" || [ -x "$HOME/.local/bin/$1" ] ||
-    { [ "$1" = opencode ] && [ -x "$HOME/.opencode/bin/opencode" ]; }
+# The agents, their labels, sign-in commands and install state come from the
+# backend (server/scripts/setup-status.js), so this menu sees what Relay sees.
+# Only each CLI's official installer lives here. Relay never signs an agent in:
+# the login command is printed for the user.
+agent_installer() {
+  case "$1" in
+    claude) printf '%s' https://claude.ai/install.sh ;;
+    cursor) printf '%s' https://cursor.com/install ;;
+    opencode) printf '%s' https://opencode.ai/install ;;
+    agy) printf '%s' https://antigravity.google/cli/install.sh ;;
+    hermes) printf '%s' https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh ;;
+  esac
 }
 
+# key<TAB>label<TAB>installed (1/0)<TAB>login, one line per agent.
+agent_rows() { (cd "$SERVER_DIR" && node scripts/setup-status.js --agents); }
+
 install_agent_cli() {
-  local i="$1" script
-  c_info "Installing ${AGENT_LABELS[$i]}..."
-  if [ -z "${AGENT_SCRIPTS[$i]}" ]; then
+  local key="$1" label="$2" script
+  c_info "Installing $label..."
+  if [ "$key" = codex ]; then
     need npm || { c_warn "Codex installs with npm, which is missing. Choose 1 to install Relay first."; return 1; }
     npm_install_global @openai/codex
     return
   fi
   need curl || system_install curl
   # Hermes' installer clones its repository.
-  [ "${AGENT_BINS[$i]}" != hermes ] || need git || system_install git
+  [ "$key" != hermes ] || need git || system_install git
   # Saved to a file rather than piped, so an installer that asks questions
   # still reads them from this terminal.
   script="$(mktemp)"
   trap "rm -f '$script'" EXIT
-  curl -fsSL "${AGENT_SCRIPTS[$i]}" -o "$script" && bash "$script"
+  curl -fsSL "$(agent_installer "$key")" -o "$script" && bash "$script"
 }
 
 install_agent_clis() {
-  local i n picks missing=() added=()
-  for i in "${!AGENT_BINS[@]}"; do
-    if agent_cli_installed "${AGENT_BINS[$i]}"; then
-      printf '  %d) %-12s \033[32m✔ installed\033[0m\n' "$((i + 1))" "${AGENT_LABELS[$i]}"
+  local rows n picks key label installed login i missing=() added=()
+  local keys=() labels=() logins=()
+  rows="$(agent_rows)"
+  i=0
+  while IFS=$'\t' read -r key label installed login; do
+    keys+=("$key"); labels+=("$label"); logins+=("$login")
+    i=$((i + 1))
+    if [ "$installed" = 1 ]; then
+      printf '  %d) %-12s \033[32m✔ installed\033[0m\n' "$i" "$label"
     else
-      printf '  %d) %-12s \033[2m✘ not installed\033[0m\n' "$((i + 1))" "${AGENT_LABELS[$i]}"
-      missing+=("$((i + 1))")
+      printf '  %d) %-12s \033[2m✘ not installed\033[0m\n' "$i" "$label"
+      missing+=("$i")
     fi
-  done
+  done <<<"$rows"
   if [ "${#missing[@]}" -eq 0 ]; then
-    c_info "All five agent CLIs are installed."
+    c_info "Every agent CLI is installed."
     return
   fi
-  read -rp "${ASK}Install which? Numbers separated by spaces, a = all missing, Enter = skip: " picks
+  read -rp "${ASK}Install which? Numbers separated by spaces, a = all missing, Enter = skip: " picks || true
   [ "$picks" != a ] || picks="${missing[*]}"
   for n in $picks; do
-    case "$n" in [1-5]) ;; *) c_warn "Skipping invalid choice: $n"; continue ;; esac
+    case " ${missing[*]} " in
+      *" $n "*) ;;
+      *)
+        if [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le "${#keys[@]}" ]; then
+          c_warn "${labels[$((n - 1))]} is already installed."
+        else
+          c_warn "Skipping invalid choice: $n"
+        fi
+        continue
+        ;;
+    esac
     i=$((n - 1))
-    if agent_cli_installed "${AGENT_BINS[$i]}"; then
-      c_warn "${AGENT_LABELS[$i]} is already installed."
-      continue
-    fi
     # A subshell, so declining a system install or a failed installer skips
     # only this CLI instead of exiting setup.
-    (install_agent_cli "$i") || true
+    (install_agent_cli "${keys[$i]}" "${labels[$i]}") || true
     hash -r
-    if agent_cli_installed "${AGENT_BINS[$i]}"; then
+    if [ "$(agent_rows | awk -F '\t' -v key="${keys[$i]}" '$1 == key { print $3 }')" = 1 ]; then
       added+=("$i")
     else
-      c_warn "${AGENT_LABELS[$i]} did not install. Install it by hand later; Relay finds it without a restart."
+      c_warn "${labels[$i]} did not install. Install it by hand later; Relay finds it without a restart."
     fi
   done
   [ "${#added[@]}" -gt 0 ] || return 0
   c_info "Sign in to each new CLI on this machine (open a new terminal if a command is not found):"
   for i in "${added[@]}"; do
-    printf '  %-12s %s\n' "${AGENT_LABELS[$i]}" "${AGENT_LOGINS[$i]}"
+    printf '  %-12s %s\n' "${labels[$i]}" "${logins[$i]}"
   done
   printf '  Relay picks them up within a minute; no restart needed.\n'
 }
@@ -193,7 +204,7 @@ tailscale_ipv4() {
 }
 
 install_backend() {
-  local port mode public_url tailscale_ip hostname_value tunnel_name answer_name tunnel_id config_file quick_url
+  local port answer default_mode mode public_url tailscale_ip hostname_value tunnel_name answer_name tunnel_id config_file quick_url
   section "Step 1/6 · System software and server dependencies"
   install_prerequisites
   install_server_deps
@@ -205,9 +216,16 @@ install_backend() {
   section "Step 4/6 · File access"
   choose_file_access
 
-  port="$(backend_port)"
-
   section "Step 5/6 · Network mode"
+  port="$(backend_port)"
+  read -rp "${ASK}Backend port [$port]: " answer
+  port="${answer:-$port}"
+  [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] ||
+    { c_err "Port must be between 1 and 65535."; exit 1; }
+  set_env PORT "$port"
+  # A Quick Tunnel's address changes on every restart; a tailnet's does not.
+  default_mode=3
+  ! tailscale_ipv4 >/dev/null || default_mode=4
   while :; do
     cat <<EOF
   1) No tunnel / direct public address
@@ -215,8 +233,8 @@ install_backend() {
   3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL
   4) Tailscale / this machine's Tailscale IP, reachable from your tailnet
 EOF
-    read -rp "${ASK}Network mode [1/2/3/4, default 3]: " mode
-    mode="${mode:-3}"
+    read -rp "${ASK}Network mode [1/2/3/4, default $default_mode]: " mode
+    mode="${mode:-$default_mode}"
     [ "$mode" = 4 ] || break
     tailscale_ip="$(tailscale_ipv4)" && break
     c_warn "Tailscale is not installed here, or this machine is not connected to a tailnet."
@@ -232,6 +250,10 @@ EOF
         http://* | https://*) ;;
         *) public_url="http://$public_url"; c_warn "No scheme given; assuming $public_url" ;;
       esac
+      node -e '
+const u = new URL(process.argv[1]);
+if (!/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash) process.exit(1);
+' "$public_url" 2>/dev/null || { c_err "Enter an HTTP(S) address without credentials, query or fragment."; exit 1; }
       # Bind to all interfaces so the public IP/domain can reach the server.
       set_env HOST 0.0.0.0
       set_env PUBLIC_BASE_URL "$public_url"
@@ -302,6 +324,8 @@ EOF
       c_info "Quick Tunnel mode: exposing 127.0.0.1:${port} via a temporary trycloudflare.com URL."
       # The tunnel reaches the server over loopback; keep it bound locally.
       set_env HOST 127.0.0.1
+      # An address from an earlier mode must not stand in for the tunnel's.
+      set_env PUBLIC_BASE_URL ""
       set_env RELAY_TUNNEL_MODE quick
       set_env CLOUDFLARED_BIN "$(command -v cloudflared)"
       set_env CLOUDFLARED_ARGS "tunnel --url http://127.0.0.1:${port}"
@@ -336,6 +360,10 @@ EOF
   if [ -n "$public_url" ]; then credential --url "$public_url"; else credential; fi
 
   c_info "Done. In the app, tap \"Scan QR\", scan the QR above, and enter the password you just set."
+  if [ "$mode" = 3 ]; then
+    c_warn "The trycloudflare.com address changes whenever the tunnel restarts (a reboot, a crash, a reinstall)."
+    c_warn "Each device then needs a new QR: $(script_path setup.sh), choice 9. For daily use, choose Cloudflare Tunnel (2) or Tailscale (4)."
+  fi
   c_info "$(service_hint)"
   c_info "Run $(script_path setup.sh) again for status, tokens, reinstall or uninstall."
 }
@@ -351,6 +379,7 @@ if [ "${1:-}" = install ] && ! svc_registered server; then
   install_backend
   exit 0
 fi
+installed_elsewhere || true
 
 while true; do
   section "Relay backend · $PLATFORM_LABEL"
@@ -359,7 +388,7 @@ while true; do
   2) Reinstall (keeps tokens, chats and settings)
   3) Uninstall all services
   4) Service status (address, agents, tokens)
-  5) Install agent CLIs (Claude Code, Codex, Cursor, OpenCode, Hermes)
+  5) Install agent CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Hermes)
   6) Create a new token
   7) Delete a token
   8) List tokens
@@ -370,13 +399,14 @@ MENU
   case "$CHOICE" in
     1)
       if svc_registered server; then
-        c_warn "Relay is already installed here. Choose 2 to reinstall."
+        installed_elsewhere || c_warn "Relay is already installed here. Choose 2 to reinstall."
         continue
       fi
       install_backend
       exit 0
       ;;
     2)
+      installed_elsewhere || true
       ask_no "Stop Relay, reinstall its dependencies and set up the network again?" || continue
       svc_remove >/dev/null
       rm -rf "$SERVER_DIR/node_modules"
@@ -389,16 +419,16 @@ MENU
       fi
       ;;
     4) "$UNIX_DIR/status.sh" || true ;;
-    5)
-      section "Agent CLIs"
-      install_agent_clis
-      ;;
-    6 | 7 | 8 | 9)
+    5 | 6 | 7 | 8 | 9)
       if [ ! -f "$ENV_FILE" ] || [ ! -d "$SERVER_DIR/node_modules" ]; then
         c_warn "Relay is not installed here yet. Choose 1 first."
         continue
       fi
       case "$CHOICE" in
+        5)
+          section "Agent CLIs"
+          install_agent_clis
+          ;;
         6)
           section "Create a token"
           read -rp "${ASK}Label for the device that will use it [$(hostname)]: " LABEL

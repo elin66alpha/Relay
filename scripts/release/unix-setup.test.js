@@ -18,7 +18,7 @@ function writeExecutable(file, body) {
   fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 }
 
-function sandbox(t, uname, fileAccess, { network = '3', tailscale = null, tailscaleExit = 0, web = false } = {}) {
+function sandbox(t, uname, fileAccess, { network = '3', port = '', tailscale = null, tailscaleExit = 0, web = false, args = ['install'], pm2List = '[]' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-setup-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, 'bin');
@@ -34,14 +34,21 @@ function sandbox(t, uname, fileAccess, { network = '3', tailscale = null, tailsc
   fs.writeFileSync(path.join(server, 'scripts', 'create-credential.js'), "console.log('CREDENTIAL ' + process.argv.slice(2).join(' '));");
   // No browser on this host: setup only reminds and carries on.
   fs.writeFileSync(path.join(server, 'scripts', 'check-browser.js'), 'process.exitCode = 1;');
+  // Every agent CLI is installed, as the backend sees them, so step 2 asks nothing.
+  fs.writeFileSync(path.join(server, 'scripts', 'setup-status.js'), [
+    "for (const key of ['claude', 'codex', 'cursor', 'opencode', 'agy', 'hermes']) {",
+    "  console.log([key, key, 1, `${key} login`].join('\\t'));",
+    '}',
+  ].join('\n'));
 
   const calls = path.join(root, 'calls');
   const url = 'https://fake-tunnel.trycloudflare.com';
   writeExecutable(path.join(bin, 'uname'), `echo ${uname}`);
   writeExecutable(path.join(bin, 'zip'), 'exit 0');
   writeExecutable(path.join(bin, 'cloudflared'), 'exit 0');
-  // Every agent CLI is present, so step 2 asks nothing.
-  for (const cli of ['claude', 'codex', 'agent', 'opencode', 'hermes']) writeExecutable(path.join(bin, cli), 'exit 0');
+  // No PM2 boot service yet; sudo records what setup runs as root.
+  writeExecutable(path.join(bin, 'systemctl'), 'exit 1');
+  writeExecutable(path.join(bin, 'sudo'), 'echo "sudo $*" >>"$RELAY_TEST_CALLS"');
   // Shadows any host Tailscale: prints the tailnet IP, or fails like one that is not up.
   writeExecutable(
     path.join(bin, 'tailscale'),
@@ -53,7 +60,8 @@ function sandbox(t, uname, fileAccess, { network = '3', tailscale = null, tailsc
     'echo "pm2 $*" >>"$RELAY_TEST_CALLS"',
     'case "$1" in',
     `  start) mkdir -p "$HOME/.pm2/logs"; echo ${url} >"$HOME/.pm2/logs/relay-tunnel-error.log" ;;`,
-    '  describe) exit 1 ;;',
+    `  describe) [ '${pm2List}' != '[]' ] || exit 1 ;;`,
+    `  jlist) echo '${pm2List}' ;;`,
     'esac',
   ].join('\n'));
   writeExecutable(path.join(bin, 'launchctl'), [
@@ -70,10 +78,10 @@ function sandbox(t, uname, fileAccess, { network = '3', tailscale = null, tailsc
     fs.mkdirSync(webDir, { recursive: true });
     fs.writeFileSync(path.join(webDir, 'index.html'), 'fixture');
   }
-  const result = spawnSync('bash', [path.join(relay, 'scripts', 'install', platform, 'setup.sh'), 'install'], {
+  const result = spawnSync('bash', [path.join(relay, 'scripts', 'install', platform, 'setup.sh'), ...args], {
     encoding: 'utf8',
-    // Step 4: file access. Step 5: network mode answers.
-    input: `${web ? 'y\n' : ''}${fileAccess}\n${network}\n`,
+    // Step 4: file access. Step 5: port and network mode, then (Linux) start at boot.
+    input: `${web ? 'y\n' : ''}${fileAccess}\n${port}\n${network}\n\n`,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, RELAY_TEST_CALLS: calls },
   });
   return { result, home, relay, server, calls: fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '', url };
@@ -95,6 +103,7 @@ function assertSameSteps(run) {
   const env = fs.readFileSync(path.join(run.server, '.env'), 'utf8');
   assert.match(env, /^RELAY_TUNNEL_MODE=quick$/m);
   assert.match(env, /^CLOUDFLARED_ARGS=tunnel --url http:\/\/127\.0\.0\.1:8787$/m);
+  assert.match(run.result.stdout, /trycloudflare\.com address changes whenever the tunnel restarts/);
 }
 
 test('Linux setup runs the six steps, leaves file access open and starts PM2', { skip: process.platform === 'win32' }, (t) => {
@@ -102,6 +111,29 @@ test('Linux setup runs the six steps, leaves file access open and starts PM2', {
   assertSameSteps(run);
   assert.match(fs.readFileSync(path.join(run.server, '.env'), 'utf8'), /^RELAY_WORKSPACE_ROOT=$/m);
   assert.match(run.calls, /^pm2 start ecosystem\.config\.js --update-env$/m);
+  // PM2's systemd unit brings the saved processes back after a reboot.
+  if (fs.existsSync('/run/systemd/system')) {
+    assert.match(run.calls, new RegExp(`^sudo env PATH=\\S+ \\S+/pm2 startup systemd -u \\S+ --hp ${run.home}$`, 'm'));
+  }
+});
+
+test('setup asks for the port and uses it for the tunnel', { skip: process.platform === 'win32' }, (t) => {
+  const run = sandbox(t, 'Linux', '1', { port: '9000' });
+  assert.equal(run.result.status, 0, run.result.stderr);
+  const env = fs.readFileSync(path.join(run.server, '.env'), 'utf8');
+  assert.match(env, /^PORT=9000$/m);
+  assert.match(env, /^CLOUDFLARED_ARGS=tunnel --url http:\/\/127\.0\.0\.1:9000$/m);
+});
+
+test('setup points at the installation the service already runs from', { skip: process.platform === 'win32' }, (t) => {
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-other-'));
+  t.after(() => fs.rmSync(other, { recursive: true, force: true }));
+  const list = JSON.stringify([{ name: 'relay-server', pm2_env: { pm_cwd: path.join(other, 'server') } }]);
+  const run = sandbox(t, 'Linux', '0', { pm2List: list });
+  assert.equal(run.result.status, 0, run.result.stderr);
+  assert.match(run.result.stdout, new RegExp(`Relay is installed from ${fs.realpathSync(other)}, not from this folder`));
+  assert.match(run.result.stdout, /RELAY_DIR="[^"]+" \S+\/update\.sh/);
+  assert.doesNotMatch(run.result.stdout, /Step 1\/6/, 'the menu opens instead of installing over it');
 });
 
 test('macOS setup runs the same six steps, isolates file access and starts both LaunchAgents', { skip: process.platform === 'win32' }, (t) => {
@@ -137,6 +169,13 @@ test('Tailscale Web uses a configured HTTPS proxy or disables Web for native-onl
     assert.ok(env.split('\n').includes(`RELAY_SERVE_WEB=${proxy ? 1 : 0}`));
     assert.ok(run.result.stdout.includes(`CREDENTIAL --url ${url}`));
   }
+});
+
+test('Tailscale is the default network mode when this machine is on a tailnet', { skip: process.platform === 'win32' }, (t) => {
+  const run = sandbox(t, 'Linux', '1', { network: '', tailscale: '100.101.102.103' });
+  assert.equal(run.result.status, 0, run.result.stderr);
+  // Enter at the network menu (read -p prints no prompt without a terminal).
+  assert.match(fs.readFileSync(path.join(run.server, '.env'), 'utf8'), /^PUBLIC_BASE_URL=http:\/\/100\.101\.102\.103:8787$/m);
 });
 
 test('Tailscale mode without a tailnet returns to the network menu', { skip: process.platform === 'win32' }, (t) => {

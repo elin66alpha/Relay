@@ -22,7 +22,11 @@ The ZIP includes the Node.js runtime, npm, production dependencies and the Web c
 - Append the folders that hold an agent CLI (such as `%APPDATA%\npm`, where Codex and OpenCode install) to your **user PATH**, plus the bundled Node when the host has none (npm's command shims need it). Uninstall removes only the entries it added.
 - Menu choice `t` opens a PowerShell with the backend's PATH and lists each CLI's sign-in command.
 
-The backend runs as a per-user **Scheduled Task** that starts when you sign in to Windows.
+The backend runs as a per-user **Scheduled Task** that starts when you sign in to Windows, so after a restart Relay waits for a sign-in. If the backend exits (a crash, for example), it starts again within five seconds.
+
+The network mode defaults to Tailscale when this machine is on a tailnet, otherwise to Quick Tunnel. A Quick Tunnel's `trycloudflare.com` address changes whenever the tunnel restarts; choose **9** in `setup.cmd` to show a token's QR again with the current address.
+
+If `setup.cmd` says Relay is installed from another folder (for example a newer release extracted beside the old one), run `update.cmd` in that folder instead. Reinstalling in the new folder starts over without the old tokens and chats.
 
 ## Common commands
 
@@ -45,7 +49,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## Logs
 
-`logs\` in the Relay folder: the backend and tunnel `.out` / `.err` logs. Setup prints its progress in the console window. PID files live in `%LOCALAPPDATA%\Relay\runtime\`.
+`logs\` in the Relay folder: the backend and tunnel `.out` / `.err` logs. Starting again appends to the backend logs, so the output before a crash stays. Setup prints its progress in the console window. PID files live in `%LOCALAPPDATA%\Relay\runtime\`.
 
 ## Drives
 

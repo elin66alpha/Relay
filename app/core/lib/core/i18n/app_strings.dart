@@ -603,6 +603,9 @@ class AppStrings {
   String get backendUpdating => isZh ? '正在更新后端…' : 'Updating the backend…';
   String backendUpdated(String version) =>
       isZh ? '后端已更新到 $version' : 'Backend updated to $version';
+  String get backendUpdateUnfinished => isZh
+      ? '后端更新没有完成。原因在主机上的 relay-update.log 里（系统临时目录）。'
+      : 'The backend update did not finish. The reason is in relay-update.log in the host\'s temp folder.';
   String get fontSize => isZh ? '字体大小' : 'Font size';
   String get fontSizeDescription =>
       isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';

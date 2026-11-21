@@ -9,19 +9,21 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 ## 前置要求
 
 - Node.js 22 或更新版本。
-- 后端至少安装一个支持的 CLI：Claude Code、Codex、Cursor、OpenCode 或 Hermes。
+- 后端至少安装一个支持的 CLI：Claude Code、Codex、Cursor、OpenCode、Antigravity 或 Hermes。
 - 每个 CLI 都必须直接在后端主机上完成认证或 provider 配置。Relay 只报告状态，
   不执行 OAuth 登录，也不收集 provider 密钥。
 - Unix 主机下载文件夹时需要 `zip`。Linux 安装还需要 PM2、Python 3、`make` 和
   C++ 编译器，以编译终端的 PTY 依赖。
 - 只有正式 Cloudflare Tunnel 或 Quick Tunnel 模式需要 `cloudflared`。
 - 在 Debian 和 Ubuntu 上，Linux 安装脚本会检查上面除 agent CLI 以外的所有项，包括
-  Node.js 版本，确认一次后用 `sudo apt-get` 安装缺少的软件：Node.js 缺失或低于 22
-  时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare 发布的 `.deb`
-  安装 `cloudflared`。请用将来运行 Relay 的普通用户执行，不要加 `sudo`。
+  Node.js 版本，确认一次（确认时会说明要装什么）后用 `sudo apt-get` 安装缺少的软件：
+  Node.js 缺失或低于 22 时从 NodeSource 安装 Node.js 24；选择隧道模式时从 Cloudflare
+  发布的 `.deb` 安装 `cloudflared`。其他发行版会告诉你需要安装什么。请用将来运行 Relay
+  的普通用户执行，不要加 `sudo`。
 - 在 macOS 上，安装脚本确认一次后用 Homebrew 做同样的事：Node.js 缺失或低于 22 时安装
   当前版本，以及 `zip`，选择隧道模式时安装 `cloudflared`。没有 Homebrew 时会列出需要
-  安装的软件。终端的 PTY 依赖需要编译时，会打开 Xcode Command Line Tools 安装程序。
+  安装的软件。终端的 PTY 依赖自带 macOS 预编译版本；只有它加载失败、需要编译时，才会打开
+  Xcode Command Line Tools 安装程序。
 - 将现有 Relay 升级到 0.1.10 或更新版本前，请先把 Node.js 更新到 22 或更新版本。
   升级脚本会在替换文件前检查；版本过低时不会改动现有安装。
 
@@ -29,7 +31,9 @@ Relay 在所有后端操作系统上使用同一个 Node.js 服务和同一套 H
 
 Linux 和 macOS 共用 `relay-backend-linux-macos-v<版本>.tar.gz`。从 [GitHub Releases](https://github.com/elin66alpha/Relay/releases/latest) 下载后，对照 `SHA256SUMS` 中的同名记录校验文件。解压到固定、可写的目录，进入包含 `server/` 的文件夹，运行 `./install.sh`。
 
-需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。
+需要升级时，在安装目录运行 `./scripts/install/unix/update.sh`，或在 App 的机器详情中选择「更新并重启」。升级脚本按发行版的 `SHA256SUMS` 校验压缩包，保留配置、令牌和聊天。安装已是最新版本时它不做任何改动（设置 `RELAY_VERSION=<版本>` 仍可安装指定版本）。它先在 `.relay-update-new/` 解压并运行 `npm ci --omit=dev`，所以下载或依赖安装失败时什么都不会变；之后把旧版本移到 `.relay-update-old/`，用新版本的服务适配脚本只重启后端，后端 30 秒内没有在端口上应答就换回旧版本。中途被打断的升级会在下次运行时撤销。
+
+如果安装脚本提示 Relay 是从另一个文件夹安装的（新版本解压到了旧版本旁边），请用它打印的 `RELAY_DIR=... update.sh` 命令升级那个安装。在新文件夹重装会把服务移过来，换成全新的 `server/.env`，没有原来的令牌和聊天。
 
 从 0.1.12 或更早版本升级时，先将新包解压到另一个目录。在新目录运行 `RELAY_DIR="/原安装目录的绝对路径" ./scripts/install/unix/update.sh`，把路径换成现有 Relay 安装目录。
 
@@ -47,11 +51,11 @@ Linux 和 macOS 共用 `relay-backend-linux-macos-v<版本>.tar.gz`。从 [GitHu
 在 Linux 和 macOS 上，`setup.sh` 会打开同一个菜单：安装、重新安装（保留令牌、聊天和设置）、卸载、
 查看服务信息（地址、隧道域名、Web 前端、各 agent 的安装和登录状态、令牌）、安装 agent
 CLI，以及新建、删除、列出或重新展示设备令牌。安装 agent CLI 会列出 Claude Code、Codex、
-Cursor、OpenCode 和 Hermes 的安装状态（查找位置与后端一致：PATH、`~/.local/bin`、
-`~/.opencode/bin`），用各 CLI 的官方安装方式安装你选的几个（Codex 用
+Cursor、OpenCode、Antigravity 和 Hermes 由后端自己报告的安装状态
+（`server/scripts/setup-status.js`），用各 CLI 的官方安装方式安装你选的几个（Codex 用
 `npm install -g @openai/codex`），并打印登录命令；Relay 不会替 CLI 登录。安装流程里也
 有这一步。重新展示会沿用原令牌，并要求设置新的二维码密码，因为旧密码
-不会保存。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供），然后询问文件访问方式：
+不会保存；使用 Quick Tunnel 时会从隧道日志读取当前地址。安装和重新安装时会询问是否在后端地址上提供 Web 前端（默认提供），然后询问文件访问方式：
 
 - **开放**（默认）：agent 和文件浏览器能访问后端用户可访问的所有文件。
 - **隔离**：工作目录、文件浏览器和 SSH 的起始目录都限制在安装目录下的 `workspace/` 中，
@@ -76,10 +80,10 @@ Web 前端；除非 `server/.env` 设置了 `RELAY_SERVE_WEB=0`，后端会在 `
    配置 HTTPS。
 2. **正式 Cloudflare Tunnel：** 使用 Cloudflare zone 下的稳定域名，服务保持绑定
    `127.0.0.1`。
-3. **Cloudflare Quick Tunnel：** 适合试用。重启后 `trycloudflare.com` 地址可能变化，
-   地址变化时需要重新生成并导入凭证。先从服务日志找到新地址，再在仓库根目录运行
-   `npm --prefix server run credential -- --url https://新地址`。
-4. **Tailscale。** Relay 只监听检测到的 tailnet IPv4。原生客户端可以通过 WireGuard 使用 `http://<tailscale-ip>:<端口>`。Web 客户端需要 HTTPS 才能保存凭证。请先配置使用受信任证书的反向代理，让它在 443 端口接收 HTTPS 并转发到该 tailnet IP 和后端端口，再在安装时填写代理主机名。用浏览器打开这个 HTTPS 地址并导入生成的凭证。主机名留空将关闭 Web，仅供原生客户端连接。 Tailscale 不可用时会返回网络菜单。
+3. **Cloudflare Quick Tunnel：** 适合试用。隧道每次重启后 `trycloudflare.com` 地址都会变，
+   安装结束时会提醒。在安装菜单里选 9 重新展示令牌的二维码（各系统都会从隧道日志读取
+   当前地址），再在每台设备上重新导入。
+4. **Tailscale。** 本机已连上 tailnet 时为默认选项。Relay 只监听检测到的 tailnet IPv4。原生客户端可以通过 WireGuard 使用 `http://<tailscale-ip>:<端口>`。Web 客户端需要 HTTPS 才能保存凭证。请先配置使用受信任证书的反向代理，让它在 443 端口接收 HTTPS 并转发到该 tailnet IP 和后端端口，再在安装时填写代理主机名。用浏览器打开这个 HTTPS 地址并导入生成的凭证。主机名留空将关闭 Web，仅供原生客户端连接。 Tailscale 不可用时会返回网络菜单。
 
 ## 服务管理
 
@@ -102,7 +106,8 @@ pm2 logs relay-tunnel
 ```
 
 Linux 安装需要 PM2（`npm install -g pm2`）。进程名为 `relay-server`；隧道模式还会创建
-`relay-tunnel`。日志位于 `~/.pm2/logs/`，文件名为 `relay-server-*.log` 和
+`relay-tunnel`。安装时会询问是否注册 PM2 的 systemd 服务（`pm2 startup systemd`，需要一次
+`sudo`），这样重启后两者都会自动恢复；没有 systemd 的主机每次开机后要运行 `start.sh`。日志位于 `~/.pm2/logs/`，文件名为 `relay-server-*.log` 和
 `relay-tunnel-*.log`。`uninstall.sh` 会删除 PM2 进程和 Web 前端，询问是否删除正式
 Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js；后端数据、令牌和
 凭证保留不动。
@@ -121,9 +126,10 @@ Cloudflare Tunnel，并逐项询问是否卸载 PM2、`cloudflared` 和 Node.js�
 
 它们就是 Linux 的那组脚本，只是用 launchd 代替 PM2：后端以及隧道模式下的隧道分别以
 LaunchAgent `dev.relay.app.backend` 和 `dev.relay.app.tunnel` 运行，位于
-`~/Library/LaunchAgents`，登录时启动，退出后自动重启。日志在 `~/Library/Logs/Relay/` 下，
-文件名为 `backend.*.log` 和 `tunnel.*.log`。生成的服务 PATH 已包含常见 Homebrew 和用户
-bin 路径。`uninstall.sh` 会删除 LaunchAgent 和 Web 前端，询问是否删除正式 Cloudflare
+`~/Library/LaunchAgents`，登录时启动（所以重启后要等有人登录），退出后自动重启。日志在
+`~/Library/Logs/Relay/` 下，文件名为 `backend.*.log` 和 `tunnel.*.log`。后端 LaunchAgent
+用完整路径运行安装时找到的 `node`，并把它所在的目录放在服务 PATH 最前面，所以 nvm、fnm 或
+Volta 装的 Node.js 也能用；PATH 还包含常见 Homebrew 和用户 bin 路径。`uninstall.sh` 会删除 LaunchAgent 和 Web 前端，询问是否删除正式 Cloudflare
 Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.js；后端数据、令牌和凭证
 保留不动。
 
@@ -133,11 +139,14 @@ Tunnel，并逐项询问是否卸载 Homebrew 安装的 `cloudflared` 和 Node.j
 生产依赖和 Web 前端。将整个 ZIP 解压到固定、可写的目录，在该目录运行 `.\setup.cmd`。
 与 Linux、macOS 一样只有命令行安装：菜单相同（安装、重装、卸载、状态查询、CLI 安装和
 设备令牌管理），安装同样分六步，包括开放/隔离的文件访问选择。Web 默认开启；隧道模式缺少 `cloudflared`
-时自动下载；五个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。安装器会把装有
+时自动下载；六个 CLI 可选用官方 Windows 安装器安装，之后由你自行登录或配置。安装器会把装有
 agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 Node 时再加上包内 Node，
 之后新开的终端即可直接调用；菜单选项 `t` 可立即打开一个。卸载只移除安装器添加的条目。包内 `README.md`
 说明安装与升级；`.\start.cmd`、`.\stop.cmd`、`.\status.cmd`、`.\credential.cmd` 和
-`.\uninstall.cmd` 是下面相同服务脚本的入口，`.\update.cmd` 把安装原地升级到最新版本。计划任务在当前用户登录时启动。
+`.\uninstall.cmd` 是下面相同服务脚本的入口，`.\update.cmd` 把安装原地升级到最新版本。计划任务在当前用户登录时启动，所以重启后要等有人登录。后端通过
+`server/scripts/keep-running.js` 运行，退出五秒后会自动重新启动，和 PM2、launchd 一样。
+与 Linux、macOS 相同，本机在 tailnet 上时网络方式默认 Tailscale，会提醒 Quick Tunnel 地址会变，
+并在 Relay 已从另一个文件夹安装时给出提示。
 
 ```powershell
 .\scripts\install\windows\status.ps1
@@ -146,7 +155,7 @@ agent CLI 的目录（如 `%APPDATA%\npm`）追加到用户 PATH，主机没有 
 .\scripts\install\windows\uninstall.ps1
 ```
 
-日志位于 Relay 目录下的 `logs\`（后端和隧道的 `.out`/`.err` 日志）；PID 文件位于 `%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell
+日志位于 Relay 目录下的 `logs\`（后端和隧道的 `.out`/`.err` 日志，重新启动时追加写入）；PID 文件位于 `%LOCALAPPDATA%\Relay\runtime\`。如果 PowerShell
 阻止脚本执行，只为当前会话临时放开：
 
 ```powershell
