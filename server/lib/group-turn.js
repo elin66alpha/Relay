@@ -23,11 +23,12 @@ function slug(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
-// Machine/peer slug for readable @mentions: lowercase, non-alphanumerics -> '-'.
+// Machine/peer slug for readable @mentions: lowercase, runs of anything but
+// letters and digits (in any script, so 工作站 survives) -> '-'.
 function handleSlug(value) {
   return String(value || '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '');
 }
 
@@ -43,49 +44,78 @@ function authorOf(message) {
   return (message && message.agent) || '';
 }
 
+const WORD_CHAR = /[A-Za-z0-9_-]/;
+
+// How much of `rest` the name `name` covers when `rest` starts with it. A name
+// ending in an ASCII word character must also end the word there, so `@codex`
+// does not match inside `@codexbot` or `@codex-like`, while `@codex:` and CJK
+// text right after it (`@codex看看`) still do.
+function prefixLength(rest, name) {
+  if (!name || !rest.startsWith(name)) return 0;
+  const endsInWord = WORD_CHAR.test(name.charAt(name.length - 1));
+  return endsInWord && WORD_CHAR.test(rest.charAt(name.length)) ? 0 : name.length;
+}
+
 // Ordered, de-duplicated list of member agent keys summoned in this message.
-// Tokens match a member by its agent key, by its readable handle
-// (`@<peer-slug>:<agent>`), or by the slug of its display label/nickname, so
-// `@claude`, `@studio:claude`, `@<peerId>:claude`, and `@ClaudeCode` all
-// resolve. Only current members can be summoned; broad aliases such as `@all`
-// are intentionally ignored.
+// What follows each `@` matches a member by its agent key, its readable handle
+// (`@<peer-slug>:<agent>`), the slug of its label/nickname (`@ClaudeCode`), or
+// the label/nickname/handle itself in any script and with no space after it
+// (`@架构师看一下`); the longest match wins. Only current members can be
+// summoned; broad aliases such as `@all` are intentionally ignored.
 function parseMentions(prompt, members, labelFor, handleFor) {
   const text = String(prompt || '');
-  const list = Array.isArray(members) ? members : [];
+  const names = (Array.isArray(members) ? members : []).map((member) => {
+    const label = String((typeof labelFor === 'function' && labelFor(member)) || '')
+      .trim()
+      .toLowerCase();
+    return {
+      member,
+      key: member.toLowerCase(),
+      handle: String((typeof handleFor === 'function' && handleFor(member)) || '').toLowerCase(),
+      label,
+      // Only an ASCII label slugs faithfully (`@ClaudeCode`); others match as written.
+      labelSlug: /^[\x20-\x7e]*$/.test(label) ? slug(label) : '',
+    };
+  });
   const order = [];
-  const seen = new Set();
-  const add = (key) => {
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      order.push(key);
+  const re = /(?:^|[^\w@])@/g;
+  while (re.exec(text) !== null) {
+    // Names are at most a few hundred characters, so look no further.
+    const rest = text.slice(re.lastIndex, re.lastIndex + 256).toLowerCase();
+    const token = (/^[a-z0-9:_-]+/.exec(rest) || [''])[0];
+    let best = null;
+    let bestLength = 0;
+    for (const name of names) {
+      const length = Math.max(
+        token && name.labelSlug && name.labelSlug === slug(token) ? token.length : 0,
+        prefixLength(rest, name.key),
+        prefixLength(rest, name.handle),
+        prefixLength(rest, name.label),
+      );
+      if (length > bestLength) {
+        best = name.member;
+        bestLength = length;
+      }
     }
-  };
-  const re = /(?:^|[^\w@])@([A-Za-z0-9:_-]+)/g;
-  let match;
-  while ((match = re.exec(text)) !== null) {
-    const token = match[1].toLowerCase();
-    const target = list.find(
-      (member) =>
-        member.toLowerCase() === token ||
-        (typeof handleFor === 'function' &&
-          String(handleFor(member) || '').toLowerCase() === token) ||
-        slug(typeof labelFor === 'function' ? labelFor(member) : member) === slug(token),
-    );
-    if (target) add(target);
+    if (best && !order.includes(best)) order.push(best);
   }
   return order;
 }
 
 // The transcript tail an agent has not yet seen: everything after its own last
-// message. An agent that has never spoken sees the whole transcript so far.
-function deltaSince(messages, agentKey) {
+// reply that its session holds. A failed turn's message never reached the
+// session, and a session reset at `resetAt` holds nothing from before then, so
+// neither counts; an agent with no such reply sees the whole transcript so far.
+function deltaSince(messages, agentKey, resetAt = '') {
   const list = Array.isArray(messages) ? messages : [];
   let lastIndex = -1;
   for (let i = list.length - 1; i >= 0; i -= 1) {
-    if (authorOf(list[i]) === agentKey) {
-      lastIndex = i;
-      break;
-    }
+    const message = list[i];
+    if (authorOf(message) !== agentKey) continue;
+    if (message.metadata && message.metadata.errorCode) continue;
+    if (resetAt && String(message.createdAt || '') <= resetAt) break;
+    lastIndex = i;
+    break;
   }
   return list.slice(lastIndex + 1);
 }

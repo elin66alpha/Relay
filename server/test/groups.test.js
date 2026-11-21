@@ -186,10 +186,14 @@ test('setGroupWorkdir updates local workdir and remote member workdir/sessionId'
     remoteUpdates: { [peerKey]: { workdir: '/new/peer', sessionId: 'new-s' } },
   });
   assert.equal(updated.workdir, '/new/local');
-  assert.deepEqual(updated.memberConfigs.claude, { model: 'opus', nickname: 'Local' });
+  // Both sessions were replaced, so both members are stamped with when.
+  const { resetAt } = updated.memberConfigs.claude;
+  assert.ok(resetAt >= created.createdAt);
+  assert.deepEqual(updated.memberConfigs.claude, { model: 'opus', nickname: 'Local', resetAt });
   assert.deepEqual(updated.memberConfigs[peerKey], {
     workdir: '/new/peer',
     sessionId: 'new-s',
     nickname: 'Remote',
+    resetAt,
   });
 });

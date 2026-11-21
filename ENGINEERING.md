@@ -344,7 +344,12 @@ architecture change (see Changes).
 - A Swarm owns one canonical transcript and private resumable sessions per
   member. A round runs in waves: within a wave, summoned members run one after
   another in mention order, each planned right before it runs so its delta
-  includes replies already given earlier in the same wave. The human's
+  includes replies already given earlier in the same wave. A delta starts after
+  the member's last reply that its session holds: a failed reply (`errorCode`)
+  never reached the session, and a reply older than the member's
+  `memberConfigs[key].resetAt` (set server-side when a work-tree change or a
+  re-added remote member replaces its session) is gone with it, so such a
+  member is fed the transcript again rather than answering without it. The human's
   `@mentions` open wave one; `@mentions` inside a member's reply summon the next
   wave (skipping any member that already ran after that reply in the same wave),
   bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since two members
@@ -353,8 +358,13 @@ architecture change (see Changes).
   Swarm: a second message to that Swarm is refused (`GROUP_BUSY`), while
   different Swarms run independently (tracked per group id in
   `GroupChatController`), and the Swarm history reports the running round
-  (`runningRequestId`) so a reopened screen still offers Stop. The app shows a
-  member as working until its reply is complete; Swarm replies are not streamed.
+  (`runningRequestId`) so a reopened screen still offers Stop. The send request
+  stays open for the whole round, so when it drops or times out
+  (`NETWORK_*`) the app reloads history and treats the message as sent if the
+  backend recorded it; it also reloads the open Swarm whenever the event
+  stream reconnects, since a missed `group_done` would leave Stop showing. The
+  app shows a member as working until its reply is complete; Swarm replies are
+  not streamed.
 - Swarms are stored bucketed by workspace in `groups.json`, while
   `GET /api/groups` lists every Swarm on the backend regardless of the device's
   current solo-chat directory and every group route resolves a Swarm by id
@@ -375,7 +385,13 @@ architecture change (see Changes).
   is random per generated credential. When two members share an agent label,
   local members also append `(<hostname>)` alongside remote members'
   `(<peer name>)`; mentions accept readable `@<peer-slug>:<agent>` handles in
-  addition to `@<peerId>:<agent>` (nicknames keep working and win). The Swarm
+  addition to `@<peerId>:<agent>` (nicknames keep working and win). A mention
+  matches the key, handle, label or nickname written right after `@` in any
+  script and needs no space after it (`@架构师看一下`); the longest match wins,
+  and peer slugs keep non-ASCII letters. `POST /api/groups/members` keeps the
+  stored config of a member the request sends no config for, so a client that
+  only changes members (relay-mcp) resets nobody; the Swarm form sends an
+  emptied stored config as `{}` to clear it. The Swarm
   record keeps `peers` (`name`, `baseUrl`) and each remote member's B `workdir`
   and dedicated `sessionId`; a peer no member references is dropped. A remote
   turn is the same runAgentTurn with only `runAgent` replaced by B's

@@ -509,7 +509,11 @@ class _SwarmFormDialogState extends State<SwarmFormDialog> {
       if (config == null) continue;
       final AgentOptionsCatalog? catalog = _catalogs[key];
       if (catalog != null) _normalizeConfig(catalog, config);
-      if (config.isNotEmpty) configs[key] = <String, String>{...config};
+      // The backend keeps the stored config of a member it gets none for, so
+      // a stored config the form emptied is sent empty to clear it.
+      if (config.isNotEmpty || widget.initialConfigs.containsKey(key)) {
+        configs[key] = <String, String>{...config};
+      }
     }
     final SwarmForm form = SwarmForm(
       name: _nameController.text.trim(),

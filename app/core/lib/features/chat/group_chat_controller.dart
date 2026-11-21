@@ -258,6 +258,7 @@ class GroupChatController extends ChangeNotifier {
     final String groupId = group.id;
     final String requestId = _newRequestId();
     bool sent = false;
+    BackendException? dropped;
     _activeRequestIds[groupId] = requestId;
     _postingGroups.add(groupId);
     _error = null;
@@ -282,10 +283,14 @@ class GroupChatController extends ChangeNotifier {
       );
       sent = true;
     } on BackendException catch (err) {
-      if (err.code != 'AGENT_CANCELLED') {
-        _error = friendlyErrorText(_strings, err);
-      } else {
+      if (err.code == 'AGENT_CANCELLED') {
         sent = true;
+      } else if (err.code?.startsWith('NETWORK_') ?? false) {
+        // The request dropped or timed out (a long round, a phone in the
+        // background) while the round may still run; history decides below.
+        dropped = err;
+      } else {
+        _error = friendlyErrorText(_strings, err);
       }
     } finally {
       if (_activeRequestIds[groupId] == requestId) {
@@ -293,7 +298,18 @@ class GroupChatController extends ChangeNotifier {
       }
       _postingGroups.remove(groupId);
       _safeNotify();
-      await _loadHistory(groupId);
+      final GroupHistory? history = await _loadHistory(groupId);
+      if (dropped != null) {
+        // Recorded means the round started: the reload restored its Stop and
+        // its events finish it, so only an unrecorded message failed.
+        sent = history?.messages
+                .any((ChatMessage m) => m.id == '$requestId:human') ??
+            false;
+        if (!sent) {
+          _error = friendlyErrorText(_strings, dropped);
+          _safeNotify();
+        }
+      }
     }
     return sent;
   }
@@ -310,7 +326,8 @@ class GroupChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadHistory(String groupId) async {
+  // The swarm's history as loaded, or null when it could not be read.
+  Future<GroupHistory?> _loadHistory(String groupId) async {
     _safeNotify();
     try {
       final GroupHistory history = await _client.fetchGroupHistory(groupId);
@@ -322,14 +339,16 @@ class GroupChatController extends ChangeNotifier {
           _activeRequestIds.remove(groupId);
         }
       }
-      if (_selected?.id != groupId) return;
+      if (_selected?.id != groupId) return history;
       _messages
         ..clear()
         ..addAll(history.messages);
+      return history;
     } on BackendException catch (err) {
       if (_selected?.id == groupId) {
         _error = friendlyErrorText(_strings, err);
       }
+      return null;
     } finally {
       _safeNotify();
     }
@@ -350,7 +369,13 @@ class GroupChatController extends ChangeNotifier {
   void _scheduleReconnect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 2), _subscribeEvents);
+    _reconnectTimer = Timer(const Duration(seconds: 2), () {
+      _subscribeEvents();
+      // Events sent while the stream was down (such as a round's group_done)
+      // are gone, so re-read the open swarm rather than trust its last state.
+      final String? groupId = _selected?.id;
+      if (groupId != null) _loadHistory(groupId);
+    });
   }
 
   void _handleEvent(BackendEvent event) {

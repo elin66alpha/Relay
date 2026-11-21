@@ -265,7 +265,12 @@ module.exports = function createGroupRouter(ctx) {
         const workdir = raw && typeof raw.workdir === 'string' ? raw.workdir.trim() : '';
         const session = await client.createSession(agentKey, workdir, `Swarm: ${swarmName}`);
         created.push({ client, agentKey, ...session });
-        configs[memberKey] = { workdir: session.workdir, sessionId: session.sessionId };
+        // A re-added member's new session has none of its earlier replies.
+        configs[memberKey] = {
+          workdir: session.workdir,
+          sessionId: session.sessionId,
+          resetAt: new Date().toISOString(),
+        };
         peers[peerId] = { name: credential.name, baseUrl: credential.baseUrl };
       }
     } catch (err) {
@@ -323,24 +328,23 @@ module.exports = function createGroupRouter(ctx) {
   // `nickname` and `prompt` passed through (groups.js bounds their length). Only
   // current members are kept, so a config can never reference a dropped member.
   // A remote member runs with its peer's own settings, so it keeps only the
-  // persona plus the peer `workdir`/`sessionId` from `linked`, never the caller's.
+  // persona. The peer `workdir`/`sessionId` and every member's `resetAt` are
+  // the server's own and come from `linked`, never from the caller.
   function normalizeConfigs(rawConfigs, members, linked = {}) {
     const out = {};
     const configs = rawConfigs && typeof rawConfigs === 'object' ? rawConfigs : {};
     for (const memberKey of members) {
-      const raw = configs[memberKey];
-      if (splitMemberKey(memberKey)) {
-        const { workdir, sessionId } = linked[memberKey] || {};
-        const config = { workdir, sessionId };
-        if (raw && typeof raw.nickname === 'string') config.nickname = raw.nickname;
-        if (raw && typeof raw.prompt === 'string') config.prompt = raw.prompt;
-        out[memberKey] = config;
-      } else if (raw && typeof raw === 'object') {
-        const config = normalizeSettings(memberKey, raw);
-        if (typeof raw.nickname === 'string') config.nickname = raw.nickname;
-        if (typeof raw.prompt === 'string') config.prompt = raw.prompt;
-        out[memberKey] = config;
-      }
+      const raw = configs[memberKey] && typeof configs[memberKey] === 'object'
+        ? configs[memberKey]
+        : null;
+      const { workdir, sessionId, resetAt } = linked[memberKey] || {};
+      let config = {};
+      if (splitMemberKey(memberKey)) config = { workdir, sessionId };
+      else if (raw) config = normalizeSettings(memberKey, raw);
+      if (raw && typeof raw.nickname === 'string') config.nickname = raw.nickname;
+      if (raw && typeof raw.prompt === 'string') config.prompt = raw.prompt;
+      if (resetAt) config.resetAt = resetAt;
+      out[memberKey] = config;
     }
     return out;
   }
@@ -426,9 +430,16 @@ module.exports = function createGroupRouter(ctx) {
     } catch (err) {
       return sendPeerError(res, err);
     }
+    // A member the caller sends no config for keeps its stored one, so a
+    // client that only changes members (relay-mcp) resets nobody's settings.
+    const rawConfigs = req.body.configs && typeof req.body.configs === 'object'
+      ? req.body.configs
+      : {};
     const group = setGroupMembers(workspace, groupId, members, {
       memberConfigs: normalizeConfigs(
-        req.body.configs, members, { ...existing.memberConfigs, ...linked.configs },
+        { ...existing.memberConfigs, ...rawConfigs },
+        members,
+        { ...existing.memberConfigs, ...linked.configs },
       ),
       peers: linked.peers,
     });
@@ -773,10 +784,10 @@ module.exports = function createGroupRouter(ctx) {
       if (!memberAgent) return null;
       const snapshot = readHistory(scopeKey);
       const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
+      const memberConfig = group.memberConfigs[memberKey] || {};
       // Plan B: feed this member only what happened since it last spoke, each
       // line labeled with its speaker. Its own resumable session has the rest.
-      const delta = deltaSince(snapshot, memberKey);
-      const memberConfig = group.memberConfigs[memberKey] || {};
+      const delta = deltaSince(snapshot, memberKey, memberConfig.resetAt);
       const selfLoc = locationFor(memberKey);
       const groupPrompt = buildGroupPrompt({
         selfLabel: groupLabelFor(memberKey),

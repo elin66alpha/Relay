@@ -103,6 +103,11 @@ function normalizeMemberConfigs(raw, members) {
       const prompt = value.prompt.trim();
       if (prompt) config.prompt = prompt.slice(0, MAX_MEMBER_PROMPT);
     }
+    // When the member's session was last replaced by an empty one (ISO time);
+    // the route sets it, so its next turn is fed the whole transcript.
+    if (typeof value.resetAt === 'string' && value.resetAt && value.resetAt.length <= 64) {
+      config.resetAt = value.resetAt;
+    }
     // Where a remote member runs on its peer; the route sets both.
     if (remotePeerId(key)) {
       for (const field of ['workdir', 'sessionId']) {
@@ -287,23 +292,31 @@ function setGroupMembers(workspace, groupId, members, options = {}) {
 }
 
 // Update a swarm's local work tree and/or remote members' peer workdir + sessionId.
-// Preserves all other member config fields (model/effort/permission/nickname/prompt).
+// Preserves all other member config fields (model/effort/permission/nickname/prompt)
+// and stamps `resetAt` on every member whose session this replaces: local
+// members when the work tree changes (the route purges theirs), and each
+// updated remote member.
 function setGroupWorkdir(workspace, groupId, { workdir, remoteUpdates = {} } = {}) {
   const id = validGroupId(groupId);
   if (!id) return null;
   const bucket = bucketFor(workspace);
   const group = bucket.groups.find((item) => item.id === id);
   if (!group) return null;
+  const now = new Date().toISOString();
+  const nextConfigs = { ...group.memberConfigs };
   if (typeof workdir === 'string' && workdir) {
     group.workdir = workdir;
+    for (const memberKey of group.members.filter((key) => !remotePeerId(key))) {
+      nextConfigs[memberKey] = { ...(nextConfigs[memberKey] || {}), resetAt: now };
+    }
   }
-  const nextConfigs = { ...group.memberConfigs };
   for (const [memberKey, update] of Object.entries(remoteUpdates || {})) {
     if (!group.members.includes(memberKey) || !remotePeerId(memberKey)) continue;
     nextConfigs[memberKey] = {
       ...(nextConfigs[memberKey] || {}),
       workdir: update.workdir,
       sessionId: update.sessionId,
+      resetAt: now,
     };
   }
   group.memberConfigs = normalizeMemberConfigs(nextConfigs, group.members);

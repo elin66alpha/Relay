@@ -185,6 +185,68 @@ void main() {
     expect(backend.historyRequests, hasLength(3));
   });
 
+  test('a dropped request keeps a round the backend recorded as running',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('@claude long task');
+    final String requestId = backend.sent.single['requestId']!;
+    backend.history['builders'] = <ChatMessage>[
+      _message('$requestId:human', '@claude long task'),
+    ];
+    backend.running = requestId;
+    backend.round.completeError(
+      BackendException('Timed out.', code: 'NETWORK_TIMEOUT'),
+    );
+
+    expect(await sending, isTrue);
+    expect(controller.error, isNull);
+    expect(controller.sending, isTrue);
+    await controller.cancel();
+    expect(backend.cancelled, <String>[requestId]);
+  });
+
+  test('a dropped request the backend never recorded is an error', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('@claude hello');
+    backend.round.completeError(
+      BackendException(
+        'Connection refused.',
+        code: 'NETWORK_CONNECTION_REFUSED',
+      ),
+    );
+
+    expect(await sending, isFalse);
+    expect(controller.error, isNotNull);
+    expect(controller.sending, isFalse);
+  });
+
+  testWidgets('a reconnected event stream reloads the open swarm',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.running = 'other-device-round';
+    await controller.start();
+    expect(controller.sending, isTrue);
+
+    // The round ends while the stream is down, so its group_done is lost.
+    backend.dropEvents();
+    final ChatMessage reply = _message(
+      'other-device-reply',
+      'Done elsewhere',
+      role: ChatRole.assistant,
+    );
+    backend.history['builders'] = <ChatMessage>[reply];
+    backend.running = null;
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(controller.sending, isFalse);
+    expect(controller.messages, <ChatMessage>[reply]);
+  });
+
   test('a round carries only the credentials of its members\' machines',
       () async {
     const MachineCredential studio = MachineCredential(
@@ -343,7 +405,7 @@ ChatMessage _message(
 
 class _GroupBackendClient extends BackendClient {
   String activeWorkdir = '/work/a';
-  final StreamController<BackendEvent> events =
+  StreamController<BackendEvent> events =
       StreamController<BackendEvent>.broadcast(sync: true);
   final List<String> groupWorkdirs = <String>[];
   final List<String> historyRequests = <String>[];
@@ -369,6 +431,14 @@ class _GroupBackendClient extends BackendClient {
 
   @override
   Stream<BackendEvent> streamEvents() => events.stream;
+
+  // Ends the current event stream, as a dropped connection does; the next
+  // subscription gets a fresh one.
+  void dropEvents() {
+    final StreamController<BackendEvent> old = events;
+    events = StreamController<BackendEvent>.broadcast(sync: true);
+    old.close();
+  }
 
   @override
   Future<List<ChatGroup>> fetchGroups() async {

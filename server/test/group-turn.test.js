@@ -54,6 +54,28 @@ test('parseMentions matches by label slug as well as agent key', () => {
   assert.deepEqual(parseMentions('@ClaudeCode look here', members, labelFor), ['claude']);
 });
 
+test('parseMentions resolves names in any script, with no space after them', () => {
+  const members = ['claude', 'codex', '4e7eeaf61885:claude'];
+  const labels = {
+    claude: '架构师',
+    codex: 'Claude大哥',
+    '4e7eeaf61885:claude': 'Claude Code (工作站)',
+  };
+  const handles = { claude: 'claude', codex: 'codex', '4e7eeaf61885:claude': '工作站:claude' };
+  const parse = (text) => parseMentions(text, members, (k) => labels[k], (k) => handles[k]);
+  assert.deepEqual(parse('请@架构师看一下'), ['claude']);
+  assert.deepEqual(parse('@codex看看'), ['codex']);
+  assert.deepEqual(parse('@claude: review this'), ['claude']);
+  // The longest name wins over a shorter one it starts with.
+  assert.deepEqual(parse('@Claude大哥 help'), ['codex']);
+  assert.deepEqual(parse('ask @工作站:claude'), ['4e7eeaf61885:claude']);
+  // A stray symbol never matches a name that has no ASCII slug.
+  assert.deepEqual(parse('ok @- done @_'), []);
+  // A name still has to end the word it starts.
+  assert.deepEqual(parse('@codexbot and @codex-like'), []);
+  assert.equal(handleSlug('工作站 二号'), '工作站-二号');
+});
+
 test('parseMentions ignores broad @all / @everyone aliases', () => {
   const members = ['claude', 'codex', 'opencode'];
   assert.deepEqual(parseMentions('@all huddle up', members, labelFor), []);
@@ -63,6 +85,25 @@ test('parseMentions ignores broad @all / @everyone aliases', () => {
 test('deltaSince returns everything for an agent that never spoke', () => {
   const messages = [human('hi'), agentMsg('claude', 'hello')];
   assert.deepEqual(deltaSince(messages, 'codex'), messages);
+});
+
+test('deltaSince skips a failed turn, whose prompt never reached the session', () => {
+  const failed = {
+    ...agentMsg('codex', 'Codex is not logged in on the backend host.'),
+    metadata: { author: 'codex', errorCode: 'NOT_LOGGED_IN' },
+  };
+  const messages = [human('@codex the spec: build X'), failed, human('@codex try again')];
+  assert.deepEqual(deltaSince(messages, 'codex'), messages);
+});
+
+test('deltaSince ignores replies from before the member session was reset', () => {
+  const messages = [
+    { ...human('@claude plan it'), createdAt: '2026-01-01T00:00:00.000Z' },
+    { ...agentMsg('claude', 'the plan'), createdAt: '2026-01-01T00:00:01.000Z' },
+    { ...human('@claude go on'), createdAt: '2026-01-01T00:00:05.000Z' },
+  ];
+  assert.deepEqual(deltaSince(messages, 'claude', '2026-01-01T00:00:03.000Z'), messages);
+  assert.deepEqual(deltaSince(messages, 'claude', '2026-01-01T00:00:00.500Z'), messages.slice(2));
 });
 
 test('deltaSince returns only messages after the agent last spoke', () => {

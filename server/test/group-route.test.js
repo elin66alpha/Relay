@@ -509,9 +509,36 @@ test('POST /api/groups/workdir changes local work tree, moves transcript, purges
     });
     assert.equal(busy.status, 409);
     assert.equal((await busy.json()).code, 'GROUP_BUSY');
+    // Its purged session holds nothing, so it is fed the earlier transcript.
+    const held = runCalls.find((c) => c.prompt.includes('hold'));
+    assert.match(held.prompt, /Human: @claude hi/);
   } finally {
     release();
     heldReplies.clear();
   }
   await running;
+});
+
+test('changing members without configs keeps each member\'s stored config', async () => {
+  const { group } = await (await api('POST', '/api/groups', {
+    name: 'Keep Configs',
+    members: ['claude'],
+    configs: { claude: { nickname: 'Architect', prompt: 'Design first.' } },
+  })).json();
+  const added = await (await api('POST', '/api/groups/members', {
+    groupId: group.id,
+    members: ['claude', 'codex'],
+  })).json();
+  const kept = added.groups.find((g) => g.id === group.id).memberConfigs.claude;
+  assert.equal(kept.nickname, 'Architect');
+  assert.equal(kept.prompt, 'Design first.');
+  // A config that is sent still replaces the stored one.
+  const cleared = await (await api('POST', '/api/groups/members', {
+    groupId: group.id,
+    members: ['claude', 'codex'],
+    configs: { claude: { nickname: 'Builder' } },
+  })).json();
+  const replaced = cleared.groups.find((g) => g.id === group.id).memberConfigs.claude;
+  assert.equal(replaced.nickname, 'Builder');
+  assert.equal(replaced.prompt, undefined);
 });

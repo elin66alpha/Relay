@@ -128,6 +128,66 @@ void main() {
     expect(result!.configs['claude'], <String, String>{'model': 'opus'});
   });
 
+  testWidgets('a stored member config emptied in the form is sent to clear it',
+      (WidgetTester tester) async {
+    SwarmForm? result;
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () async {
+                result = await showDialog<SwarmForm>(
+                  context: context,
+                  builder: (_) => SwarmFormDialog(
+                    title: 'Manage members',
+                    agents: const <CliAgent>[],
+                    backend: _LocalBackend(),
+                    localMachineName: 'Desk',
+                    machines: const <MachineCredential>[_studio],
+                    machineBackend: (MachineCredential m) => _MachineBackend(m),
+                    initialName: 'Team',
+                    initialMembers: const <String>['$_studioPeer:claude'],
+                    initialWorkdir: '/trees/team',
+                    initialConfigs: const <String, Map<String, String>>{
+                      '$_studioPeer:claude': <String, String>{
+                        'nickname': 'Old',
+                      },
+                    },
+                    initialPeers: const {},
+                    nameEditable: false,
+                    workTreeEditable: false,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('swarm-member-$_studioPeer:claude')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Nickname (this swarm)'),
+      '',
+    );
+    // The member dialog sits above the form, so its OK is the last one.
+    await tester.tap(find.text('OK').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // Left out, the backend would keep the stored nickname.
+    expect(result!.configs['$_studioPeer:claude'], <String, String>{});
+  });
+
   testWidgets('keeps form open and shows error when onSubmit fails',
       (WidgetTester tester) async {
     await tester.pumpWidget(
