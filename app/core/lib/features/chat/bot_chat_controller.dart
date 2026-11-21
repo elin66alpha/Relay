@@ -1461,7 +1461,6 @@ class BotChatController extends ChangeNotifier {
       requestId,
       () => StringBuffer(current.content),
     );
-    buffer.write(text);
     // Append to the open segment, opening the first one on the first delta (the
     // backend only emits an explicit boundary for the 2nd+ message in a turn).
     final List<_StreamSegment> segments = _streamSegments.putIfAbsent(
@@ -1469,6 +1468,14 @@ class BotChatController extends ChangeNotifier {
       () => <_StreamSegment>[_StreamSegment(DateTime.now())],
     );
     if (segments.isEmpty) segments.add(_StreamSegment(DateTime.now()));
+    // The first text of a follow-up message writes the separator that
+    // _appendSegmentBoundary deferred.
+    if (segments.length > 1 &&
+        segments.last.buffer.isEmpty &&
+        buffer.isNotEmpty) {
+      buffer.write('\n\n');
+    }
+    buffer.write(text);
     segments.last.buffer.write(text);
     if (current.metadata[_awaitingFirstTokenKey] == true) {
       _messages[index] = current.copyWith(
@@ -1494,10 +1501,18 @@ class BotChatController extends ChangeNotifier {
       requestId,
       () => StringBuffer(current.content),
     );
-    if (buffer.isNotEmpty) buffer.write('\n\n');
-    _streamSegments
-        .putIfAbsent(requestId, () => <_StreamSegment>[])
-        .add(_StreamSegment(DateTime.now()));
+    final List<_StreamSegment> segments =
+        _streamSegments.putIfAbsent(requestId, () => <_StreamSegment>[]);
+    // A message with no text (only thinking and tool calls) leaves its segment
+    // empty; reuse it, as the backend does, instead of stacking blank lines.
+    if (segments.isNotEmpty && segments.last.buffer.toString().trim().isEmpty) {
+      segments.last = _StreamSegment(DateTime.now());
+      return;
+    }
+    // After an earlier segment the separator waits for the new segment's
+    // first text (_appendDelta), so a turn that is still thinking ends clean.
+    if (segments.isEmpty && buffer.isNotEmpty) buffer.write('\n\n');
+    segments.add(_StreamSegment(DateTime.now()));
     _notifyStreamingUpdate();
   }
 

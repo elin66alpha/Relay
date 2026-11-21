@@ -845,6 +845,7 @@ function acpEventEmitter(onEvent) {
   let finalText = '';
   let currentMsgId = null;
   let hasContext = false;
+  let thinking = false;
 
   // ACP chunks are already deltas, so they are emitted as-is rather than
   // through makeDeltaEmitter (whose prefix de-duplication is for CLIs that
@@ -856,6 +857,16 @@ function acpEventEmitter(onEvent) {
   };
 
   const onMessage = (update) => {
+    // Reasoning text stays hidden, but a model can think for 20s+ between
+    // replies (Cursor's Grok), so each stretch of it shows one progress line.
+    if (update.sessionUpdate === 'agent_thought_chunk') {
+      if (!thinking) emit(onEvent, 'Thinking…');
+      thinking = true;
+      return;
+    }
+    if (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'tool_call') {
+      thinking = false;
+    }
     if (update.sessionUpdate === 'agent_message_chunk') {
       const msgId = update.messageId || 'msg';
       if (currentMsgId !== null && msgId !== currentMsgId) {

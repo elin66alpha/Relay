@@ -157,6 +157,9 @@ architecture change (see Changes).
       callbacks. Pending interaction replies recheck turn ownership before
       emitting more events; a failed prompt resumes idle watching. Trajectory
       discovery failures back off for at least five seconds.
+      Reasoning text (`agent_thought_chunk`) is never shown; each stretch of
+      it becomes one `Thinking…` progress line (`acpEventEmitter`), because
+      Cursor's Grok can think 20s+ between visible replies.
     - `codex-session-pool.js` — the codex app-server driver. `turn/start`
       returns as soon as the turn is *accepted*; the turn is settled by the
       later `turn/completed` notification. Everything except the sandbox applies
