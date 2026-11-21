@@ -8,6 +8,7 @@ const {
   authorOf,
   parseMentions,
   deltaSince,
+  lastSpeaker,
   buildGroupPrompt,
 } = require('../lib/group-turn');
 
@@ -85,6 +86,12 @@ test('parseMentions ignores broad @all / @everyone aliases', () => {
 test('deltaSince returns everything for an agent that never spoke', () => {
   const messages = [human('hi'), agentMsg('claude', 'hello')];
   assert.deepEqual(deltaSince(messages, 'codex'), messages);
+});
+
+test('lastSpeaker is the newest current member to speak, never the human', () => {
+  const messages = [agentMsg('codex', 'a'), agentMsg('opencode', 'b'), human('c')];
+  assert.equal(lastSpeaker(messages, ['claude', 'codex']), 'codex');
+  assert.equal(lastSpeaker([human('hi')], ['claude']), '');
 });
 
 test('deltaSince skips a failed turn, whose prompt never reached the session', () => {

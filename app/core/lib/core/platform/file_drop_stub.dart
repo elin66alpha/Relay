@@ -3,11 +3,15 @@ import 'dart:typed_data';
 class DroppedFile {
   const DroppedFile({
     required this.name,
-    required this.bytes,
+    required this.size,
+    required this.readBytes,
   });
 
   final String name;
-  final Uint8List bytes;
+  final int size;
+
+  /// Read only for accepted files, so dropping a huge one loads nothing.
+  final Future<Uint8List> Function() readBytes;
 }
 
 abstract class FileDropController {

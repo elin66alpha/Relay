@@ -37,6 +37,6 @@ On a device without B's credential, the member shows "This device is not connect
 - Stop cancels the turn on B with the same request id.
 - Deleting the Swarm or removing the member deletes its session on B, and clearing the Swarm clears it (when the request carries B's credential); none of these blocks the change on A.
 
-B sees these as ordinary turns from this device. If no device has that work directory open on B, B sends its own task notifications.
+B sees these as ordinary turns from this device. The round's one notification comes from A; B sends none for its swarm sessions (versions of B before 0.2.2 still send their own).
 
 [Relay MCP](relay-mcp.md) cannot run members on other machines.

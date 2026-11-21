@@ -420,6 +420,7 @@ class _QueueBackendClient extends BackendClient {
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) {
     if (pendingHistoryQueue.isNotEmpty) {
       return pendingHistoryQueue.removeAt(0).future;

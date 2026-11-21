@@ -9,6 +9,7 @@ const {
   handleSlug,
   parseMentions,
   deltaSince,
+  lastSpeaker,
   buildGroupPrompt,
 } = require('../lib/group-turn');
 const { normalizeSettings } = require('../lib/agent-options');
@@ -48,7 +49,9 @@ function maxMentionHops(env = process.env) {
 // A responder shared across every agent turn in one round. Unlike the single-chat
 // responder it does NOT end the stream after each agent (final()), so the route
 // can close it once the whole round drains. Non-streaming requests get one JSON
-// reply from the route after the loop instead.
+// reply from the route after the loop instead. event() reports every event as
+// unhandled, so a turn also broadcasts it and devices that did not start the
+// round still see members' progress.
 function createRoundResponder(res, streaming) {
   let opened = false;
   return {
@@ -64,9 +67,8 @@ function createRoundResponder(res, streaming) {
       writeStreamEvent(res, 'ready', { ok: true, requestId });
     },
     event(type, payload) {
-      if (!streaming) return false;
-      writeStreamEvent(res, type, payload);
-      return true;
+      if (streaming) writeStreamEvent(res, type, payload);
+      return false;
     },
     async fallbackText() {},
     final(reply) {
@@ -707,7 +709,19 @@ module.exports = function createGroupRouter(ctx) {
       };
     };
     const credentials = requestPeers(req);
-    const mentions = parseMentions(prompt, group.members, groupLabelFor, groupHandleFor);
+    let mentions = parseMentions(prompt, group.members, groupLabelFor, groupHandleFor);
+    if (mentions.length === 0) {
+      // A message that names no one is a follow-up ("continue") to whoever
+      // spoke last; before anyone has, it would summon no one, so refuse it.
+      const last = lastSpeaker(readHistory(scopeKey), group.members);
+      if (!last) {
+        return res.status(400).json({
+          error: 'mention a member with @ to start the conversation',
+          code: 'GROUP_NO_MENTION',
+        });
+      }
+      mentions = [last];
+    }
     const abortController = new AbortController();
     const runState = {
       requestId,
@@ -855,8 +869,12 @@ module.exports = function createGroupRouter(ctx) {
         // Broadcast member lifecycle on the shared stream as group_agent_*
         // without scopeWorkdir so every device viewing this swarm sees it
         // regardless of solo-chat workdir, and solo-chat listeners ignore it.
+        // Progress lines go too, so a working member shows what it is doing;
+        // reply text does not, since Swarm replies are not streamed.
         broadcastScope: (type, payload) => {
+          const progress = type === 'agent_progress';
           if (
+            progress ||
             type === 'agent_start' ||
             type === 'agent_done' ||
             type === 'agent_error' ||
@@ -867,6 +885,7 @@ module.exports = function createGroupRouter(ctx) {
               requestId: payload.requestId,
               agent: agentPayload(payload.agent),
               groupId: group.id,
+              ...(progress ? { line: payload.line } : {}),
               createdAt: new Date().toISOString(),
             });
           }
@@ -919,7 +938,7 @@ module.exports = function createGroupRouter(ctx) {
           groupId: group.id,
           groupName: group.name,
         },
-        notifyTaskCompletion,
+        // The round notifies once when it ends, not once per member turn.
         prompt: groupPrompt,
         recordHistory: true,
         recordUserMessage: false,
@@ -940,6 +959,10 @@ module.exports = function createGroupRouter(ctx) {
     };
 
     const turns = [];
+    // Members a reply named after the last allowed wave, so the app can tell
+    // the human why they did not answer.
+    let unsummoned = [];
+    let lastReply = null;
     try {
       // The human's mentions open the round; each wave runs its summoned
       // members one after another in mention order, then its replies can summon
@@ -957,9 +980,12 @@ module.exports = function createGroupRouter(ctx) {
           if (result) {
             settled.push(result);
             turns.push({ agent: result.agent, status: result.status });
+            if (result.status === 'done') lastReply = result;
           }
         }
-        summons = wave >= maxHops || runState.cancelled ? [] : nextSummons(settled);
+        const next = runState.cancelled ? [] : nextSummons(settled);
+        summons = wave < maxHops ? next : [];
+        if (wave >= maxHops) unsummoned = next.map((item) => item.memberKey);
       }
     } finally {
       runningScopes.delete(scopeKey);
@@ -967,12 +993,22 @@ module.exports = function createGroupRouter(ctx) {
     }
 
     touchGroup(workspace, group.id);
+    // One notification per round, named after the swarm. A stopped round was
+    // stopped by someone watching it.
+    if (lastReply && !runState.cancelled && typeof notifyTaskCompletion === 'function') {
+      notifyTaskCompletion({
+        agent: { label: group.name },
+        scopeWorkdir: runWorkdir,
+        content: lastReply.content,
+      });
+    }
     const summary = {
       ok: true,
       requestId,
       groupId: group.id,
       cancelled: runState.cancelled,
       turns,
+      unsummoned,
     };
     // Broadcast the round's end on the shared stream so every device viewing this
     // group reloads the authoritative transcript — important for agents that emit

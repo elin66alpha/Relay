@@ -1,10 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/backend/backend_client.dart';
 import '../../core/i18n/app_strings.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/util/error_text.dart';
 import '../../core/widgets/web_link.dart';
 import 'browser_controller.dart';
@@ -54,9 +54,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Phones and tablets, natively or in a mobile Web browser, get the page's
   // mobile layout and touch events; desktop and desktop Web get a mouse.
-  bool get _mobile =>
-      defaultTargetPlatform == TargetPlatform.android ||
-      defaultTargetPlatform == TargetPlatform.iOS;
+  bool get _mobile => isPhoneOrTablet;
 
   @override
   void initState() {

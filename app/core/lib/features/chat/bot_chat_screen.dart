@@ -12,6 +12,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/wallpaper.dart';
@@ -108,10 +109,18 @@ class _BotChatScreenState extends State<BotChatScreen>
     });
   }
 
+  // Desktop and Web also report inactive -> resumed on every focus change; only
+  // a return from the background can have lost the event stream.
+  bool _wasBackgrounded = false;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _wasBackgrounded = true;
+    } else if (state == AppLifecycleState.resumed && _wasBackgrounded) {
+      _wasBackgrounded = false;
       widget.chatController.onAppResumed();
     }
   }
@@ -463,9 +472,7 @@ class _BotChatScreenState extends State<BotChatScreen>
         backgroundColor: Colors.transparent,
         drawerScrimColor: Colors.black54,
         // Let mobile users open the drawer from anywhere in the chat.
-        drawerEdgeDragWidth: !kIsWeb &&
-                (defaultTargetPlatform == TargetPlatform.android ||
-                    defaultTargetPlatform == TargetPlatform.iOS)
+        drawerEdgeDragWidth: !kIsWeb && isPhoneOrTablet
             ? MediaQuery.sizeOf(context).width
             : null,
         drawer: usePermanentSidebar

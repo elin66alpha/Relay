@@ -24,4 +24,6 @@ Progress shows while downloading, and the location when done:
 |---|---|
 | Web | the browser's downloads folder (large files may use a lot of memory) |
 | iOS | the app's Documents folder, under Files → On My iPhone → Relay |
+| Android 10 and later | the Download folder |
+| Android 9 and earlier | `Android/data/dev.relay.app/files/Download` in internal storage |
 | Others | the path shown in the message |

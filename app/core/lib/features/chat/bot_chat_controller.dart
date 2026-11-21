@@ -39,7 +39,7 @@ class BotChatController extends ChangeNotifier {
   final BackendClient _backendClient;
   late final ChatPushRegistration _pushRegistration = ChatPushRegistration(
     backendClient: _backendClient,
-    hasMachine: () => _machine != null && !isDemoMachine(_machine),
+    machineId: () => isDemoMachine(_machine) ? null : _machine?.id,
     language: () => _strings.isZh ? 'zh' : 'en',
     quotaPushEnabled: () => _quotaPushEnabled,
     taskPushEnabled: () => _taskPushEnabled,
@@ -1739,9 +1739,12 @@ class BotChatController extends ChangeNotifier {
     }
     for (final BackgroundTurn turn in turns) {
       try {
+        // Only the turn's own reply matters, and it is among the newest: this
+        // runs every five seconds.
         final ChatHistory history = await _backendClient.fetchHistory(
           turn.agentKey,
           sessionId: turn.sessionId,
+          tail: 20,
         );
         final bool finished = history.messages.any(
           (ChatMessage m) =>

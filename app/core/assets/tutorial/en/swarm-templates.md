@@ -13,7 +13,7 @@ Inside a Swarm you can:
 | Action | Note |
 |---|---|
 | Manage members | add or remove members and change their nickname, prompt and settings; the work tree cannot change |
-| Clear transcript | clears the transcript and member sessions, keeping the Swarm and its members |
+| Clear transcript | after you confirm, clears the transcript and member sessions, keeping the Swarm and its members |
 | Delete swarm | deletes the Swarm and its transcript |
 
 ## Templates

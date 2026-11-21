@@ -20,6 +20,8 @@ const sessions = [
 const histories = new Map();
 const runCalls = [];
 const purgeCalls = [];
+// Whether each turn was given the task notifier.
+const notifies = [];
 const resolveChatSession = (_contextKey, id) =>
   sessions.find((session) => session.id === (id || 'default'));
 let server;
@@ -35,6 +37,7 @@ before(async () => {
     runningScopes: new Set(),
     scopeChains: new Map(),
     normalizeDeviceId: () => '',
+    notifyTaskCompletion: () => {},
     getAgent: (key) => agents[key] || null,
     listAgents: () => Object.values(agents),
     requestWorkdir: (req) => req.get('x-workdir'),
@@ -98,8 +101,9 @@ before(async () => {
       const index = list.findIndex((message) => message.id === id);
       list[index] = updater(list[index]);
     },
-    async runAgentTurn({ agentKey, prompt, responder }) {
+    async runAgentTurn({ agentKey, prompt, responder, notifyTaskCompletion }) {
       runCalls.push({ agentKey, prompt });
+      notifies.push(typeof notifyTaskCompletion === 'function');
       responder.json({ ok: true });
       return prompt === '/compact'
         ? { status: 'done', reply: { message: { context: { used: 9, size: 100 } } } }
@@ -116,6 +120,7 @@ beforeEach(() => {
   histories.clear();
   runCalls.length = 0;
   purgeCalls.length = 0;
+  notifies.length = 0;
 });
 
 after(() => {
@@ -196,6 +201,16 @@ test('history belongs to the requested workdir, agent, and session', async () =>
   }
 });
 
+test('history tail returns only the newest messages', async () => {
+  const messages = [1, 2, 3].map((n) => ({ id: `m${n}`, role: 'user', content: `${n}` }));
+  histories.set(scopeKeyFor('claude', WORKDIR, 'default'), messages);
+  for (const [tail, expected] of [['2', messages.slice(-2)], ['0', messages], ['x', messages]]) {
+    const response = await api('GET', `/api/history?agent=claude&tail=${tail}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).messages, expected, `tail=${tail}`);
+  }
+});
+
 test('clearing a session purges its CLI transcript and only its scoped history', async () => {
   const target = scopeKeyFor('claude', WORKDIR, 'review');
   const other = scopeKeyFor('claude', WORKDIR, 'default');
@@ -250,4 +265,11 @@ test('swarm sessions are excluded from history search and can be cleared by expl
   assert.equal(clearRes.status, 200);
   assert.equal(histories.has(swarmKey), false);
   assert.equal(histories.has(mainKey), true);
+});
+
+test('a hidden swarm session turn sends no notification of its own', async () => {
+  await api('POST', '/api/chat', { prompt: 'solo' });
+  await api('POST', '/api/chat', { prompt: 'member turn', sessionId: 'swarm-1' });
+  // The coordinating backend notifies once for the whole round instead.
+  assert.deepEqual(notifies, [true, false]);
 });

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:js_interop';
-import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
@@ -38,11 +37,12 @@ class WebFileDropController implements FileDropController {
       for (int i = 0; i < files.length; i += 1) {
         final web.File? file = files.item(i);
         if (file == null) continue;
-        final ByteBuffer buffer = (await file.arrayBuffer().toDart).toDart;
         dropped.add(
           DroppedFile(
             name: file.name,
-            bytes: buffer.asUint8List(),
+            size: file.size,
+            readBytes: () async =>
+                (await file.arrayBuffer().toDart).toDart.asUint8List(),
           ),
         );
       }

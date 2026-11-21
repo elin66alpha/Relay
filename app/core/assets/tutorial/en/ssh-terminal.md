@@ -16,7 +16,7 @@ A detached terminal is kept for 12 hours with up to 2 MB of output for replay; t
 
 ## The phone key bar
 
-On Android and iOS a bar below the terminal adds the keys a phone keyboard lacks: Ctrl, Shift, Esc, Tab and the four arrows.
+On Android and iOS, in the app or a phone browser, a bar below the terminal adds the keys a phone keyboard lacks: Ctrl, Shift, Esc, Tab and the four arrows.
 
 - Ctrl and Shift apply to the **next** key only: tap Ctrl, then type `c` for Ctrl+C; tap it again to cancel.
 - Esc, Tab and the arrows send at once.

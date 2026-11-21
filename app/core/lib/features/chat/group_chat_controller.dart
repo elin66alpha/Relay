@@ -15,8 +15,8 @@ import '../../core/util/error_text.dart';
 /// human echo and each member's start and finish arrive on the shared
 /// `/api/events` stream tagged with `groupId`, so one subscription shows both
 /// this device's and other devices' activity. Replies are not streamed: a
-/// member shows as working until it finishes, then the transcript is reloaded
-/// to show its whole reply.
+/// member shows as working, with its newest progress lines, until it finishes,
+/// then the transcript is reloaded to show its whole reply.
 ///
 /// [machines] lists this device's machine credentials. Requests that reach a
 /// swarm's remote members carry the credentials of those members' machines;
@@ -32,6 +32,7 @@ class GroupChatController extends ChangeNotifier {
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
   static const String _authorKey = 'author';
   static const String _agentLabelKey = 'agentLabel';
+  static const String _progressLinesKey = 'progressLines';
 
   final BackendClient _client;
   final List<MachineCredential> Function() _machines;
@@ -55,6 +56,8 @@ class GroupChatController extends ChangeNotifier {
   // Group ids whose send() call from this device is currently in flight.
   final Set<String> _postingGroups = <String>{};
   String? _error;
+  // Information about the last round (members it did not summon), not an error.
+  String? _notice;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _reconnectTimer;
   bool _disposed = false;
@@ -70,6 +73,7 @@ class GroupChatController extends ChangeNotifier {
   bool get sending =>
       _selected != null && _activeRequestIds.containsKey(_selected!.id);
   String? get error => _error;
+  String? get notice => _notice;
 
   List<MachineCredential> _peersFor(Iterable<String> members) =>
       peerCredentialsFor(members, _machines());
@@ -121,6 +125,7 @@ class GroupChatController extends ChangeNotifier {
   Future<void> selectGroup(ChatGroup group) async {
     if (_selected?.id == group.id) return;
     _selected = group;
+    _notice = null;
     _messages.clear();
     _safeNotify();
     await _loadHistory(group.id);
@@ -262,6 +267,7 @@ class GroupChatController extends ChangeNotifier {
     _activeRequestIds[groupId] = requestId;
     _postingGroups.add(groupId);
     _error = null;
+    _notice = null;
     // Optimistic human bubble with the id the backend will use, so the echoed
     // group_message event upserts in place instead of duplicating.
     _upsert(
@@ -289,6 +295,8 @@ class GroupChatController extends ChangeNotifier {
         // The request dropped or timed out (a long round, a phone in the
         // background) while the round may still run; history decides below.
         dropped = err;
+      } else if (err.code == 'GROUP_NO_MENTION') {
+        _error = _strings.groupNeedsMention;
       } else {
         _error = friendlyErrorText(_strings, err);
       }
@@ -359,17 +367,25 @@ class GroupChatController extends ChangeNotifier {
   void _subscribeEvents() {
     _eventsSub?.cancel();
     _eventsSub = _client.streamEvents().listen(
-          _handleEvent,
-          onError: (Object _) => _scheduleReconnect(),
-          onDone: _scheduleReconnect,
-          cancelOnError: true,
-        );
+      (BackendEvent event) {
+        _reconnectSeconds = 2;
+        _handleEvent(event);
+      },
+      onError: (Object _) => _scheduleReconnect(),
+      onDone: _scheduleReconnect,
+      cancelOnError: true,
+    );
   }
+
+  // Doubles while the backend stays unreachable; any event resets it.
+  int _reconnectSeconds = 2;
 
   void _scheduleReconnect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 2), () {
+    final int delay = _reconnectSeconds;
+    _reconnectSeconds = min(30, delay * 2);
+    _reconnectTimer = Timer(Duration(seconds: delay), () {
       _subscribeEvents();
       // Events sent while the stream was down (such as a round's group_done)
       // are gone, so re-read the open swarm rather than trust its last state.
@@ -395,6 +411,21 @@ class GroupChatController extends ChangeNotifier {
             (eventRequestId == null ||
                 _activeRequestIds[groupId] == eventRequestId)) {
           _activeRequestIds.remove(groupId);
+        }
+        final List<String> unsummoned =
+            (data['unsummoned'] as List?)?.whereType<String>().toList() ??
+                const <String>[];
+        if (isSelected && unsummoned.isNotEmpty) {
+          _notice = _strings.swarmUnsummoned(
+            unsummoned
+                .map(
+                  (String key) =>
+                      group.memberConfigs[key]?['nickname'] ??
+                      group.memberLabel(key),
+                )
+                .join(', '),
+          );
+          _safeNotify();
         }
         if (isSelected && !ownPosting) {
           _loadHistory(groupId);
@@ -424,6 +455,12 @@ class GroupChatController extends ChangeNotifier {
       case 'agent_start':
         if (!isSelected) return;
         _ensureBubble(data);
+        _safeNotify();
+        break;
+      case 'group_agent_progress':
+        final String line = data['line'] as String? ?? '';
+        if (!isSelected || line.trim().isEmpty) return;
+        _appendProgress(data, line);
         _safeNotify();
         break;
       case 'group_agent_done':
@@ -464,6 +501,27 @@ class GroupChatController extends ChangeNotifier {
     );
     _messages.add(bubble);
     return bubble;
+  }
+
+  // A working member's newest step lines, shown under its bubble. After a
+  // reload the bubble is the transcript's `<requestId>:assistant` message.
+  void _appendProgress(Map<String, Object?> data, String line) {
+    final String requestId = data['requestId'] as String? ?? '';
+    int index = _indexOf('$requestId:assistant');
+    if (index == -1) index = _indexOf(_ensureBubble(data).id);
+    final ChatMessage bubble = _messages[index];
+    final Object? raw = bubble.metadata[_progressLinesKey];
+    final List<String> lines = <String>[
+      if (raw is List) ...raw.whereType<String>(),
+    ];
+    if (lines.isEmpty || lines.last != line) lines.add(line);
+    // The backend keeps the same newest six.
+    while (lines.length > 6) {
+      lines.removeAt(0);
+    }
+    _messages[index] = bubble.copyWith(
+      metadata: <String, Object?>{...bubble.metadata, _progressLinesKey: lines},
+    );
   }
 
   int _indexOf(String id) =>

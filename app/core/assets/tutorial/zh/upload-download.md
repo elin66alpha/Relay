@@ -24,4 +24,6 @@ keywords: 上传, 下载, upload, download, zip, 打包, 拖拽, 大小限制
 |---|---|
 | 网页 | 浏览器的下载文件夹（大文件可能占用较多内存） |
 | iOS | App 的「文稿」目录，在「文件 → 我的 iPhone → Relay」里 |
+| Android 10 及以上 | Download 文件夹 |
+| Android 9 及以下 | 内部存储的 `Android/data/dev.relay.app/files/Download` |
 | 其他 | 提示里显示的路径 |

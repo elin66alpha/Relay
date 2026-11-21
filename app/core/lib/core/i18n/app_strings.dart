@@ -51,6 +51,17 @@ class AppStrings {
   String get deleteGroupConfirm =>
       isZh ? '删除该蜂群及其聊天记录？' : 'Delete this swarm and its transcript?';
   String get clearTranscript => isZh ? '清空记录' : 'Clear transcript';
+  String get clearSwarmTitle => isZh ? '清空蜂群记录？' : 'Clear this swarm?';
+  String get clearSwarmBody => isZh
+      ? '删除全部聊天记录，并重置每个成员的会话（包括其他机器上的成员），成员会忘记之前的内容。工作目录里的文件不受影响。'
+      : "Delete the whole transcript and reset every member's session, including members on other machines, so they forget it. Files in the work trees are not changed.";
+  String get you => isZh ? '你' : 'You';
+  String get groupNeedsMention => isZh
+      ? '还没有成员发言，请用 @ 指定第一个回答的成员，例如 @claude'
+      : 'No member has spoken yet: @mention who should answer first, e.g. @claude';
+  String swarmUnsummoned(String names) => isZh
+      ? '本轮接力已达上限，未召唤：$names。需要的话 @ 它继续。'
+      : 'This round reached its hand-off limit and did not summon: $names. @mention them to continue.';
   String get noGroups => isZh ? '还没有蜂群' : 'No swarms yet';
   String get groupEmptyHint =>
       isZh ? '用 @ 召唤成员，例如 @claude' : 'Mention a member with @, e.g. @claude';

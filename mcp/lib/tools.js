@@ -452,7 +452,7 @@ function createTools({ getClient, state, machineName }) {
     },
     {
       name: 'relay_swarm_chat',
-      description: 'Send a message to a swarm; @mentions decide which members answer. Returns the round\'s replies when it ends within waitSeconds, otherwise status "running" with a requestId for relay_task (with groupId). A member on another Relay machine ("<peerId>:<agent>") cannot run from relay-mcp: its turn ends with PEER_NOT_LINKED.',
+      description: 'Send a message to a swarm; @mentions decide which members answer (none: the member who spoke last; refused with GROUP_NO_MENTION before anyone has). Returns the round\'s replies when it ends within waitSeconds, otherwise status "running" with a requestId for relay_task (with groupId). A member on another Relay machine ("<peerId>:<agent>") cannot run from relay-mcp: its turn ends with PEER_NOT_LINKED.',
       inputSchema: schema({
         groupId: { type: 'string' },
         prompt: { type: 'string' },

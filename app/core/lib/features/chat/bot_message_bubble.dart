@@ -1,12 +1,12 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/models/chat_message.dart';
-import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/util/time_format.dart';
 import '../../core/widgets/chat_wallpaper.dart';
@@ -35,8 +35,8 @@ class ChatNotice extends StatelessWidget {
   }
 }
 
-// The turn's persisted execution steps.
-List<String> _persistedSteps(ChatMessage message) {
+/// The turn's persisted execution steps (its progress lines).
+List<String> persistedSteps(ChatMessage message) {
   final Object? raw = message.metadata['progressLines'];
   if (raw is! List) return const <String>[];
   return raw
@@ -153,7 +153,7 @@ class BotMessageBubble extends StatelessWidget {
     final bool acrylic = WallpaperScope.enabledOf(context);
     final ColorScheme colors = Theme.of(context).colorScheme;
     final double maxBubbleWidth =
-        isDesktopTarget ? 760 : MediaQuery.sizeOf(context).width * 0.80;
+        math.min(760, MediaQuery.sizeOf(context).width * 0.80);
     final Color textColor = isUser && !system
         ? (acrylic ? colors.onPrimaryContainer : colors.onPrimary)
         : colors.onSurface;
@@ -182,7 +182,7 @@ class BotMessageBubble extends StatelessWidget {
     // Execution steps captured during the turn, surfaced collapsed once it ends
     // (live progress still streams via `progressLines` below while running).
     final List<String> finishedSteps = (!isUser && !system && !streaming)
-        ? _persistedSteps(message)
+        ? persistedSteps(message)
         : const <String>[];
     final DateTime stampTime =
         (!isUser && segments.isNotEmpty && segments.first.createdAt != null)

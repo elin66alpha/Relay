@@ -547,7 +547,9 @@ secret scanner and does not alter the raw stored history.
 A Swarm is one canonical transcript above several independent CLI sessions.
 Each workspace bucket can store up to 20 Swarms, with up to eight members in
 each, and `GET /api/groups` lists every Swarm on the backend regardless of the
-device's current solo-chat directory. When a human message mentions multiple
+device's current solo-chat directory. A human message that mentions no one goes
+to the member who spoke last; before any member has spoken it is refused with
+`GROUP_NO_MENTION`. When a human message mentions multiple
 members, Relay runs them one after another in mention order: each member is
 planned right before it runs, receiving only what is new since it last spoke
 (including replies already given earlier in the same wave).
@@ -561,14 +563,17 @@ that reply in the same wave (and has therefore already seen it).
 message (default 3; set 0 to keep summoning human-only), because two members
 that keep naming each other would otherwise run — and bill — without end. A
 member cannot summon itself, and a turn that failed or was cancelled summons no
-one.
+one. Members still named after the last allowed wave are reported in the round's
+`group_done` as `unsummoned`, and the app shows who they are.
 
 Each Swarm runs one round at a time, while different Swarms can run
 concurrently. While a Swarm's round runs, the composer offers Stop instead of
 Send for that Swarm (including after leaving and reopening it or on another
 device); a second message to the same Swarm is refused with `GROUP_BUSY`.
-Replies are not streamed: each member shows as working until its whole reply is
-in.
+Replies are not streamed: each member shows as working, with its latest progress
+lines (`group_agent_progress`), until its whole reply is in. A finished round
+sends one task notification named after the Swarm instead of one per member, and
+a backend hosting a remote member's hidden swarm session sends none for it.
 
 At creation, a Swarm picks its local work tree (defaulting to the machine's
 `defaultDir`, not the last-used solo directory) and per-member model, effort,

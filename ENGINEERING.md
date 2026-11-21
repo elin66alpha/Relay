@@ -335,6 +335,14 @@ architecture change (see Changes).
   the corresponding cache.
 - The shared `/api/events` stream is workdir-aware and has an idle timeout so a
   dead connection reconnects. Preserve scope filters when adding events.
+- `GET /api/history?tail=N` returns only the newest N messages (an older
+  backend ignores it and returns all). Use it where the app checks a turn's
+  state on a timer, as the background-turn check does, and never where it shows
+  the transcript.
+- `isPhoneOrTablet` (`core/platform/platform_capabilities.dart`) is the one
+  rule for a touch device with a soft keyboard: Android or iOS, natively or in
+  a mobile browser. The terminal key bar, Enter-to-send, the Browser's touch
+  mode and the drawer's edge swipe all follow it.
 
 ### Files, Swarms, and side conversations
 
@@ -350,10 +358,14 @@ architecture change (see Changes).
   `memberConfigs[key].resetAt` (set server-side when a work-tree change or a
   re-added remote member replaces its session) is gone with it, so such a
   member is fed the transcript again rather than answering without it. The human's
-  `@mentions` open wave one; `@mentions` inside a member's reply summon the next
+  `@mentions` open wave one; a human message that mentions no one goes to the
+  member who spoke last (`lastSpeaker`), and is refused with `GROUP_NO_MENTION`
+  before any member has spoken. `@mentions` inside a member's reply summon the next
   wave (skipping any member that already ran after that reply in the same wave),
   bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since two members
-  naming each other would otherwise never stop. A member never summons itself,
+  naming each other would otherwise never stop; members still named after the
+  last allowed wave come back as `group_done.unsummoned`, which the app shows
+  above the transcript. A member never summons itself,
   and a failed or cancelled turn summons no one. One round runs at a time per
   Swarm: a second message to that Swarm is refused (`GROUP_BUSY`), while
   different Swarms run independently (tracked per group id in
@@ -363,8 +375,14 @@ architecture change (see Changes).
   (`NETWORK_*`) the app reloads history and treats the message as sent if the
   backend recorded it; it also reloads the open Swarm whenever the event
   stream reconnects, since a missed `group_done` would leave Stop showing. The
-  app shows a member as working until its reply is complete; Swarm replies are
-  not streamed.
+  app shows a member as working until its reply is complete, with its newest
+  progress lines (`group_agent_progress`, broadcast also for rounds a streaming
+  client such as relay-mcp started), folded under the finished reply; Swarm
+  reply text is not streamed. A round sends one task notification, named after
+  the Swarm, when it ends without being stopped, and member turns send none; a
+  backend's hidden swarm session turns (`kind: 'swarm'`) send none either, since
+  the coordinating backend notifies for the round. Clearing a Swarm asks for
+  confirmation, because it also resets every member's session.
 - Swarms are stored bucketed by workspace in `groups.json`, while
   `GET /api/groups` lists every Swarm on the backend regardless of the device's
   current solo-chat directory and every group route resolves a Swarm by id
@@ -395,8 +413,7 @@ architecture change (see Changes).
   record keeps `peers` (`name`, `baseUrl`) and each remote member's B `workdir`
   and dedicated `sessionId`; a peer no member references is dropped. A remote
   turn is the same runAgentTurn with only `runAgent` replaced by B's
-  `/api/chat`, so history, events, mentions, Stop and notifications need no
-  second path. Remote members use B's own model/effort/permission. B is used
+  `/api/chat`, so history, events, mentions and Stop need no second path. Remote members use B's own model/effort/permission. B is used
   only through its existing API, so B needs no change and may be older.
 - B's token never reaches A's disk: the app sends `peers: [{ baseUrl, token }]`
   in each Swarm request that reaches B, and A keeps it in memory for that
@@ -536,7 +553,7 @@ navigation on 2026-11-09.
 - Tutorial: `node scripts/release/check_docs.js` reports every article missing in the other language and every unresolved link; `app/core/test/tutorial_test.dart` checks that every article parses with the same slugs and orders in both languages, that search needs every query word and ranks title hits first, and that the list, search and an article link work on screen. Changing a feature updates its article in both languages.
 - Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer → Home works while an agent turn is running, even when every agent is busy; the turn keeps running on the backend and shows again on return. Covered by `app/core/test/chat_cancel_test.dart`.
-- iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`).
+- iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`). Desktop and Web focus changes reconnect nothing; only a return through hidden/paused does (`app/core/test/machine_switch_test.dart`).
 - Home: tapping the current workspace opens File System; tapping a recent workspace selects it. While refreshing, directory actions are disabled; switching machines clears recent directories immediately and late responses from earlier refreshes cannot replace the list or enable a previous machine's directory action.
 - Home and File System show at most five workspaces in backend recency order. File System keeps them in one compact horizontally scrolling row above the breadcrumbs, with folder-name labels and full-path tooltips; tapping a tag switches the active workdir and displays its directory, while navigating through folders or breadcrumbs only browses. An unavailable recent-workspace list does not prevent file browsing. Covered by `app/core/test/home_navigation_page_test.dart` and `app/core/test/file_system_screen_test.dart`.
 - Solo chat: tapping the chat title opens File System through BackendClient and the set-workdir callback.
@@ -544,6 +561,9 @@ navigation on 2026-11-09.
 - Solo chat links: tapping a workdir-relative file link with a `:3` line suffix in a finished reply opens that file's preview; `file:` links accept an empty host or `localhost` and ignore URI query/fragment metadata; a directory link opens File System there; a missing file shows "The file does not exist or is not accessible."; `[x](https://…)` shows "Open in browser?" with the full URL and launches only on Open; `javascript:` links do nothing. Coverage: `app/core/test/chat_links_test.dart`.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
 - File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents (Markdown files up to 20,000 characters render by default without loading embedded images and toggle to source; larger Markdown opens as source) and tapping a supported image (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB and 40 million pixels) renders a zoomable preview; a non-image file containing a NUL byte or an oversized/malformed image shows "Cannot preview this file."; past 512 KiB text shows "Only the first 512 KiB is shown."
+- File browser on Android 9 and earlier: Download saves to `Android/data/dev.relay.app/files/Download` with no permission prompt; on Android 10+ it saves to Download and a duplicate name is reported as MediaStore saved it (`name (1).ext`).
+- File browser on Web: picking or dropping a file over 100 MB shows the size message without the tab reading the file.
+- Windows desktop: on a 1920×1080 screen at 150% scaling the first window fits above the taskbar with the composer visible.
 - File browser on iOS: Download saves to the app's Documents folder, shown in Files → On My iPhone → Relay. Against a backend older than the client, New Folder reports that the backend is too old instead of an HTML page.
 - File browser: Windows UNC breadcrumbs keep the server and share as one absolute root; after an initial workdir request fails, Refresh retries it without leaving the screen. Regression coverage lives in `app/core/test/file_system_screen_test.dart` and `app/core/test/home_navigation_page_test.dart` (including delayed responses across machine switches).
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.

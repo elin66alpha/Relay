@@ -2,6 +2,7 @@
 
 const { randomUUID } = require('crypto');
 const express = require('express');
+const { boundedInteger } = require('../lib/bounded-integer');
 
 module.exports = function createChatRouter(ctx) {
   const {
@@ -100,7 +101,9 @@ module.exports = function createChatRouter(ctx) {
         contextKey,
         dependencies: agentTurnDependencies(),
         deviceId,
-        notifyTaskCompletion,
+        // A hidden swarm session's turn belongs to a round on another
+        // backend, which sends that round's one notification.
+        notifyTaskCompletion: chatSession.kind === 'swarm' ? undefined : notifyTaskCompletion,
         onBackgroundTurn: backgroundTurnHandler({
           agent,
           contextKey,
@@ -198,11 +201,15 @@ module.exports = function createChatRouter(ctx) {
     if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
       finalizeStaleStreamingHistory(scopeKey);
     }
+    // `tail` returns only the newest messages, for a client checking a turn's
+    // state rather than showing the conversation.
+    const messages = readHistory(scopeKey);
+    const tail = boundedInteger(req.query.tail, 0, 1, 1000);
     return res.json({
       agent: agent.key,
       workdir,
       session: sessionPayload(chatSession),
-      messages: readHistory(scopeKey),
+      messages: tail ? messages.slice(-tail) : messages,
       contextWindow: contextWindowFor(
         agent.key, getSettings(agent.key, scopeKey, contextKey).model,
       ),

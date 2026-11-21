@@ -120,6 +120,17 @@ function deltaSince(messages, agentKey, resetAt = '') {
   return list.slice(lastIndex + 1);
 }
 
+// The current member who wrote the newest message, so a message that names
+// no one continues with it; '' when no member has spoken yet.
+function lastSpeaker(messages, members) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const author = authorOf(list[i]);
+    if (author !== HUMAN_AUTHOR && members.includes(author)) return author;
+  }
+  return '';
+}
+
 function speakerLabel(message, labelFor) {
   const author = authorOf(message);
   if (author === HUMAN_AUTHOR) return 'Human';
@@ -245,5 +256,6 @@ module.exports = {
   authorOf,
   parseMentions,
   deltaSince,
+  lastSpeaker,
   buildGroupPrompt,
 };

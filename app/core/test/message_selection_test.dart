@@ -577,6 +577,7 @@ class _ChatBackendClient extends BackendClient {
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) async =>
       ChatHistory(
         messages: <ChatMessage>[

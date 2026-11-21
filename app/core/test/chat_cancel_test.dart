@@ -146,6 +146,7 @@ class _CancelBackend extends BackendClient {
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) async =>
       const ChatHistory(messages: []);
 

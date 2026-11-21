@@ -266,13 +266,17 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     if (picked.isEmpty) return;
     final List<_UploadFile> files = <_UploadFile>[];
     for (final PlatformFile file in picked) {
+      final int? length = await file.length();
+      if (length == null) continue;
       if (kIsWeb) {
         files.add(
-          _UploadFile.bytes(name: file.name, data: await file.readAsBytes()),
+          _UploadFile.bytes(
+            name: file.name,
+            read: file.readAsBytes,
+            length: length,
+          ),
         );
       } else {
-        final int? length = await file.length();
-        if (length == null) continue;
         files.add(
           _UploadFile.stream(
             name: file.name,
@@ -291,7 +295,8 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
           .map(
             (DroppedFile file) => _UploadFile.bytes(
               name: file.name,
-              data: file.bytes,
+              read: file.readBytes,
+              length: file.size,
             ),
           )
           .toList(growable: false),
@@ -326,12 +331,12 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       for (final _UploadFile file in toUpload) {
         if (!mounted) return;
         setState(() => _operationText = context.l10n.uploadingFile(file.name));
-        final Uint8List? bytes = file.bytes;
-        if (bytes != null) {
+        final Future<Uint8List> Function()? read = file.readBytes;
+        if (read != null) {
           await widget.backend.uploadFile(
             path: listing.absolutePath,
             name: file.name,
-            bytes: bytes,
+            bytes: await read(),
           );
         } else {
           await widget.backend.uploadFileStream(
@@ -1447,22 +1452,23 @@ class _FileListFrame extends StatelessWidget {
 }
 
 class _UploadFile {
+  // Web sends a file in one piece; it is read only after the size check.
   const _UploadFile.bytes({
     required this.name,
-    required Uint8List data,
-  })  : bytes = data,
-        readStream = null,
-        length = data.length;
+    required Future<Uint8List> Function() read,
+    required this.length,
+  })  : readBytes = read,
+        readStream = null;
 
   const _UploadFile.stream({
     required this.name,
     required Stream<List<int>> data,
     required this.length,
-  })  : bytes = null,
+  })  : readBytes = null,
         readStream = data;
 
   final String name;
-  final Uint8List? bytes;
+  final Future<Uint8List> Function()? readBytes;
   final Stream<List<int>>? readStream;
   final int length;
 }

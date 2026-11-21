@@ -97,6 +97,35 @@ void main() {
     await _close(tester);
   });
 
+  testWidgets('only a return from the background reconnects the events', (
+    WidgetTester tester,
+  ) async {
+    final _Hosts hosts = _Hosts();
+    await _openChat(tester, hosts);
+    hosts.requests.clear();
+
+    // A desktop or Web window losing and regaining focus.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await _settle(tester);
+    expect(hosts.requests, isEmpty);
+
+    // An app sent to the background and reopened (the states the engine sends).
+    for (final AppLifecycleState state in <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await _settle(tester);
+    expect(hosts.requests.map((Uri uri) => uri.path), contains('/api/events'));
+    await _close(tester);
+  });
+
   test('a switch reuses the stored credential list', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     MachineCredentialsStore.resetCacheForTest();

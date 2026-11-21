@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_core/core/backend/backend_client.dart';
+import 'package:relay_core/core/i18n/app_strings.dart';
 import 'package:relay_core/core/models/chat_message.dart';
 import 'package:relay_core/core/models/group.dart';
 import 'package:relay_core/core/models/machine_credential.dart';
+import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/features/chat/group_chat_controller.dart';
 
 void main() {
@@ -185,6 +187,93 @@ void main() {
     expect(backend.historyRequests, hasLength(3));
   });
 
+  test('a working member shows its newest progress lines, also after a reload',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+    final Map<String, Object?> member = <String, Object?>{
+      'requestId': 'round.0.0.claude',
+      'agent': <String, Object?>{'key': 'claude', 'label': 'Claude Code'},
+    };
+    List<Object?> lines() =>
+        controller.messages.last.metadata['progressLines']! as List<Object?>;
+
+    backend.emit('group_agent_start', member);
+    for (int i = 1; i <= 7; i++) {
+      backend.emit('group_agent_progress', <String, Object?>{
+        ...member,
+        'line': 'step $i',
+      });
+    }
+    backend.emit('group_agent_progress', <String, Object?>{
+      ...member,
+      'line': 'step 7',
+    });
+    expect(lines(), <String>[
+      'step 2',
+      'step 3',
+      'step 4',
+      'step 5',
+      'step 6',
+      'step 7',
+    ]);
+
+    // A reload swaps the bubble for the transcript's message, which keeps
+    // collecting lines.
+    backend.history['builders'] = <ChatMessage>[
+      ChatMessage(
+        id: 'round.0.0.claude:assistant',
+        role: ChatRole.assistant,
+        content: '',
+        createdAt: DateTime.utc(2026, 1, 2),
+        metadata: const <String, Object?>{
+          'streaming': true,
+          'progressLines': <String>['step 7'],
+        },
+      ),
+    ];
+    await controller.loadGroups();
+    backend.emit('group_agent_progress', <String, Object?>{
+      ...member,
+      'line': 'step 8',
+    });
+    expect(controller.messages, hasLength(1));
+    expect(lines(), <String>['step 7', 'step 8']);
+  });
+
+  test('a round that hit the hand-off limit names who it did not summon',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.emit('group_done', <String, Object?>{
+      'requestId': 'other-round',
+      'unsummoned': <String>['codex'],
+    });
+    expect(controller.notice, contains('Codex'));
+
+    final Future<bool> sending = controller.send('@codex go on');
+    expect(controller.notice, isNull);
+    backend.round.complete();
+    await sending;
+  });
+
+  test('a first message that names no one asks for an @mention', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('hello?');
+    backend.round.completeError(
+      BackendException('mention a member', code: 'GROUP_NO_MENTION'),
+    );
+
+    expect(await sending, isFalse);
+    expect(
+      controller.error,
+      const AppStrings(AppLanguage.en).groupNeedsMention,
+    );
+  });
+
   test('a dropped request keeps a round the backend recorded as running',
       () async {
     backend.history['builders'] = <ChatMessage>[];
@@ -245,6 +334,30 @@ void main() {
 
     expect(controller.sending, isFalse);
     expect(controller.messages, <ChatMessage>[reply]);
+  });
+
+  testWidgets('an event stream that keeps dropping backs off',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+    final int loads = backend.historyRequests.length;
+
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 1);
+
+    // Nothing arrived on the new stream: the next try waits twice as long.
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 1);
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 2);
+
+    // An event shows the backend is back, so the next drop retries quickly.
+    backend.emit('heartbeat', const <String, Object?>{});
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 3);
   });
 
   test('a round carries only the credentials of its members\' machines',

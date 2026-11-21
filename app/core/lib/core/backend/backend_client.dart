@@ -660,13 +660,16 @@ class BackendClient {
   }
 
   /// Fetches the stored conversation for one agent session so the app can show
-  /// the previous chat on reopen without persisting anything locally.
+  /// the previous chat on reopen without persisting anything locally. [tail]
+  /// asks for only the newest messages; an older backend returns them all.
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) async {
     final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
-        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
+        '&sessionId=${Uri.encodeQueryComponent(sessionId)}'
+        '${tail == null ? '' : '&tail=$tail'}';
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(credential, '/api/history?$query');
     late final http.Response response;
@@ -833,10 +836,11 @@ class BackendClient {
     );
   }
 
-  /// Post a human message to a group. Sent as plain JSON (not SSE): the per-agent
-  /// turn deltas are mirrored to every device on the shared `/api/events` stream,
-  /// tagged with `groupId`, so the UI renders from there. Awaiting this resolves
-  /// when the whole round (every summoned member) finishes.
+  /// Post a human message to a group. Sent as plain JSON (not SSE): each
+  /// member's start, progress lines and finish reach every device on the shared
+  /// `/api/events` stream, tagged with `groupId`, so the UI renders from there;
+  /// reply text is not streamed. Awaiting this resolves when the whole round
+  /// (every summoned member) finishes.
   Future<void> sendGroupMessage({
     required String groupId,
     required String prompt,

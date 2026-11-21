@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_strings.dart';
@@ -405,7 +405,7 @@ Future<void> checkForAppUpdate(
   if (asset == null) {
     // iOS builds are installed and updated through TestFlight.
     return report(
-      defaultTargetPlatform == TargetPlatform.iOS
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
           ? strings.updateInTestFlight(latest)
           : strings.updateAvailable(latest),
     );

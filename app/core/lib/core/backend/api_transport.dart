@@ -224,10 +224,16 @@ class ApiTransport {
         lower.contains('name_not_resolved') ||
         lower.contains('nodename nor servname')) {
       code = 'NETWORK_HOST_LOOKUP';
-    } else if (lower.contains('connection refused')) {
+    } else if (lower.contains('connection refused') ||
+        // Windows: errno 10061 and 1225.
+        lower.contains('actively refused') ||
+        lower.contains('refused the network connection')) {
       code = 'NETWORK_CONNECTION_REFUSED';
-    } else if (lower.contains('network is unreachable') ||
-        lower.contains('no route to host')) {
+    } else if (lower.contains('unreachable') ||
+        lower.contains('no route to host') ||
+        // Windows: errno 1231 and 1232.
+        lower.contains('cannot be reached') ||
+        lower.contains('not reachable')) {
       code = 'NETWORK_UNREACHABLE';
     }
     return BackendException(raw, code: code);

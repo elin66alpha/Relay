@@ -39,6 +39,10 @@ const sentEvents = [];
 const scriptedReplies = new Map();
 // Per-agent promises a turn waits on, so a test can hold a round open.
 const heldReplies = new Map();
+// Per-agent progress line a turn reports before replying.
+const scriptedProgress = new Map();
+// Task notifications the round sent.
+const notified = [];
 const purgedCalls = [];
 let validateWorkdirOverride = null;
 
@@ -66,6 +70,9 @@ function buildContext() {
         settings: opts.settings,
       });
       const reply = scriptedReplies.get(agentKey) || `reply from ${agentKey}`;
+      if (scriptedProgress.has(agentKey)) {
+        onEvent({ type: 'progress', line: scriptedProgress.get(agentKey) });
+      }
       await heldReplies.get(agentKey);
       onEvent({ type: 'delta', text: reply });
       return reply;
@@ -85,7 +92,7 @@ function buildContext() {
     finalizeStaleStreamingHistory: history.finalizeStaleStreamingHistory,
     getAgent: (key) => AGENTS[key] || null,
     normalizeDeviceId: () => '',
-    notifyTaskCompletion: () => {},
+    notifyTaskCompletion: (payload) => notified.push(payload),
     readHistory: history.readHistory,
     requestWorkdir: (req) => req.get('x-workdir') || WORKDIR,
     runAgentTurn,
@@ -279,6 +286,45 @@ test('two members mentioning each other stop at the hop cap', async () => {
     round.turns.map((t) => t.agent),
     ['claude', 'codex', 'claude'],
   );
+  // The last reply still named codex, which the round reports instead of
+  // dropping silently.
+  assert.deepEqual(round.unsummoned, ['codex']);
+});
+
+test('a round broadcasts members\' progress and notifies once, named after the swarm', async () => {
+  const { group } = await (await api('POST', '/api/groups', {
+    name: 'Notify Crew',
+    members: ['claude', 'codex'],
+  })).json();
+  const notifiedBefore = notified.length;
+  const eventsBefore = sentEvents.length;
+  scriptedProgress.set('claude', 'Reading files');
+  // A streaming request (relay-mcp) gets progress too, and other devices still do.
+  const stream = await (await fetch(`${base}/api/group/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      'X-Workdir': WORKDIR,
+    },
+    body: JSON.stringify({ groupId: group.id, prompt: '@claude @codex check' }),
+  })).text();
+  scriptedProgress.clear();
+
+  assert.match(stream, /event: agent_progress/);
+  const progress = sentEvents
+    .slice(eventsBefore)
+    .filter((e) => e.type === 'group_agent_progress');
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].payload.groupId, group.id);
+  assert.equal(progress[0].payload.agent.key, 'claude');
+  assert.equal(progress[0].payload.line, 'Reading files');
+  assert.ok(!sentEvents.slice(eventsBefore).some((e) => e.type === 'group_agent_delta'));
+  assert.deepEqual(notified.slice(notifiedBefore), [{
+    agent: { label: 'Notify Crew' },
+    scopeWorkdir: WORKDIR,
+    content: 'reply from codex',
+  }]);
 });
 
 test('a member mentioning itself does not summon another turn', async () => {
@@ -326,24 +372,29 @@ test('a later message still sees earlier replies, so cross-round stays collabora
   assert.match(claudeCall.prompt, /Codex: reply from codex/);
 });
 
-test('a message with no mention is recorded but summons no one', async () => {
-  const created = await (await api('POST', '/api/groups', {
+test('a message naming no one goes to the last speaker, and is refused before anyone spoke', async () => {
+  const { group } = await (await api('POST', '/api/groups', {
     name: 'Quiet',
-    members: ['claude'],
+    members: ['claude', 'codex'],
   })).json();
-  const group = created.group;
   const before = runCalls.length;
 
-  const round = await (await api('POST', '/api/group/chat', {
+  const refused = await api('POST', '/api/group/chat', {
     groupId: group.id,
     prompt: 'just thinking out loud, no summon here',
-  })).json();
-  assert.deepEqual(round.turns, []);
+  });
+  assert.equal(refused.status, 400);
+  assert.equal((await refused.json()).code, 'GROUP_NO_MENTION');
   assert.equal(runCalls.length, before);
+  const empty = await (await api('GET', `/api/group/history?groupId=${group.id}`)).json();
+  assert.deepEqual(empty.messages, []);
 
-  const histResp = await (await api('GET', `/api/group/history?groupId=${group.id}`)).json();
-  assert.equal(histResp.messages.length, 1);
-  assert.equal(histResp.messages[0].role, 'user');
+  await api('POST', '/api/group/chat', { groupId: group.id, prompt: '@codex draft it' });
+  const round = await (await api('POST', '/api/group/chat', {
+    groupId: group.id,
+    prompt: 'continue',
+  })).json();
+  assert.deepEqual(round.turns.map((t) => t.agent), ['codex']);
 });
 
 test('a swarm runs in its chosen work tree with each member its configured settings', async () => {
