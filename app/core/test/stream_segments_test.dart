@@ -50,7 +50,15 @@ void main() {
       return controller.messages.last;
     }
 
+    // Streamed text reaches the message list without rebuilding the drawer,
+    // title and composer, which listen to the controller itself.
+    int controllerNotifications = 0;
+    int streamNotifications = 0;
+    controller.addListener(() => controllerNotifications++);
+    controller.streamUpdates.addListener(() => streamNotifications++);
     await emit('agent_delta', 'Looking first.');
+    expect(controllerNotifications, 0);
+    expect(streamNotifications, greaterThan(0));
     // Three messages that only think and call tools.
     await emit('agent_segment');
     await emit('agent_segment');

@@ -14,7 +14,6 @@ import '../cli_agents/cli_agents_controller.dart';
 import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../settings/tutorial_screen.dart';
-import '../settings/whats_new_screen.dart';
 import 'bot_chat_controller.dart';
 import 'cli_agents_drawer.dart';
 
@@ -152,12 +151,6 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
     }
   }
 
-  void _openWhatsNew() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const WhatsNewScreen()),
-    );
-  }
-
   void _openTutorial() {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const TutorialScreen()),
@@ -236,19 +229,6 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                   ),
                   const SizedBox(height: 20),
                   _HomeSection(
-                    title: strings.whatsNew,
-                    children: <Widget>[
-                      ListTile(
-                        leading: const Icon(Icons.auto_awesome_outlined),
-                        title: Text(strings.whatsNewHomeTitle),
-                        subtitle: Text(whatsNewSummary(strings)),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: _openWhatsNew,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _HomeSection(
                     title: strings.tutorial,
                     children: <Widget>[
                       ListTile(
@@ -265,6 +245,180 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Opened from the solo chat title: the current workspace, the seven most
+/// recent others, and File System pinned at the bottom. Choosing a recent
+/// workspace switches to it and returns to the chat.
+class WorkspacesPage extends StatefulWidget {
+  const WorkspacesPage({super.key, required this.chatController});
+
+  final BotChatController chatController;
+
+  @override
+  State<WorkspacesPage> createState() => _WorkspacesPageState();
+}
+
+class _WorkspacesPageState extends State<WorkspacesPage> {
+  bool _loading = true;
+  List<String> _recentWorkdirs = const <String>[];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _loading = true);
+    final Future<void> workdir = widget.chatController.refreshWorkdir();
+    List<String> recent = const <String>[];
+    try {
+      recent = await widget.chatController.backend.recentWorkdirs();
+    } catch (_) {
+      // An offline backend still leaves File System reachable.
+    }
+    await workdir;
+    if (!mounted) return;
+    setState(() {
+      _recentWorkdirs = recent;
+      _loading = false;
+    });
+  }
+
+  Future<void> _openFileSystem() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FileSystemScreen(
+          backend: widget.chatController.backend,
+          onSetWorkdir: widget.chatController.setWorkdir,
+        ),
+      ),
+    );
+    if (mounted) unawaited(_refresh());
+  }
+
+  Future<void> _selectWorkdir(String dir) async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final AppStrings strings = context.l10n;
+    try {
+      await widget.chatController.setWorkdir(dir);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      messenger.showSnackBar(SnackBar(content: Text(strings.workdirUpdated)));
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            err is BackendException && err.code == 'WORKDIR_BUSY'
+                ? strings.workdirBusy
+                : friendlyErrorText(strings, err),
+          ),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppStrings strings = context.l10n;
+    return Scaffold(
+      appBar: AppBar(title: Text(strings.workspaces)),
+      body: ListenableBuilder(
+        listenable: widget.chatController,
+        builder: (BuildContext context, Widget? _) {
+          final String? workdir = widget.chatController.activeWorkdir;
+          final List<String> recent = _recentWorkdirs
+              .where((String dir) => dir != workdir)
+              .take(7)
+              .toList(growable: false);
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              children: <Widget>[
+                _HomeColumn(
+                  children: <Widget>[
+                    if (_loading) ...<Widget>[
+                      const LinearProgressIndicator(minHeight: 2),
+                      const SizedBox(height: 12),
+                    ],
+                    if (workdir != null) ...<Widget>[
+                      _HomeSection(
+                        title: strings.currentWorkspace,
+                        children: <Widget>[
+                          _WorkdirTile(
+                            dir: workdir,
+                            current: true,
+                            onTap: _loading ? null : _openFileSystem,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                    _HomeSection(
+                      title: strings.recentWorkspaces,
+                      emptyText: strings.noRecentWorkspaces,
+                      children: <Widget>[
+                        for (final String dir in recent)
+                          _WorkdirTile(
+                            dir: dir,
+                            onTap: _loading ? null : () => _selectWorkdir(dir),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: _HomeColumn(
+          children: <Widget>[
+            _HomeSectionCard(
+              child: ListTile(
+                leading: const Icon(Icons.folder_open_outlined),
+                title: Text(strings.fileSystem),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _openFileSystem,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Centres [children] at the home page's 840 px reading width.
+class _HomeColumn extends StatelessWidget {
+  const _HomeColumn({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      heightFactor: 1,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 840),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
       ),
     );
   }

@@ -13,7 +13,6 @@ keywords: home, drawer, sidebar, navigation, menu
 | Current machine | opens [Machine details](machine-details.md) |
 | Current workspace | opens the [file browser](file-browser.md) |
 | Recent workspaces | up to 5 directories with chat history; tap another one to switch to it |
-| What's new | what this version adds |
 | Tutorial | where you are now |
 
 ## The drawer
@@ -28,7 +27,7 @@ On wide screens it stays on the left; on a phone tap the menu button, or swipe r
 
 ## The chat screen
 
-- **Title**: the workspace on top (tap it to open the file browser), "Agent - Session" below.
+- **Title**: the workspace on top (tap it to open [Workspaces](workspaces.md): the current workspace, up to 7 recent ones and File system), "Agent - Session" below.
 - **Search button**: searches history in the current workspace; see [Search history and export](history-search.md).
 - **Quota strip**: above the composer, the current agent's remaining quota (Claude Code, Codex, Cursor).
 - **Context usage**: for example `42k / 200k`; see [Context usage](context-usage.md).

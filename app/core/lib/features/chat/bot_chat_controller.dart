@@ -113,6 +113,12 @@ class BotChatController extends ChangeNotifier {
   // history each time was O(n) churn that grew with the conversation.
   List<ChatMessage> get messages =>
       UnmodifiableListView<ChatMessage>(_messages);
+
+  /// Fires on throttled streaming text updates, which change only a streaming
+  /// bubble's content. They skip the controller's own listeners so the drawer,
+  /// title and composer do not rebuild ~12x/sec; render [messages] from both.
+  Listenable get streamUpdates => _streamUpdates;
+  final ValueNotifier<int> _streamUpdates = ValueNotifier<int>(0);
   int get messageCount => _messages.length;
   int? get contextWindow => _contextWindow;
   bool get isThinking => _activeRequestId != null;
@@ -1542,7 +1548,7 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     _flushStreamBuffers();
-    notifyListeners();
+    _streamUpdates.value++;
     _streamNotifyTimer = Timer(const Duration(milliseconds: 80), () {
       _streamNotifyTimer = null;
       if (!_streamNotifyQueued) return;

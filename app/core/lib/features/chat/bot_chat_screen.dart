@@ -22,7 +22,6 @@ import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
-import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../quota/quota_strip.dart';
 import 'bot_chat_controller.dart';
@@ -89,6 +88,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     WidgetsBinding.instance.addObserver(this);
     _lastNotificationSettings = _notificationSettings;
     widget.chatController.addListener(_onChatChanged);
+    widget.chatController.streamUpdates.addListener(_onChatChanged);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
     widget.settingsController.addListener(_onSettingsChanged);
@@ -129,6 +129,7 @@ class _BotChatScreenState extends State<BotChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.chatController.removeListener(_onChatChanged);
+    widget.chatController.streamUpdates.removeListener(_onChatChanged);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
     widget.settingsController.removeListener(_onSettingsChanged);
@@ -591,6 +592,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                         listenable: Listenable.merge(<Listenable>[
                           widget.agentsController,
                           widget.chatController,
+                          widget.chatController.streamUpdates,
                         ]),
                         builder: (BuildContext context, Widget? _) {
                           if (widget.chatController.machine == null) {
@@ -909,10 +911,7 @@ class _ChatTitle extends StatelessWidget {
           onTap: () {
             Navigator.of(context).push<void>(
               MaterialPageRoute<void>(
-                builder: (_) => FileSystemScreen(
-                  backend: chatController.backend,
-                  onSetWorkdir: chatController.setWorkdir,
-                ),
+                builder: (_) => WorkspacesPage(chatController: chatController),
               ),
             );
           },

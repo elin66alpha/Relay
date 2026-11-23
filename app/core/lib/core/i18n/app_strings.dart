@@ -459,6 +459,7 @@ class AppStrings {
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
+  String get workspaces => isZh ? '工作区' : 'Workspaces';
   String get currentWorkspace => isZh ? '当前工作区' : 'Current workspace';
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>
@@ -579,10 +580,6 @@ class AppStrings {
   String get quotaAlerts => isZh ? '额度刷新提醒' : 'Quota reset alerts';
   String get taskAlerts => isZh ? '任务完成提醒' : 'Task completion alerts';
   String get tutorial => isZh ? '教程' : 'Tutorial';
-  String get whatsNew => isZh ? '新功能' : "What's new";
-  String get whatsNewHomeTitle =>
-      isZh ? '看看这个版本新增了什么' : 'See what this version adds';
-  String get otherChanges => isZh ? '其他改进' : 'Other changes';
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';

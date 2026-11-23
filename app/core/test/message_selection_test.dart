@@ -96,10 +96,8 @@ void main() {
     chat.goHome();
     await tester.pumpAndSettle();
     expect(find.text('Current machine'), findsOneWidget);
-    expect(
-      tester.getTopLeft(find.text("What's new")).dy,
-      lessThan(tester.getTopLeft(find.text('Tutorial')).dy),
-    );
+    expect(find.text("What's new"), findsNothing);
+    expect(find.text('Tutorial'), findsOneWidget);
     expect(find.byType(Card), findsNothing);
     expect(
       surfaces().every((ChatChromeSurface surface) => surface.acrylic),

@@ -8,7 +8,7 @@ keywords: file system, file browser, path, disk, drive, hidden files, new folder
 
 ## Open it
 
-Tap **Current workspace** on Home, the chat title, or **File system** at the bottom of the drawer.
+Tap **Current workspace** on Home, **File system** at the bottom of the Workspaces page that the chat title opens, or **File system** at the bottom of the drawer.
 
 ## Navigate
 

@@ -74,10 +74,8 @@ tests.
   `node scripts/release/check_docs.js` checks the pairing and links.
 - Release bumps update these files together:
   `app/shell/pubspec.yaml`, `server/package.json`, `mcp/package.json`, `_applicationVersion` in
-  `app/core/lib/features/settings/app_settings_screen.dart`, a
-  `docs/CHANGELOG.md` entry, and a plain-language English and Chinese entry
-  (1-3 highlights, other changes as short lines) at the top of
-  `app/core/lib/features/settings/whats_new_screen.dart`.
+  `app/core/lib/features/settings/app_settings_screen.dart`, and a
+  `docs/CHANGELOG.md` entry.
 - Dependabot pull requests merge into the release branch in development, never
   straight into `main`. When a new release branch starts, point every
   `target-branch` in `.github/dependabot.yml` at it, on `main`, where
