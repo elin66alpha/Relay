@@ -14,6 +14,14 @@
   started from PowerShell 7 otherwise loads PowerShell 7's, which fails), retries
   unpacking, and logs failures to `relay-client-update.log` in the temp folder.
   Windows clients on 0.2.0 or 0.2.1 need to install 0.2.2 by hand once.
+- **Antigravity logged out after a restart over SSH**: restarting the backend
+  from an SSH shell (`pm2 restart --update-env`, then `pm2 save`) left that
+  shell's `SSH_*` variables in the backend for good. agy then treated every
+  conversation, quota check and agent started from Relay as an SSH login and
+  kept its token in a file instead of the keyring the host's own agy uses, so
+  it reported "not logged in" while agy worked in a terminal. The backend now
+  drops those variables, and stale `ANTIGRAVITY_*` ones from an agy tool shell,
+  at startup; `SSH_AUTH_SOCK` stays.
 - **Claude on macOS**: Claude Code keeps its login in the macOS login Keychain
   instead of `~/.claude/.credentials.json`, so a macOS backend showed Claude as
   not logged in and could not read its quota. Login status now checks the

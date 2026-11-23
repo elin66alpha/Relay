@@ -164,8 +164,22 @@ function agyAuthFile(homeDir = os.homedir()) {
   return path.join(homeDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
 }
 
+// A shell that runs `pm2 start/restart --update-env` (then `pm2 save`) leaves its
+// session in the backend's environment for good, and every agent inherits it.
+// agy reads SSH_CONNECTION/SSH_CLIENT/SSH_TTY as an SSH login and keeps its token
+// in a file instead of the keyring the host's own agy uses, so it looks logged
+// out; ANTIGRAVITY_* claims a tool call of an agy session long gone. Agents run
+// as the host. SSH_AUTH_SOCK stays: agents may use it for git over SSH.
+function dropLoginSessionEnv(env) {
+  for (const key of Object.keys(env)) {
+    if (/^(SSH_(CONNECTION|CLIENT|TTY)|ANTIGRAVITY_)/.test(key)) delete env[key];
+  }
+  return env;
+}
+
 module.exports = {
   agyAuthFile,
+  dropLoginSessionEnv,
   CURSOR_CONFIG_DIR,
   cliCommand,
   commandExists,

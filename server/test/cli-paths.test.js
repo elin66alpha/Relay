@@ -79,3 +79,17 @@ test('cliCommand is null for a CLI that is not installed', () => {
   const { cliCommand } = require('../lib/cli-paths');
   assert.equal(cliCommand('relay-no-such-cli-xyz'), null);
 });
+
+test('a login shell session left in the backend env does not reach agents', () => {
+  const { dropLoginSessionEnv } = require('../lib/cli-paths');
+  const env = {
+    PATH: '/usr/bin',
+    SSH_CONNECTION: '1 2 3 4',
+    SSH_CLIENT: '1 2 3',
+    SSH_TTY: '/dev/pts/0',
+    SSH_AUTH_SOCK: '/tmp/agent.sock',
+    ANTIGRAVITY_AGENT: '1',
+    ANTIGRAVITY_LS_ADDRESS: 'localhost:1',
+  };
+  assert.deepEqual(dropLoginSessionEnv(env), { PATH: '/usr/bin', SSH_AUTH_SOCK: '/tmp/agent.sock' });
+});

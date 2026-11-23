@@ -282,6 +282,13 @@ architecture change (see Changes).
 
 ### Backend modules and persistence
 
+- `server.js` drops `SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY` and `ANTIGRAVITY_*`
+  from its own environment at startup (`dropLoginSessionEnv` in
+  `lib/cli-paths.js`), before anything spawns an agent. `pm2 start/restart
+  --update-env` and `pm2 save` keep the calling shell's variables for good, and
+  agy treats the SSH ones as an SSH login: it then keeps its token in a file
+  instead of the keyring the host's own agy uses, and looks logged out.
+  `SSH_AUTH_SOCK` stays for git over SSH.
 - Each route factory receives through `routeContext` everything that holds state
   or does I/O: server state, persistence, processes, caches, and the helpers
   `server.js` builds. Tests replace those. A route requires directly only Node

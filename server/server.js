@@ -2,6 +2,8 @@
 
 // dotenv 17+ logs every load unless told to be quiet.
 require('dotenv').config({ quiet: true });
+// Before anything spawns an agent: see dropLoginSessionEnv.
+require('./lib/cli-paths').dropLoginSessionEnv(process.env);
 
 const fs = require('fs');
 const path = require('path');
