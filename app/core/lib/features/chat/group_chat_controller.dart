@@ -56,10 +56,15 @@ class GroupChatController extends ChangeNotifier {
   // Group ids whose send() call from this device is currently in flight.
   final Set<String> _postingGroups = <String>{};
   String? _error;
+  // Error from a failed history reload, tracked separately so a later
+  // successful reload clears it without wiping send or form errors.
+  String? _reloadError;
   // Information about the last round (members it did not summon), not an error.
   String? _notice;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _reconnectTimer;
+  Timer? _historyRetryTimer;
+  int _historyRetrySeconds = 2;
   bool _disposed = false;
 
   /// The shared backend client, exposed so the swarm form can browse work trees
@@ -72,7 +77,7 @@ class GroupChatController extends ChangeNotifier {
   bool get loadingGroups => _loadingGroups;
   bool get sending =>
       _selected != null && _activeRequestIds.containsKey(_selected!.id);
-  String? get error => _error;
+  String? get error => _error ?? _reloadError;
   String? get notice => _notice;
 
   List<MachineCredential> _peersFor(Iterable<String> members) =>
@@ -94,6 +99,8 @@ class GroupChatController extends ChangeNotifier {
   Future<void> loadGroups() async {
     _loadingGroups = true;
     _error = null;
+    _reloadError = null;
+    final String? previousId = _selected?.id;
     _safeNotify();
     try {
       _groups = await _client.fetchGroups();
@@ -116,6 +123,7 @@ class GroupChatController extends ChangeNotifier {
     } on BackendException catch (err) {
       _error = friendlyErrorText(_strings, err);
     } finally {
+      if (_selected?.id != previousId) _cancelHistoryRetry();
       _loadingGroups = false;
       _safeNotify();
     }
@@ -124,7 +132,9 @@ class GroupChatController extends ChangeNotifier {
 
   Future<void> selectGroup(ChatGroup group) async {
     if (_selected?.id == group.id) return;
+    _cancelHistoryRetry();
     _selected = group;
+    _reloadError = null;
     _notice = null;
     _messages.clear();
     _safeNotify();
@@ -153,7 +163,9 @@ class GroupChatController extends ChangeNotifier {
         (ChatGroup g) => g.id == group.id,
         orElse: () => group,
       );
+      _cancelHistoryRetry();
       _selected = created;
+      _reloadError = null;
       _messages.clear();
       _safeNotify();
       return created;
@@ -227,7 +239,9 @@ class GroupChatController extends ChangeNotifier {
       _activeRequestIds.remove(group.id);
       _postingGroups.remove(group.id);
       if (_selected?.id == group.id) {
+        _cancelHistoryRetry();
         _selected = _groups.isNotEmpty ? _groups.first : null;
+        _reloadError = null;
         _messages.clear();
       }
       _safeNotify();
@@ -267,6 +281,7 @@ class GroupChatController extends ChangeNotifier {
     _activeRequestIds[groupId] = requestId;
     _postingGroups.add(groupId);
     _error = null;
+    _reloadError = null;
     _notice = null;
     // Optimistic human bubble with the id the backend will use, so the echoed
     // group_message event upserts in place instead of duplicating.
@@ -348,18 +363,42 @@ class GroupChatController extends ChangeNotifier {
         }
       }
       if (_selected?.id != groupId) return history;
+      _cancelHistoryRetry();
+      _reloadError = null;
       _messages
         ..clear()
         ..addAll(history.messages);
       return history;
     } on BackendException catch (err) {
       if (_selected?.id == groupId) {
-        _error = friendlyErrorText(_strings, err);
+        _reloadError = friendlyErrorText(_strings, err);
+        if (err.code?.startsWith('NETWORK_') ?? false) {
+          _scheduleHistoryRetry(groupId);
+        } else {
+          _cancelHistoryRetry();
+        }
       }
       return null;
     } finally {
       _safeNotify();
     }
+  }
+
+  void _scheduleHistoryRetry(String groupId) {
+    if (_disposed || (_historyRetryTimer?.isActive ?? false)) return;
+    final int delay = _historyRetrySeconds;
+    _historyRetrySeconds = min(30, delay * 2);
+    _historyRetryTimer = Timer(Duration(seconds: delay), () {
+      _historyRetryTimer = null;
+      if (_disposed || _selected?.id != groupId) return;
+      _loadHistory(groupId);
+    });
+  }
+
+  void _cancelHistoryRetry() {
+    _historyRetryTimer?.cancel();
+    _historyRetryTimer = null;
+    _historyRetrySeconds = 2;
   }
 
   // --- Shared event stream ---------------------------------------------------
@@ -553,6 +592,7 @@ class GroupChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _cancelHistoryRetry();
     _reconnectTimer?.cancel();
     _eventsSub?.cancel();
     _client.close();

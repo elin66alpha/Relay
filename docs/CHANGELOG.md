@@ -64,6 +64,13 @@
     curl, and on non-apt distributions says Node.js is missing. macOS setup no
     longer requires the Xcode Command Line Tools: node-pty ships prebuilt for
     macOS.
+- **Swarm recovery after going offline**: when a Swarm transcript reload failed
+  with a network error (for instance while a device was briefly offline during
+  a round), the controller showed the network error banner and never reloaded
+  again, leaving typing indicators and the banner stuck after the connection
+  returned. Selected-swarm reloads now retry with backoff (2 s to 30 s) on
+  network errors and clear their reload error once history loads again without
+  clearing unrelated send errors.
 
 ## 0.2.1 - 2026-11-19
 

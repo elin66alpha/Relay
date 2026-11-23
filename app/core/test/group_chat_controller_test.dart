@@ -473,6 +473,119 @@ void main() {
     expect(result?.id, 'builders-new');
     expect(controller.selected?.id, 'builders-new');
   });
+
+  testWidgets(
+      'a network reload failure retries with backoff and settles once reachable',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.running = 'round-1';
+    await controller.start();
+    expect(controller.sending, isTrue);
+
+    backend.emit('group_agent_start', <String, Object?>{
+      'requestId': 'round-1:claude',
+      'agent': <String, Object?>{'key': 'claude', 'label': 'Claude Code'},
+    });
+    backend.historyError = BackendException('offline', code: 'NETWORK_ERROR');
+    final int before = backend.historyRequests.length;
+
+    backend.emit('group_agent_done', <String, Object?>{
+      'requestId': 'round-1:claude',
+    });
+    await tester.pump();
+    expect(backend.historyRequests.length, before + 1);
+    expect(controller.error, isNotNull);
+    expect(controller.sending, isTrue);
+
+    // First retry fires at 2s; still offline so backoff doubles to 4s.
+    await tester.pump(const Duration(seconds: 1));
+    expect(backend.historyRequests.length, before + 1);
+    await tester.pump(const Duration(seconds: 1));
+    expect(backend.historyRequests.length, before + 2);
+    expect(controller.error, isNotNull);
+
+    // Backend recovers with the settled reply.
+    final ChatMessage reply = _message(
+      'round-1:claude:assistant',
+      'OK4',
+      role: ChatRole.assistant,
+    );
+    backend.historyError = null;
+    backend.running = null;
+    backend.history['builders'] = <ChatMessage>[reply];
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, before + 2);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(backend.historyRequests.length, before + 3);
+    expect(controller.sending, isFalse);
+    expect(controller.messages, <ChatMessage>[reply]);
+    expect(controller.error, isNull);
+
+    // No further retries once settled.
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, before + 3);
+  });
+
+  test('a successful reload does not clear a groupNeedsMention send error',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('hello?');
+    backend.round.completeError(
+      BackendException('mention a member', code: 'GROUP_NO_MENTION'),
+    );
+    expect(await sending, isFalse);
+    final String expected = const AppStrings(AppLanguage.en).groupNeedsMention;
+    expect(controller.error, expected);
+
+    backend.emit('group_done', <String, Object?>{'requestId': 'other-round'});
+    await pumpEventQueue();
+    expect(controller.error, expected);
+  });
+
+  testWidgets('a non-network reload failure is not retried',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.historyError = BackendException(
+      'not found',
+      status: 404,
+      code: 'GROUP_NOT_FOUND',
+    );
+    final int before = backend.historyRequests.length;
+    backend.emit('group_done', <String, Object?>{'requestId': 'r1'});
+    await tester.pump();
+    expect(backend.historyRequests.length, before + 1);
+    expect(controller.error, isNotNull);
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, before + 1);
+  });
+
+  testWidgets('switching swarms cancels a pending reload retry',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.history['reviewers'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.historyError = BackendException('offline', code: 'NETWORK_ERROR');
+    backend.emit('group_done', <String, Object?>{'requestId': 'r1'});
+    await tester.pump();
+    expect(controller.error, isNotNull);
+
+    backend.historyError = null;
+    await controller.selectGroup(_reviewers);
+    expect(controller.error, isNull);
+    final int afterSwitch = backend.historyRequests.length;
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, afterSwitch);
+  });
 }
 
 const ChatGroup _builders = ChatGroup(
@@ -530,6 +643,7 @@ class _GroupBackendClient extends BackendClient {
   final Map<String, Completer<void>> roundsByGroup =
       <String, Completer<void>>{};
   String? running;
+  BackendException? historyError;
   ChatGroup? createdGroup;
   List<ChatGroup>? createdList;
 
@@ -564,6 +678,8 @@ class _GroupBackendClient extends BackendClient {
   @override
   Future<GroupHistory> fetchGroupHistory(String groupId) async {
     historyRequests.add('$activeWorkdir:$groupId');
+    final BackendException? err = historyError;
+    if (err != null) throw err;
     return GroupHistory(
       group: <ChatGroup>[_builders, _reviewers, _mixed, _other]
           .firstWhere((ChatGroup g) => g.id == groupId),
