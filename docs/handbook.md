@@ -1026,6 +1026,29 @@ This writes 1080×1920 PNGs (432×768 viewport at 2.5×) under
 `docs/screenshots/mobile-zh-9x16/`, preserving the README captures. Wallpaper
 settings remain dark opacity 0.6, light opacity 0.8, blur 6 and tint 0.55.
 
+### Testing the Web client in a real browser
+
+`scripts/dev/web_smoke.js` drives the built Web client in headless Chromium
+(Playwright, installed on demand like the screenshot script) against the
+running backend, not a demo copy:
+
+```bash
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
+node scripts/dev/web_smoke.js
+```
+
+It creates a temporary `relay-web-test` token and deletes it afterwards, works
+only in `~/playground/relay-web-test/`, names everything it creates
+`[web-test] …` and deletes those afterwards, and sends one short message to
+Claude Code on the cheapest model. It visits home, chat, files, browser and
+settings at desktop and phone sizes and exits 1 on any console error, page
+error, failed request or HTTP status of 400 or more. Screenshots go to
+`~/playground/relay-web-test/shots/`; they show real conversations, so
+keep them out of the repository. `RELAY_TEST_URL` points it at a backend other
+than `http://127.0.0.1:8787`. `scripts/dev/lib/relay_web.js` holds the shared
+helpers for throwaway exploratory scripts; the agent workflow is in
+`.claude/skills/relay-web-test/SKILL.md`.
+
 ### Backend settings
 
 `server/.env.example` documents supported deployment settings. The most useful

@@ -65,6 +65,10 @@ tests.
 - Cross-stack API changes: verify both suites and keep old payload parsing safe
   when adding response fields. `mcp/` is also a client of the API: run its
   tests when a route it calls changes.
+- Changes to what the Web client shows or does: also run the real-browser flow
+  in `.claude/skills/relay-web-test/SKILL.md` (`node scripts/dev/web_smoke.js`
+  against the live backend, then a focused exploratory script), because widget
+  tests miss rendering, real HTTP/SSE and real agent replies. Not part of CI.
 - Documentation changes: verify local Markdown links, commands, environment
   names, English/Chinese README parity, and the in-app tutorial articles in
   `app/core/assets/tutorial/{en,zh}/` against code rather than old docs.

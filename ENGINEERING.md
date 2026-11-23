@@ -42,7 +42,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend; the linux and macos scripts forward to unix |
 | scripts/install/unix | the one Linux/macOS implementation: update.sh, the setup menu, service scripts and the per-platform adapters in lib/ |
 | scripts/release | release bundle builders (five relay-client assets, two relay-backend archives with bundled installers, and SHA256SUMS), version/documentation checks, Windows setup checks and a local Android signing fallback for a release draft |
-| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview, plus the Docker backend sandbox) |
+| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview, a real-browser smoke test of the Web client against the live backend, plus the Docker backend sandbox) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
 | .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft that also builds the signed Android APK, uploads the signed iOS app to TestFlight and notarizes the macOS app, all from Actions Secrets (`apple_only` runs just the Apple part on any branch) |
 
@@ -514,6 +514,7 @@ navigation on 2026-11-09.
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
 - `node scripts/dev/readme_screenshots.js docs/farrari.png` (Web build present) -> fourteen English/Chinese README screenshots (home and chat at 1440×960; mobile chat, Swarm, files, settings and tutorial at 800×1640) in `docs/screenshots/`, using an isolated demo backend with the Ferrari wallpaper.
 - `node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh` (Web build present) -> ten Chinese demo screenshots (home, chat, empty chat, Swarm, files, browser, image preview, machine details, quota usage and settings) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings; quota capture waits for all usage queries to finish.
+- `node scripts/dev/web_smoke.js` (Web build present, `relay-server` running on `RELAY_TEST_URL`, default `http://127.0.0.1:8787`) -> exit 0, every check `PASS`: home, chat, files, browser and settings at 1440×960 and 400×820 with no console errors, page errors, failed requests or HTTP ≥ 400, one real Claude Code reply on desktop, screenshots in `~/playground/relay-web-test/shots/`, and no `relay-web-test` token or `[web-test]` session or Swarm left afterwards.
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.

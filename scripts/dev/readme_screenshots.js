@@ -5,13 +5,21 @@
 //
 //   node scripts/dev/readme_screenshots.js <wallpaper image> [--mobile-zh]
 'use strict';
+/* global createImageBitmap, document */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
+const {
+  DRAWER,
+  WEB_BUILD_HINT,
+  enableSemantics,
+  loadPlaywright,
+  runSteps,
+  seedStorage,
+} = require('./lib/relay_web');
 
 const REPO = path.resolve(__dirname, '../..');
 const MOBILE_ZH = process.argv.includes('--mobile-zh');
@@ -26,14 +34,12 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const PREVIEW_PORT = PORT + 1;
 const TOKEN = 'relay-demo-screenshot-token-0000000000000000';
 const DARK_OPACITY = Number(process.env.WALLPAPER_DARK_OPACITY || 0.6);
-const PLAYWRIGHT_VERSION = '1.63.0';
 const SEP = '\u0000';
 // Chat times are today's date at fixed hours; the browser runs in UTC to match.
 const day = new Date().toISOString().slice(0, 10);
 const at = (hm) => `${day}T${hm}:00.000Z`;
 
 // Viewport, device pixel ratio and the actions that reach each screen.
-const DRAWER = [28, 27];
 const OPEN_FILES = [{ tap: DRAWER }, { button: ['File system', '文件系统'] }];
 const OPEN_BROWSER = [{ tap: DRAWER }, { button: ['Browser', '浏览器'] }];
 const OPEN_IMAGE = [...OPEN_FILES, { button: ['ferrari.png', 'ferrari.png'] }];
@@ -67,20 +73,6 @@ const MOBILE_SHOTS = [
   { name: 'relay-quota-mobile', steps: [{ tap: DRAWER }, { tap: [100, 165] }], quota: true },
   { name: 'relay-settings-mobile', steps: [{ tap: DRAWER }, { button: ['Settings', '设置'] }] },
 ].map((shot) => ({ ...shot, size: [432, 768, 2.5] }));
-
-function loadPlaywright() {
-  if (process.env.PLAYWRIGHT_CORE) return require(process.env.PLAYWRIGHT_CORE);
-  const dir = path.join(os.tmpdir(), `relay-playwright-${PLAYWRIGHT_VERSION}`);
-  const module = path.join(dir, 'node_modules', 'playwright-core');
-  if (!fs.existsSync(module)) {
-    execFileSync('npm', ['install', '--prefix', dir, '--no-save', `playwright-core@${PLAYWRIGHT_VERSION}`], {
-      stdio: 'inherit',
-    });
-  }
-  // A no-op when the matching browser is already in the Playwright cache.
-  execFileSync(process.execPath, [path.join(module, 'cli.js'), 'install', 'chromium'], { stdio: 'inherit' });
-  return require(module);
-}
 
 function writeJson(name, value) {
   fs.writeFileSync(path.join(SERVER, name), JSON.stringify(value, null, 2));
@@ -317,6 +309,40 @@ async function startServer(browserPath) {
   throw new Error(`demo server did not answer on ${BASE_URL}`);
 }
 
+async function prepareWallpaperPref(page, wallpaper, darkOpacity) {
+  return page.evaluate(async ({ wallpaper: raw, darkOpacity: dark }) => {
+    const b64 = (buffer) => {
+      let text = '';
+      for (const byte of new Uint8Array(buffer)) text += String.fromCharCode(byte);
+      return btoa(text);
+    };
+    // Prepare the wallpaper the way the Web client does on import: at most
+    // 1920 px on the long edge, JPEG, shrunk until it fits 256 KB.
+    const source = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([source]));
+    const canvas = document.createElement('canvas');
+    const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+    let w = Math.round(bitmap.width * scale);
+    let h = Math.round(bitmap.height * scale);
+    let jpeg;
+    for (;;) {
+      canvas.width = w;
+      canvas.height = h;
+      const paint = canvas.getContext('2d');
+      paint.fillStyle = '#808080';
+      paint.fillRect(0, 0, w, h);
+      paint.drawImage(bitmap, 0, 0, w, h);
+      jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+      if (jpeg.size <= 256 * 1024) break;
+      w = Math.round(w * 0.8);
+      h = Math.round(h * 0.8);
+    }
+    return JSON.stringify({
+      image: b64(await jpeg.arrayBuffer()), light: 0.8, dark, blur: 6, tint: 0.55,
+    });
+  }, { wallpaper, darkOpacity });
+}
+
 async function shoot(browser, wallpaper, lang, shot) {
   const [width, height, dpr] = shot.size;
   const page = await browser.newPage({
@@ -353,73 +379,22 @@ async function shoot(browser, wallpaper, lang, shot) {
     });
   }
   await page.goto(BASE_URL);
-  await page.evaluate(async ({ lang, wallpaper, darkOpacity, baseUrl, token }) => {
-    localStorage.clear();
-    const pref = (key, value) => localStorage.setItem(`flutter.${key}`, JSON.stringify(value));
-    const b64 = (buffer) => {
-      let text = '';
-      for (const byte of new Uint8Array(buffer)) text += String.fromCharCode(byte);
-      return btoa(text);
-    };
-
-    // Prepare the wallpaper the way the Web client does on import: at most
-    // 1920 px on the long edge, JPEG, shrunk until it fits 256 KB.
-    const source = Uint8Array.from(atob(wallpaper), (c) => c.charCodeAt(0));
-    const bitmap = await createImageBitmap(new Blob([source]));
-    const canvas = document.createElement('canvas');
-    const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
-    let w = Math.round(bitmap.width * scale);
-    let h = Math.round(bitmap.height * scale);
-    let jpeg;
-    for (;;) {
-      canvas.width = w;
-      canvas.height = h;
-      const paint = canvas.getContext('2d');
-      paint.fillStyle = '#808080';
-      paint.fillRect(0, 0, w, h);
-      paint.drawImage(bitmap, 0, 0, w, h);
-      jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
-      if (jpeg.size <= 256 * 1024) break;
-      w = Math.round(w * 0.8);
-      h = Math.round(h * 0.8);
-    }
-
-    pref('relay.language.v1', lang);
-    pref('relay.theme_mode.v1', 'dark');
-    pref('relay.active_machine_id.v1', 'demo');
-    pref('relay.wallpaper.v2', JSON.stringify({
-      image: b64(await jpeg.arrayBuffer()), light: 0.8, dark: darkOpacity, blur: 6, tint: 0.55,
-    }));
-
-    // flutter_secure_storage_web 1.x keeps a raw AES-GCM key under its public
-    // key and each value as "<iv>.<ciphertext>", both base64.
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-    localStorage.setItem('FlutterSecureStorage', b64(await crypto.subtle.exportKey('raw', key)));
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const machines = JSON.stringify([{
-      id: 'demo', name: 'Relay Demo', baseUrl, token, createdAt: '2026-01-01T00:00:00.000Z',
-    }]);
-    const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(machines));
-    localStorage.setItem('FlutterSecureStorage.relay.machine_credentials.v1', `${b64(iv)}.${b64(sealed)}`);
-  }, { lang, wallpaper, darkOpacity: DARK_OPACITY, baseUrl: BASE_URL, token: TOKEN });
+  const wallpaperPref = await prepareWallpaperPref(page, wallpaper, DARK_OPACITY);
+  await seedStorage(page, {
+    machineId: 'demo',
+    name: 'Relay Demo',
+    baseUrl: BASE_URL,
+    token: TOKEN,
+    prefs: {
+      'relay.language.v1': lang,
+      'relay.theme_mode.v1': 'dark',
+      'relay.wallpaper.v2': wallpaperPref,
+    },
+  });
   await page.reload();
   await page.waitForTimeout(6000);
-  // Flutter paints to canvas; enable its semantics tree to target drawer labels.
-  await page.locator('flt-semantics-placeholder').evaluate((element) => element.click());
-  await page.waitForTimeout(500);
-  for (const step of shot.steps) {
-    if (step.tap) {
-      await page.mouse.click(...step.tap);
-    } else if (step.button) {
-      const label = step.button[lang === 'zh' ? 1 : 0];
-      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      await page.getByRole('button', { name: new RegExp(escaped) }).click();
-    } else {
-      await page.mouse.move(step.scroll[0], step.scroll[1]);
-      await page.mouse.wheel(0, step.scroll[2]);
-    }
-    await page.waitForTimeout(step.scroll ? 1000 : 3000);
-  }
+  await enableSemantics(page);
+  await runSteps(page, shot.steps, { lang });
   if (shot.browser) {
     await page.getByRole('textbox').fill(`http://127.0.0.1:${PREVIEW_PORT}`);
     const framesBeforeNavigation = browserFrames;
@@ -455,7 +430,7 @@ async function main() {
     process.exit(2);
   }
   if (!fs.existsSync(path.join(WEB, 'index.html'))) {
-    console.error('build the Web client first: (cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)');
+    console.error(`build the Web client first: ${WEB_BUILD_HINT}`);
     process.exit(2);
   }
   const { chromium } = loadPlaywright();
