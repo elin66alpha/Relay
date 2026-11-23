@@ -230,6 +230,7 @@ module.exports = {
   MAX_SESSIONS,
   MAX_SWARM_SESSIONS,
   SCOPE_SEPARATOR,
+  isSwarmSession,
   listChatSessions,
   resolveChatSession,
   createChatSession,

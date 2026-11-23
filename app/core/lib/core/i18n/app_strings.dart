@@ -395,6 +395,12 @@ class AppStrings {
       : 'This deletes the chat history and machine-side context for this session. Files in the workdir are not changed.';
   String sessionActionFailed(Object err) =>
       isZh ? '会话操作失败：$err' : 'Session action failed: $err';
+  String get keepSessionAlwaysOn =>
+      isZh ? '常驻此会话' : 'Keep this session always on';
+  String get stopKeepingAlwaysOn => isZh ? '取消常驻' : 'Stop keeping always on';
+  String get alwaysOnLimitReached => isZh
+      ? '常驻会话已满（最多 3 个），不能再开启。请到首页取消一个常驻会话。'
+      : 'Always-on sessions are full (max 3). Go to Home and turn one off first.';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get moreChatActions => isZh ? '更多操作' : 'More actions';
@@ -464,6 +470,10 @@ class AppStrings {
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>
       isZh ? '还没有工作过的工作区。' : 'No recent workspaces yet.';
+  String get alwaysOnSessions => isZh ? '常驻会话' : 'Always-on sessions';
+  String get noAlwaysOnSessions => isZh
+      ? '还没有常驻会话。在会话右上角点图钉即可常驻。'
+      : 'No always-on sessions. Tap the pin at the top right of a chat to add one.';
   String get tutorialHomeHint => isZh
       ? '按模块分类讲解每个功能，可以搜索。'
       : 'Every feature, grouped by area, with search.';

@@ -344,7 +344,10 @@ Idle sessions are closed and there is a cap on how many stay live, because these
 processes can be resource-intensive. See `RELAY_CLAUDE_*` and `RELAY_AGENT_*`
 in `server/.env.example`. Defaults retain up to three Claude processes and four
 live JSON-RPC sessions per agent, with a 15-minute idle timeout. Turns past a
-cap wait for a slot.
+cap wait for a slot. Up to three solo-chat sessions per backend can be marked
+**always-on** (in backend memory only, cleared on restart): they are never
+idle-closed or evicted by LRU and sit outside the per-pool caps so ordinary
+sessions keep their full quota.
 
 Work an agent starts in the background now outlives the turn that started it,
 except on Codex: its sandbox kills each command's process group as the command
@@ -682,7 +685,8 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
   options/settings/version/update, diagnostics, device tokens, and shared events.
 - Chat: chat, cancellation, history, history search/export, and clear session.
 - Named sessions: list/create, set active, rename (`POST /api/sessions/rename`),
-  and delete.
+  delete, and always-on pins (`GET /api/sessions/always-on`,
+  `POST /api/sessions/always-on`, `POST /api/sessions/always-on/remove`).
 - Files/workdir: current workdir, recent workdirs with chat history, absolute
   directory browse, upload, and download.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.

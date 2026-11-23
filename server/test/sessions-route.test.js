@@ -11,12 +11,14 @@ const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-sessions-route-'
 // The store path is resolved from the env at require time, like agent-settings.js.
 process.env.RELAY_CHAT_SESSIONS_FILE = path.join(scratchDir, 'chat-sessions.json');
 const sessions = require('../lib/chat-sessions');
+const { createAlwaysOnSessions } = require('../lib/always-on-sessions');
 const createSessionsRouter = require('../routes/sessions');
 
 const WORKDIR = '/tmp/sessions-int';
 const CONTEXT = `${WORKDIR}\0claude`;
 const runningScopes = new Set();
 const scopeChains = new Map();
+const alwaysOnSessions = createAlwaysOnSessions();
 let server;
 let base;
 
@@ -26,6 +28,7 @@ before(async () => {
   app.use(createSessionsRouter({
     ...sessions,
     agentPayload: (agent) => agent,
+    alwaysOnSessions,
     clearHistory: () => {},
     deleteSettings: () => {},
     getSettings: () => ({}),
@@ -43,6 +46,7 @@ before(async () => {
     runningScopes,
     scopeChains,
     scopeKeyFor: sessions.scopeKeyFor,
+    sessionContextKeyFor: sessions.sessionContextKeyFor,
   }));
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve);
@@ -183,4 +187,95 @@ test('swarm sessions are hidden from GET /api/sessions, never become active, hav
   });
   assert.equal(delRes.status, 200);
   assert.equal(sessions.resolveChatSession(swarmCtx, created.sessionId), null);
+});
+
+test('always-on routes support pin/unpin, cap at 3, unknown 404, remove by workdir, delete unmark, and refuse swarm sessions', async () => {
+  const dirA = '/tmp/always-on-a';
+  const dirB = '/tmp/always-on-b';
+  const ctxA = sessions.sessionContextKeyFor('claude', dirA);
+  const ctxB = sessions.sessionContextKeyFor('codex', dirB);
+  const sA1 = sessions.createChatSession(ctxA, 'Alpha').activeSessionId;
+  const sA2 = sessions.createChatSession(ctxA, 'Beta').activeSessionId;
+  const sB1 = sessions.createChatSession(ctxB, 'Gamma').activeSessionId;
+  const swarm = sessions.createChatSession(ctxA, 'Swarm: Hidden', { kind: 'swarm' }).session;
+
+  const getAlwaysOn = () => fetch(`${base}/api/sessions/always-on`);
+  const setAlwaysOn = (body, workdir) => fetch(`${base}/api/sessions/always-on`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Workdir': workdir },
+    body: JSON.stringify(body),
+  });
+  const removeAlwaysOn = (body) => fetch(`${base}/api/sessions/always-on/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  // Starts empty and works without X-Workdir.
+  const initial = await getAlwaysOn();
+  assert.equal(initial.status, 200);
+  assert.deepEqual(await initial.json(), { ok: true, max: 3, sessions: [] });
+
+  // Unknown session -> 404 SESSION_NOT_FOUND.
+  const missing = await setAlwaysOn({ agent: 'claude', sessionId: 'missing', alwaysOn: true }, dirA);
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).code, 'SESSION_NOT_FOUND');
+
+  // Swarm session -> 400.
+  const swarmRes = await setAlwaysOn({ agent: 'claude', sessionId: swarm.id, alwaysOn: true }, dirA);
+  assert.equal(swarmRes.status, 400);
+
+  // Pin 3 sessions across workdirs/agents (including Main).
+  const pin1 = await setAlwaysOn({ agent: 'claude', sessionId: sessions.MAIN_SESSION_ID, alwaysOn: true }, dirA);
+  assert.equal(pin1.status, 200);
+  assert.deepEqual((await pin1.json()).sessions, [
+    { agent: 'claude', workdir: dirA, sessionId: 'default', name: 'Main' },
+  ]);
+  assert.equal((await setAlwaysOn({ agent: 'claude', sessionId: sA1, alwaysOn: true }, dirA)).status, 200);
+  assert.equal((await setAlwaysOn({ agent: 'codex', sessionId: sB1, alwaysOn: true }, dirB)).status, 200);
+
+  // 4th is refused with 409 ALWAYS_ON_LIMIT.
+  const fourth = await setAlwaysOn({ agent: 'claude', sessionId: sA2, alwaysOn: true }, dirA);
+  assert.equal(fourth.status, 409);
+  assert.deepEqual(await fourth.json(), {
+    error: 'always-on limit reached (max 3)',
+    code: 'ALWAYS_ON_LIMIT',
+  });
+
+  // Re-pinning an already pinned session while full still succeeds.
+  assert.equal((await setAlwaysOn({ agent: 'claude', sessionId: sA1, alwaysOn: true }, dirA)).status, 200);
+
+  // Remove by stored workdir without needing X-Workdir.
+  const removed = await removeAlwaysOn({ agent: 'codex', workdir: dirB, sessionId: sB1 });
+  assert.equal(removed.status, 200);
+  assert.deepEqual((await removed.json()).sessions, [
+    { agent: 'claude', workdir: dirA, sessionId: 'default', name: 'Main' },
+    { agent: 'claude', workdir: dirA, sessionId: sA1, name: 'Alpha' },
+  ]);
+
+  // Deleting a pinned session removes its mark.
+  const del = await fetch(`${base}/api/sessions/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Workdir': dirA },
+    body: JSON.stringify({ agent: 'claude', sessionId: sA1 }),
+  });
+  assert.equal(del.status, 200);
+  assert.deepEqual((await (await getAlwaysOn()).json()).sessions, [
+    { agent: 'claude', workdir: dirA, sessionId: 'default', name: 'Main' },
+  ]);
+
+  // Turning off via POST is idempotent.
+  const off1 = await setAlwaysOn({ agent: 'claude', sessionId: 'default', alwaysOn: false }, dirA);
+  assert.equal(off1.status, 200);
+  assert.deepEqual((await off1.json()).sessions, []);
+  const off2 = await setAlwaysOn({ agent: 'claude', sessionId: 'default', alwaysOn: false }, dirA);
+  assert.equal(off2.status, 200);
+  assert.deepEqual((await off2.json()).sessions, []);
+
+  // A session deleted out-of-band is dropped from GET and removed from the registry.
+  assert.equal((await setAlwaysOn({ agent: 'claude', sessionId: sA2, alwaysOn: true }, dirA)).status, 200);
+  sessions.deleteChatSession(ctxA, sA2);
+  const pruned = await getAlwaysOn();
+  assert.deepEqual((await pruned.json()).sessions, []);
+  assert.equal(alwaysOnSessions.list().length, 0);
 });

@@ -103,6 +103,7 @@ const {
   MAX_SESSIONS,
   MAX_SWARM_SESSIONS,
   SCOPE_SEPARATOR,
+  isSwarmSession,
   listChatSessions,
   resolveChatSession,
   createChatSession,
@@ -113,6 +114,7 @@ const {
   sessionContextKeyFor,
   scopeKeyFor,
 } = require('./lib/chat-sessions');
+const { alwaysOnSessions } = require('./lib/always-on-sessions');
 const {
   agentPayload,
   createBackgroundTurnHandler,
@@ -590,6 +592,7 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
+  alwaysOnSessions,
   backendVersion,
   backgroundTurnHandler,
   bearerToken,
@@ -623,6 +626,7 @@ const routeContext = {
   getDefaultWorkdir,
   getGroup,
   getSettings,
+  isSwarmSession,
   listAbsoluteDirectory,
   listAgents,
   listAllGroups,

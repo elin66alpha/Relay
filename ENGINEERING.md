@@ -53,7 +53,8 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server/lib/agents.js | process-runner boundary | runAgent(agent, prompt, onEvent, {workdir, settings, sessionKey}); onEvent receives progress, delta, segment, and `context` ({used, size}) events; purgeSession | session pools, agent-options, model-discovery, cli-paths, json-store, workdir |
 | server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK, session-slots, bounded-integer |
 | server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers. The ACP driver authenticates after initialize only when the caller passes authMethod, sends clientMeta, applies ordered config options, and lists models (listModels) when the caller passes those options; a command may add env | pool API, driver | child_process, session-slots, bounded-integer |
-| server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work policy | createSessionSlots; acquireSlot/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
+| server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work and always-on policies (always-on keys are exempt from idle close, LRU eviction, and `maxLive`) | createSessionSlots; acquireSlot(key)/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
+| server/lib/always-on-sessions.js | in-memory registry of up to 3 always-on solo-chat sessions per backend, keyed by conversation scope key; cleared on restart | MAX_ALWAYS_ON, createAlwaysOnSessions, alwaysOnSessions (has, add, remove, list) | none |
 | server/lib/sse.js | shared SSE negotiation, event writes and stream close | wantsStream, writeStreamEvent, endStream | none |
 | server/lib/bounded-integer.js | bounded integer parsing with a fallback | boundedInteger | none |
 | server/lib/cli-paths.js | where agent CLIs and Relay's Cursor files live: CLI lookup (PATH, then per-user fallbacks, cached a minute), Cursor's auth file and Relay's CURSOR_CONFIG_DIR; cliCommand turns a CLI into a shell-free `{cmd, args}`, resolving a Windows npm/pnpm `.cmd` launcher to the Node script or binary it wraps, and every CLI spawn goes through it | cliCommand, locateBin, resolveBin, commandExists, executableInPath, cursorAuthFile, CURSOR_CONFIG_DIR | none |
@@ -124,7 +125,12 @@ architecture change (see Changes).
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
   per-turn `spawn` for an agent that has a pool, because it repeats CLI startup
-  and cuts off background work when the process exits.
+  and cuts off background work when the process exits. Up to three solo-chat
+  sessions per backend can be pinned **always-on** (`server/lib/always-on-sessions.js`,
+  stored in backend memory only and cleared on restart): always-on scopes are
+  exempt from idle close and LRU eviction and sit outside each pool's `maxLive`
+  cap (ordinary sessions keep their full cap); toggling never spawns or restarts
+  a CLI process and stays out of agent settings / `optionsKey`.
   - `server/lib/claude-session-pool.js` — one Agent SDK process per scope.
     Settings resolve to SDK options (`claudeSdkOptions`) rather than argv, and
     are fixed for the life of a process, so a change restarts it with `resume`.
@@ -476,6 +482,7 @@ architecture change (see Changes).
 | Solo chat + sessions | routes/chat, routes/sessions, agent-turn, features/chat | active |
 | Chat links (solo chat only: Markdown links to web addresses open the system browser after a confirmation showing the full URL; file links, workdir-relative or absolute, open the file preview or browser; other schemes and plain-text paths stay inert) | features/chat chat_links, features/filesystem | active |
 | Session rename (every session except Main) | routes/sessions, chat-sessions, features/chat drawer | active |
+| Always-on sessions (up to 3 solo-chat sessions per backend in memory; exempt from idle close, LRU eviction, and per-pool caps; chat header pin toggle and Home list with jump-to-session and unpin; hidden against older backends returning 404) | always-on-sessions, session-slots, agents, routes/sessions, core/models/always_on_session, core/backend, features/chat | active |
 | Message Copy (all settled replies) and Edit (user messages: text back into the composer, nothing rewritten) | features/chat | active |
 | Per-session agent controls (model/effort/permission/fast) | agent-options, agent-settings, chat/agent_controls | active |
 | Model picker second page (bottom link): Cursor models outside its plan (`paid`), Claude/Codex models a newer one replaced (`legacy`); Swarms list first-page models only | agent-options, chat/agent_controls, chat/swarm_form_dialog | active |
@@ -564,6 +571,7 @@ navigation on 2026-11-09.
 - Home and File System show at most five workspaces in backend recency order. File System keeps them in one compact horizontally scrolling row above the breadcrumbs, with folder-name labels and full-path tooltips; tapping a tag switches the active workdir and displays its directory, while navigating through folders or breadcrumbs only browses. An unavailable recent-workspace list does not prevent file browsing. Covered by `app/core/test/home_navigation_page_test.dart` and `app/core/test/file_system_screen_test.dart`.
 - Solo chat: tapping the chat title opens Workspaces with the current workspace and up to seven other recent ones; choosing one switches the workdir and returns to the chat, and File System stays pinned at the bottom. Covered by `app/core/test/home_navigation_page_test.dart`.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
+- Always-on sessions: header pin toggles on/off (hidden on 404 backends), 4th pin returns 409 `ALWAYS_ON_LIMIT` with the limit SnackBar, Home lists pinned sessions below Recent workspaces with tap-to-open (workdir + agent + session) and trailing unpin, and toggling never restarts Claude. Covered by `server/test/always-on-sessions.test.js`, `server/test/session-slots.test.js`, `server/test/sessions-route.test.js`, `server/test/claude-session-pool.test.js`, and `app/core/test/always_on_sessions_test.dart`.
 - Solo chat links: tapping a workdir-relative file link with a `:3` line suffix in a finished reply opens that file's preview; `file:` links accept an empty host or `localhost` and ignore URI query/fragment metadata; a directory link opens File System there; a missing file shows "The file does not exist or is not accessible."; `[x](https://…)` shows "Open in browser?" with the full URL and launches only on Open; `javascript:` links do nothing. Coverage: `app/core/test/chat_links_test.dart`.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
 - File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents (Markdown files up to 20,000 characters render by default without loading embedded images and toggle to source; larger Markdown opens as source) and tapping a supported image (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB and 40 million pixels) renders a zoomable preview; a non-image file containing a NUL byte or an oversized/malformed image shows "Cannot preview this file."; past 512 KiB text shows "Only the first 512 KiB is shown."

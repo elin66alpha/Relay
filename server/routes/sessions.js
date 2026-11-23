@@ -9,12 +9,14 @@ module.exports = function createSessionsRouter(ctx) {
     MAX_SWARM_SESSIONS = 32,
     agentPayload,
     agentRequiredOrUnknownError,
+    alwaysOnSessions,
     clearHistory,
     purgeSession,
     createChatSession,
     deleteChatSession,
     deleteSettings,
     getSettings,
+    isSwarmSession,
     listChatSessions,
     renameChatSession,
     resolveAgentScope,
@@ -22,10 +24,47 @@ module.exports = function createSessionsRouter(ctx) {
     runningScopes,
     scopeChains,
     scopeKeyFor,
+    sessionContextKeyFor,
     setActiveChatSession,
     setSettings,
   } = ctx;
   const router = express.Router();
+
+  function pruneStaleAlwaysOn() {
+    const valid = [];
+    for (const entry of alwaysOnSessions.list()) {
+      const contextKey = sessionContextKeyFor(entry.agentKey, entry.workdir);
+      const session = resolveChatSession(contextKey, entry.sessionId);
+      if (!session || isSwarmSession(session)) {
+        alwaysOnSessions.remove(entry.key);
+        continue;
+      }
+      valid.push({
+        agent: entry.agentKey,
+        workdir: entry.workdir,
+        sessionId: entry.sessionId,
+        name: session.name,
+      });
+    }
+    return valid;
+  }
+
+  // Matches stored entries only, so a malformed id never maps to another session.
+  function removeAlwaysOn(agentKey, workdir, sessionId) {
+    for (const entry of alwaysOnSessions.list()) {
+      if (entry.agentKey === agentKey && entry.workdir === workdir && entry.sessionId === sessionId) {
+        alwaysOnSessions.remove(entry.key);
+      }
+    }
+  }
+
+  function alwaysOnPayload() {
+    return {
+      ok: true,
+      max: alwaysOnSessions.MAX_ALWAYS_ON,
+      sessions: pruneStaleAlwaysOn(),
+    };
+  }
 
   router.get('/api/sessions', (req, res) => {
     const agentKey = String(req.query.agent || '').trim();
@@ -191,6 +230,7 @@ module.exports = function createSessionsRouter(ctx) {
       });
     }
     const result = deleteChatSession(contextKey, sessionId);
+    alwaysOnSessions.remove(scopeKey);
     await purgeSession(scopeKey, { agentKey: agent.key, workdir });
     clearHistory(scopeKey);
     deleteSettings(scopeKey);
@@ -201,6 +241,81 @@ module.exports = function createSessionsRouter(ctx) {
       deletedSessionId: sessionId,
       ...result,
     });
+  });
+
+  router.get('/api/sessions/always-on', (_req, res) => {
+    return res.json(alwaysOnPayload());
+  });
+
+  router.post('/api/sessions/always-on', (req, res) => {
+    const agentKey = String(req.body.agent || '').trim();
+    const sessionId = String(req.body.sessionId || '').trim();
+    const alwaysOn = req.body.alwaysOn;
+    const scope = resolveAgentScope(req, res, {
+      agentKey,
+      requireSession: false,
+      agentError: agentRequiredOrUnknownError,
+      beforeWorkdir: () => {
+        if (!sessionId) {
+          res.status(400).json({ error: 'sessionId is required' });
+          return false;
+        }
+        if (typeof alwaysOn !== 'boolean') {
+          res.status(400).json({ error: 'alwaysOn must be a boolean' });
+          return false;
+        }
+        return true;
+      },
+    });
+    if (!scope) return;
+    const { agent, workdir, contextKey } = scope;
+    const existing = resolveChatSession(contextKey, sessionId);
+    if (existing && isSwarmSession(existing)) {
+      return res.status(400).json({
+        error: 'swarm sessions cannot be always-on',
+        code: 'SWARM_SESSION_NOT_SUPPORTED',
+      });
+    }
+    if (alwaysOn) {
+      if (!existing) {
+        return res.status(404).json({ error: 'session not found', code: 'SESSION_NOT_FOUND' });
+      }
+      pruneStaleAlwaysOn();
+      const scopeKey = scopeKeyFor(agent.key, workdir, existing.id);
+      const added = alwaysOnSessions.add(scopeKey, {
+        agentKey: agent.key,
+        workdir,
+        sessionId: existing.id,
+      });
+      if (!added) {
+        return res.status(409).json({
+          error: `always-on limit reached (max ${alwaysOnSessions.MAX_ALWAYS_ON})`,
+          code: 'ALWAYS_ON_LIMIT',
+        });
+      }
+    } else if (existing) {
+      alwaysOnSessions.remove(scopeKeyFor(agent.key, workdir, existing.id));
+    } else {
+      removeAlwaysOn(agent.key, workdir, sessionId);
+    }
+    return res.json(alwaysOnPayload());
+  });
+
+  router.post('/api/sessions/always-on/remove', (req, res) => {
+    const agentKey = String(req.body.agent || '').trim();
+    const workdir = String(req.body.workdir || '').trim();
+    const sessionId = String(req.body.sessionId || '').trim();
+    if (!agentKey) {
+      return res.status(400).json({ error: 'agent is required' });
+    }
+    if (!workdir) {
+      return res.status(400).json({ error: 'workdir is required' });
+    }
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
+    }
+    removeAlwaysOn(agentKey, workdir, sessionId);
+    return res.json(alwaysOnPayload());
   });
 
   return router;

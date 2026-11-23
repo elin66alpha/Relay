@@ -53,6 +53,10 @@ class BotChatController extends ChangeNotifier {
   final Map<String, List<AgentSession>> _sessionsByAgent =
       <String, List<AgentSession>>{};
   final Map<String, String> _activeSessionByAgent = <String, String>{};
+  // Current machine's always-on list; null means unsupported (404) or unprobed.
+  AlwaysOnSessionList? _alwaysOnSessions;
+  String? _alwaysOnMachineId;
+  int _alwaysOnSeq = 0;
   final Map<String, StringBuffer> _streamBuffers = <String, StringBuffer>{};
   // Per-request live segments mirroring the backend: the agent's mid-task
   // follow-up notes and its final answer are kept as separate, individually
@@ -134,6 +138,32 @@ class BotChatController extends ChangeNotifier {
   String? get activeWorkdir => _activeWorkdir;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
+  bool get alwaysOnSupported => _alwaysOnSessions != null;
+  int get alwaysOnMax => _alwaysOnSessions?.max ?? 3;
+  List<AlwaysOnSession> get alwaysOnSessions =>
+      List<AlwaysOnSession>.unmodifiable(
+        _alwaysOnSessions?.sessions ?? const <AlwaysOnSession>[],
+      );
+  bool get isActiveSessionAlwaysOn {
+    final AlwaysOnSessionList? list = _alwaysOnSessions;
+    final String? sessionId = activeSessionId;
+    final String? workdir = _activeWorkdir;
+    if (_machine == null ||
+        list == null ||
+        sessionId == null ||
+        sessionId.isEmpty ||
+        workdir == null ||
+        workdir.isEmpty) {
+      return false;
+    }
+    return list.sessions.any(
+      (AlwaysOnSession item) =>
+          item.agentKey == _agent.key &&
+          item.sessionId == sessionId &&
+          item.workdir == workdir,
+    );
+  }
+
   AppStrings get _strings => AppStrings(_language);
 
   String? activeSessionIdFor(String agentKey) =>
@@ -257,6 +287,7 @@ class BotChatController extends ChangeNotifier {
     _activeSessionByAgent[agent.key] = result.activeSession.id;
     _agent = agent;
     await _reloadConversation();
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> selectSession(CliAgent agent, String sessionId) async {
@@ -277,6 +308,7 @@ class BotChatController extends ChangeNotifier {
     _activeSessionByAgent[agent.key] = result.activeSession.id;
     _agent = agent;
     await _reloadConversation(reattachTurn: reattachTurn);
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> renameSession(
@@ -294,6 +326,7 @@ class BotChatController extends ChangeNotifier {
     if (_machine?.id != machine.id) return;
     _sessionsByAgent[agent.key] = result.sessions;
     notifyListeners();
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> deleteSession(CliAgent agent, String sessionId) async {
@@ -313,6 +346,82 @@ class BotChatController extends ChangeNotifier {
     } else {
       notifyListeners();
     }
+    unawaited(refreshAlwaysOnSessions());
+  }
+
+  void clearAlwaysOnSessions() {
+    _alwaysOnSeq += 1;
+    if (_alwaysOnSessions == null && _alwaysOnMachineId == null) return;
+    _alwaysOnSessions = null;
+    _alwaysOnMachineId = null;
+    notifyListeners();
+  }
+
+  Future<void> refreshAlwaysOnSessions({String? machineId}) async {
+    final int seq = ++_alwaysOnSeq;
+    final String? targetMachineId = machineId ?? _machine?.id;
+    if (targetMachineId != null &&
+        _alwaysOnMachineId != null &&
+        _alwaysOnMachineId != targetMachineId) {
+      _alwaysOnSessions = null;
+      _alwaysOnMachineId = targetMachineId;
+      notifyListeners();
+    }
+    try {
+      final AlwaysOnSessionList? result =
+          await _backendClient.fetchAlwaysOnSessions();
+      if (seq != _alwaysOnSeq) return;
+      if (_machine != null &&
+          targetMachineId != null &&
+          _machine!.id != targetMachineId) {
+        return;
+      }
+      _alwaysOnSessions = result;
+      _alwaysOnMachineId = targetMachineId;
+      notifyListeners();
+    } catch (_) {
+      // Best-effort: keep the current state when offline.
+    }
+  }
+
+  Future<bool> toggleActiveSessionAlwaysOn() async {
+    final MachineCredential? machine = _machine;
+    if (machine == null || _alwaysOnSessions == null) return false;
+    final String agentKey = _agent.key;
+    final String sessionId = await ensureActiveSessionId(_agent);
+    if (_machine?.id != machine.id || _agent.key != agentKey) return false;
+    final bool next = !isActiveSessionAlwaysOn;
+    final int seq = ++_alwaysOnSeq;
+    final AlwaysOnSessionList updated =
+        await _backendClient.setSessionAlwaysOn(agentKey, sessionId, next);
+    if (_machine?.id != machine.id || seq != _alwaysOnSeq) return next;
+    _alwaysOnSessions = updated;
+    _alwaysOnMachineId = machine.id;
+    notifyListeners();
+    return next;
+  }
+
+  Future<void> removeAlwaysOnSession(
+    AlwaysOnSession session, {
+    String? machineId,
+  }) async {
+    final int seq = ++_alwaysOnSeq;
+    final String? targetMachineId = machineId ?? _machine?.id;
+    final AlwaysOnSessionList updated =
+        await _backendClient.removeAlwaysOnSession(
+      session.agentKey,
+      session.workdir,
+      session.sessionId,
+    );
+    if (seq != _alwaysOnSeq) return;
+    if (_machine != null &&
+        targetMachineId != null &&
+        _machine!.id != targetMachineId) {
+      return;
+    }
+    _alwaysOnSessions = updated;
+    _alwaysOnMachineId = targetMachineId;
+    notifyListeners();
   }
 
   void setLanguage(AppLanguage language) {
@@ -387,6 +496,7 @@ class BotChatController extends ChangeNotifier {
       quotaController.clearUsageReport();
       unawaited(refreshWorkdir());
     }
+    unawaited(refreshAlwaysOnSessions(machineId: machine.id));
     if (sameContext && activeSessionId != null) {
       notifyListeners();
       return;
@@ -1231,6 +1341,7 @@ class BotChatController extends ChangeNotifier {
   /// pull the history once to catch up.
   Future<void> onAppResumed() async {
     await reconnectEvents();
+    unawaited(refreshAlwaysOnSessions());
     if (isThinking || _remoteActive) {
       await _refreshHistorySnapshot();
     } else {

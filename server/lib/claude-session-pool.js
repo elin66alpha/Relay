@@ -183,6 +183,7 @@ function createClaudeSessionPool(options = {}) {
     closeEntry,
     isBusy: (entry) => entry.turn || entry.background,
     keepAlive: (entry) => entry.tasks.size > 0,
+    isAlwaysOn: options.isAlwaysOn,
     evictsBefore,
   });
   const {
@@ -375,7 +376,7 @@ function createClaudeSessionPool(options = {}) {
     // Load before taking a slot: nothing may await between acquireSlot() and
     // registering the entry, or two concurrent spawns both pass the cap check.
     const { query } = await loadSdk();
-    await acquireSlot();
+    await acquireSlot(request.key);
     const input = createInputQueue();
     const entry = {
       key: request.key,

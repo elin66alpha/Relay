@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/agent_options.dart';
 import '../models/agent_session.dart';
+import '../models/always_on_session.dart';
 import '../models/backend_status.dart';
 import '../models/chat_history.dart';
 import '../models/chat_message.dart';
@@ -21,6 +22,7 @@ import 'api_transport.dart';
 import 'sse_codec.dart';
 
 export '../models/agent_session.dart' show AgentSessionList;
+export '../models/always_on_session.dart';
 export '../models/backend_status.dart';
 export '../models/chat_history.dart';
 export '../models/filesystem.dart';
@@ -657,6 +659,63 @@ class BackendClient {
       throw BackendException('Invalid session delete response.');
     }
     return AgentSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  AlwaysOnSessionList _alwaysOnListFrom(Object? decoded) {
+    if (decoded is! Map) {
+      throw BackendException('Invalid always-on sessions response.');
+    }
+    return AlwaysOnSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Returns null when an older backend answers 404 (feature unsupported).
+  Future<AlwaysOnSessionList?> fetchAlwaysOnSessions() async {
+    try {
+      final Object? decoded = await _requestJson(
+        'GET',
+        '/api/sessions/always-on',
+      );
+      return _alwaysOnListFrom(decoded);
+    } on BackendException catch (err) {
+      if (err.status == 404 || err.code == 'BACKEND_ROUTE_MISSING') {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<AlwaysOnSessionList> setSessionAlwaysOn(
+    String agentKey,
+    String sessionId,
+    bool alwaysOn,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/always-on',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'sessionId': sessionId,
+        'alwaysOn': alwaysOn,
+      },
+    );
+    return _alwaysOnListFrom(decoded);
+  }
+
+  Future<AlwaysOnSessionList> removeAlwaysOnSession(
+    String agentKey,
+    String workdir,
+    String sessionId,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/always-on/remove',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'workdir': workdir,
+        'sessionId': sessionId,
+      },
+    );
+    return _alwaysOnListFrom(decoded);
   }
 
   /// Fetches the stored conversation for one agent session so the app can show

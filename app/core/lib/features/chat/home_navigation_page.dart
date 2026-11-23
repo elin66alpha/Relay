@@ -5,11 +5,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/backend/backend_client.dart';
+import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/util/error_text.dart';
+import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
+import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
@@ -74,6 +77,7 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
     final bool machineChanged = machineId != _lastMachineId;
     _lastMachineId = machineId;
     if (machineId == null) {
+      widget.chatController.clearAlwaysOnSessions();
       setState(() {
         _recentWorkdirs = const <String>[];
         _loading = false;
@@ -81,11 +85,17 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
       return;
     }
 
+    if (machineChanged) {
+      widget.chatController.clearAlwaysOnSessions();
+    }
     setState(() {
       _loading = true;
       if (machineChanged) _recentWorkdirs = const <String>[];
     });
     final Future<void> workdir = widget.chatController.refreshWorkdir();
+    unawaited(
+      widget.chatController.refreshAlwaysOnSessions(machineId: machineId),
+    );
     List<String> recent = const <String>[];
     try {
       recent = await widget.chatController.backend.recentWorkdirs();
@@ -147,6 +157,81 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                 : friendlyErrorText(context.l10n, err),
           ),
         ),
+      );
+    }
+  }
+
+  Future<void> _openAlwaysOnSession(
+    AlwaysOnSession session,
+    MachineCredential machine,
+  ) async {
+    if (_loading || machine.id != widget.machinesController.activeMachine?.id) {
+      return;
+    }
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final AppStrings strings = context.l10n;
+    final CliAgent agent = widget.agentsController.agents
+            .where((CliAgent item) => item.key == session.agentKey)
+            .firstOrNull ??
+        cliAgentByKey(session.agentKey);
+    try {
+      if (widget.chatController.activeWorkdir != session.workdir) {
+        await widget.chatController.setWorkdir(session.workdir);
+        if (machine.id != widget.machinesController.activeMachine?.id) {
+          return;
+        }
+      }
+      final bool activated =
+          await widget.agentsController.setActive(session.agentKey);
+      if (machine.id != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      if (!activated) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(agentUnavailableMessage(strings, agent))),
+        );
+        return;
+      }
+      await widget.chatController.loadFor(agent, machine);
+      if (machine.id != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      await widget.chatController.selectSession(agent, session.sessionId);
+    } catch (err) {
+      if (machine.id != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            err is BackendException && err.code == 'WORKDIR_BUSY'
+                ? strings.workdirBusy
+                : friendlyErrorText(strings, err),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _removeAlwaysOn(
+    AlwaysOnSession session,
+    String machineId,
+  ) async {
+    if (_loading || machineId != widget.machinesController.activeMachine?.id) {
+      return;
+    }
+    try {
+      await widget.chatController.removeAlwaysOnSession(
+        session,
+        machineId: machineId,
+      );
+    } catch (err) {
+      if (!mounted ||
+          machineId != widget.machinesController.activeMachine?.id) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyErrorText(context.l10n, err))),
       );
     }
   }
@@ -227,6 +312,27 @@ class _HomeNavigationPageState extends State<HomeNavigationPage> {
                         ),
                     ],
                   ),
+                  if (machine != null &&
+                      widget.chatController.alwaysOnSupported) ...<Widget>[
+                    const SizedBox(height: 20),
+                    _HomeSection(
+                      title: strings.alwaysOnSessions,
+                      emptyText: strings.noAlwaysOnSessions,
+                      children: <Widget>[
+                        for (final AlwaysOnSession session
+                            in widget.chatController.alwaysOnSessions)
+                          _AlwaysOnSessionTile(
+                            session: session,
+                            onTap: _loading
+                                ? null
+                                : () => _openAlwaysOnSession(session, machine),
+                            onRemove: _loading
+                                ? null
+                                : () => _removeAlwaysOn(session, machine.id),
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   _HomeSection(
                     title: strings.tutorial,
@@ -539,6 +645,44 @@ class _WorkdirTile extends StatelessWidget {
         style: AppTheme.mono(colors.onSurfaceVariant).copyWith(fontSize: 12),
       ),
       trailing: onTap != null ? const Icon(Icons.chevron_right) : null,
+      onTap: onTap,
+    );
+  }
+}
+
+class _AlwaysOnSessionTile extends StatelessWidget {
+  const _AlwaysOnSessionTile({
+    required this.session,
+    this.onTap,
+    this.onRemove,
+  });
+
+  final AlwaysOnSession session;
+  final VoidCallback? onTap;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String agentLabel = cliAgentByKey(session.agentKey).label;
+    return ListTile(
+      leading: AgentIcon(agentKey: session.agentKey),
+      title: Text(
+        session.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        '${workdirName(session.workdir)} · $agentLabel',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+      ),
+      trailing: IconButton(
+        icon: Icon(Icons.push_pin, color: colors.primary),
+        tooltip: context.l10n.stopKeepingAlwaysOn,
+        onPressed: onRemove,
+      ),
       onTap: onTap,
     );
   }
