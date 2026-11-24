@@ -424,14 +424,22 @@ public static class RelayLauncher {
     bool inheritHandles, uint flags, IntPtr environment, string directory, ref STARTUPINFOEX startup, out PROCESS_INFORMATION info);
   [DllImport("kernel32.dll")]
   static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  static extern bool SetFilePointerEx(IntPtr file, long distance, IntPtr newPointer, uint method);
 
   static IntPtr Open(string path, bool write) {
     SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
     sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
     sa.bInheritHandle = true;
-    // GENERIC_WRITE + CREATE_ALWAYS for a log, GENERIC_READ + OPEN_EXISTING for NUL.
-    IntPtr handle = CreateFile(path, write ? 0x40000000u : 0x80000000u, 7, ref sa, write ? 2u : 3u, 0x80, IntPtr.Zero);
+    // GENERIC_WRITE + OPEN_ALWAYS for a log, GENERIC_READ + OPEN_EXISTING for NUL.
+    IntPtr handle = CreateFile(path, write ? 0x40000000u : 0x80000000u, 7, ref sa, write ? 4u : 3u, 0x80, IntPtr.Zero);
     if (handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open " + path);
+    // Appended, so a restart keeps the output (and the crash) that came before it.
+    if (write && !SetFilePointerEx(handle, 0, IntPtr.Zero, 2)) {
+      int error = Marshal.GetLastWin32Error();
+      CloseHandle(handle);
+      throw new Win32Exception(error, "Cannot append to " + path);
+    }
     return handle;
   }
 
@@ -553,7 +561,9 @@ function Get-RelayBlockers {
 }
 
 # Waits until the backend from the PID file listens on its port. False when it
-# exits first or is not listening by the deadline.
+# exits first or is not listening by the deadline. The PID is keep-running.js,
+# and the listener its server.js child, so any listener on the port counts:
+# callers have already made sure nothing else holds it.
 function Wait-RelayBackendReady {
   param([int]$TimeoutSeconds = 30)
   $port = [int](Get-BackendPort)
@@ -564,7 +574,7 @@ function Wait-RelayBackendReady {
     $processId = Get-RelayPid -PidFile $Script:BackendPidFile
     if (-not $processId) { return $false }
     if ($canCheckPort) {
-      if (Get-NetTCPConnection -State Listen -LocalPort $port -OwningProcess $processId -ErrorAction SilentlyContinue) {
+      if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
         return $true
       }
     } elseif (((Get-Date) - $started).TotalSeconds -ge 5) {
@@ -575,11 +585,13 @@ function Wait-RelayBackendReady {
   return $false
 }
 
+# Through keep-running.js, which starts server.js again when it exits, as PM2
+# and launchd do on Linux and macOS.
 function Start-RelayBackend {
   $nodePath = (Get-Command 'node').Source
   Start-RelayProcess -Name 'backend' `
     -FilePath $nodePath `
-    -ArgumentList @('server.js') `
+    -ArgumentList @('scripts\keep-running.js') `
     -WorkingDirectory $Script:ServerDir `
     -PidFile $Script:BackendPidFile `
     -OutLog (Join-Path $Script:LogDir 'backend.out.log') `
@@ -650,6 +662,28 @@ function Register-RelayStartup {
 
 function Unregister-RelayStartup {
   Unregister-ScheduledTask -TaskName $Script:StartupTaskName -Confirm:$false -ErrorAction SilentlyContinue
+}
+
+# The installation the startup task starts, or '' without one. The task is one
+# per user, so setup from another folder would move it there.
+function Get-RelayInstalledRoot {
+  $task = Get-ScheduledTask -TaskName $Script:StartupTaskName -ErrorAction SilentlyContinue
+  if (-not $task) { return '' }
+  foreach ($action in @($task.Actions)) {
+    if ("$($action.Arguments)" -match '-File "(.+)\\scripts\\install\\windows\\start\.ps1"') { return $Matches[1] }
+  }
+  return ''
+}
+
+# Warns, and returns $true, when Relay is installed from another folder.
+function Test-RelayInstalledElsewhere {
+  $root = Get-RelayInstalledRoot
+  if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { return $false }
+  if ([IO.Path]::GetFullPath($root).TrimEnd('\') -eq [IO.Path]::GetFullPath($Script:RootDir).TrimEnd('\')) { return $false }
+  Write-Warn "Relay is installed from $root, not from this folder."
+  Write-Warn "To upgrade it and keep its tokens and chats, run $(Join-Path $root 'update.cmd')."
+  Write-Warn 'Reinstall here only to replace it with a new installation that has no tokens or chats.'
+  return $true
 }
 
 function Wait-ForTunnelUrl {

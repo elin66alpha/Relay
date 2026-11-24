@@ -66,6 +66,18 @@ function cancelledError() {
   return new PeerError('request cancelled', 'AGENT_CANCELLED');
 }
 
+// Peers known to advertise `features: ['swarm-sessions']` on GET /api/sessions.
+// Those peers keep swarm sessions hidden and never activate them, so no active
+// session save/restore is needed.
+const swarmSessionsPeers = new Set();
+
+// Process-wide ref-counted guard for legacy peers (those without
+// `swarm-sessions`). Keyed by `${baseUrl}\0${agent}\0${workdir || ''}` so
+// concurrent turns from multiple swarms on the same peer agent capture the
+// user's active session once (0->1) and restore it only when all finish (1->0).
+const legacyActiveGuards = new Map();
+const legacyPendingRestores = new Map();
+
 function createPeerClient({ name, baseUrl, token, deviceId, deviceName }) {
   const label = name || baseUrl;
 
@@ -135,24 +147,82 @@ function createPeerClient({ name, baseUrl, token, deviceId, deviceName }) {
     return Array.isArray(body && body.agents) ? body.agents : [];
   }
 
-  async function activeSessionId(agent, workdir) {
+  async function fetchSessionsMeta(agent, workdir) {
     const body = await json(`/api/sessions${query(agent)}`, { workdir });
-    return (body && body.activeSessionId) || '';
+    const features = Array.isArray(body && body.features) ? body.features : [];
+    const supportsSwarm = features.includes('swarm-sessions');
+    if (supportsSwarm) swarmSessionsPeers.add(baseUrl);
+    return {
+      supportsSwarm,
+      activeSessionId: (body && body.activeSessionId) || '',
+    };
   }
 
-  // Creating a session makes it the peer's active one, which would move the
-  // peer's own user into it, so the previous active session is restored.
-  async function createSession(agent, workdir, sessionName) {
-    const previous = await activeSessionId(agent, workdir);
-    const body = await json('/api/sessions', {
-      method: 'POST',
-      workdir,
-      body: { agent, name: sessionName },
-    });
-    if (previous && previous !== body.activeSessionId) {
-      await restoreActive(agent, workdir, previous);
+  // Runs `task(supportsSwarm)` while guarding the peer user's active session
+  // for legacy peers. New peers advertising `swarm-sessions` skip save/restore
+  // completely; legacy peers ref-count concurrent calls per (peer, agent,
+  // workdir), capturing on 0->1 and restoring on 1->0.
+  async function withActiveSessionGuard(agent, workdir, task) {
+    if (swarmSessionsPeers.has(baseUrl)) {
+      return task(true);
     }
-    return { sessionId: body.activeSessionId, workdir: body.workdir || workdir };
+    const key = `${baseUrl}\0${agent}\0${workdir || ''}`;
+    let entry = legacyActiveGuards.get(key);
+    if (!entry) {
+      entry = {
+        count: 0,
+        previous: '',
+        supportsSwarm: false,
+        capturePromise: null,
+      };
+      legacyActiveGuards.set(key, entry);
+    }
+    entry.count += 1;
+    if (entry.count === 1) {
+      const pendingRestore = legacyPendingRestores.get(key);
+      entry.capturePromise = (async () => {
+        if (pendingRestore) await pendingRestore;
+        const meta = await fetchSessionsMeta(agent, workdir);
+        entry.supportsSwarm = meta.supportsSwarm;
+        entry.previous = meta.supportsSwarm ? '' : meta.activeSessionId;
+        return meta;
+      })();
+    }
+    try {
+      await entry.capturePromise;
+      return await task(entry.supportsSwarm);
+    } finally {
+      entry.count -= 1;
+      if (entry.count === 0) {
+        if (legacyActiveGuards.get(key) === entry) legacyActiveGuards.delete(key);
+        if (!entry.supportsSwarm && entry.previous) {
+          const restore = restoreActive(agent, workdir, entry.previous).finally(() => {
+            if (legacyPendingRestores.get(key) === restore) {
+              legacyPendingRestores.delete(key);
+            }
+          });
+          legacyPendingRestores.set(key, restore);
+          await restore;
+        }
+      }
+    }
+  }
+
+  // Creates a hidden swarm session on the peer (`kind: 'swarm'`). New peers
+  // keep it hidden and never activate it; legacy peers ignore `kind` and
+  // activate it, so the guard restores the user's previous active session.
+  async function createSession(agent, workdir, sessionName) {
+    return withActiveSessionGuard(agent, workdir, async () => {
+      const body = await json('/api/sessions', {
+        method: 'POST',
+        workdir,
+        body: { agent, name: sessionName, kind: 'swarm' },
+      });
+      return {
+        sessionId: body.sessionId || body.activeSessionId,
+        workdir: body.workdir || workdir,
+      };
+    });
   }
 
   function restoreActive(agent, workdir, sessionId) {
@@ -190,76 +260,77 @@ function createPeerClient({ name, baseUrl, token, deviceId, deviceName }) {
   // One turn on the peer, in the runAgent contract: streamed progress, deltas
   // and segment boundaries go to onEvent, the reply text is returned, a failed
   // turn throws, and a cancelled one throws AGENT_CANCELLED. Aborting `signal`
-  // forwards the cancel to the peer. A turn also makes its session the peer's
-  // active one, so the previous active session is restored afterwards.
+  // forwards the cancel to the peer. On legacy peers a turn also makes its
+  // session active, so the guard restores the user's active session once all
+  // concurrent turns on that agent finish.
   async function chat({ agent, sessionId, workdir, prompt, requestId, signal, onEvent }) {
     if (signal && signal.aborted) throw cancelledError();
-    const previous = await activeSessionId(agent, workdir);
-    if (signal && signal.aborted) throw cancelledError();
-    const controller = new AbortController();
-    const onAbort = () => {
-      cancel(requestId, workdir);
-      controller.abort();
-    };
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
-    const openTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      let res;
+    return withActiveSessionGuard(agent, workdir, async () => {
+      if (signal && signal.aborted) throw cancelledError();
+      const controller = new AbortController();
+      const onAbort = () => {
+        cancel(requestId, workdir);
+        controller.abort();
+      };
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      const openTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        res = await send('/api/chat', {
-          method: 'POST',
-          workdir,
-          accept: 'text/event-stream',
-          body: { agent, sessionId, prompt, requestId },
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(openTimer);
-      }
-      if (!String(res.headers.get('content-type') || '').includes('text/event-stream')) {
-        const reply = await res.json();
-        return String((reply && reply.message && reply.message.content) || '');
-      }
-      const decoder = new TextDecoder();
-      let buffer = '';
-      for await (const chunk of res.body) {
-        buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, '\n');
-        let index;
-        while ((index = buffer.indexOf('\n\n')) >= 0) {
-          const event = parseEvent(buffer.slice(0, index));
-          buffer = buffer.slice(index + 2);
-          if (!event) continue;
-          const payload = event.payload || {};
-          if (event.type === 'agent_delta') {
-            onEvent({ type: 'delta', text: String(payload.text || '') });
-          } else if (event.type === 'agent_progress') {
-            onEvent({ type: 'progress', line: String(payload.line || '') });
-          } else if (event.type === 'agent_segment') {
-            onEvent({ type: 'segment' });
-          } else if (event.type === 'agent_done') {
-            return String((payload.message && payload.message.content) || '');
-          } else if (event.type === 'agent_error') {
-            throw new PeerError(
-              `${label}: ${payload.error || 'agent request failed'}`,
-              payload.code || 'AGENT_ERROR',
-            );
-          } else if (event.type === 'agent_cancelled') {
-            throw cancelledError();
+        let res;
+        try {
+          res = await send('/api/chat', {
+            method: 'POST',
+            workdir,
+            accept: 'text/event-stream',
+            body: { agent, sessionId, prompt, requestId },
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(openTimer);
+        }
+        if (!String(res.headers.get('content-type') || '').includes('text/event-stream')) {
+          const reply = await res.json();
+          return String((reply && reply.message && reply.message.content) || '');
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for await (const chunk of res.body) {
+          buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, '\n');
+          let index;
+          while ((index = buffer.indexOf('\n\n')) >= 0) {
+            const event = parseEvent(buffer.slice(0, index));
+            buffer = buffer.slice(index + 2);
+            if (!event) continue;
+            const payload = event.payload || {};
+            if (event.type === 'agent_delta') {
+              onEvent({ type: 'delta', text: String(payload.text || '') });
+            } else if (event.type === 'agent_progress') {
+              onEvent({ type: 'progress', line: String(payload.line || '') });
+            } else if (event.type === 'agent_segment') {
+              onEvent({ type: 'segment' });
+            } else if (event.type === 'agent_done') {
+              return String((payload.message && payload.message.content) || '');
+            } else if (event.type === 'agent_error') {
+              throw new PeerError(
+                `${label}: ${payload.error || 'agent request failed'}`,
+                payload.code || 'AGENT_ERROR',
+              );
+            } else if (event.type === 'agent_cancelled') {
+              throw cancelledError();
+            }
           }
         }
+        throw new PeerError(`${label} closed the reply before it finished.`, 'PEER_UNREACHABLE');
+      } catch (err) {
+        if (signal && signal.aborted) throw cancelledError();
+        if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+          throw new PeerError(`${label} did not answer in time.`, 'PEER_UNREACHABLE');
+        }
+        throw err;
+      } finally {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        controller.abort();
       }
-      throw new PeerError(`${label} closed the reply before it finished.`, 'PEER_UNREACHABLE');
-    } catch (err) {
-      if (signal && signal.aborted) throw cancelledError();
-      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-        throw new PeerError(`${label} did not answer in time.`, 'PEER_UNREACHABLE');
-      }
-      throw err;
-    } finally {
-      if (signal) signal.removeEventListener('abort', onAbort);
-      controller.abort();
-      if (previous && previous !== sessionId) await restoreActive(agent, workdir, previous);
-    }
+    });
   }
 
   return { listAgents, createSession, deleteSession, clearSession, chat };

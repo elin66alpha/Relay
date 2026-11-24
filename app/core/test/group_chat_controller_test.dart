@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_core/core/backend/backend_client.dart';
+import 'package:relay_core/core/i18n/app_strings.dart';
 import 'package:relay_core/core/models/chat_message.dart';
 import 'package:relay_core/core/models/group.dart';
 import 'package:relay_core/core/models/machine_credential.dart';
+import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/features/chat/group_chat_controller.dart';
 
 void main() {
@@ -185,6 +187,179 @@ void main() {
     expect(backend.historyRequests, hasLength(3));
   });
 
+  test('a working member shows its newest progress lines, also after a reload',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+    final Map<String, Object?> member = <String, Object?>{
+      'requestId': 'round.0.0.claude',
+      'agent': <String, Object?>{'key': 'claude', 'label': 'Claude Code'},
+    };
+    List<Object?> lines() =>
+        controller.messages.last.metadata['progressLines']! as List<Object?>;
+
+    backend.emit('group_agent_start', member);
+    for (int i = 1; i <= 7; i++) {
+      backend.emit('group_agent_progress', <String, Object?>{
+        ...member,
+        'line': 'step $i',
+      });
+    }
+    backend.emit('group_agent_progress', <String, Object?>{
+      ...member,
+      'line': 'step 7',
+    });
+    expect(lines(), <String>[
+      'step 2',
+      'step 3',
+      'step 4',
+      'step 5',
+      'step 6',
+      'step 7',
+    ]);
+
+    // A reload swaps the bubble for the transcript's message, which keeps
+    // collecting lines.
+    backend.history['builders'] = <ChatMessage>[
+      ChatMessage(
+        id: 'round.0.0.claude:assistant',
+        role: ChatRole.assistant,
+        content: '',
+        createdAt: DateTime.utc(2026, 1, 2),
+        metadata: const <String, Object?>{
+          'streaming': true,
+          'progressLines': <String>['step 7'],
+        },
+      ),
+    ];
+    await controller.loadGroups();
+    backend.emit('group_agent_progress', <String, Object?>{
+      ...member,
+      'line': 'step 8',
+    });
+    expect(controller.messages, hasLength(1));
+    expect(lines(), <String>['step 7', 'step 8']);
+  });
+
+  test('a round that hit the hand-off limit names who it did not summon',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.emit('group_done', <String, Object?>{
+      'requestId': 'other-round',
+      'unsummoned': <String>['codex'],
+    });
+    expect(controller.notice, contains('Codex'));
+
+    final Future<bool> sending = controller.send('@codex go on');
+    expect(controller.notice, isNull);
+    backend.round.complete();
+    await sending;
+  });
+
+  test('a first message that names no one asks for an @mention', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('hello?');
+    backend.round.completeError(
+      BackendException('mention a member', code: 'GROUP_NO_MENTION'),
+    );
+
+    expect(await sending, isFalse);
+    expect(
+      controller.error,
+      const AppStrings(AppLanguage.en).groupNeedsMention,
+    );
+  });
+
+  test('a dropped request keeps a round the backend recorded as running',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('@claude long task');
+    final String requestId = backend.sent.single['requestId']!;
+    backend.history['builders'] = <ChatMessage>[
+      _message('$requestId:human', '@claude long task'),
+    ];
+    backend.running = requestId;
+    backend.round.completeError(
+      BackendException('Timed out.', code: 'NETWORK_TIMEOUT'),
+    );
+
+    expect(await sending, isTrue);
+    expect(controller.error, isNull);
+    expect(controller.sending, isTrue);
+    await controller.cancel();
+    expect(backend.cancelled, <String>[requestId]);
+  });
+
+  test('a dropped request the backend never recorded is an error', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('@claude hello');
+    backend.round.completeError(
+      BackendException(
+        'Connection refused.',
+        code: 'NETWORK_CONNECTION_REFUSED',
+      ),
+    );
+
+    expect(await sending, isFalse);
+    expect(controller.error, isNotNull);
+    expect(controller.sending, isFalse);
+  });
+
+  testWidgets('a reconnected event stream reloads the open swarm',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.running = 'other-device-round';
+    await controller.start();
+    expect(controller.sending, isTrue);
+
+    // The round ends while the stream is down, so its group_done is lost.
+    backend.dropEvents();
+    final ChatMessage reply = _message(
+      'other-device-reply',
+      'Done elsewhere',
+      role: ChatRole.assistant,
+    );
+    backend.history['builders'] = <ChatMessage>[reply];
+    backend.running = null;
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(controller.sending, isFalse);
+    expect(controller.messages, <ChatMessage>[reply]);
+  });
+
+  testWidgets('an event stream that keeps dropping backs off',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+    final int loads = backend.historyRequests.length;
+
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 1);
+
+    // Nothing arrived on the new stream: the next try waits twice as long.
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 1);
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 2);
+
+    // An event shows the backend is back, so the next drop retries quickly.
+    backend.emit('heartbeat', const <String, Object?>{});
+    backend.dropEvents();
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, loads + 3);
+  });
+
   test('a round carries only the credentials of its members\' machines',
       () async {
     const MachineCredential studio = MachineCredential(
@@ -236,6 +411,181 @@ void main() {
     await pumpEventQueue();
     expect(controller.sending, isFalse);
   });
+
+  test('running state and Stop are tracked independently per swarm', () async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.history['reviewers'] = <ChatMessage>[];
+    await controller.start();
+
+    // Start a round in builders (A).
+    final Completer<void> roundA = Completer<void>();
+    final Completer<void> roundB = Completer<void>();
+    backend.roundsByGroup['builders'] = roundA;
+    backend.roundsByGroup['reviewers'] = roundB;
+
+    final Future<bool> sendA = controller.send('@claude work in A');
+    final String reqA = backend.sent.last['requestId']!;
+    expect(reqA, isNotEmpty);
+    expect(controller.sending, isTrue);
+
+    // Switch to reviewers (B): B is NOT sending and accepts a concurrent round.
+    await controller.selectGroup(_reviewers);
+    expect(controller.sending, isFalse);
+    final Future<bool> sendB = controller.send('@codex work in B');
+    final String reqB = backend.sent.last['requestId']!;
+    expect(controller.sending, isTrue);
+
+    // Cancel in B cancels ONLY B's request, not A's.
+    await controller.cancel();
+    expect(backend.cancelled, <String>[reqB]);
+
+    // Finish A while still viewing B: B must stay sending.
+    roundA.complete();
+    expect(await sendA, isTrue);
+    expect(controller.sending, isTrue);
+
+    // Finish B.
+    roundB.complete();
+    expect(await sendB, isTrue);
+    expect(controller.sending, isFalse);
+
+    // Switching back to A shows A is no longer sending.
+    await controller.selectGroup(_builders);
+    expect(controller.sending, isFalse);
+  });
+
+  test(
+      'createGroup selects the newly created swarm by id even when names repeat',
+      () async {
+    await controller.start();
+    const ChatGroup duplicate = ChatGroup(
+      id: 'builders-new',
+      name: 'Builders',
+      members: <String>['claude'],
+    );
+    backend.createdGroup = duplicate;
+    backend.createdList = <ChatGroup>[_builders, duplicate, _reviewers];
+
+    final ChatGroup? result = await controller.createGroup(
+      'Builders',
+      const <String>['claude'],
+    );
+    expect(result?.id, 'builders-new');
+    expect(controller.selected?.id, 'builders-new');
+  });
+
+  testWidgets(
+      'a network reload failure retries with backoff and settles once reachable',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.running = 'round-1';
+    await controller.start();
+    expect(controller.sending, isTrue);
+
+    backend.emit('group_agent_start', <String, Object?>{
+      'requestId': 'round-1:claude',
+      'agent': <String, Object?>{'key': 'claude', 'label': 'Claude Code'},
+    });
+    backend.historyError = BackendException('offline', code: 'NETWORK_ERROR');
+    final int before = backend.historyRequests.length;
+
+    backend.emit('group_agent_done', <String, Object?>{
+      'requestId': 'round-1:claude',
+    });
+    await tester.pump();
+    expect(backend.historyRequests.length, before + 1);
+    expect(controller.error, isNotNull);
+    expect(controller.sending, isTrue);
+
+    // First retry fires at 2s; still offline so backoff doubles to 4s.
+    await tester.pump(const Duration(seconds: 1));
+    expect(backend.historyRequests.length, before + 1);
+    await tester.pump(const Duration(seconds: 1));
+    expect(backend.historyRequests.length, before + 2);
+    expect(controller.error, isNotNull);
+
+    // Backend recovers with the settled reply.
+    final ChatMessage reply = _message(
+      'round-1:claude:assistant',
+      'OK4',
+      role: ChatRole.assistant,
+    );
+    backend.historyError = null;
+    backend.running = null;
+    backend.history['builders'] = <ChatMessage>[reply];
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(backend.historyRequests.length, before + 2);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(backend.historyRequests.length, before + 3);
+    expect(controller.sending, isFalse);
+    expect(controller.messages, <ChatMessage>[reply]);
+    expect(controller.error, isNull);
+
+    // No further retries once settled.
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, before + 3);
+  });
+
+  test('a successful reload does not clear a groupNeedsMention send error',
+      () async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    final Future<bool> sending = controller.send('hello?');
+    backend.round.completeError(
+      BackendException('mention a member', code: 'GROUP_NO_MENTION'),
+    );
+    expect(await sending, isFalse);
+    final String expected = const AppStrings(AppLanguage.en).groupNeedsMention;
+    expect(controller.error, expected);
+
+    backend.emit('group_done', <String, Object?>{'requestId': 'other-round'});
+    await pumpEventQueue();
+    expect(controller.error, expected);
+  });
+
+  testWidgets('a non-network reload failure is not retried',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.historyError = BackendException(
+      'not found',
+      status: 404,
+      code: 'GROUP_NOT_FOUND',
+    );
+    final int before = backend.historyRequests.length;
+    backend.emit('group_done', <String, Object?>{'requestId': 'r1'});
+    await tester.pump();
+    expect(backend.historyRequests.length, before + 1);
+    expect(controller.error, isNotNull);
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, before + 1);
+  });
+
+  testWidgets('switching swarms cancels a pending reload retry',
+      (WidgetTester tester) async {
+    backend.history['builders'] = <ChatMessage>[];
+    backend.history['reviewers'] = <ChatMessage>[];
+    await controller.start();
+
+    backend.historyError = BackendException('offline', code: 'NETWORK_ERROR');
+    backend.emit('group_done', <String, Object?>{'requestId': 'r1'});
+    await tester.pump();
+    expect(controller.error, isNotNull);
+
+    backend.historyError = null;
+    await controller.selectGroup(_reviewers);
+    expect(controller.error, isNull);
+    final int afterSwitch = backend.historyRequests.length;
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(backend.historyRequests.length, afterSwitch);
+  });
 }
 
 const ChatGroup _builders = ChatGroup(
@@ -281,7 +631,7 @@ ChatMessage _message(
 
 class _GroupBackendClient extends BackendClient {
   String activeWorkdir = '/work/a';
-  final StreamController<BackendEvent> events =
+  StreamController<BackendEvent> events =
       StreamController<BackendEvent>.broadcast(sync: true);
   final List<String> groupWorkdirs = <String>[];
   final List<String> historyRequests = <String>[];
@@ -290,7 +640,12 @@ class _GroupBackendClient extends BackendClient {
   final List<List<MachineCredential>> sentPeers = <List<MachineCredential>>[];
   final List<String> cancelled = <String>[];
   final Completer<void> round = Completer<void>();
+  final Map<String, Completer<void>> roundsByGroup =
+      <String, Completer<void>>{};
   String? running;
+  BackendException? historyError;
+  ChatGroup? createdGroup;
+  List<ChatGroup>? createdList;
 
   void emit(String type, Map<String, Object?> data) {
     events.add(
@@ -304,6 +659,14 @@ class _GroupBackendClient extends BackendClient {
   @override
   Stream<BackendEvent> streamEvents() => events.stream;
 
+  // Ends the current event stream, as a dropped connection does; the next
+  // subscription gets a fresh one.
+  void dropEvents() {
+    final StreamController<BackendEvent> old = events;
+    events = StreamController<BackendEvent>.broadcast(sync: true);
+    old.close();
+  }
+
   @override
   Future<List<ChatGroup>> fetchGroups() async {
     groupWorkdirs.add(activeWorkdir);
@@ -315,6 +678,8 @@ class _GroupBackendClient extends BackendClient {
   @override
   Future<GroupHistory> fetchGroupHistory(String groupId) async {
     historyRequests.add('$activeWorkdir:$groupId');
+    final BackendException? err = historyError;
+    if (err != null) throw err;
     return GroupHistory(
       group: <ChatGroup>[_builders, _reviewers, _mixed, _other]
           .firstWhere((ChatGroup g) => g.id == groupId),
@@ -324,6 +689,26 @@ class _GroupBackendClient extends BackendClient {
           ],
       runningRequestId: running,
     );
+  }
+
+  @override
+  Future<({ChatGroup group, List<ChatGroup> groups})> createGroup(
+    String name,
+    List<String> members, {
+    String workdir = '',
+    Map<String, Map<String, String>> configs =
+        const <String, Map<String, String>>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
+    final ChatGroup group = createdGroup ??
+        ChatGroup(
+          id: 'created',
+          name: name,
+          members: members,
+          workdir: workdir,
+        );
+    final List<ChatGroup> list = createdList ?? <ChatGroup>[group];
+    return (group: group, groups: list);
   }
 
   @override
@@ -339,7 +724,7 @@ class _GroupBackendClient extends BackendClient {
       'prompt': prompt,
       'requestId': requestId,
     });
-    return round.future;
+    return (roundsByGroup[groupId] ?? round).future;
   }
 
   @override

@@ -126,3 +126,59 @@ test('idle timers leave active turns alone and retry while background tasks run'
   await delay(60);
   assert.deepEqual(closed, ['task', 'turn', 'background']);
 });
+
+test('always-on sessions are never idle-closed until unmarked', async (t) => {
+  const pinned = new Set(['pinned']);
+  const { slots, closed, add } = makeSlots(t, {
+    idleMs: 20,
+    isAlwaysOn: (key) => pinned.has(key),
+  });
+  const entry = add('pinned');
+  slots.scheduleIdleClose(entry);
+  await delay(70);
+  assert.deepEqual(closed, []);
+  pinned.delete('pinned');
+  await delay(60);
+  assert.deepEqual(closed, ['pinned']);
+});
+
+test('always-on sessions are never evicted by LRU and do not count toward maxLive', async (t) => {
+  const pinned = new Set(['p1', 'p2']);
+  const { slots, live, closed, add } = makeSlots(t, {
+    maxLive: 2,
+    isAlwaysOn: (key) => pinned.has(key),
+  });
+  // Two always-on entries plus one ordinary entry: ordinary count is 1 (< 2).
+  add('p1', { lastActivity: 0 });
+  add('p2', { lastActivity: 1 });
+  add('o1', { lastActivity: 10 });
+  await slots.acquireSlot('o2');
+  add('o2', { lastActivity: 20 });
+  assert.deepEqual(closed, [], 'ordinary sessions get their full cap of 2');
+  assert.equal(live.size, 4);
+
+  // Acquiring a 3rd ordinary session evicts o1 (the oldest ordinary), never p1/p2.
+  await slots.acquireSlot('o3');
+  add('o3', { lastActivity: 30 });
+  assert.deepEqual(closed, ['o1']);
+  assert.equal(live.has('p1'), true);
+  assert.equal(live.has('p2'), true);
+  assert.equal(live.size, 4);
+});
+
+test('acquiring an always-on key does not wait even when the ordinary cap is full and busy', async (t) => {
+  const pinned = new Set(['p1']);
+  const { slots, live, closed, add } = makeSlots(t, {
+    maxLive: 1,
+    isAlwaysOn: (key) => pinned.has(key),
+  });
+  add('busy-ordinary', { turn: {} });
+  let acquired = false;
+  await slots.acquireSlot('p1').then(() => {
+    acquired = true;
+  });
+  assert.equal(acquired, true);
+  assert.equal(slots.waiting, 0);
+  assert.deepEqual(closed, []);
+  assert.equal(live.has('busy-ordinary'), true);
+});

@@ -40,3 +40,5 @@ Model, effort, permission and Fast mode are saved per session. A new session sta
 ## When to start a new session
 
 Use a new session for a new task and the existing one for follow-ups. The context stays cleaner and uses less quota. Messages in one session queue one after another; different sessions run at the same time.
+
+To keep a session's CLI process warm indefinitely without idle closure or eviction, see [Always-on sessions](always-on-sessions.md).

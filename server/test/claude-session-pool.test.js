@@ -658,3 +658,35 @@ test('a background turn can be interrupted', async () => {
   assert.equal(bg.turns[0].error.code, 'CLAUDE_SESSION_LOST', 'a wedged CLI is dropped');
   await pool.shutdown();
 });
+
+test('toggling always-on keeps the same Claude process without restart and exempts it from idle close', async () => {
+  const sdk = fakeSdk();
+  const pinned = new Set();
+  const pool = makePool(sdk, {
+    idleMs: 40,
+    isAlwaysOn: (key) => pinned.has(key),
+  });
+  await send(pool, 'a', 'one');
+  assert.equal(sdk.spawned.length, 1);
+
+  // Pin while live: stays alive past idle timeout and reuses the same process.
+  pinned.add('a');
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(pool.stats().live, 1, 'always-on session is not idle-closed');
+  assert.equal(sdk.spawned[0].closed, false);
+
+  const second = await send(pool, 'a', 'two');
+  assert.equal(sdk.spawned.length, 1, 'pinning did not restart the process');
+  assert.equal(second.result.result, 'echo:two');
+  assert.deepEqual(sdk.spawned[0].prompts, ['one', 'two']);
+
+  // Unpin while live: still no restart on immediate next turn, then idle-closes.
+  pinned.delete('a');
+  const third = await send(pool, 'a', 'three');
+  assert.equal(sdk.spawned.length, 1, 'unpinning did not restart the process');
+  assert.equal(third.result.result, 'echo:three');
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(pool.stats().live, 0, 'closes normally once unmarked and idle');
+  assert.equal(sdk.spawned[0].closed, true);
+  await pool.shutdown();
+});

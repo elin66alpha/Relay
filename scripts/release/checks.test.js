@@ -22,11 +22,9 @@ test('release version check catches mismatches in each published version', (t) =
   write('app/shell/pubspec.yaml', 'version: 1.2.3+5\n');
   write('app/core/lib/features/settings/app_settings_screen.dart', "const _applicationVersion = '1.2.3';");
   write('docs/CHANGELOG.md', '## 1.2.3 - today\n');
-  const whatsNew = 'app/core/lib/features/settings/whats_new_screen.dart';
-  write(whatsNew, "const List<_Release> _zhReleases = [version: '1.2.3'];\nconst List<_Release> _enReleases = [version: '1.2.3'];");
   assert.equal(checkVersions(root), '1.2.3');
-  write(whatsNew, "const List<_Release> _zhReleases = [version: '1.2.3'];\nconst List<_Release> _enReleases = [version: '1.2.2'];");
-  assert.throws(() => checkVersions(root), /English What's new/);
+  write('docs/CHANGELOG.md', '## 1.2.2 - yesterday\n');
+  assert.throws(() => checkVersions(root), /changelog: expected 1.2.3, got 1.2.2/);
 });
 
 test('documentation check catches missing files and sections', (t) => {

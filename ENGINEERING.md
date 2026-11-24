@@ -42,7 +42,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | scripts/install/{linux,macos,windows} | what users run to install and manage a backend; the linux and macos scripts forward to unix |
 | scripts/install/unix | the one Linux/macOS implementation: update.sh, the setup menu, service scripts and the per-platform adapters in lib/ |
 | scripts/release | release bundle builders (five relay-client assets, two relay-backend archives with bundled installers, and SHA256SUMS), version/documentation checks, Windows setup checks and a local Android signing fallback for a release draft |
-| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview, plus the Docker backend sandbox) |
+| scripts/dev | local development helpers (build flow, backend restart, icon export, isolated demo screenshots for the English/Chinese READMEs and Chinese 9:16 phones, including localhost browser and workspace image preview, a real-browser smoke test of the Web client against the live backend, plus the Docker backend sandbox) |
 | docs | handbook, install guides, security model, changelog, README screenshots |
 | .github/workflows | CI on pull requests, an on-demand unsigned iOS IPA, and a manually prepared release draft that also builds the signed Android APK, uploads the signed iOS app to TestFlight and notarizes the macOS app, all from Actions Secrets (`apple_only` runs just the Apple part on any branch) |
 
@@ -53,12 +53,14 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server/lib/agents.js | process-runner boundary | runAgent(agent, prompt, onEvent, {workdir, settings, sessionKey}); onEvent receives progress, delta, segment, and `context` ({used, size}) events; purgeSession | session pools, agent-options, model-discovery, cli-paths, json-store, workdir |
 | server/lib/claude-session-pool.js | Claude Agent SDK sessions per scope | pool send/forget/shutdown; send resolves {result, sessionId, stderr, context} | Agent SDK, session-slots, bounded-integer |
 | server/lib/stdio-agent-pool.js (+acp-, codex-session-pool.js) | shared JSON-RPC stdio pool + drivers. The ACP driver authenticates after initialize only when the caller passes authMethod, sends clientMeta, applies ordered config options, and lists models (listModels) when the caller passes those options; a command may add env | pool API, driver | child_process, session-slots, bounded-integer |
-| server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work policy | createSessionSlots; acquireSlot/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
+| server/lib/session-slots.js | shared session cap, LRU eviction and idle timers; pool-supplied background-work and always-on policies (always-on keys are exempt from idle close, LRU eviction, and `maxLive`) | createSessionSlots; acquireSlot(key)/releaseSlot, pumpWaiters, clearIdleTimer/scheduleIdleClose, waiting | pool close callback |
+| server/lib/always-on-sessions.js | in-memory registry of up to 3 always-on solo-chat sessions per backend, keyed by conversation scope key; cleared on restart | MAX_ALWAYS_ON, createAlwaysOnSessions, alwaysOnSessions (has, add, remove, list) | none |
 | server/lib/sse.js | shared SSE negotiation, event writes and stream close | wantsStream, writeStreamEvent, endStream | none |
 | server/lib/bounded-integer.js | bounded integer parsing with a fallback | boundedInteger | none |
 | server/lib/cli-paths.js | where agent CLIs and Relay's Cursor files live: CLI lookup (PATH, then per-user fallbacks, cached a minute), Cursor's auth file and Relay's CURSOR_CONFIG_DIR; cliCommand turns a CLI into a shell-free `{cmd, args}`, resolving a Windows npm/pnpm `.cmd` launcher to the Node script or binary it wraps, and every CLI spawn goes through it | cliCommand, locateBin, resolveBin, commandExists, executableInPath, cursorAuthFile, CURSOR_CONFIG_DIR | none |
 | server/lib/model-discovery.js | locate each CLI and read its model catalog, cached for a minute (including "not installed"); keep catalogs the CLI is asked for (Cursor over ACP, `opencode models`, Hermes' configured model) in reported-models.json | discoverModels, clearModelDiscoveryCache, parseCursorCatalog, parseOpenCodeModels, hermesModelOptions, recordReportedModels | child_process, json-store, cli-paths |
-| server/lib/agent-status.js, diagnostics.js | agent install/auth state from stored CLI auth files (an installed agy with an unreadable keyring login remains usable and reports unknown login status; a missing CLI reports false); GET /api/diagnostics report | getAgentStatuses, clearAgentStatusCache; buildDiagnostics | agents, cli-paths (agent-status); agent-status, tokens, workdir (diagnostics) |
+| server/lib/agent-status.js, diagnostics.js | agent install/auth state from stored CLI auth files (an installed agy with an unreadable keyring login remains usable and reports unknown login status; a missing CLI reports false; on macOS a Claude login in the Keychain counts, checked by attributes only); GET /api/diagnostics report | getAgentStatuses, clearAgentStatusCache; buildDiagnostics | agents, cli-paths, claude-credentials (agent-status); agent-status, tokens, workdir (diagnostics) |
+| server/lib/claude-credentials.js | where Claude Code's OAuth login lives: `~/.claude/.credentials.json`, or the macOS login Keychain (`Claude Code-credentials`) when that file is absent on darwin; a refreshed token is written back to the place it was read from | createClaudeCredentialStore (read, readCreds, write, mtimeMs), macKeychain, parseKeychainAttributes, decodeKeychainSecret | child_process (`security`) |
 | server/lib/machine-info.js | CPU model, memory and GPU names (probed once), used/total of every local disk (Linux /proc/mounts block devices, macOS / and /Volumes, Windows drive letters), live mainboard/SSD/CPU/GPU temperatures (each the average of its sensors) from Linux hwmon and nvidia-smi; GET /api/machine | machineInfo | os, fs, child_process (lspci, system_profiler, powershell, nvidia-smi) |
 | server/lib/self-update.js | the backend's own version and its in-place upgrade: starts the host updater (the installed scripts/install/unix/update.sh with RELAY_DIR on Linux/macOS, scripts/install/windows/update.ps1 on Windows) in a process that outlives the restart; refuses a git checkout and a second run within ten minutes; output goes to `relay-update.log` in the OS temp directory | backendVersion, startBackendUpdate (via routeContext), updateCommand, UpdateError | child_process |
 | server/lib/credential-file.js | encrypted relay.credentials.v1 payload for QR/file onboarding | encryptCredential | crypto |
@@ -69,7 +71,7 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | server/lib/context-windows.js | last context window size each agent + model reported, so a conversation without a reply can still show its limit | recordContextWindow(agent, model, size), contextWindowFor(agent, model); GET /api/history returns it as `contextWindow` | json-store |
 | server/lib/history.js, chat-sessions.js, groups.js, tokens.js | persistence | per-module load/save | json-store (history: own writer: background flush writes scope by scope in chunks; a file that exists but cannot be loaded is renamed to `<file>.corrupt-<time>` before history starts empty) |
 | server/lib/filesystem.js, workdir.js | path policy, streamed uploads under a byte cap, directory zip downloads | resolve/list/prepare, streamUploadToFile, sendDirectoryZip | tokens, fcm, cli-paths (denylist paths from their owners), machine-info (disks for `drives`) |
-| server/lib/usage.js, quota-*.js | quota reporting, schedules and sending them at a reset, keepalive | buildUsageReport, schedule API, createQuotaScheduleRunner | json-store, cli-paths |
+| server/lib/usage.js, quota-*.js | quota reporting, schedules and sending them at a reset, keepalive | buildUsageReport, schedule API, createQuotaScheduleRunner | json-store, cli-paths, claude-credentials |
 | server/lib/notify.js, push.js, fcm.js | notifications | notifyAll | subscription-store |
 | server/lib/terminal-manager.js | resumable PTY per token; owns the server's WebSocket upgrade listener | createTerminalManager; attachServer(server, otherUpgrade) hands other paths to otherUpgrade before a 404 | node-pty, bounded-integer |
 | server/lib/browser-manager.js | one headless Chrome/Chromium/Edge per token over `--remote-debugging-pipe`: JPEG screencast out, validated input in, loopback-only address bar; new loopback tabs navigate the streamed page; external HTTP(S) addresses go to the app (`open`) for confirmation | createBrowserManager (createTicket, handleUpgrade, attachClient, closeSession(tokenId), closeAll), findBrowser, launchPage (AbortSignal, closed promise), loopbackUrl | child_process, ws, cli-paths, bounded-integer |
@@ -79,8 +81,8 @@ script is under `scripts/` except the Node tools in `server/scripts/`.
 | app/core/lib/features/quota | quota state (QuotaController, one instance created in app/shell's main.dart and shared by the strip and usage screen) and QuotaStrip / QuotaUsageScreen (including Claude/Codex scheduled reset messages) | QuotaController, QuotaStrip, QuotaUsageScreen | lib/core |
 | app/core/lib/features/{browser,cli_agents,filesystem,machines,settings,ssh} | screens + controllers per area; take BackendClient and callbacks, never BotChatController | widgets | lib/core (machines also cli_agents, settings, ssh) |
 | app/shell/lib/main.dart | creates the shared controllers and starts the app | main() | app/core |
-| scripts/install/unix | Linux and macOS install, setup menu and service scripts; lib/linux.sh (apt-get, PM2) and lib/macos.sh (Homebrew, launchd) implement the adapter functions listed in lib/common.sh, and nothing else differs between the two | update.sh, setup/start/stop/status/uninstall (run through scripts/install/{linux,macos}) | server/scripts, server/ecosystem.config.js, PM2/launchd |
-| scripts/install/windows | Windows install/service adapter, command-line only: setup.ps1 is the same menu and six install steps (including open/isolated file access) as scripts/install/unix/setup.sh, over the operations in lib/setup.ps1; update.ps1 upgrades the installation in place (latest release checked against SHA256SUMS, or `-Archive <zip>`), restarting only the backend; it refuses while another process holds the folder or the backend port, moves the previous version aside on the same drive, removes `.js`/`.ps1` files a release no longer ships from its own folders (and the Setup.exe that releases up to 0.1.12 shipped), and puts the previous version back when installing fails or the new backend does not listen within 30 seconds. PID files (lib/common.ps1) record the process start time so a PID reused after a reboot is not mistaken for Relay | setup/start/stop/status/update/uninstall | server/scripts, Windows Scheduled Task |
+| scripts/install/unix | Linux and macOS install, setup menu and service scripts; lib/linux.sh (apt-get, PM2 and its `pm2 startup` systemd unit for boot) and lib/macos.sh (Homebrew, launchd; the backend LaunchAgent runs setup's `node` by absolute path with its folder first on PATH) implement the adapter functions listed in lib/common.sh, and nothing else differs between the two. The agent CLI menu takes agents, labels, login commands and install state from server/scripts/setup-status.js. update.sh skips a release the installation already has, stages it and runs `npm ci --omit=dev` in `.relay-update-new/`, swaps release trees whole and other release files one by one with the previous version in `.relay-update-old/`, restarts only the backend through the new release's `svc_restart_server`, and restores the previous version when the backend does not answer on its port within 30 seconds (or, on the next run, after an interruption) | update.sh, setup/start/stop/status/uninstall (run through scripts/install/{linux,macos}) | server/scripts, server/ecosystem.config.js, PM2/launchd |
+| scripts/install/windows | Windows install/service adapter, command-line only: setup.ps1 is the same menu and six install steps (including open/isolated file access) as scripts/install/unix/setup.sh, over the operations in lib/setup.ps1; update.ps1 upgrades the installation in place (latest release checked against SHA256SUMS, or `-Archive <zip>`), restarting only the backend; it refuses while another process holds the folder or the backend port, moves the previous version aside on the same drive, removes `.js`/`.ps1` files a release no longer ships from its own folders (and the Setup.exe that releases up to 0.1.12 shipped), and puts the previous version back when installing fails or the new backend does not listen within 30 seconds. PID files (lib/common.ps1) record the process start time so a PID reused after a reboot is not mistaken for Relay. The backend runs through server/scripts/keep-running.js, which starts server.js again five seconds after it exits, and its logs are appended across restarts | setup/start/stop/status/update/uninstall | server/scripts, Windows Scheduled Task |
 | scripts/dev/backend-sandbox | Ubuntu 24.04 Docker sandbox (`relay-sandbox`, non-root `relay`, `relay-sandbox-home` volume, host loopback `127.0.0.1:18787`) for testing Linux backend bundles and `update.sh` upgrades without colliding with the host backend | `sandbox.sh` (`build`, `install <tarball>`, `update [version]`, `shell`, `status`, `destroy`) | Docker, `scripts/install/unix` |
 | mcp/index.js | stdio entry: decrypts the credential once, newline-delimited JSON-RPC loop; env `RELAY_CREDENTIAL` (JSON or path), `RELAY_CREDENTIAL_PASSPHRASE`, optional `RELAY_WORKDIR`, `RELAY_MCP_NAME` | stdin/stdout | mcp/lib/* |
 | mcp/lib/{credential,protocol}.js | `relay.credentials.v1` decryption with the app's limits, refusing `*.trycloudflare.com`; MCP initialize/ping/tools/list/tools/call | decryptCredential; createMcpHandler | node:crypto |
@@ -123,7 +125,12 @@ architecture change (see Changes).
   authoritative, so any scope without a live session cold-starts by resuming it
   and degrades to exactly the old per-turn behaviour. Do not reintroduce a
   per-turn `spawn` for an agent that has a pool, because it repeats CLI startup
-  and cuts off background work when the process exits.
+  and cuts off background work when the process exits. Up to three solo-chat
+  sessions per backend can be pinned **always-on** (`server/lib/always-on-sessions.js`,
+  stored in backend memory only and cleared on restart): always-on scopes are
+  exempt from idle close and LRU eviction and sit outside each pool's `maxLive`
+  cap (ordinary sessions keep their full cap); toggling never spawns or restarts
+  a CLI process and stays out of agent settings / `optionsKey`.
   - `server/lib/claude-session-pool.js` — one Agent SDK process per scope.
     Settings resolve to SDK options (`claudeSdkOptions`) rather than argv, and
     are fixed for the life of a process, so a change restarts it with `resume`.
@@ -156,6 +163,9 @@ architecture change (see Changes).
       callbacks. Pending interaction replies recheck turn ownership before
       emitting more events; a failed prompt resumes idle watching. Trajectory
       discovery failures back off for at least five seconds.
+      Reasoning text (`agent_thought_chunk`) is never shown; each stretch of
+      it becomes one `Thinking…` progress line (`acpEventEmitter`), because
+      Cursor's Grok can think 20s+ between visible replies.
     - `codex-session-pool.js` — the codex app-server driver. `turn/start`
       returns as soon as the turn is *accepted*; the turn is settled by the
       later `turn/completed` notification. Everything except the sandbox applies
@@ -270,12 +280,21 @@ architecture change (see Changes).
   tokens. An explicit credential recheck
   uses `account/read` with `refreshToken: true` on the shared Codex app-server.
   `server/lib/usage.js` separately reads and may refresh OAuth credentials for
-  quota reporting and keepalive. A token or account identity value must never
+  quota reporting and keepalive. Claude's come through `server/lib/claude-credentials.js`, which on
+  macOS reads and writes the login Keychain; the first read asks the Mac's
+  desktop session to allow `security` access. A token or account identity value must never
   reach Relay's API or app, because agent credentials and account details stay
   on the backend host rather than being shared with every connected device.
 
 ### Backend modules and persistence
 
+- `server.js` drops `SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY` and `ANTIGRAVITY_*`
+  from its own environment at startup (`dropLoginSessionEnv` in
+  `lib/cli-paths.js`), before anything spawns an agent. `pm2 start/restart
+  --update-env` and `pm2 save` keep the calling shell's variables for good, and
+  agy treats the SSH ones as an SSH login: it then keeps its token in a file
+  instead of the keyring the host's own agy uses, and looks logged out.
+  `SSH_AUTH_SOCK` stays for git over SSH.
 - Each route factory receives through `routeContext` everything that holds state
   or does I/O: server state, persistence, processes, caches, and the helpers
   `server.js` builds. Tests replace those. A route requires directly only Node
@@ -329,6 +348,15 @@ architecture change (see Changes).
   the corresponding cache.
 - The shared `/api/events` stream is workdir-aware and has an idle timeout so a
   dead connection reconnects. Preserve scope filters when adding events.
+- `GET /api/history?tail=N` returns only the newest N messages (an older
+  backend ignores it and returns all). Use it where the app checks a turn's
+  state on a timer, as the background-turn check does, and never where it shows
+  the transcript.
+- `isPhoneOrTablet` (`core/platform/platform_capabilities.dart`) is the one
+  rule for a touch device with a soft keyboard: Android or iOS, natively or in
+  a mobile browser. The terminal key bar, Enter-to-send, the Browser's touch
+  mode, the drawer's edge swipe, and desktop/Web-only file drag-and-drop
+  (`supportsFileDrop`) all follow it.
 
 ### Files, Swarms, and side conversations
 
@@ -336,28 +364,71 @@ architecture change (see Changes).
   always applies the precise sensitive-path denylist and optional
   `RELAY_FS_ROOTS` allowlist in `server/lib/filesystem.js`.
 - A Swarm owns one canonical transcript and private resumable sessions per
-  member. A round runs in waves: each wave snapshots the transcript once and
-  runs everyone summoned in it in parallel from their own delta prompts. The
-  human's `@mentions` open wave one; `@mentions` inside a member's reply summon
-  the next wave, bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since
-  two members naming each other would otherwise never stop. A member never
-  summons itself, and a failed or cancelled turn summons no one. One round runs
-  at a time: a message sent meanwhile is refused (`GROUP_BUSY`), and the Swarm
-  history reports the running round (`runningRequestId`) so a reopened screen
-  still offers Stop. The app shows a member as working until its reply is
-  complete; Swarm replies are not streamed.
-- Swarm configuration is stored under the workspace that lists it, while its
-  chosen work tree is the directory members actually use.
+  member. A round runs in waves: within a wave, summoned members run one after
+  another in mention order, each planned right before it runs so its delta
+  includes replies already given earlier in the same wave. A delta starts after
+  the member's last reply that its session holds: a failed reply (`errorCode`)
+  never reached the session, and a reply older than the member's
+  `memberConfigs[key].resetAt` (set server-side when a work-tree change or a
+  re-added remote member replaces its session) is gone with it, so such a
+  member is fed the transcript again rather than answering without it. The human's
+  `@mentions` open wave one; a human message that mentions no one goes to the
+  member who spoke last (`lastSpeaker`), and is refused with `GROUP_NO_MENTION`
+  before any member has spoken. `@mentions` inside a member's reply summon the next
+  wave (skipping any member that already ran after that reply in the same wave),
+  bounded by `RELAY_SWARM_MAX_HOPS` (default 3, 0 disables) since two members
+  naming each other would otherwise never stop; members still named after the
+  last allowed wave come back as `group_done.unsummoned`, which the app shows
+  above the transcript. A member never summons itself,
+  and a failed or cancelled turn summons no one. One round runs at a time per
+  Swarm: a second message to that Swarm is refused (`GROUP_BUSY`), while
+  different Swarms run independently (tracked per group id in
+  `GroupChatController`), and the Swarm history reports the running round
+  (`runningRequestId`) so a reopened screen still offers Stop. The send request
+  stays open for the whole round, so when it drops or times out
+  (`NETWORK_*`) the app reloads history and treats the message as sent if the
+  backend recorded it; it also reloads the open Swarm whenever the event
+  stream reconnects, since a missed `group_done` would leave Stop showing. The
+  app shows a member as working until its reply is complete, with its newest
+  progress lines (`group_agent_progress`, broadcast also for rounds a streaming
+  client such as relay-mcp started), folded under the finished reply; Swarm
+  reply text is not streamed. A round sends one task notification, named after
+  the Swarm, when it ends without being stopped, and member turns send none; a
+  backend's hidden swarm session turns (`kind: 'swarm'`) send none either, since
+  the coordinating backend notifies for the round. Clearing a Swarm asks for
+  confirmation, because it also resets every member's session.
+- Swarms are stored bucketed by workspace in `groups.json`, while
+  `GET /api/groups` lists every Swarm on the backend regardless of the device's
+  current solo-chat directory and every group route resolves a Swarm by id
+  across buckets; Swarm events (`group_message`, `group_done`,
+  `group_cancelled`, `group_agent_*`) omit `scopeWorkdir` so any device viewing
+  the Swarm sees them. Each machine's default work directory (`GET /api/workdir`
+  `defaultDir`) is used as the Swarm form's default (rather than the device's
+  last-used directory). Work directories are validated on creation and on change
+  (`POST /api/groups/workdir`, refused with `GROUP_BUSY` while a round runs),
+  which resets only the affected members' sessions (purging local member
+  sessions, or creating new peer sessions and deleting the old ones with
+  rollback on failure). Each member's prompt states its own machine and work
+  directory, every other member's machine and work directory, and that it cannot
+  read or edit files on another machine.
 - A Swarm member is a local agent key or a remote member `<peerId>:<agentKey>`
   on another Relay backend (B); `peerId` is the first 12 hex digits of the
   SHA-256 of B's normalized `baseUrl`, not the credential's machine id, which
-  is random per generated credential. The Swarm record keeps `peers`
-  (`name`, `baseUrl`) and each remote member's B `workdir` and dedicated
-  `sessionId`; a peer no member references is dropped. A remote turn is the
-  same runAgentTurn with only `runAgent` replaced by B's `/api/chat`, so
-  history, events, mentions, Stop and notifications need no second path.
-  Remote members use B's own model/effort/permission. B is used only through
-  its existing API, so B needs no change and may be older.
+  is random per generated credential. When two members share an agent label,
+  local members also append `(<hostname>)` alongside remote members'
+  `(<peer name>)`; mentions accept readable `@<peer-slug>:<agent>` handles in
+  addition to `@<peerId>:<agent>` (nicknames keep working and win). A mention
+  matches the key, handle, label or nickname written right after `@` in any
+  script and needs no space after it (`@架构师看一下`); the longest match wins,
+  and peer slugs keep non-ASCII letters. `POST /api/groups/members` keeps the
+  stored config of a member the request sends no config for, so a client that
+  only changes members (relay-mcp) resets nobody; the Swarm form sends an
+  emptied stored config as `{}` to clear it. The Swarm
+  record keeps `peers` (`name`, `baseUrl`) and each remote member's B `workdir`
+  and dedicated `sessionId`; a peer no member references is dropped. A remote
+  turn is the same runAgentTurn with only `runAgent` replaced by B's
+  `/api/chat`, so history, events, mentions and Stop need no second path. Remote members use B's own model/effort/permission. B is used
+  only through its existing API, so B needs no change and may be older.
 - B's token never reaches A's disk: the app sends `peers: [{ baseUrl, token }]`
   in each Swarm request that reaches B, and A keeps it in memory for that
   request only — not in `groups.json`, history, events, responses, errors or
@@ -366,9 +437,15 @@ architecture change (see Changes).
   member without a credential in the request ends its turn with
   `PEER_NOT_LINKED`; unreachable/refused peers end it with `PEER_UNREACHABLE`/
   `PEER_UNAUTHORIZED`; the other members still run.
-- Creating a session or running a turn makes it B's active session, so the peer
-  client restores B's previous active session afterwards, keeping B's own user
-  where they were.
+- Peer Swarm sessions: `POST /api/sessions` accepts `kind: 'swarm'` (advertised
+  on `GET /api/sessions` via `features: ['swarm-sessions']`). Swarm sessions are
+  hidden from `GET /api/sessions`, have their own cap (32 per context, separate
+  from `MAX_SESSIONS` 8), never become active on create or `touchChatSession`,
+  still resolve by explicit id for `/api/chat`, delete and clear, and are
+  excluded from history search. When B advertises `swarm-sessions`, `peer-client`
+  skips active-session save/restore; against older peers, `peer-client` uses a
+  process-wide reference-counted guard per `(peer, agent, workdir)` so
+  concurrent rounds capture B's active session on 0→1 and restore it on 1→0.
 - The SSH terminal exchanges the bearer credential for a short-lived,
   single-use WebSocket ticket. Never put the bearer token in a socket URL,
   because URLs can expose it through access logs. A token record owns one
@@ -406,6 +483,7 @@ architecture change (see Changes).
 | Solo chat + sessions | routes/chat, routes/sessions, agent-turn, features/chat | active |
 | Chat links (solo chat only: Markdown links to web addresses open the system browser after a confirmation showing the full URL; file links, workdir-relative or absolute, open the file preview or browser; other schemes and plain-text paths stay inert) | features/chat chat_links, features/filesystem | active |
 | Session rename (every session except Main) | routes/sessions, chat-sessions, features/chat drawer | active |
+| Always-on sessions (up to 3 solo-chat sessions per backend in memory; exempt from idle close, LRU eviction, and per-pool caps; chat header pin toggle and Home list with jump-to-session and unpin; hidden against older backends returning 404) | always-on-sessions, session-slots, agents, routes/sessions, core/models/always_on_session, core/backend, features/chat | active |
 | Message Copy (all settled replies) and Edit (user messages: text back into the composer, nothing rewritten) | features/chat | active |
 | Per-session agent controls (model/effort/permission/fast) | agent-options, agent-settings, chat/agent_controls | active |
 | Model picker second page (bottom link): Cursor models outside its plan (`paid`), Claude/Codex models a newer one replaced (`legacy`); Swarms list first-page models only | agent-options, chat/agent_controls, chat/swarm_form_dialog | active |
@@ -416,8 +494,8 @@ architecture change (see Changes).
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
 | Swarm members on other machines (form groups agents by machine from Settings → Machine credentials; remote members show their machine name; the app sends the peer credential per request) | routes/group, groups, peer-client, core/backend, core/models/group, chat/swarm_form_dialog, chat/group_chat_* | active |
-| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry; `GET /api/workdir/browse` reports `drives`, the disks the machine page lists (Windows drive letters; `/` plus mounted disks on Unix), empty when isolated; with more than one, the first breadcrumb opens a menu that switches between them) | routes/fs, filesystem, features/filesystem | active |
-| Workspace navigation (Home shows up to five recent workspaces; File System shows up to five in one compact, horizontally scrolling row, and selecting a tag switches the active workspace and displayed directory; Home current directory and chat title open the file browser; selecting a different recent directory on Home switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
+| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry, desktop and desktop-Web drag-and-drop upload overlay (`supportsFileDrop`, `dev.relay.app/file_drop` on Linux/Windows/macOS and HTML5 drag events on Web), and settled download status cleared on workspace switch or leaving the screen; `GET /api/workdir/browse` reports `drives`, the disks the machine page lists (Windows drive letters; `/` plus mounted disks on Unix), empty when isolated; with more than one, the first breadcrumb opens a menu that switches between them) | routes/fs, filesystem, features/filesystem, core/download, core/platform | active |
+| Workspace navigation (Home shows up to five recent workspaces; File System shows up to five in one compact, horizontally scrolling row, and selecting a tag switches the active workspace and displayed directory; Home current directory opens the file browser; the chat title opens WorkspacesPage (current workspace, up to seven other recent ones that switch and return to the chat, File System pinned at the bottom); selecting a different recent directory on Home switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted, rendered Markdown without embedded images and source-first past 20k chars with toggle; images up to 20 MiB / 40 MP) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |
 | SSH terminal | routes/terminal, terminal-manager, features/ssh | active |
@@ -427,12 +505,11 @@ architecture change (see Changes).
 | Device-local wallpaper with acrylic surfaces (behavior under Verification) | core/settings, core/widgets, features/settings, features/chat | active |
 | Tutorial (Home and Settings entry, and the credential screen's deploy guide): a searchable article list grouped by category, one Markdown article per feature in `app/core/assets/tutorial/{en,zh}/<slug>.md` with title/category/order/summary/keywords front matter; the list comes from the asset manifest, so a new file is a new article | features/settings/tutorial_screen, features/chat home, features/machines credentials | active |
 | Demo mode (client-only simulated backend for `https://demo.relay.invalid` via `DemoHttpClient`, welcome screen "Try the demo", "Demo mode" banner with "Exit demo", attachments, SSH, Browser, automatic update checks and push registration disabled, author GitHub link on welcome and About) | core/backend/demo_http_client, core/backend/api_transport, core/models/machine_credential, core/widgets/author_contact_link, features/machines, features/chat, features/settings | active |
-| What's new (Home entry above Tutorial; per release 1-3 plain-language highlights plus other changes in small text) | features/settings/whats_new_screen, features/chat home | active |
 | Machine details hardware card (CPU, memory, GPU, temperatures refreshed every 10 s while the page is open) | machine-info, routes/meta, features/machines | active |
 | Credential onboarding | server/scripts/create-credential, core/credentials, features/machines | active |
-| One backend setup for Linux and macOS: extract the shared tarball and run its root `./install.sh` for six steps including the open/isolated file access choice. Setup uses apt-get and PM2 on Linux or Homebrew and launchd on macOS. The bundled `scripts/install/unix/update.sh` verifies and applies upgrades | scripts/install/unix | active |
+| One backend setup for Linux and macOS: extract the shared tarball and run its root `./install.sh` for six steps including the open/isolated file access choice and the port. Setup uses apt-get and PM2 on Linux (offering to start at boot) or Homebrew and launchd on macOS. On every OS the network mode defaults to Tailscale on a tailnet, a Quick Tunnel install warns that its URL changes, and setup names the folder Relay is already installed from. The bundled `scripts/install/unix/update.sh` verifies and applies upgrades | scripts/install/unix | active |
 | App update (at start-up and from Settings → Check for updates: compares with the latest GitHub release, then downloads its asset and hands it to the system: Android package installer, Windows replaces the app folder and restarts, Linux opens the .deb, macOS unpacks in Downloads; iOS only reports, Web updates with its backend) | features/settings (update_check, app_update), features/chat (start-up call) | active |
-| Backend update (Machine details shows the backend version and, when a release is newer, Update and restart; `POST /api/backend-update`, `version` in `GET /api/machine`; host entries are the bundled Unix update.sh and Windows `update.cmd`) | self-update, routes/meta, scripts/install/unix/update.sh, scripts/install/windows/update.ps1, features/machines | active |
+| Backend update (Machine details shows the backend version and, when a release is newer, Update and restart; `POST /api/backend-update`, `version` in `GET /api/machine`; host entries are the bundled Unix update.sh and Windows `update.cmd`; an update that has not changed the version after ten minutes says it did not finish) | self-update, routes/meta, scripts/install/unix/update.sh, scripts/install/windows/update.ps1, features/machines | active |
 | Relay MCP for personal agents (stdio; status, chat/task/cancel, history, sessions, agent options/settings/update, workdir, files, Swarms, usage, quota schedules, machine, terminal) | mcp | active |
 
 Deprecated features stay listed until their code is deleted, then the row is
@@ -452,6 +529,7 @@ navigation on 2026-11-09.
 - `(cd app/core && flutter test --no-pub)` -> "All tests passed!"
 - `node scripts/dev/readme_screenshots.js docs/farrari.png` (Web build present) -> fourteen English/Chinese README screenshots (home and chat at 1440×960; mobile chat, Swarm, files, settings and tutorial at 800×1640) in `docs/screenshots/`, using an isolated demo backend with the Ferrari wallpaper.
 - `node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh` (Web build present) -> ten Chinese demo screenshots (home, chat, empty chat, Swarm, files, browser, image preview, machine details, quota usage and settings) in `docs/screenshots/mobile-zh-9x16/`, each 1080×1920 (9:16), with translated demo conversations and the README wallpaper settings; quota capture waits for all usage queries to finish.
+- `node scripts/dev/web_smoke.js` (Web build present, `relay-server` running on `RELAY_TEST_URL`, default `http://127.0.0.1:8787`) -> exit 0, every check `PASS`: home, chat, files, browser and settings at 1440×960 and 400×820 with no console errors, page errors, failed requests or HTTP ≥ 400, one real Claude Code reply on desktop, screenshots in `~/playground/relay-web-test/shots/`, and no `relay-web-test` token or `[web-test]` session or Swarm left afterwards.
 - Settings → Wallpaper: Replace image and Remove wallpaper controls appear above the preview and adjustment controls.
 - Settings → Wallpaper: choosing or removing an image updates the preview before Save; import/processing displays a spinner.
 - Settings → Wallpaper: one opacity slider controls the current theme, and moving it updates the preview before Save.
@@ -467,6 +545,7 @@ navigation on 2026-11-09.
 - An empty chat with a wallpaper displays neither an agent icon nor "Start chatting" text; removing the image restores solid surfaces and that placeholder.
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
+- `node --test server/test/usage-backoff.test.js` -> repeated usage queries without a Claude login log once, then retry when the credential file appears. The test uses a temporary home and simulates an empty macOS Keychain.
 - `npm --prefix server test` -> "# fail 0"; includes browser startup/shutdown and token-revocation cleanup, ACP settings/background serialization, cancellation during interactions, prompt-failure recovery and trajectory-discovery backoff.
 - `(cd server && node --test test/codex-session-pool.test.js test/agents.test.js test/agent-turn.test.js)` -> "# fail 0"; covers automatic Codex turns, child-work idle retention, turn-id isolation, cancellation, completed-item text and background reply delivery.
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities
@@ -474,7 +553,7 @@ navigation on 2026-11-09.
 - (Two backends A and B, the app holding both credentials) New swarm on A lists B's usable agents under B's name; adding B's Claude creates a "Swarm: <name>" session on B while B keeps its previous active session; `@<B's Claude>` replies in A's transcript labelled "Claude Code (<B name>)"; Stop during that reply stops it on B; on a device without B's credential the member chip shows "This device is not connected to that machine".
 - `npm --prefix mcp test` -> "# fail 0"; `server/node_modules/.bin/eslint -c server/eslint.config.js mcp` -> exit 0
 - (Backend running, a credential made with `npm --prefix server run credential -- --label <bot>`) `RELAY_CREDENTIAL=<json> RELAY_CREDENTIAL_PASSPHRASE=<password> node mcp/index.js` answers `tools/list` with 17 tools; `relay_status` lists the agents, `relay_terminal` with `echo ok` returns `ok`, and a `relay_chat` that outlasts `waitSeconds` returns `running` and then `done` from `relay_task`.
-- On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes; a bundle missing `server/scripts/windows-setup.js` reports an incomplete extraction, repeated `.env` rewrites keep non-ASCII comments byte-for-byte, a bundle's `runtime\node` leads PATH ahead of the user PATH, and the user PATH sync appends CLI folders and the bundled Node once, keeps `%VARIABLES%` unexpanded, skips an unchanged rewrite and is undone by uninstall (registry access stubbed), `Start-RelayProcess` called with captured stdout returns while the started process keeps running and writing its log, and a PID file whose start time does not match (a PID reused after a reboot) or a PID-only file naming a process other than node/cloudflared is not treated as running and is not killed by Stop-RelayProcess.
+- On Windows, `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/test_windows_setup.ps1` -> setup contract passed, without host service changes; a bundle missing `server/scripts/setup-status.js` reports an incomplete extraction, repeated `.env` rewrites keep non-ASCII comments byte-for-byte, a bundle's `runtime\node` leads PATH ahead of the user PATH, and the user PATH sync appends CLI folders and the bundled Node once, keeps `%VARIABLES%` unexpanded, skips an unchanged rewrite and is undone by uninstall (registry access stubbed), `Start-RelayProcess` called with captured stdout returns while the started process keeps running and writing its log, and a PID file whose start time does not match (a PID reused after a reboot) or a PID-only file naming a process other than node/cloudflared is not treated as running and is not killed by Stop-RelayProcess.
 - Windows backend ZIP (`scripts/release/package_windows_backend.ps1`): entries use `/`, dependency trees come first and the top-level `.cmd` launchers last, so a partly extracted folder has no `setup.cmd` yet; the bundle contains no `Setup.exe` and `bundle-info.json` has no `setupGui` field.
 - Windows release bundle: `setup.cmd` provides install/reinstall, CLI selection, Web on/off, open/isolated file access, all four network modes, status, token create/delete/list/re-show, an agent terminal with the backend's PATH, and uninstall with retained backend state; Web and API share Node. Setup appends folders holding an agent CLI, and the bundled Node when the host has none, to the user PATH, records them in `%LOCALAPPDATA%\Relay\user-path.json`, and uninstall removes only those.
 - `(cd server && node -e "require('node-pty')")` -> exit 0
@@ -488,28 +567,33 @@ navigation on 2026-11-09.
 - CI runs the backend suite on Linux with Node 22 and 24 and on Windows and macOS with Node 24; it builds the Linux desktop client on Ubuntu 22.04 and the latest Ubuntu runner, packages the Ubuntu 22.04 build, and builds the Windows desktop client, an unsigned iOS client and the macOS client.
 - `(cd app/shell && flutter build apk --release --no-pub)` -> fails naming `android/key.properties` when it is missing; with it, `apksigner verify --print-certs` on the APK shows the SHA-256 that `.github/workflows/release.yml` (`EXPECTED_ANDROID_CERT`, also checked against the keystore alias with `keytool` before the build) and `scripts/release/add_signed_android.sh` (`expected_cert`) expect
 - Tutorial: `node scripts/release/check_docs.js` reports every article missing in the other language and every unresolved link; `app/core/test/tutorial_test.dart` checks that every article parses with the same slugs and orders in both languages, that search needs every query word and ranks title hits first, and that the list, search and an article link work on screen. Changing a feature updates its article in both languages.
-- Home: a What's new section sits above Tutorial; its entry shows the newest version and highlight names and opens a page listing 1-3 highlights per release with other changes in small text, in English and Chinese.
 - Drawer → Home works while an agent turn is running, even when every agent is busy; the turn keeps running on the backend and shows again on return. Covered by `app/core/test/chat_cancel_test.dart`.
-- iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`).
+- iOS: with the app in the background, finish a turn from another client; on reopening, the chat shows it without pressing refresh (`onAppResumed` reconnects events and pulls history once; `app/core/test/workdir_switch_test.dart`). Desktop and Web focus changes reconnect nothing; only a return through hidden/paused does (`app/core/test/machine_switch_test.dart`).
 - Home: tapping the current workspace opens File System; tapping a recent workspace selects it. While refreshing, directory actions are disabled; switching machines clears recent directories immediately and late responses from earlier refreshes cannot replace the list or enable a previous machine's directory action.
 - Home and File System show at most five workspaces in backend recency order. File System keeps them in one compact horizontally scrolling row above the breadcrumbs, with folder-name labels and full-path tooltips; tapping a tag switches the active workdir and displays its directory, while navigating through folders or breadcrumbs only browses. An unavailable recent-workspace list does not prevent file browsing. Covered by `app/core/test/home_navigation_page_test.dart` and `app/core/test/file_system_screen_test.dart`.
-- Solo chat: tapping the chat title opens File System through BackendClient and the set-workdir callback.
+- Solo chat: tapping the chat title opens Workspaces with the current workspace and up to seven other recent ones; choosing one switches the workdir and returns to the chat, and File System stays pinned at the bottom. Covered by `app/core/test/home_navigation_page_test.dart`.
 - Drawer: every session except Main has a rename button; a new name shows in the list and the chat header without changing the active session.
+- Always-on sessions: header pin toggles on/off (hidden on 404 backends), 4th pin returns 409 `ALWAYS_ON_LIMIT` with the limit SnackBar, Home lists pinned sessions below Recent workspaces with tap-to-open (workdir + agent + session) and trailing unpin, and toggling never restarts Claude. Covered by `server/test/always-on-sessions.test.js`, `server/test/session-slots.test.js`, `server/test/sessions-route.test.js`, `server/test/claude-session-pool.test.js`, and `app/core/test/always_on_sessions_test.dart`.
 - Solo chat links: tapping a workdir-relative file link with a `:3` line suffix in a finished reply opens that file's preview; `file:` links accept an empty host or `localhost` and ignore URI query/fragment metadata; a directory link opens File System there; a missing file shows "The file does not exist or is not accessible."; `[x](https://…)` shows "Open in browser?" with the full URL and launches only on Open; `javascript:` links do nothing. Coverage: `app/core/test/chat_links_test.dart`.
 - Solo chat: a settled message shows Copy; a user message also shows Edit, which puts its text in the composer and sends nothing.
 - File browser: pinned path breadcrumbs, the `..` parent row, and swiping right navigate up directories; tapping a UTF-8 text file shows its contents (Markdown files up to 20,000 characters render by default without loading embedded images and toggle to source; larger Markdown opens as source) and tapping a supported image (JPG, PNG, WebP, GIF, BMP, ICO up to 20 MiB and 40 million pixels) renders a zoomable preview; a non-image file containing a NUL byte or an oversized/malformed image shows "Cannot preview this file."; past 512 KiB text shows "Only the first 512 KiB is shown."
+- File browser on Android 9 and earlier: Download saves to `Android/data/dev.relay.app/files/Download` with no permission prompt; on Android 10+ it saves to Download and a duplicate name is reported as MediaStore saved it (`name (1).ext`).
+- File browser on Web: picking or dropping a file over 100 MB shows the size message without the tab reading the file.
+- Windows desktop: on a 1920×1080 screen at 150% scaling the first window fits above the taskbar with the composer visible.
 - File browser on iOS: Download saves to the app's Documents folder, shown in Files → On My iPhone → Relay. Against a backend older than the client, New Folder reports that the backend is too old instead of an HTML page.
 - File browser: Windows UNC breadcrumbs keep the server and share as one absolute root; after an initial workdir request fails, Refresh retries it without leaving the screen. Regression coverage lives in `app/core/test/file_system_screen_test.dart` and `app/core/test/home_navigation_page_test.dart` (including delayed responses across machine switches).
 - Solo chat + → Attach file: the file appears as `<workdir>/.relay/uploads/<yyyyMMdd-HHmmss>-<name>` and its relative path is appended to the draft, nothing sent.
-- On a fresh Linux or macOS host, extracting `relay-backend-linux-macos-v<VERSION>.tar.gz` and running its root `./install.sh` starts Step 1/6 in the extracted directory. An installed copy upgrades with `./scripts/install/unix/update.sh`, preserving `server/.env` and restarting the backend. Coverage: `scripts/release/installer-upgrade.test.js`.
-- `node --test scripts/release/unix-setup.test.js` on Linux or macOS -> 6 pass: Tailscale mode (4) binds only the detected tailnet IP. Native-only installs use its HTTP address; Web uses the configured HTTPS proxy origin in both PUBLIC_BASE_URL and the credential. Setup returns to the network menu on missing or invalid Tailscale output. A Quick Tunnel install prints Step 1/6 to 6/6 with the same titles on both platforms and starts PM2 on Linux, both LaunchAgents on macOS; choosing Isolated at Step 4/6 writes `RELAY_WORKSPACE_ROOT=<install>/workspace` and creates the directory, Open leaves it empty.
-- Linux or macOS setup → 5 (Install agent CLIs): lists Claude Code, Codex, Cursor, OpenCode and Hermes with ✔ installed / ✘ not installed matching `GET /api/agents` `installed`; Enter installs nothing; each installed pick prints its login command.
+- On a fresh Linux or macOS host, extracting `relay-backend-linux-macos-v<VERSION>.tar.gz` and running its root `./install.sh` starts Step 1/6 in the extracted directory. An installed copy upgrades with `./scripts/install/unix/update.sh`, preserving `server/.env` and tokens, dropping files the release no longer ships from its trees and restarting only the backend (the tunnel keeps its URL). `node --test scripts/release/installer-upgrade.test.js` -> 8 pass: a mismatched checksum changes nothing; the latest release already installed changes nothing; a failed `npm ci` changes nothing; a backend that does not answer is replaced by the previous version, restarted; an interrupted swap is undone by the next run; macOS rewrites the backend LaunchAgent with an absolute `node`, Linux re-registers only `relay-server` with PM2.
+- `node --test scripts/release/unix-setup.test.js` on Linux or macOS -> 9 pass: the asked port reaches `PORT` and the tunnel arguments; Tailscale is the default network mode on a tailnet; a backend registered from another folder opens the menu with the `RELAY_DIR=... update.sh` command instead of installing; on a systemd host Linux setup registers `pm2 startup systemd` through sudo. Tailscale mode (4) binds only the detected tailnet IP. Native-only installs use its HTTP address; Web uses the configured HTTPS proxy origin in both PUBLIC_BASE_URL and the credential. Setup returns to the network menu on missing or invalid Tailscale output. A Quick Tunnel install prints Step 1/6 to 6/6 with the same titles on both platforms and starts PM2 on Linux, both LaunchAgents on macOS; choosing Isolated at Step 4/6 writes `RELAY_WORKSPACE_ROOT=<install>/workspace` and creates the directory, Open leaves it empty.
+- Linux or macOS setup → 5 (Install agent CLIs): lists Claude Code, Codex, Cursor, OpenCode, Antigravity and Hermes with ✔ installed / ✘ not installed matching `GET /api/agents` `installed` (`node server/scripts/setup-status.js --agents`; coverage `server/test/setup-status.test.js`); Enter installs nothing; each installed pick prints its login command.
+- Setup menu → 9 with a Quick Tunnel on Linux, macOS or Windows: the QR carries the tunnel's current URL, read from the newest of the PM2, LaunchAgent or `<install>/logs` tunnel logs. Coverage: `server/test/create-credential.test.js`.
+- A Windows backend that exits starts again within five seconds (server/scripts/keep-running.js). Coverage: `server/test/keep-running.test.js`.
 - Machine details: Enter SSH comes first, then a card with the machine name, CPU model with thread count, memory, one row per GPU, and one row per disk as `<mount>  <used> used / <total> total` matching `df` on the host.
 - Machine details temperatures: at most four tiles in the order Mainboard, SSD, CPU, GPU, each the average of that part's sensors (Linux; other systems show only GPU via nvidia-smi or "No readable temperature sensors"); a tile changes within 10 s of a temperature change.
 - Machine details status text has no Backend online, timeout, quota watch, transfer limit, token, runtime counter or Web build lines.
 - Settings → Check for updates: on the latest version it shows "You are on the latest version, <version>"; when GitHub's latest release tag is higher, Android, Windows, Linux and macOS show a "Version <tag> is available" dialog with Later and Update, while iOS and Web show "Version <tag> is available on GitHub Releases"; offline it shows "Could not check for updates. Try again later." The same dialog appears once at app start when a release is newer, and nothing appears otherwise. Coverage: `app/core/test/app_update_test.dart`.
-- (A release newer than the installed app) Update downloads with a progress bar, then: Android opens the package installer and the app restarts on the new version with its machines kept; Windows closes the app, replaces its folder and starts the new version; Linux opens the .deb in the software installer; macOS leaves the new Relay.app unpacked in Downloads. Not yet run against a real release.
-- (A release newer than the backend, installed from a release bundle) Machine details shows "Relay backend <version>" and "Update to <tag> and restart"; confirming shows "Updating the backend…", then "Backend updated to <tag>" within ten minutes, with `server/.env`, tokens and chats unchanged and a Quick Tunnel URL unchanged; the updater's output is in `relay-update.log` in the OS temp directory. A backend started from a git checkout answers 409 `UPDATE_UNSUPPORTED`. Coverage: `server/test/self-update.test.js`, `app/core/test/machine_details_screen_test.dart`; the Windows updater was run against a fixture installation and a local ZIP (old backend killed, trees replaced, `.env` kept, backend restarted), Linux and macOS not yet run against a real release.
+- (A release newer than the installed app) Update downloads with a progress bar, then: Android opens the package installer and the app restarts on the new version with its machines kept; Windows closes the app, replaces its folder and starts the new version; Linux opens the .deb in the software installer; macOS leaves the new Relay.app unpacked in Downloads. On Windows the replacement is `relay-client-update.ps1` (UTF-8 with BOM) beside the downloaded ZIP in `%TEMP%`, started through `cmd start` because Windows PowerShell runs nothing without a console (Dart's detached mode); it imports `$PSHOME`'s Archive module, and failures go to `relay-client-update.log` beside it. Coverage: `app/core/test/app_update_test.dart` runs the real replacement on a Windows host (skipped elsewhere). 0.2.0 and 0.2.1 Windows clients cannot update themselves and need 0.2.2 installed by hand. Not yet run against a real release.
+- (A release newer than the backend, installed from a release bundle) Machine details shows "Relay backend <version>" and "Update to <tag> and restart"; confirming shows "Updating the backend…", then "Backend updated to <tag>" within ten minutes, with `server/.env`, tokens and chats unchanged and a Quick Tunnel URL unchanged; the updater's output is in `relay-update.log` in the OS temp directory. A backend started from a git checkout answers 409 `UPDATE_UNSUPPORTED`. When the version has not changed after ten minutes of polls, the app says "The backend update did not finish" and names `relay-update.log`. Coverage: `server/test/self-update.test.js`, `app/core/test/machine_details_screen_test.dart`; the Windows updater was run against a fixture installation and a local ZIP (old backend killed, trees replaced, `.env` kept, backend restarted), Linux and macOS not yet run against a real release.
 - `grep -rn "import '\.\./chat/\|features/chat/" app/core/lib/features --include=*.dart | grep -v '^app/core/lib/features/chat/'` -> no output
 - `grep -rn "features/" app/core/lib/core --include=*.dart` -> no output
 - After a reply in solo chat with Claude Code, Codex, OpenCode, Antigravity, or Hermes, the line above the composer ends with `<used> / <window>` (e.g. `42k / 200k`); `<window>` reads `?` until that agent + model has replied once.
@@ -552,8 +636,7 @@ navigation on 2026-11-09.
 Architecture-level changes only. Keep the latest 10; fold older entries into
 one summary line.
 
-- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18); session-slots, sse and bounded-integer extracted from the session pools and streams so their policies could not drift (2026-10-18); ACP pool gained an optional authenticate step so Cursor joins the existing session pool (2026-10-25); Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR, because it applies a model to its whole process and persists every choice as the host CLI's default (2026-10-25); server/lib/cli-paths.js added so agents.js, model-discovery.js and filesystem.js share one CLI lookup (2026-10-26); chat screens split by responsibility and routes given routeContext for state and I/O (2026-10-26).
-- 2026-10-29: repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/. Reason: front end and back end were indistinguishable at the root, the old backends directory and server/ read as two backends, and scripts/ mixed user installers with developer tools.
+- Earlier: server routes split into server/routes (2026-06-10); agent controls persisted per workdir + agent + session (2026-10-02); feature dependencies made acyclic, with the drawer, quota state and code_block.dart moved so features never import each other (2026-10-17); context-windows.js added because no CLI exposes a model's context window before a reply (2026-10-17); upload/zip, background turns and the scheduled-message runner moved from server.js into lib/ (2026-10-18); session-slots, sse and bounded-integer extracted from the session pools and streams so their policies could not drift (2026-10-18); ACP pool gained an optional authenticate step so Cursor joins the existing session pool (2026-10-25); Cursor runs one ACP process per model choice under Relay's own CURSOR_CONFIG_DIR, because it applies a model to its whole process and persists every choice as the host CLI's default (2026-10-25); server/lib/cli-paths.js added so agents.js, model-discovery.js and filesystem.js share one CLI lookup (2026-10-26); chat screens split by responsibility and routes given routeContext for state and I/O (2026-10-26); repository regrouped by role into app/{core,shell}, scripts/{install,release,dev} and docs/ (2026-10-29).
 - 2026-10-29: design constraints moved from AGENTS.md into ENGINEERING.md (Invariants); AGENTS.md keeps the working rules for agents that share the workspace. Reason: the constraints are part of the system's design and belong with the module map, and two copies drifted apart.
 - 2026-11-09: added `mcp/`, a stdio MCP server that drives the backend only through its HTTP API and signs in with the app's encrypted credential. Reason: personal agents need the app's capabilities without new backend surface or a second auth model.
 - 2026-11-15: added server/lib/browser-manager.js and features/browser; terminal-manager's upgrade listener hands paths it does not own to the browser manager. Reason: viewing a dev page on the backend's localhost from outside its network needs a host-side browser over Relay's existing authenticated connection, without port forwarding (path rewriting, HMR sockets, same-origin access to the Relay Web client) or new dependencies.
@@ -563,6 +646,7 @@ one summary line.
 - 2026-11-06: Antigravity joins the shared ACP pool with isolated session workers, reads per-turn context occupancy and window limits from the language server's `GetCascadeTrajectory`, and queries quota from `RetrieveUserQuotaSummary` with a headless `agy -p /usage --output-format json` fallback. Reason: concurrent conversations need independent settings, ACP emits no `usage_update` for Antigravity, and quota checks must work without a running conversation or model inference cost.
 - 2026-11-17: removed the Windows GUI setup (Setup.cs, setup-action.ps1, scripts/release/build_windows_setup.ps1, the bundle's Setup.exe and `setupGui`); scripts/install/windows/setup.ps1 mirrors scripts/install/unix/setup.sh. Reason: one command-line setup on every OS, so Windows does not carry a second UI to keep in step with the Unix menu.
 - 2026-11-16: added server/lib/self-update.js and scripts/install/windows/update.ps1; the app downloads and installs its own releases (open_filex hands the file to the system). Reason: updating meant a manual download on every device and a host login for every backend; the backend route reuses the host's existing upgrade path instead of a second updater.
+- 2026-11-21: the backend install flow was reviewed across Linux, macOS and Windows. server/scripts/windows-setup.js became setup-status.js, which the Unix agent menu also reads; Windows runs the backend under server/scripts/keep-running.js; Unix update.sh stages, health-checks and rolls back like update.ps1 and restarts through the new release's adapter; Linux registers PM2's boot unit. Reason: Linux did not survive a reboot, a Windows crash stayed down, a failed Unix update could leave a remote host dead, and the two setups had drifted (agent list, port, Quick Tunnel URL handling).
 
 ## Review
 

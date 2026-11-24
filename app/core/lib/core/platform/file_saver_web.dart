@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -24,13 +25,11 @@ Future<DownloadSaveResult> saveDownloadStream({
   }
   final web.Blob blob = web.Blob(<JSAny>[builder.takeBytes().toJS].toJS);
   final String url = web.URL.createObjectURL(blob);
-  try {
-    web.HTMLAnchorElement()
-      ..href = url
-      ..download = fileName
-      ..click();
-  } finally {
-    web.URL.revokeObjectURL(url);
-  }
+  // Safari fails a download whose blob URL is revoked before it has started.
+  Timer(const Duration(minutes: 1), () => web.URL.revokeObjectURL(url));
+  web.HTMLAnchorElement()
+    ..href = url
+    ..download = fileName
+    ..click();
   return const DownloadSaveResult(isBrowserDownload: true);
 }

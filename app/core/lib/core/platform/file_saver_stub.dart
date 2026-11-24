@@ -7,7 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'download_save_result.dart';
 
 /// Talks to the Android side, which streams a file into the shared MediaStore
-/// Downloads collection (the folder the system "Files"/"Downloads" app shows).
+/// Downloads collection (the folder the system "Files"/"Downloads" app shows),
+/// or before Android 10 into the app's own Downloads folder.
 const MethodChannel _downloadsChannel =
     MethodChannel('dev.relay.app/downloads');
 

@@ -12,7 +12,7 @@ Open [Machine details](machine-details.md). The **Relay backend** row shows the 
 
 After you confirm, the backend downloads the latest release and restarts. **Running turns and terminals are interrupted**, so wait for tasks to finish first. The update keeps `server/.env`, tokens, chats and settings.
 
-It uses the same upgrade path as the host: the installed `scripts/install/unix/update.sh` on Linux and macOS, `update.cmd` on Windows. Its output goes to `relay-update.log` in the OS temp directory.
+It uses the same upgrade path as the host: the installed `scripts/install/unix/update.sh` on Linux and macOS, `update.cmd` on Windows. Its output goes to `relay-update.log` in the OS temp directory. If the backend still reports its old version after ten minutes, the app says the update did not finish and offers it again; the reason is in that log.
 
 The app cannot update a backend when:
 
@@ -26,7 +26,9 @@ The app cannot update a backend when:
 | Linux / macOS | run `./scripts/install/unix/update.sh` in the Relay folder |
 | Windows | run `.\update.cmd` in the Relay folder |
 
-On Windows the update changes nothing while another process still runs from the Relay folder or holds the backend port (for example a backend started with `npm start`, or an agent left running); it names the process so you can stop it. If the new version does not start, the previous one is put back and started again.
+Both do nothing when you already have the latest release. They install the new version's dependencies before changing anything, and if the new version does not answer on its port within 30 seconds, they put the previous one back and start it again. On Linux and macOS an update that was interrupted (a power cut, for example) is undone by the next run.
+
+On Windows the update changes nothing while another process still runs from the Relay folder or holds the backend port (for example a backend started with `npm start`, or an agent left running); it names the process so you can stop it.
 
 For an installation from 0.1.12 or earlier, extract the new archive to a separate directory. From that new folder run `RELAY_DIR="/absolute/path/to/existing/relay" ./scripts/install/unix/update.sh`, substituting the existing installation path.
 

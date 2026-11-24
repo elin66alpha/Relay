@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/agent_options.dart';
 import '../models/agent_session.dart';
+import '../models/always_on_session.dart';
 import '../models/backend_status.dart';
 import '../models/chat_history.dart';
 import '../models/chat_message.dart';
@@ -21,6 +22,7 @@ import 'api_transport.dart';
 import 'sse_codec.dart';
 
 export '../models/agent_session.dart' show AgentSessionList;
+export '../models/always_on_session.dart';
 export '../models/backend_status.dart';
 export '../models/chat_history.dart';
 export '../models/filesystem.dart';
@@ -659,14 +661,74 @@ class BackendClient {
     return AgentSessionList.fromJson(decoded.cast<String, Object?>());
   }
 
+  AlwaysOnSessionList _alwaysOnListFrom(Object? decoded) {
+    if (decoded is! Map) {
+      throw BackendException('Invalid always-on sessions response.');
+    }
+    return AlwaysOnSessionList.fromJson(decoded.cast<String, Object?>());
+  }
+
+  /// Returns null when an older backend answers 404 (feature unsupported).
+  Future<AlwaysOnSessionList?> fetchAlwaysOnSessions() async {
+    try {
+      final Object? decoded = await _requestJson(
+        'GET',
+        '/api/sessions/always-on',
+      );
+      return _alwaysOnListFrom(decoded);
+    } on BackendException catch (err) {
+      if (err.status == 404 || err.code == 'BACKEND_ROUTE_MISSING') {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<AlwaysOnSessionList> setSessionAlwaysOn(
+    String agentKey,
+    String sessionId,
+    bool alwaysOn,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/always-on',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'sessionId': sessionId,
+        'alwaysOn': alwaysOn,
+      },
+    );
+    return _alwaysOnListFrom(decoded);
+  }
+
+  Future<AlwaysOnSessionList> removeAlwaysOnSession(
+    String agentKey,
+    String workdir,
+    String sessionId,
+  ) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/sessions/always-on/remove',
+      body: <String, Object?>{
+        'agent': agentKey,
+        'workdir': workdir,
+        'sessionId': sessionId,
+      },
+    );
+    return _alwaysOnListFrom(decoded);
+  }
+
   /// Fetches the stored conversation for one agent session so the app can show
-  /// the previous chat on reopen without persisting anything locally.
+  /// the previous chat on reopen without persisting anything locally. [tail]
+  /// asks for only the newest messages; an older backend returns them all.
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) async {
     final String query = 'agent=${Uri.encodeQueryComponent(agentKey)}'
-        '&sessionId=${Uri.encodeQueryComponent(sessionId)}';
+        '&sessionId=${Uri.encodeQueryComponent(sessionId)}'
+        '${tail == null ? '' : '&tail=$tail'}';
     final MachineCredential credential = await _requireCredential();
     final Uri uri = _uri(credential, '/api/history?$query');
     late final http.Response response;
@@ -729,7 +791,7 @@ class BackendClient {
     };
   }
 
-  Future<List<ChatGroup>> createGroup(
+  Future<({ChatGroup group, List<ChatGroup> groups})> createGroup(
     String name,
     List<String> members, {
     String workdir = '',
@@ -749,7 +811,12 @@ class BackendClient {
       },
       timeout: const Duration(seconds: 60),
     );
-    return _groupsFrom(decoded);
+    final List<ChatGroup> groups = _groupsFrom(decoded);
+    final Object? rawGroup = decoded is Map ? decoded['group'] : null;
+    final ChatGroup group = rawGroup is Map
+        ? ChatGroup.fromJson(rawGroup.cast<String, Object?>())
+        : groups.first;
+    return (group: group, groups: groups);
   }
 
   Future<List<ChatGroup>> setGroupMembers(
@@ -766,6 +833,26 @@ class BackendClient {
         'groupId': groupId,
         'members': members,
         if (configs.isNotEmpty) 'configs': configs,
+        ..._peersBody(peers),
+      },
+      timeout: const Duration(seconds: 60),
+    );
+    return _groupsFrom(decoded);
+  }
+
+  Future<List<ChatGroup>> setGroupWorkdir(
+    String groupId, {
+    String workdir = '',
+    Map<String, String> memberWorkdirs = const <String, String>{},
+    List<MachineCredential> peers = const <MachineCredential>[],
+  }) async {
+    final Object? decoded = await _requestJson(
+      'POST',
+      '/api/groups/workdir',
+      body: <String, Object?>{
+        'groupId': groupId,
+        if (workdir.isNotEmpty) 'workdir': workdir,
+        if (memberWorkdirs.isNotEmpty) 'memberWorkdirs': memberWorkdirs,
         ..._peersBody(peers),
       },
       timeout: const Duration(seconds: 60),
@@ -808,10 +895,11 @@ class BackendClient {
     );
   }
 
-  /// Post a human message to a group. Sent as plain JSON (not SSE): the per-agent
-  /// turn deltas are mirrored to every device on the shared `/api/events` stream,
-  /// tagged with `groupId`, so the UI renders from there. Awaiting this resolves
-  /// when the whole round (every summoned member) finishes.
+  /// Post a human message to a group. Sent as plain JSON (not SSE): each
+  /// member's start, progress lines and finish reach every device on the shared
+  /// `/api/events` stream, tagged with `groupId`, so the UI renders from there;
+  /// reply text is not streamed. Awaiting this resolves when the whole round
+  /// (every summoned member) finishes.
   Future<void> sendGroupMessage({
     required String groupId,
     required String prompt,

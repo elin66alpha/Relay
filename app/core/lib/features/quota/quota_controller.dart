@@ -12,6 +12,9 @@ class QuotaController extends ChangeNotifier {
   int get quotaScheduleRevision => _quotaScheduleRevision;
 
   UsageReport? _lastUsageReport;
+  // Bumped on a machine switch, so a reply still in flight from the previous
+  // host is not merged into the new host's report.
+  int _reportGeneration = 0;
 
   /// The most recent quota report, kept so the usage and scheduler screens can
   /// paint the previous numbers immediately instead of holding a spinner for a
@@ -23,7 +26,9 @@ class QuotaController extends ChangeNotifier {
   /// merged into [lastUsageReport] and the merged report returned, so sources
   /// queried separately can land one at a time.
   Future<UsageReport> usageReport({String? source}) async {
+    final int generation = _reportGeneration;
     final UsageReport report = await _backendClient.usageReport(source: source);
+    if (generation != _reportGeneration) return report;
     final UsageReport? last = _lastUsageReport;
     return _lastUsageReport =
         source == null || last == null ? report : last.merge(report);
@@ -54,6 +59,7 @@ class QuotaController extends ChangeNotifier {
       _backendClient.cancelQuotaSchedule(id);
 
   void clearUsageReport() {
+    _reportGeneration += 1;
     _lastUsageReport = null;
   }
 

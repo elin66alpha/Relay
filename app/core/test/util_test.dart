@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_core/core/backend/api_transport.dart';
 import 'package:relay_core/core/i18n/app_strings.dart';
 import 'package:relay_core/core/models/machine_credential.dart';
+import 'package:relay_core/core/platform/platform_capabilities.dart';
 import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/core/util/error_text.dart';
 import 'package:relay_core/core/util/format_bytes.dart';
@@ -96,5 +98,50 @@ void main() {
         'Bad state: boom',
       );
     });
+
+    test('classifies Linux, macOS and Windows socket errors alike', () {
+      final Uri uri = Uri.parse('http://10.0.0.5:8787/api/health');
+      for (final (String message, String code) in <(String, String)>[
+        ('Connection refused (OS Error: errno = 111)', 'CONNECTION_REFUSED'),
+        (
+          'No connection could be made because the target machine actively '
+              'refused it. (OS Error: errno = 10061)',
+          'CONNECTION_REFUSED',
+        ),
+        (
+          'The remote computer refused the network connection. '
+              '(OS Error: errno = 1225)',
+          'CONNECTION_REFUSED',
+        ),
+        ('Network is unreachable (OS Error: errno = 101)', 'UNREACHABLE'),
+        ('No route to host (OS Error: errno = 65)', 'UNREACHABLE'),
+        (
+          'A socket operation was attempted to an unreachable host. '
+              '(OS Error: errno = 10065)',
+          'UNREACHABLE',
+        ),
+        (
+          'The network location cannot be reached. (OS Error: errno = 1231)',
+          'UNREACHABLE',
+        ),
+      ]) {
+        expect(
+          ApiTransport().networkExceptionFor(Exception(message), uri).code,
+          'NETWORK_$code',
+          reason: message,
+        );
+      }
+    });
+  });
+
+  test('phones and tablets, native or Web, use the soft keyboard', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final TargetPlatform platform in TargetPlatform.values) {
+      debugDefaultTargetPlatformOverride = platform;
+      final bool phone =
+          platform == TargetPlatform.android || platform == TargetPlatform.iOS;
+      expect(isPhoneOrTablet, phone, reason: '$platform');
+      expect(usesHardwareKeyboard, !phone, reason: '$platform');
+    }
   });
 }

@@ -2,27 +2,31 @@
 title: Mentions and rounds
 category: Swarms
 order: 520
-summary: Use @ to choose who answers, run members in parallel, let members summon each other, and stop.
-keywords: @, mention, summon, parallel, round, wave, stop, RELAY_SWARM_MAX_HOPS
+summary: Use @ to choose who answers, run members in mention order, let members summon each other, and stop.
+keywords: @, mention, summon, order, round, wave, stop, RELAY_SWARM_MAX_HOPS
 ---
 
 ## Choose who answers with @
 
-In the Swarm composer, write `@member-name` to choose who answers, for example `@claude look at this error`.
+In the Swarm composer, write `@member-name` to choose who answers, for example `@claude look at this error` or `@studio:claude check the server logs`. A member answers to its agent key, its `@handle` and its nickname, in any language and with no space needed after it: a member nicknamed 架构师 answers `@架构师看一下`.
 
-When one message mentions several members, Relay snapshots the transcript once, gives each member what is new since it last spoke, and runs them **in parallel**. Each member works through its own private session one turn at a time.
+A message that mentions no one goes to the member who spoke last, so a follow-up such as "continue" needs no @. Before any member has spoken, a message without a mention is not sent and the composer keeps it.
+
+When one message mentions several members, Relay runs them **one after another in mention order**. Each member is planned right before it runs, so it sees what is new since it last spoke — including replies already given earlier in the same wave. A failed reply does not count as speaking, so a member that failed sees the messages again on its next turn; after its session is reset (a new work directory, or a member on another machine removed and added again), it reads the whole conversation again.
 
 ## Members summon each other
 
-Each member's prompt lists the other members and the `@name` that reaches each. Whoever a member's reply names speaks next: the round continues with another wave, and the newly summoned members see the previous wave's replies.
+Each member's prompt states its own machine and work directory, and lists the other members with their `@handle`, machine and work directory. Whoever a member's reply names speaks in the next wave — unless that member already ran after the reply in the same wave and has already seen it.
 
-To stop two members from naming each other forever (and billing all the while), the waves members start after your message are capped, at **3** by default, set by the backend's `RELAY_SWARM_MAX_HOPS`; at 0 only you can summon. A member cannot summon itself, and a failed or cancelled reply summons no one.
+To stop two members from naming each other forever (and billing all the while), the waves members start after your message are capped, at **3** by default, set by the backend's `RELAY_SWARM_MAX_HOPS`; at 0 only you can summon. A member cannot summon itself, and a failed or cancelled reply summons no one. When the last allowed wave's replies still name someone, a note above the transcript says who was not summoned; @ them to continue.
 
-## One round at a time
+## One round at a time per Swarm
 
-A Swarm runs one round at a time. While it runs, the composer shows **Stop** instead of Send, even after you leave and come back or on another device. A message sent meanwhile is refused, because two rounds would interleave in the one transcript.
+Each Swarm runs one round at a time, while different Swarms can run concurrently. While a Swarm's round runs, its composer shows **Stop** instead of Send, even after you leave and come back or on another device; switching to another Swarm lets you send there immediately. A second message to the same busy Swarm is refused. If the connection drops during a long round, for example when the phone goes to the background, the round keeps running and the composer still shows **Stop**.
 
-Swarm replies are not streamed: each member shows as working until its whole reply is in.
+Swarm replies are not streamed: each member shows as working, with its latest steps (tool calls, commands) under it, until its whole reply is in. The finished reply keeps those steps folded under it.
+
+When a round ends and no device has that work directory open, the backend sends one notification named after the Swarm, not one per member.
 
 ## Stop
 

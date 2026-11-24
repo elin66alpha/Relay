@@ -48,6 +48,15 @@ case "$version" in
   [0-9]*) ;;
   *) c_err "Could not find the latest Relay release."; exit 1 ;;
 esac
+current="$(grep -m 1 -E '^[[:space:]]*"version"' "$dir/server/package.json" 2>/dev/null |
+  sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/' || true)"
+# Reinstalling the same version would only interrupt running turns. An
+# explicit RELAY_VERSION still installs, even an older one.
+if [ -z "${RELAY_VERSION:-}" ] && [ -n "$current" ] &&
+   [ "$(printf '%s\n' "$version" "$current" | sort -V | tail -n 1)" = "$current" ]; then
+  c_info "Relay $current is already the latest version."
+  exit 0
+fi
 
 # Existing installations are upgraded without running setup again. Check the
 # new runtime requirement before removing or replacing any of their files.
@@ -74,34 +83,134 @@ curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS"
   exit 1
 }
 
-# Parse this function before extraction replaces the running script.
-apply_update() {
-  # The Web client's files change names between builds; replace it whole.
-  rm -rf "$dir/app/shell/build/web"
-  # Releases before 0.1.10 kept the Web client in build/web and these scripts in
-  # backends/.
-  rm -rf "$dir/build/web" "$dir/backends"
-  # Releases before 0.1.12 kept separate Linux and macOS helpers, now in unix/lib.
-  rm -rf "$dir/scripts/install/linux/lib" "$dir/scripts/install/macos/lib"
-  tar -xzf "$tmp/$name" -C "$dir" --strip-components=1
-  c_info "Relay $version unpacked in $dir"
+# These trees hold release files only, so they are swapped whole, which also
+# drops files a release no longer ships. Every other release file sits beside
+# state (server/.env, tokens.json, chats) and is replaced one by one.
+TREES="server/lib server/routes server/scripts server/node_modules scripts/install app/shell/build/web"
+new="$dir/.relay-update-new"
+# The previous version, until the new one answers. Its presence marks an
+# update that has not finished.
+old="$dir/.relay-update-old"
 
-  c_info "Upgrading: installing server dependencies..."
-  (cd "$dir/server" && npm install)
-  if [ "$platform" = linux ]; then
-    if need pm2 && pm2 describe relay-server >/dev/null 2>&1; then
-      # --update-env also refreshes PATH, so newly installed agent CLIs are found.
-      pm2 restart relay-server --update-env
-      pm2 save >/dev/null 2>&1 || true
+# Moves the previous version aside and the staged one in, recording in $old
+# what it moved so restore_old can undo every step, even after an interruption.
+swap_in() {
+  local rel
+  mkdir -p "$old" || return 1
+  : >>"$old/.added"
+  for rel in $TREES; do
+    if [ -e "$dir/$rel" ]; then
+      mkdir -p "$(dirname "$old/$rel")" && mv "$dir/$rel" "$old/$rel" || return 1
+    else
+      printf '%s\n' "$rel" >>"$old/.added"
     fi
-  else
-    # The label setup gives the backend LaunchAgent (unix/lib/macos.sh).
-    agent="gui/$(id -u)/dev.relay.app.backend"
-    if launchctl print "$agent" >/dev/null 2>&1; then
-      launchctl kickstart -k "$agent"
+    if [ -e "$new/$rel" ]; then
+      mkdir -p "$(dirname "$dir/$rel")" && mv "$new/$rel" "$dir/$rel" || return 1
     fi
+  done
+  (cd "$new" && find . -type f) | while IFS= read -r rel; do
+    rel="${rel#./}"
+    if [ -e "$dir/$rel" ]; then
+      mkdir -p "$(dirname "$old/$rel")" && mv "$dir/$rel" "$old/$rel" || exit 1
+    else
+      printf '%s\n' "$rel" >>"$old/.added"
+    fi
+    mkdir -p "$(dirname "$dir/$rel")" && cp -p "$new/$rel" "$dir/$rel" || exit 1
+  done
+}
+
+# Puts the version in $old back. On failure $old stays for the next run.
+restore_old() {
+  local rel
+  for rel in $TREES; do
+    if [ -e "$old/$rel" ]; then
+      rm -rf "${dir:?}/$rel" && mv "$old/$rel" "$dir/$rel" || return 1
+    fi
+  done
+  if [ -f "$old/.added" ]; then
+    while IFS= read -r rel; do rm -rf "${dir:?}/$rel" || return 1; done <"$old/.added"
+    rm -f "$old/.added"
   fi
+  (cd "$old" && find . -type f) | while IFS= read -r rel; do
+    rel="${rel#./}"
+    mkdir -p "$(dirname "$dir/$rel")" && mv -f "$old/$rel" "$dir/$rel" || exit 1
+  done || return 1
+  rm -rf "$old"
+}
+
+rm -rf "$new" "$dir/.relay-update-done"
+if [ -d "$old" ]; then
+  c_info "Restoring the version an interrupted update left in $old..."
+  restore_old || { c_err "Could not restore $old. Move its files back into $dir by hand, then rerun this command."; exit 1; }
+fi
+
+# Staged and installed beside the running version, so a failed download,
+# dependency install or build leaves the installation as it was.
+mkdir -p "$new"
+tar -xzf "$tmp/$name" -C "$new" --strip-components=1
+[ -f "$new/server/server.js" ] || { rm -rf "$new"; c_err "The archive is not a Relay backend. Nothing was changed."; exit 1; }
+c_info "Installing the server dependencies of Relay $version..."
+(cd "$new/server" && npm ci --omit=dev) || {
+  rm -rf "$new"
+  c_err "Installing the dependencies of Relay $version failed. Nothing was changed."
+  exit 1
+}
+
+if ! swap_in; then
+  c_err "Replacing the files failed; putting Relay ${current:-the previous version} back."
+  restore_old || c_err "Could not restore $old. Move its files back into $dir by hand."
+  rm -rf "$new"
+  exit 1
+fi
+rm -rf "$new"
+c_info "Relay $version unpacked in $dir"
+
+# The new release's own adapter restarts the backend, so a changed LaunchAgent
+# or PM2 definition reaches upgraded installations too.
+# shellcheck source=lib/common.sh
+source "$dir/scripts/install/unix/lib/common.sh"
+# The sourced scripts share this shell's variables; ROOT_DIR is this same
+# installation, resolved.
+dir="$ROOT_DIR"
+restart_backend() {
+  # Releases before this one have no svc_restart_server.
+  if declare -F svc_restart_server >/dev/null; then svc_restart_server; else svc_start; fi
+}
+
+# Any HTTP answer on the backend port means the new version is serving.
+backend_answers() {
+  local host
+  host="$(get_env HOST)"
+  case "$host" in "" | 0.0.0.0) host=127.0.0.1 ;; esac
+  for _ in $(seq 1 30); do
+    sleep 1
+    ! curl -s -o /dev/null --max-time 2 "http://$host:$(backend_port)/" || return 0
+  done
+  return 1
+}
+
+if ! svc_registered server; then
+  mv "$old" "$dir/.relay-update-done" && rm -rf "$dir/.relay-update-done"
+  c_info "Upgraded to $version. Relay is not running here; start it with $(script_path start.sh)."
+  exit 0
+fi
+c_info "Restarting the backend..."
+if restart_backend && backend_answers; then
+  mv "$old" "$dir/.relay-update-done" && rm -rf "$dir/.relay-update-done"
+  # Releases before 0.1.10 kept the Web client in build/web and these scripts in backends/.
+  rm -rf "$dir/build/web" "$dir/backends"
   c_info "Upgraded to $version. Tokens, chats and settings are unchanged."
   c_info "For status, tokens or agent CLIs run: $dir/scripts/install/$platform/setup.sh"
-}
-apply_update
+  exit 0
+fi
+
+c_err "Relay $version did not start within 30 seconds; putting Relay ${current:-the previous version} back."
+c_err "Its logs: $(server_log_files | tr '\n' ' ')"
+restore_old || { c_err "Could not restore $old. Move its files back into $dir by hand."; exit 1; }
+restart_backend || true
+if backend_answers; then
+  c_info "Relay ${current:-the previous version} is running again."
+else
+  c_err "The previous version did not start either; see the logs above."
+fi
+exit 1

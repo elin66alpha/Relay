@@ -21,13 +21,16 @@ Future<void> _pumpDetails(
   WidgetTester tester,
   CliAgentsController agentsController, {
   String latest = '0.1.13',
+  bool updateSucceeds = true,
 }) async {
   tester.view.physicalSize = const Size(1200, 900);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
-  final _OfflineBackendClient backend = _OfflineBackendClient();
+  final _OfflineBackendClient backend = _OfflineBackendClient(
+    updateSucceeds: updateSucceeds,
+  );
   addTearDown(backend.close);
 
   await tester.pumpWidget(
@@ -132,13 +135,48 @@ void main() {
     expect(find.text('Updating the backend…'), findsNothing);
     expect(find.text('Update to 0.1.14 and restart'), findsNothing);
   });
+
+  testWidgets('an update that never finishes says so after ten minutes', (
+    WidgetTester tester,
+  ) async {
+    await _pumpDetails(
+      tester,
+      CliAgentsController(),
+      latest: '0.1.14',
+      updateSucceeds: false,
+    );
+    await tester.tap(find.text('Update to 0.1.14 and restart'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update'));
+    await tester.pump();
+    await tester.pump();
+
+    // Still waiting after nine minutes of polls.
+    for (int i = 0; i < 54; i++) {
+      await tester.pump(const Duration(seconds: 10));
+    }
+    expect(find.text('Updating the backend…'), findsOneWidget);
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(seconds: 10));
+    }
+    await tester.pump();
+    expect(find.textContaining('did not finish'), findsOneWidget);
+    expect(find.textContaining('relay-update.log'), findsOneWidget);
+    expect(find.text('Updating the backend…'), findsNothing);
+    expect(find.text('Update to 0.1.14 and restart'), findsOneWidget);
+  });
 }
 
 class _OfflineBackendClient extends BackendClient {
+  _OfflineBackendClient({this.updateSucceeds = true});
+
+  final bool updateSucceeds;
   String _version = '0.1.13';
 
   @override
-  Future<void> updateBackend() async => _version = '0.1.14';
+  Future<void> updateBackend() async {
+    if (updateSucceeds) _version = '0.1.14';
+  }
 
   @override
   Future<Uri> terminalWebSocketUri({required int cols, required int rows}) {

@@ -46,6 +46,8 @@ void main() {
     ];
     await Future<void>.delayed(const Duration(seconds: 6));
     expect(controller.sessionRunning('claude', 'other'), isFalse);
+    // The check asks for the newest messages only, not the whole conversation.
+    expect(backend.otherTails, allOf(isNotEmpty, everyElement(20)));
   });
 }
 
@@ -68,6 +70,7 @@ class _Backend extends BackendClient {
   final List<StreamController<List<int>>> _streams =
       <StreamController<List<int>>>[];
   List<ChatMessage> otherHistory = <ChatMessage>[];
+  final List<int?> otherTails = <int?>[];
 
   void emit(String type, String requestId, String sessionId) {
     final String payload = jsonEncode(<String, Object?>{
@@ -117,8 +120,12 @@ class _Backend extends BackendClient {
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
-  }) async =>
-      ChatHistory(
-        messages: sessionId == 'other' ? otherHistory : const <ChatMessage>[],
-      );
+    int? tail,
+  }) async {
+    if (sessionId != 'other') {
+      return const ChatHistory(messages: <ChatMessage>[]);
+    }
+    otherTails.add(tail);
+    return ChatHistory(messages: otherHistory);
+  }
 }

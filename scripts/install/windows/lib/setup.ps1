@@ -3,7 +3,7 @@
 
 function Get-RelayDetails {
   Require-Node
-  $bridge = Join-Path $Script:ServerDir 'scripts\windows-setup.js'
+  $bridge = Join-Path $Script:ServerDir 'scripts\setup-status.js'
   if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) {
     Write-Fail "The backend bundle is incomplete; missing $bridge. Extract the entire ZIP again and wait for extraction to finish."
   }
@@ -204,14 +204,21 @@ function Install-RelayBackend {
   Start-RelayServices
   if ($NetworkMode -eq 'quick') {
     $PublicUrl = Wait-ForTunnelUrl
-    if (-not $PublicUrl) { Write-Fail 'No Quick Tunnel URL detected. Check the tunnel logs and retry.' }
-    Set-EnvValue 'PUBLIC_BASE_URL' $PublicUrl
+    if ($PublicUrl) { Set-EnvValue 'PUBLIC_BASE_URL' $PublicUrl }
+    else { Write-Warn 'Tunnel URL not visible yet; the credential step will retry detection.' }
   }
   Write-Info 'Step 6/6 - Device credential'
-  $credentialArgs = @('--url', $PublicUrl)
+  # Without a URL the credential script reads the newest one from the tunnel log.
+  $credentialArgs = @()
+  if ($PublicUrl) { $credentialArgs += @('--url', $PublicUrl) }
   if ($Label) { $credentialArgs += @('--label', $Label) }
   Invoke-RelayCredential -Arguments $credentialArgs -Passphrase $Passphrase
   Write-Info 'Installed. Import the encrypted credential file or scan its QR code in Relay.'
+  if ($NetworkMode -eq 'quick') {
+    Write-Warn 'The trycloudflare.com address changes whenever the tunnel restarts (a restart of Windows, a crash, a reinstall).'
+    Write-Warn 'Each device then needs a new QR: setup.cmd, choice 9. For daily use, choose Cloudflare Tunnel (2) or Tailscale (4).'
+  }
+  Write-Warn 'Relay starts when you sign in to Windows, so after a restart it waits for a sign-in.'
 }
 
 function Remove-RelayWeb {

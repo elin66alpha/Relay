@@ -6,6 +6,7 @@ const path = require('path');
 
 const { AGENTS } = require('./agents');
 const { commandExists, cursorAuthFile, agyAuthFile } = require('./cli-paths');
+const { macKeychain } = require('./claude-credentials');
 
 const STATUS_TTL_MS = 60 * 1000;
 const statusCache = new Map();
@@ -31,15 +32,22 @@ function nonEmpty(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function claudeCredential(fsModule, homeDir) {
+// On macOS Claude Code keeps its OAuth login in the login Keychain instead of
+// ~/.claude/.credentials.json; the lookup reads attributes only, never the token.
+function macKeychainHasClaudeLogin() {
+  return macKeychain.has();
+}
+
+function claudeCredential(fsModule, homeDir, platform, keychainHas) {
   const creds = readJson(
     fsModule,
     path.join(homeDir, '.claude', '.credentials.json'),
   );
   const oauth = (creds && creds.claudeAiOauth) || {};
-  return {
-    authed: nonEmpty(oauth.accessToken) && nonEmpty(oauth.refreshToken),
-  };
+  if (nonEmpty(oauth.accessToken) && nonEmpty(oauth.refreshToken)) {
+    return { authed: true };
+  }
+  return { authed: platform === 'darwin' && keychainHas() };
 }
 
 function normalizedAuthMode(value) {
@@ -170,7 +178,7 @@ function cursorCredential(fsModule, homeDir, environment, platform) {
 
 // Login state only: supported CLIs refresh tokens, so token expiry is not a
 // login deadline.
-function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform) {
+function agentCredential(agentKey, installed, fsModule, homeDir, environment, platform, keychainHas) {
   switch (agentKey) {
     case 'agy':
       if (!installed) return { authed: false };
@@ -184,7 +192,7 @@ function agentCredential(agentKey, installed, fsModule, homeDir, environment, pl
       // logout. A real logout surfaces as an auth error on the next turn.
       return { authed: null, authKind: 'hostManaged' };
     case 'claude':
-      return claudeCredential(fsModule, homeDir);
+      return claudeCredential(fsModule, homeDir, platform, keychainHas);
     case 'codex':
       return codexCredential(fsModule, homeDir, environment);
     case 'hermes':
@@ -198,7 +206,7 @@ function agentCredential(agentKey, installed, fsModule, homeDir, environment, pl
   }
 }
 
-function buildStatuses({ fsModule, homeDir, commandExistsFn, environment, platform }) {
+function buildStatuses({ fsModule, homeDir, commandExistsFn, environment, platform, keychainHas }) {
   const statuses = {};
   for (const agent of Object.values(AGENTS)) {
     const installed = commandExistsFn(agent.bin || agent.key);
@@ -209,6 +217,7 @@ function buildStatuses({ fsModule, homeDir, commandExistsFn, environment, platfo
       homeDir,
       environment,
       platform,
+      keychainHas,
     );
     statuses[agent.key] = {
       installed,
@@ -225,6 +234,7 @@ function getAgentStatuses(options = {}) {
   const environment = options.env || process.env;
   const platform = options.platform || process.platform;
   const commandExistsFn = options.commandExists || commandExists;
+  const keychainHas = options.keychainHas || macKeychainHasClaudeLogin;
   const now = typeof options.now === 'function' ? options.now() : Date.now();
   const useCache = options.cache !== false;
   const cacheKey = homeDir;
@@ -240,6 +250,7 @@ function getAgentStatuses(options = {}) {
     commandExistsFn,
     environment,
     platform,
+    keychainHas,
   });
   if (useCache) statusCache.set(cacheKey, { value, at: now });
   return value;

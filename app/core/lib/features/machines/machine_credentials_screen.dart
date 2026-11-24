@@ -15,6 +15,7 @@ import '../../core/credentials/qr_image_pixels.dart';
 import '../../core/credentials/qr_pixels.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/models/machine_credential.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/widgets/author_contact_link.dart';
 import '../settings/tutorial_screen.dart';
@@ -23,9 +24,7 @@ import 'machine_credentials_controller.dart';
 bool _supportsCameraQrScan() {
   // Camera QR scanning only exists on mobile. Desktop (and web) have no
   // mobile_scanner implementation, so they import via image upload or paste.
-  return !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
+  return !kIsWeb && isPhoneOrTablet;
 }
 
 enum _AddMachineMethod { scan, paste, upload }

@@ -23,6 +23,15 @@ function slug(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+// Machine/peer slug for readable @mentions: lowercase, runs of anything but
+// letters and digits (in any script, so 工作站 survives) -> '-'.
+function handleSlug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 // The author of a transcript message: explicit metadata.author wins (that is how
 // the orchestrator records it), otherwise fall back to role/agent so a message
 // written before attribution metadata still resolves sensibly.
@@ -35,47 +44,91 @@ function authorOf(message) {
   return (message && message.agent) || '';
 }
 
-// Ordered, de-duplicated list of member agent keys the human summoned in this
-// message. Tokens match a member by its agent key or by the slug of its display
-// label, so both `@claude` and `@Claude Code` resolve. Only current members can
-// be summoned; broad aliases such as `@all` are intentionally ignored.
-function parseMentions(prompt, members, labelFor) {
+const WORD_CHAR = /[A-Za-z0-9_-]/;
+
+// How much of `rest` the name `name` covers when `rest` starts with it. A name
+// ending in an ASCII word character must also end the word there, so `@codex`
+// does not match inside `@codexbot` or `@codex-like`, while `@codex:` and CJK
+// text right after it (`@codex看看`) still do.
+function prefixLength(rest, name) {
+  if (!name || !rest.startsWith(name)) return 0;
+  const endsInWord = WORD_CHAR.test(name.charAt(name.length - 1));
+  return endsInWord && WORD_CHAR.test(rest.charAt(name.length)) ? 0 : name.length;
+}
+
+// Ordered, de-duplicated list of member agent keys summoned in this message.
+// What follows each `@` matches a member by its agent key, its readable handle
+// (`@<peer-slug>:<agent>`), the slug of its label/nickname (`@ClaudeCode`), or
+// the label/nickname/handle itself in any script and with no space after it
+// (`@架构师看一下`); the longest match wins. Only current members can be
+// summoned; broad aliases such as `@all` are intentionally ignored.
+function parseMentions(prompt, members, labelFor, handleFor) {
   const text = String(prompt || '');
-  const list = Array.isArray(members) ? members : [];
+  const names = (Array.isArray(members) ? members : []).map((member) => {
+    const label = String((typeof labelFor === 'function' && labelFor(member)) || '')
+      .trim()
+      .toLowerCase();
+    return {
+      member,
+      key: member.toLowerCase(),
+      handle: String((typeof handleFor === 'function' && handleFor(member)) || '').toLowerCase(),
+      label,
+      // Only an ASCII label slugs faithfully (`@ClaudeCode`); others match as written.
+      labelSlug: /^[\x20-\x7e]*$/.test(label) ? slug(label) : '',
+    };
+  });
   const order = [];
-  const seen = new Set();
-  const add = (key) => {
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      order.push(key);
+  const re = /(?:^|[^\w@])@/g;
+  while (re.exec(text) !== null) {
+    // Names are at most a few hundred characters, so look no further.
+    const rest = text.slice(re.lastIndex, re.lastIndex + 256).toLowerCase();
+    const token = (/^[a-z0-9:_-]+/.exec(rest) || [''])[0];
+    let best = null;
+    let bestLength = 0;
+    for (const name of names) {
+      const length = Math.max(
+        token && name.labelSlug && name.labelSlug === slug(token) ? token.length : 0,
+        prefixLength(rest, name.key),
+        prefixLength(rest, name.handle),
+        prefixLength(rest, name.label),
+      );
+      if (length > bestLength) {
+        best = name.member;
+        bestLength = length;
+      }
     }
-  };
-  const re = /(?:^|[^\w@])@([A-Za-z0-9:_-]+)/g;
-  let match;
-  while ((match = re.exec(text)) !== null) {
-    const token = match[1].toLowerCase();
-    const target = list.find(
-      (member) =>
-        member.toLowerCase() === token ||
-        slug(typeof labelFor === 'function' ? labelFor(member) : member) === slug(token),
-    );
-    if (target) add(target);
+    if (best && !order.includes(best)) order.push(best);
   }
   return order;
 }
 
 // The transcript tail an agent has not yet seen: everything after its own last
-// message. An agent that has never spoken sees the whole transcript so far.
-function deltaSince(messages, agentKey) {
+// reply that its session holds. A failed turn's message never reached the
+// session, and a session reset at `resetAt` holds nothing from before then, so
+// neither counts; an agent with no such reply sees the whole transcript so far.
+function deltaSince(messages, agentKey, resetAt = '') {
   const list = Array.isArray(messages) ? messages : [];
   let lastIndex = -1;
   for (let i = list.length - 1; i >= 0; i -= 1) {
-    if (authorOf(list[i]) === agentKey) {
-      lastIndex = i;
-      break;
-    }
+    const message = list[i];
+    if (authorOf(message) !== agentKey) continue;
+    if (message.metadata && message.metadata.errorCode) continue;
+    if (resetAt && String(message.createdAt || '') <= resetAt) break;
+    lastIndex = i;
+    break;
   }
   return list.slice(lastIndex + 1);
+}
+
+// The current member who wrote the newest message, so a message that names
+// no one continues with it; '' when no member has spoken yet.
+function lastSpeaker(messages, members) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const author = authorOf(list[i]);
+    if (author !== HUMAN_AUTHOR && members.includes(author)) return author;
+  }
+  return '';
 }
 
 function speakerLabel(message, labelFor) {
@@ -100,8 +153,19 @@ function lineFor(message, labelFor) {
 // each delta message labeled with its speaker. Bounded to maxBytes by keeping the
 // most recent messages and noting any omission, so a long silence cannot produce
 // a prompt that exceeds the request budget.
+function formatLocation(machine, workdir) {
+  const m = typeof machine === 'string' ? machine.trim() : '';
+  const w = typeof workdir === 'string' ? workdir.trim() : '';
+  if (m && w) return `on ${m} in ${w}`;
+  if (m) return `on ${m}`;
+  if (w) return `in ${w}`;
+  return '';
+}
+
 function buildGroupPrompt({
   selfLabel,
+  selfMachine,
+  selfWorkdir,
   persona,
   delta,
   labelFor,
@@ -110,22 +174,40 @@ function buildGroupPrompt({
 }) {
   const name = String(selfLabel || 'this agent');
   const role = typeof persona === 'string' ? persona.trim() : '';
+  const selfLoc = formatLocation(selfMachine, selfWorkdir);
+  const selfLocationLine = selfLoc ? `\n\nYou are running ${selfLoc}.` : '';
   // Summoning only happens if the agent knows it can, and knows the exact token
-  // that resolves. Each entry is `Label (@key)`: the key always parses, while a
-  // nickname only does when it is a single word.
-  const others = (Array.isArray(roster) ? roster : [])
-    .filter((member) => member && member.key)
-    .map((member) => `${member.label || member.key} (@${member.key})`);
+  // that resolves. Each entry is `Label (@handle)` (with machine/workdir when
+  // known): the handle always parses, while a nickname only does when it is a
+  // single word.
+  const rosterEntries = (Array.isArray(roster) ? roster : []).filter(
+    (member) => member && member.key,
+  );
+  const hasLocations = Boolean(selfLoc) || rosterEntries.some(
+    (member) => member.machine || member.workdir,
+  );
+  const others = rosterEntries.map((member) => {
+    const handle = member.handle || member.key;
+    const loc = formatLocation(member.machine, member.workdir);
+    return loc
+      ? `${member.label || member.key} (@${handle}) [${loc}]`
+      : `${member.label || member.key} (@${handle})`;
+  });
+  const remoteNote = hasLocations
+    ? ' You cannot read or edit files on another machine; ask that machine\'s member instead.'
+    : '';
   const rosterLine = others.length
     ? `\n\nOther members of this swarm: ${others.join(', ')}. ` +
       'Mentioning one of them by that @name hands them the floor once you ' +
       'finish, and they will see this exchange. Only do it when you actually ' +
-      'need them; say nothing of the sort to end the exchange.'
+      'need them; say nothing of the sort to end the exchange.' +
+      remoteNote
     : '';
   const header =
     `You are "${name}" in a group chat with a human and possibly other AI agents. ` +
     'Each line below is prefixed with its speaker. Reply only as yourself, ' +
     'addressing the conversation; it is now your turn to respond.' +
+    selfLocationLine +
     rosterLine +
     (role ? `\n\nYour role in this swarm: ${role}` : '');
   const footer = `(It is now your turn, ${name}.)`;
@@ -170,8 +252,10 @@ function buildGroupPrompt({
 
 module.exports = {
   HUMAN_AUTHOR,
+  handleSlug,
   authorOf,
   parseMentions,
   deltaSince,
+  lastSpeaker,
   buildGroupPrompt,
 };

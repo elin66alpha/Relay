@@ -9,6 +9,7 @@ function createSessionSlots({
   closeEntry,
   isBusy = (entry) => entry.turn,
   keepAlive = () => false,
+  isAlwaysOn = () => false,
   evictsBefore = (a, b) => a.lastActivity < b.lastActivity,
 }) {
   const slotWaiters = [];
@@ -18,10 +19,18 @@ function createSessionSlots({
     if (waiter) waiter();
   }
 
+  function ordinaryLiveCount() {
+    let count = 0;
+    for (const key of live.keys()) {
+      if (!isAlwaysOn(key)) count += 1;
+    }
+    return count;
+  }
+
   function lruIdleEntry() {
     let victim = null;
     for (const entry of live.values()) {
-      if (isBusy(entry) || entry.closed) continue;
+      if (isBusy(entry) || entry.closed || isAlwaysOn(entry.key)) continue;
       if (!victim || evictsBefore(entry, victim)) victim = entry;
     }
     return victim;
@@ -33,15 +42,20 @@ function createSessionSlots({
   // only by an unrelated eviction.
   function pumpWaiters() {
     if (!slotWaiters.length) return;
+    if (ordinaryLiveCount() < maxLive) {
+      releaseSlot();
+      return;
+    }
     const victim = lruIdleEntry();
     if (victim) closeEntry(victim).catch(() => {});
   }
 
-  async function acquireSlot() {
-    // The cap covers every live session the pool owns. When they are all
-    // mid-turn there is nothing safe to evict, so the caller waits for a slot
-    // rather than the pool quietly exceeding its own memory budget.
-    while (live.size >= maxLive) {
+  async function acquireSlot(key) {
+    if (key != null && isAlwaysOn(key)) return;
+    // The cap covers every non-always-on live session the pool owns. When they
+    // are all mid-turn there is nothing safe to evict, so the caller waits for
+    // a slot rather than the pool quietly exceeding its own memory budget.
+    while (ordinaryLiveCount() >= maxLive) {
       const victim = lruIdleEntry();
       if (victim) {
         await closeEntry(victim);
@@ -61,8 +75,8 @@ function createSessionSlots({
     if (entry.closed) return;
     entry.idleTimer = setTimeout(() => {
       if (isBusy(entry)) return;
-      // Background work keeps the session alive; check again later.
-      if (keepAlive(entry)) return scheduleIdleClose(entry);
+      // Background work or an always-on pin keeps the session alive; check again later.
+      if (keepAlive(entry) || isAlwaysOn(entry.key)) return scheduleIdleClose(entry);
       closeEntry(entry).catch(() => {});
     }, idleMs);
     if (typeof entry.idleTimer.unref === 'function') entry.idleTimer.unref();

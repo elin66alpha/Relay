@@ -303,11 +303,14 @@ function historyScopesFor({ workdir, agentKey }) {
   return scopes;
 }
 
-function searchHistory({ workdir, query, agentKey = '', sessionNameFor, limit = 50 }) {
+function searchHistory({ workdir, query, agentKey = '', sessionNameFor, includeScope, limit = 50 }) {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return [];
   const matches = [];
   for (const scope of historyScopesFor({ workdir, agentKey })) {
+    if (typeof includeScope === 'function' && !includeScope(scope.agentKey, scope.sessionId)) {
+      continue;
+    }
     for (const message of scope.messages) {
       const content = textForMessage(message);
       if (!content.toLowerCase().includes(needle)) continue;

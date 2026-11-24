@@ -344,7 +344,10 @@ Idle sessions are closed and there is a cap on how many stay live, because these
 processes can be resource-intensive. See `RELAY_CLAUDE_*` and `RELAY_AGENT_*`
 in `server/.env.example`. Defaults retain up to three Claude processes and four
 live JSON-RPC sessions per agent, with a 15-minute idle timeout. Turns past a
-cap wait for a slot.
+cap wait for a slot. Up to three solo-chat sessions per backend can be marked
+**always-on** (in backend memory only, cleared on restart): they are never
+idle-closed or evicted by LRU and sit outside the per-pool caps so ordinary
+sessions keep their full quota.
 
 Work an agent starts in the background now outlives the turn that started it,
 except on Codex: its sandbox kills each command's process group as the command
@@ -545,61 +548,80 @@ secret scanner and does not alter the raw stored history.
 ### Swarms
 
 A Swarm is one canonical transcript above several independent CLI sessions.
-Each workspace can store up to 20 Swarms, with up to eight members in each.
-When a human message mentions multiple members, Relay snapshots the transcript
-once, builds a speaker-labelled delta for each member, and runs those members in
-parallel. Each member still serializes against its own private Swarm session.
+Each workspace bucket can store up to 20 Swarms, with up to eight members in
+each, and `GET /api/groups` lists every Swarm on the backend regardless of the
+device's current solo-chat directory. A human message that mentions no one goes
+to the member who spoke last; before any member has spoken it is refused with
+`GROUP_NO_MENTION`. When a human message mentions multiple
+members, Relay runs them one after another in mention order: each member is
+planned right before it runs, receiving only what is new since it last spoke
+(including replies already given earlier in the same wave).
 
-Members can summon each other. A member's prompt lists the other members and the
-`@name` that reaches each, and any of those names in its reply hands them the
-floor: the round continues with another wave, snapshotted after the previous
-replies so the newly summoned members see them. `RELAY_SWARM_MAX_HOPS` bounds how
-many agent-driven waves follow the human's message (default 3; set 0 to keep
-summoning human-only), because two members that keep naming each other would
-otherwise run — and bill — without end. A member cannot summon itself, and a
-turn that failed or was cancelled summons no one.
+Members can summon each other. A member's prompt states its own machine and work
+directory, lists every other member with its `@handle`, machine and work
+directory, and notes that it cannot read or edit files on another machine. Any
+member named in a reply speaks in the next wave — unless it already ran after
+that reply in the same wave (and has therefore already seen it).
+`RELAY_SWARM_MAX_HOPS` bounds how many agent-driven waves follow the human's
+message (default 3; set 0 to keep summoning human-only), because two members
+that keep naming each other would otherwise run — and bill — without end. A
+member cannot summon itself, and a turn that failed or was cancelled summons no
+one. Members still named after the last allowed wave are reported in the round's
+`group_done` as `unsummoned`, and the app shows who they are.
 
-A Swarm runs one round at a time. While a round runs, the composer offers Stop
-instead of Send, including after leaving and reopening the Swarm or on another
-device; a message sent meanwhile is refused with `GROUP_BUSY` rather than
-started alongside it, because two rounds would interleave their waves in the
-one transcript. Replies are not streamed: each member shows as working until
-its whole reply is in.
+Each Swarm runs one round at a time, while different Swarms can run
+concurrently. While a Swarm's round runs, the composer offers Stop instead of
+Send for that Swarm (including after leaving and reopening it or on another
+device); a second message to the same Swarm is refused with `GROUP_BUSY`.
+Replies are not streamed: each member shows as working, with its latest progress
+lines (`group_agent_progress`), until its whole reply is in. A finished round
+sends one task notification named after the Swarm instead of one per member, and
+a backend hosting a remote member's hidden swarm session sends none for it.
 
-At creation, a Swarm selects its work tree and per-member model, effort,
-permission, nickname, and prompt/persona. The work tree cannot be changed later
-because it is part of the keys for the Swarm transcript and each member's
-resumable session; changing it would address a different conversation.
-Swarms can be cleared, updated, deleted, or saved as reusable JSON templates.
+At creation, a Swarm picks its local work tree (defaulting to the machine's
+`defaultDir`, not the last-used solo directory) and per-member model, effort,
+permission, nickname, and prompt/persona. Work directories are validated at
+creation and can be changed later from the Swarm menu (**Change work
+directory**), which validates the new path(s) and resets only the affected
+members' sessions (refused with `GROUP_BUSY` while a round runs). Swarms can
+also be cleared, updated, deleted, or saved as reusable JSON templates.
 Templates contain the name, member list, and member configuration; they omit the
 machine-specific workdir, id, and transcript.
 
 The create and edit form groups agents by machine: this machine first, then
-every other machine in Settings → Machine credentials, listing that machine's usable agents
-(a machine the app cannot reach shows why). Tap an agent to add it and tap a
-member to configure it. The name is optional (`Swarm N` by default).
+every other machine in Settings → Machine credentials, listing that machine's
+usable agents (a machine the app cannot reach shows why). Tap an agent to add it
+and tap a member to configure it. The name is optional (the lowest unused
+`Swarm N` by default).
 
 #### Members on other machines
 
 A member can be an agent on another Relay backend. The Swarm, its transcript
 and its rounds stay on the backend that hosts it (A); a turn for a remote
 member is sent to the other backend (B) through B's ordinary API
-(`GET /api/agents`, `GET`/`POST /api/sessions`, `POST /api/sessions/active`,
-`POST /api/chat` over SSE, `POST /api/chat/cancel`, and on removal
-`POST /api/sessions/delete` or `POST /api/session/clear`), so B needs no change
-and may run an older version.
+(`GET /api/agents`, `GET`/`POST /api/sessions`, `POST /api/chat` over SSE,
+`POST /api/chat/cancel`, and on removal `POST /api/sessions/delete` or
+`POST /api/session/clear`), so B needs no change and may run an older version.
 
 - A remote member key is `<peerId>:<agentKey>`, where `peerId` is the first 12
   hex digits of the SHA-256 of B's normalized `baseUrl`. The same agent can be
-  a member on several machines; labels add the machine name, as in
-  `Claude Code (Studio)`, and `@<peerId>:<agentKey>` summons it.
-- Adding one checks that B is reachable and has the agent, then creates a
-  dedicated session on B named `Swarm: <swarm name>` in the chosen work
-  directory on B (by default the one the app remembers for B). Because creating
-  a session and running a turn both make it B's active session, A restores B's
-  previous active session afterwards.
+  a member on several machines; remote labels append the machine name
+  (`Claude Code (Studio)`), and when two members share an agent label, the local
+  member also appends this machine's hostname. Mentions accept readable
+  `@<peer-slug>:<agentKey>` handles (such as `@studio:claude`) in addition to
+  `@<peerId>:<agentKey>`, and nicknames keep working and take precedence.
+- Adding a remote member checks that B is reachable and has the agent, then
+  creates a dedicated hidden swarm session on B (`kind: 'swarm'`, named
+  `Swarm: <swarm name>`) in the chosen work directory on B (defaulting to B's
+  `defaultDir`). Hidden swarm sessions do not appear in B's session list, have
+  their own cap (32 per context), never become B's active session, and are
+  excluded from history search. Against older peers that do not advertise
+  `swarm-sessions`, A uses a reference-counted guard to restore B's previous
+  active session once all concurrent turns on that agent finish.
 - B's own model, effort and permission for that session apply; the Swarm sets
-  only nickname, prompt and the work directory on B, which is fixed once added.
+  only nickname, prompt and the work directory on B. Changing a remote member's
+  work directory later creates a new session in the new directory and deletes
+  the old one (rolling back on failure).
 - The app sends B's credential with each request that reaches B's members. A
   never stores it (see [Security](SECURITY.md#swarm-members-on-other-machines)).
   A member whose machine is not in this device's credentials is marked "This
@@ -663,7 +685,8 @@ WebSocket upgrade requires the short-lived ticket created by its HTTP endpoint.
   options/settings/version/update, diagnostics, device tokens, and shared events.
 - Chat: chat, cancellation, history, history search/export, and clear session.
 - Named sessions: list/create, set active, rename (`POST /api/sessions/rename`),
-  and delete.
+  delete, and always-on pins (`GET /api/sessions/always-on`,
+  `POST /api/sessions/always-on`, `POST /api/sessions/always-on/remove`).
 - Files/workdir: current workdir, recent workdirs with chat history, absolute
   directory browse, upload, and download.
 - Swarms: list/create, update members, delete, history, clear, chat, and cancel.
@@ -1006,6 +1029,29 @@ node scripts/dev/readme_screenshots.js docs/farrari.png --mobile-zh
 This writes 1080×1920 PNGs (432×768 viewport at 2.5×) under
 `docs/screenshots/mobile-zh-9x16/`, preserving the README captures. Wallpaper
 settings remain dark opacity 0.6, light opacity 0.8, blur 6 and tint 0.55.
+
+### Testing the Web client in a real browser
+
+`scripts/dev/web_smoke.js` drives the built Web client in headless Chromium
+(Playwright, installed on demand like the screenshot script) against the
+running backend, not a demo copy:
+
+```bash
+(cd app/shell && flutter build web --no-pub --pwa-strategy=none --no-web-resources-cdn)
+node scripts/dev/web_smoke.js
+```
+
+It creates a temporary `relay-web-test` token and deletes it afterwards, works
+only in `~/playground/relay-web-test/`, names everything it creates
+`[web-test] …` and deletes those afterwards, and sends one short message to
+Claude Code on the cheapest model. It visits home, chat, files, browser and
+settings at desktop and phone sizes and exits 1 on any console error, page
+error, failed request or HTTP status of 400 or more. Screenshots go to
+`~/playground/relay-web-test/shots/`; they show real conversations, so
+keep them out of the repository. `RELAY_TEST_URL` points it at a backend other
+than `http://127.0.0.1:8787`. `scripts/dev/lib/relay_web.js` holds the shared
+helpers for throwaway exploratory scripts; the agent workflow is in
+`.claude/skills/relay-web-test/SKILL.md`.
 
 ### Backend settings
 

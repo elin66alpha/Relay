@@ -15,9 +15,11 @@ A Swarm member can be an agent on **another Relay backend**. The Swarm, its tran
 
 ## Adding one
 
-In the Swarm form, other machines' agents are listed after this machine's, labelled with the machine's name, for example `Claude Code (Studio)`. Adding one checks that B is reachable and has that agent, then creates a dedicated session on B named `Swarm: <swarm name>`. B's previous active session is restored afterwards.
+In the Swarm form, other machines' agents are listed after this machine's, labelled with the machine's name, for example `Claude Code (Studio)`. When two members share an agent label, the local one also appends this machine's hostname. You can summon a remote member with a readable handle like `@studio:claude` as well as `@<peerId>:claude` (or its nickname).
 
-A remote member sets only its **nickname, prompt and work directory on B** (by default the one the app remembers for B), and the work directory is fixed once added. Model, effort and permission follow that session's settings on B.
+Adding one checks that B is reachable and has that agent, then creates a dedicated hidden swarm session on B (`Swarm: <swarm name>`). Hidden swarm sessions do not appear in B's drawer, never become B's active session, do not count toward B's 8-session limit, and are excluded from history search. Against older versions of B, A restores B's previous active session once concurrent turns finish.
+
+A remote member sets only its **nickname, prompt and work directory on B** (defaulting to B's default directory). You can change it later from **Change work directory**, which creates a new session in the new directory and deletes the old one. Model, effort and permission follow that session's settings on B. Each member's prompt tells it where every member runs and that it cannot directly read files on another machine.
 
 ## Without B's credential
 
@@ -35,6 +37,6 @@ On a device without B's credential, the member shows "This device is not connect
 - Stop cancels the turn on B with the same request id.
 - Deleting the Swarm or removing the member deletes its session on B, and clearing the Swarm clears it (when the request carries B's credential); none of these blocks the change on A.
 
-B sees these as ordinary turns from this device. If no device has that work directory open on B, B sends its own task notifications.
+B sees these as ordinary turns from this device. The round's one notification comes from A; B sends none for its swarm sessions (versions of B before 0.2.2 still send their own).
 
 [Relay MCP](relay-mcp.md) cannot run members on other machines.

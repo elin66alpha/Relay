@@ -39,7 +39,7 @@ class BotChatController extends ChangeNotifier {
   final BackendClient _backendClient;
   late final ChatPushRegistration _pushRegistration = ChatPushRegistration(
     backendClient: _backendClient,
-    hasMachine: () => _machine != null && !isDemoMachine(_machine),
+    machineId: () => isDemoMachine(_machine) ? null : _machine?.id,
     language: () => _strings.isZh ? 'zh' : 'en',
     quotaPushEnabled: () => _quotaPushEnabled,
     taskPushEnabled: () => _taskPushEnabled,
@@ -53,6 +53,10 @@ class BotChatController extends ChangeNotifier {
   final Map<String, List<AgentSession>> _sessionsByAgent =
       <String, List<AgentSession>>{};
   final Map<String, String> _activeSessionByAgent = <String, String>{};
+  // Current machine's always-on list; null means unsupported (404) or unprobed.
+  AlwaysOnSessionList? _alwaysOnSessions;
+  String? _alwaysOnMachineId;
+  int _alwaysOnSeq = 0;
   final Map<String, StringBuffer> _streamBuffers = <String, StringBuffer>{};
   // Per-request live segments mirroring the backend: the agent's mid-task
   // follow-up notes and its final answer are kept as separate, individually
@@ -113,6 +117,12 @@ class BotChatController extends ChangeNotifier {
   // history each time was O(n) churn that grew with the conversation.
   List<ChatMessage> get messages =>
       UnmodifiableListView<ChatMessage>(_messages);
+
+  /// Fires on throttled streaming text updates, which change only a streaming
+  /// bubble's content. They skip the controller's own listeners so the drawer,
+  /// title and composer do not rebuild ~12x/sec; render [messages] from both.
+  Listenable get streamUpdates => _streamUpdates;
+  final ValueNotifier<int> _streamUpdates = ValueNotifier<int>(0);
   int get messageCount => _messages.length;
   int? get contextWindow => _contextWindow;
   bool get isThinking => _activeRequestId != null;
@@ -128,6 +138,32 @@ class BotChatController extends ChangeNotifier {
   String? get activeWorkdir => _activeWorkdir;
   String? get activeSessionId => _activeSessionByAgent[_agent.key];
   AgentSession? get activeSession => sessionById(_agent.key, activeSessionId);
+  bool get alwaysOnSupported => _alwaysOnSessions != null;
+  int get alwaysOnMax => _alwaysOnSessions?.max ?? 3;
+  List<AlwaysOnSession> get alwaysOnSessions =>
+      List<AlwaysOnSession>.unmodifiable(
+        _alwaysOnSessions?.sessions ?? const <AlwaysOnSession>[],
+      );
+  bool get isActiveSessionAlwaysOn {
+    final AlwaysOnSessionList? list = _alwaysOnSessions;
+    final String? sessionId = activeSessionId;
+    final String? workdir = _activeWorkdir;
+    if (_machine == null ||
+        list == null ||
+        sessionId == null ||
+        sessionId.isEmpty ||
+        workdir == null ||
+        workdir.isEmpty) {
+      return false;
+    }
+    return list.sessions.any(
+      (AlwaysOnSession item) =>
+          item.agentKey == _agent.key &&
+          item.sessionId == sessionId &&
+          item.workdir == workdir,
+    );
+  }
+
   AppStrings get _strings => AppStrings(_language);
 
   String? activeSessionIdFor(String agentKey) =>
@@ -175,11 +211,14 @@ class BotChatController extends ChangeNotifier {
   /// Refreshes per-agent login state from the backend. Best-effort: a probe
   /// failure (offline, older backend without the endpoint) is ignored.
   Future<void> refreshAuthStatus({bool verifyCredentials = false}) async {
-    if (_machine == null) return;
+    final MachineCredential? machine = _machine;
+    if (machine == null) return;
     try {
       final Map<String, bool?> status = await _backendClient.fetchAuthStatus(
         verifyCredentials: verifyCredentials,
       );
+      // A reply from the machine switched away from describes other logins.
+      if (_machine?.id != machine.id) return;
       _authStatus
         ..clear()
         ..addAll(status);
@@ -248,6 +287,7 @@ class BotChatController extends ChangeNotifier {
     _activeSessionByAgent[agent.key] = result.activeSession.id;
     _agent = agent;
     await _reloadConversation();
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> selectSession(CliAgent agent, String sessionId) async {
@@ -268,6 +308,7 @@ class BotChatController extends ChangeNotifier {
     _activeSessionByAgent[agent.key] = result.activeSession.id;
     _agent = agent;
     await _reloadConversation(reattachTurn: reattachTurn);
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> renameSession(
@@ -285,6 +326,7 @@ class BotChatController extends ChangeNotifier {
     if (_machine?.id != machine.id) return;
     _sessionsByAgent[agent.key] = result.sessions;
     notifyListeners();
+    unawaited(refreshAlwaysOnSessions());
   }
 
   Future<void> deleteSession(CliAgent agent, String sessionId) async {
@@ -304,6 +346,82 @@ class BotChatController extends ChangeNotifier {
     } else {
       notifyListeners();
     }
+    unawaited(refreshAlwaysOnSessions());
+  }
+
+  void clearAlwaysOnSessions() {
+    _alwaysOnSeq += 1;
+    if (_alwaysOnSessions == null && _alwaysOnMachineId == null) return;
+    _alwaysOnSessions = null;
+    _alwaysOnMachineId = null;
+    notifyListeners();
+  }
+
+  Future<void> refreshAlwaysOnSessions({String? machineId}) async {
+    final int seq = ++_alwaysOnSeq;
+    final String? targetMachineId = machineId ?? _machine?.id;
+    if (targetMachineId != null &&
+        _alwaysOnMachineId != null &&
+        _alwaysOnMachineId != targetMachineId) {
+      _alwaysOnSessions = null;
+      _alwaysOnMachineId = targetMachineId;
+      notifyListeners();
+    }
+    try {
+      final AlwaysOnSessionList? result =
+          await _backendClient.fetchAlwaysOnSessions();
+      if (seq != _alwaysOnSeq) return;
+      if (_machine != null &&
+          targetMachineId != null &&
+          _machine!.id != targetMachineId) {
+        return;
+      }
+      _alwaysOnSessions = result;
+      _alwaysOnMachineId = targetMachineId;
+      notifyListeners();
+    } catch (_) {
+      // Best-effort: keep the current state when offline.
+    }
+  }
+
+  Future<bool> toggleActiveSessionAlwaysOn() async {
+    final MachineCredential? machine = _machine;
+    if (machine == null || _alwaysOnSessions == null) return false;
+    final String agentKey = _agent.key;
+    final String sessionId = await ensureActiveSessionId(_agent);
+    if (_machine?.id != machine.id || _agent.key != agentKey) return false;
+    final bool next = !isActiveSessionAlwaysOn;
+    final int seq = ++_alwaysOnSeq;
+    final AlwaysOnSessionList updated =
+        await _backendClient.setSessionAlwaysOn(agentKey, sessionId, next);
+    if (_machine?.id != machine.id || seq != _alwaysOnSeq) return next;
+    _alwaysOnSessions = updated;
+    _alwaysOnMachineId = machine.id;
+    notifyListeners();
+    return next;
+  }
+
+  Future<void> removeAlwaysOnSession(
+    AlwaysOnSession session, {
+    String? machineId,
+  }) async {
+    final int seq = ++_alwaysOnSeq;
+    final String? targetMachineId = machineId ?? _machine?.id;
+    final AlwaysOnSessionList updated =
+        await _backendClient.removeAlwaysOnSession(
+      session.agentKey,
+      session.workdir,
+      session.sessionId,
+    );
+    if (seq != _alwaysOnSeq) return;
+    if (_machine != null &&
+        targetMachineId != null &&
+        _machine!.id != targetMachineId) {
+      return;
+    }
+    _alwaysOnSessions = updated;
+    _alwaysOnMachineId = targetMachineId;
+    notifyListeners();
   }
 
   void setLanguage(AppLanguage language) {
@@ -378,6 +496,7 @@ class BotChatController extends ChangeNotifier {
       quotaController.clearUsageReport();
       unawaited(refreshWorkdir());
     }
+    unawaited(refreshAlwaysOnSessions(machineId: machine.id));
     if (sameContext && activeSessionId != null) {
       notifyListeners();
       return;
@@ -581,9 +700,10 @@ class BotChatController extends ChangeNotifier {
   /// Pulls this device's current work directory: its stored path, or the
   /// backend default before one is chosen. Best-effort.
   Future<void> refreshWorkdir() async {
+    final String? machineId = _machine?.id;
     try {
       final WorkdirInfo info = await _backendClient.workdir();
-      if (info.dir == _activeWorkdir) return;
+      if (_machine?.id != machineId || info.dir == _activeWorkdir) return;
       _activeWorkdir = info.dir;
       notifyListeners();
     } catch (_) {
@@ -725,9 +845,12 @@ class BotChatController extends ChangeNotifier {
   Future<void> reconnectEvents() async {
     _eventReconnectTimer?.cancel();
     _eventReconnectTimer = null;
-    await _eventsSub?.cancel();
+    // Open the new stream before the old host has closed its connection: a
+    // cancelled subscription delivers no further events either way.
+    final StreamSubscription<BackendEvent>? old = _eventsSub;
     _eventsSub = null;
     if (_wantsEvents) _connectEventsNow();
+    await old?.cancel();
   }
 
   Future<void> disposeController() async {
@@ -1218,6 +1341,7 @@ class BotChatController extends ChangeNotifier {
   /// pull the history once to catch up.
   Future<void> onAppResumed() async {
     await reconnectEvents();
+    unawaited(refreshAlwaysOnSessions());
     if (isThinking || _remoteActive) {
       await _refreshHistorySnapshot();
     } else {
@@ -1454,7 +1578,6 @@ class BotChatController extends ChangeNotifier {
       requestId,
       () => StringBuffer(current.content),
     );
-    buffer.write(text);
     // Append to the open segment, opening the first one on the first delta (the
     // backend only emits an explicit boundary for the 2nd+ message in a turn).
     final List<_StreamSegment> segments = _streamSegments.putIfAbsent(
@@ -1462,6 +1585,14 @@ class BotChatController extends ChangeNotifier {
       () => <_StreamSegment>[_StreamSegment(DateTime.now())],
     );
     if (segments.isEmpty) segments.add(_StreamSegment(DateTime.now()));
+    // The first text of a follow-up message writes the separator that
+    // _appendSegmentBoundary deferred.
+    if (segments.length > 1 &&
+        segments.last.buffer.isEmpty &&
+        buffer.isNotEmpty) {
+      buffer.write('\n\n');
+    }
+    buffer.write(text);
     segments.last.buffer.write(text);
     if (current.metadata[_awaitingFirstTokenKey] == true) {
       _messages[index] = current.copyWith(
@@ -1487,10 +1618,18 @@ class BotChatController extends ChangeNotifier {
       requestId,
       () => StringBuffer(current.content),
     );
-    if (buffer.isNotEmpty) buffer.write('\n\n');
-    _streamSegments
-        .putIfAbsent(requestId, () => <_StreamSegment>[])
-        .add(_StreamSegment(DateTime.now()));
+    final List<_StreamSegment> segments =
+        _streamSegments.putIfAbsent(requestId, () => <_StreamSegment>[]);
+    // A message with no text (only thinking and tool calls) leaves its segment
+    // empty; reuse it, as the backend does, instead of stacking blank lines.
+    if (segments.isNotEmpty && segments.last.buffer.toString().trim().isEmpty) {
+      segments.last = _StreamSegment(DateTime.now());
+      return;
+    }
+    // After an earlier segment the separator waits for the new segment's
+    // first text (_appendDelta), so a turn that is still thinking ends clean.
+    if (segments.isEmpty && buffer.isNotEmpty) buffer.write('\n\n');
+    segments.add(_StreamSegment(DateTime.now()));
     _notifyStreamingUpdate();
   }
 
@@ -1520,7 +1659,7 @@ class BotChatController extends ChangeNotifier {
       return;
     }
     _flushStreamBuffers();
-    notifyListeners();
+    _streamUpdates.value++;
     _streamNotifyTimer = Timer(const Duration(milliseconds: 80), () {
       _streamNotifyTimer = null;
       if (!_streamNotifyQueued) return;
@@ -1717,9 +1856,12 @@ class BotChatController extends ChangeNotifier {
     }
     for (final BackgroundTurn turn in turns) {
       try {
+        // Only the turn's own reply matters, and it is among the newest: this
+        // runs every five seconds.
         final ChatHistory history = await _backendClient.fetchHistory(
           turn.agentKey,
           sessionId: turn.sessionId,
+          tail: 20,
         );
         final bool finished = history.messages.any(
           (ChatMessage m) =>

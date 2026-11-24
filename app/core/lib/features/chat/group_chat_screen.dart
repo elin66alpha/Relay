@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
 import '../machines/machine_credentials_controller.dart';
+import 'bot_message_bubble.dart';
 import 'chat_content.dart';
 import 'group_chat_controller.dart';
 import 'swarm_form_dialog.dart';
@@ -57,10 +59,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   final TextEditingController _input = TextEditingController();
   final FocusNode _inputFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
+  // Whether the reader is at the newest message. Only scrolling changes it, so
+  // a reply growing below the view does not count as the reader leaving.
+  bool _atBottom = true;
+  int _lastMessageCount = 0;
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(() {
+      final ScrollPosition pos = _scroll.position;
+      _atBottom = pos.maxScrollExtent - pos.pixels < 280;
+    });
     _controller = GroupChatController(
       machines: () => widget.machinesController.credentials,
     )..language = widget.settingsController.language;
@@ -70,7 +80,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
   void _onChange() {
     if (!mounted) return;
-    // Keep the newest message in view as the transcript grows / streams.
+    // Follow the newest message while the reader is at it, and snap to it when
+    // one is added; leave a reader who scrolled up to older replies alone.
+    final int count = _controller.messages.length;
+    final bool added = count != _lastMessageCount;
+    _lastMessageCount = count;
+    if (!_atBottom && !added) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(
@@ -226,6 +241,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         child: Text(strings.manageMembers),
                       ),
                       PopupMenuItem<String>(
+                        value: 'workdir',
+                        child: Text(strings.changeWorkDirectory),
+                      ),
+                      PopupMenuItem<String>(
                         value: 'clear',
                         child: Text(strings.clearTranscript),
                       ),
@@ -240,7 +259,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             body: Column(
               children: <Widget>[
                 if (_controller.error != null)
-                  _ErrorBanner(message: _controller.error!),
+                  _Banner(message: _controller.error!, error: true),
+                if (_controller.notice != null)
+                  _Banner(message: _controller.notice!, error: false),
                 Expanded(child: _buildBody(strings, group)),
                 if (group != null)
                   ChatChromeSurface(
@@ -377,8 +398,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       case 'members':
         _manageMembers(group);
         break;
+      case 'workdir':
+        _changeWorkdir(group);
+        break;
       case 'clear':
-        _controller.clearTranscript();
+        _confirmClear();
         break;
       case 'delete':
         _confirmDelete(group);
@@ -442,18 +466,22 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   Future<void> _createGroup() async {
-    final SwarmForm? result = await _showSwarmForm(context.l10n.newGroup);
-    if (result == null) return;
-    await _controller.createGroup(
-      result.name,
-      result.members,
-      workdir: result.workdir,
-      configs: result.configs,
+    await _showSwarmForm(
+      context.l10n.newGroup,
+      onSubmit: (SwarmForm result) async {
+        final ChatGroup? created = await _controller.createGroup(
+          result.name,
+          result.members,
+          workdir: result.workdir,
+          configs: result.configs,
+        );
+        return created == null ? (_controller.error ?? '') : null;
+      },
     );
   }
 
   Future<void> _manageMembers(ChatGroup group) async {
-    final SwarmForm? result = await _showSwarmForm(
+    await _showSwarmForm(
       context.l10n.manageMembers,
       initialName: group.name,
       initialMembers: group.members,
@@ -462,12 +490,37 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       initialPeers: group.peers,
       nameEditable: false,
       workTreeEditable: false,
+      onSubmit: (SwarmForm result) async {
+        final bool ok = await _controller.updateMembers(
+          group,
+          result.members,
+          configs: result.configs,
+        );
+        return ok ? null : (_controller.error ?? '');
+      },
     );
-    if (result == null) return;
-    await _controller.updateMembers(
-      group,
-      result.members,
-      configs: result.configs,
+  }
+
+  Future<void> _changeWorkdir(ChatGroup group) async {
+    final MachineCredential? current = widget.machinesController.activeMachine;
+    await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => SwarmWorkdirDialog(
+        group: group,
+        backend: _controller.backend,
+        localMachineName: current?.displayName ?? '',
+        machines: widget.machinesController.credentials
+            .where((MachineCredential m) => m.id != current?.id)
+            .toList(growable: false),
+        onSubmit: (String workdir, Map<String, String> memberWorkdirs) async {
+          final bool ok = await _controller.updateWorkdir(
+            group,
+            workdir: workdir,
+            memberWorkdirs: memberWorkdirs,
+          );
+          return ok ? null : (_controller.error ?? '');
+        },
+      ),
     );
   }
 
@@ -572,6 +625,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     Map<String, SwarmPeer> initialPeers = const <String, SwarmPeer>{},
     bool nameEditable = true,
     bool workTreeEditable = true,
+    Future<String?> Function(SwarmForm form)? onSubmit,
   }) {
     final MachineCredential? current = widget.machinesController.activeMachine;
     return showDialog<SwarmForm>(
@@ -591,17 +645,41 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         initialConfigs: initialConfigs,
         nameEditable: nameEditable,
         workTreeEditable: workTreeEditable,
+        onSubmit: onSubmit,
       ),
     );
   }
 
   Future<void> _confirmDelete(ChatGroup group) async {
     final AppStrings strings = context.l10n;
+    if (await _confirm(
+      strings.deleteGroup,
+      strings.deleteGroupConfirm,
+      strings.delete,
+    )) {
+      await _controller.deleteGroup(group);
+    }
+  }
+
+  // Clearing also wipes every member's session, which cannot be undone.
+  Future<void> _confirmClear() async {
+    final AppStrings strings = context.l10n;
+    if (await _confirm(
+      strings.clearSwarmTitle,
+      strings.clearSwarmBody,
+      strings.clear,
+    )) {
+      await _controller.clearTranscript();
+    }
+  }
+
+  Future<bool> _confirm(String title, String body, String action) async {
+    final AppStrings strings = context.l10n;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(strings.deleteGroup),
-        content: Text(strings.deleteGroupConfirm),
+        title: Text(title),
+        content: Text(body),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -609,12 +687,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text(strings.delete),
+            child: Text(action),
           ),
         ],
       ),
     );
-    if (confirmed == true) await _controller.deleteGroup(group);
+    return confirmed == true;
   }
 }
 
@@ -688,8 +766,7 @@ class _MessageBubble extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final bool isHuman = message.role == ChatRole.user;
     final String? author = message.metadata['author'] as String?;
-    final String label =
-        isHuman ? groupAuthorLabel('human') : _memberLabel(author);
+    final String label = isHuman ? context.l10n.you : _memberLabel(author);
     final bool canEdit = !isHuman &&
         author != null &&
         group != null &&
@@ -712,6 +789,10 @@ class _MessageBubble extends StatelessWidget {
     // the partial text a reload may carry, until its whole reply is in.
     final bool awaiting =
         streaming || (awaitingFirstToken && message.content.isEmpty);
+    // What the member is doing (tool calls, commands) while it works, folded
+    // away under its finished reply.
+    final List<String> steps =
+        isHuman ? const <String>[] : persistedSteps(message);
     final DateTime stampTime =
         (!isHuman && segments.isNotEmpty && segments.first.createdAt != null)
             ? segments.first.createdAt!
@@ -746,6 +827,17 @@ class _MessageBubble extends StatelessWidget {
             color: textColor,
             formatInlineEmphasis: true,
           ),
+        if (steps.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 8),
+          if (awaiting)
+            ProgressLines(lines: steps, color: textColor, active: true)
+          else
+            CollapsibleNote(
+              title: context.l10n.agentSteps(steps.length),
+              color: textColor,
+              child: ProgressLines(lines: steps, color: textColor),
+            ),
+        ],
         if (cancelled && message.content.isNotEmpty) ...<Widget>[
           const SizedBox(height: 8),
           MessageStatus(
@@ -803,7 +895,7 @@ class _MessageBubble extends StatelessWidget {
           ),
           Container(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.82,
+              maxWidth: math.min(760, MediaQuery.of(context).size.width * 0.82),
             ),
             child: ChatChromeSurface(
               acrylic: WallpaperScope.enabledOf(context),
@@ -885,17 +977,19 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message});
+// A line above the transcript: an error, or information about the last round.
+class _Banner extends StatelessWidget {
+  const _Banner({required this.message, required this.error});
 
   final String message;
+  final bool error;
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return ChatChromeSurface(
       acrylic: WallpaperScope.enabledOf(context),
-      color: theme.colorScheme.errorContainer,
+      color: error ? colors.errorContainer : colors.secondaryContainer,
       border: const Border(),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -903,7 +997,10 @@ class _ErrorBanner extends StatelessWidget {
           width: double.infinity,
           child: Text(
             message,
-            style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            style: TextStyle(
+              color:
+                  error ? colors.onErrorContainer : colors.onSecondaryContainer,
+            ),
           ),
         ),
       ),

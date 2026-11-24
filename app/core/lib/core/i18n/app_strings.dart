@@ -43,10 +43,25 @@ class AppStrings {
   String get groupName => isZh ? '蜂群名称' : 'Swarm name';
   String get groupMembers => isZh ? '成员' : 'Members';
   String get manageMembers => isZh ? '管理成员' : 'Manage members';
+  String get changeWorkDirectory => isZh ? '更改工作目录' : 'Change work directory';
+  String get changeWorkDirectoryHint => isZh
+      ? '更改目录会重置受影响成员的会话。'
+      : "Changing a directory resets the affected members' sessions.";
   String get deleteGroup => isZh ? '删除蜂群' : 'Delete swarm';
   String get deleteGroupConfirm =>
       isZh ? '删除该蜂群及其聊天记录？' : 'Delete this swarm and its transcript?';
   String get clearTranscript => isZh ? '清空记录' : 'Clear transcript';
+  String get clearSwarmTitle => isZh ? '清空蜂群记录？' : 'Clear this swarm?';
+  String get clearSwarmBody => isZh
+      ? '删除全部聊天记录，并重置每个成员的会话（包括其他机器上的成员），成员会忘记之前的内容。工作目录里的文件不受影响。'
+      : "Delete the whole transcript and reset every member's session, including members on other machines, so they forget it. Files in the work trees are not changed.";
+  String get you => isZh ? '你' : 'You';
+  String get groupNeedsMention => isZh
+      ? '还没有成员发言，请用 @ 指定第一个回答的成员，例如 @claude'
+      : 'No member has spoken yet: @mention who should answer first, e.g. @claude';
+  String swarmUnsummoned(String names) => isZh
+      ? '本轮接力已达上限，未召唤：$names。需要的话 @ 它继续。'
+      : 'This round reached its hand-off limit and did not summon: $names. @mention them to continue.';
   String get noGroups => isZh ? '还没有蜂群' : 'No swarms yet';
   String get groupEmptyHint =>
       isZh ? '用 @ 召唤成员，例如 @claude' : 'Mention a member with @, e.g. @claude';
@@ -254,8 +269,11 @@ class AppStrings {
   String get linkedFileNotFound =>
       isZh ? '文件不存在或无权访问。' : 'The file does not exist or is not accessible.';
   String get dragDropUpload => isZh
-      ? 'Web 端可以把文件拖到此页上传。'
-      : 'On web, drag files onto this page to upload.';
+      ? '桌面端与 Web 端可以把文件拖到此页上传。'
+      : 'On desktop and web, drag files onto this page to upload.';
+  String get dropFilesToUpload => isZh ? '拖动文件即可上传' : 'Drop files to upload';
+  String dropFilesToDirectory(String path) =>
+      isZh ? '松开鼠标上传到：$path' : 'Release to upload into: $path';
   String uploadingFile(String name) => isZh ? '正在上传：$name' : 'Uploading: $name';
   String uploadComplete(int count) =>
       isZh ? '已上传 $count 个文件。' : '$count file(s) uploaded.';
@@ -380,6 +398,12 @@ class AppStrings {
       : 'This deletes the chat history and machine-side context for this session. Files in the workdir are not changed.';
   String sessionActionFailed(Object err) =>
       isZh ? '会话操作失败：$err' : 'Session action failed: $err';
+  String get keepSessionAlwaysOn =>
+      isZh ? '常驻此会话' : 'Keep this session always on';
+  String get stopKeepingAlwaysOn => isZh ? '取消常驻' : 'Stop keeping always on';
+  String get alwaysOnLimitReached => isZh
+      ? '常驻会话已满（最多 3 个），不能再开启。请到首页取消一个常驻会话。'
+      : 'Always-on sessions are full (max 3). Go to Home and turn one off first.';
   String get stop => isZh ? '停止' : 'Stop';
   String get send => isZh ? '发送' : 'Send';
   String get moreChatActions => isZh ? '更多操作' : 'More actions';
@@ -444,10 +468,15 @@ class AppStrings {
       isZh ? '执行步骤 · $count 条' : '$count ${count == 1 ? 'step' : 'steps'}';
   String startChat(String agent) =>
       isZh ? '与 $agent 开始对话' : 'Start chatting with $agent';
+  String get workspaces => isZh ? '工作区' : 'Workspaces';
   String get currentWorkspace => isZh ? '当前工作区' : 'Current workspace';
   String get recentWorkspaces => isZh ? '最近工作过的工作区' : 'Recent workspaces';
   String get noRecentWorkspaces =>
       isZh ? '还没有工作过的工作区。' : 'No recent workspaces yet.';
+  String get alwaysOnSessions => isZh ? '常驻会话' : 'Always-on sessions';
+  String get noAlwaysOnSessions => isZh
+      ? '还没有常驻会话。在会话右上角点图钉即可常驻。'
+      : 'No always-on sessions. Tap the pin at the top right of a chat to add one.';
   String get tutorialHomeHint => isZh
       ? '按模块分类讲解每个功能，可以搜索。'
       : 'Every feature, grouped by area, with search.';
@@ -564,10 +593,6 @@ class AppStrings {
   String get quotaAlerts => isZh ? '额度刷新提醒' : 'Quota reset alerts';
   String get taskAlerts => isZh ? '任务完成提醒' : 'Task completion alerts';
   String get tutorial => isZh ? '教程' : 'Tutorial';
-  String get whatsNew => isZh ? '新功能' : "What's new";
-  String get whatsNewHomeTitle =>
-      isZh ? '看看这个版本新增了什么' : 'See what this version adds';
-  String get otherChanges => isZh ? '其他改进' : 'Other changes';
   String get about => isZh ? '关于' : 'About';
   String get aboutApp => isZh ? '关于应用' : 'About this app';
   String get version => isZh ? '版本' : 'Version';
@@ -599,6 +624,9 @@ class AppStrings {
   String get backendUpdating => isZh ? '正在更新后端…' : 'Updating the backend…';
   String backendUpdated(String version) =>
       isZh ? '后端已更新到 $version' : 'Backend updated to $version';
+  String get backendUpdateUnfinished => isZh
+      ? '后端更新没有完成。原因在主机上的 relay-update.log 里（系统临时目录）。'
+      : 'The backend update did not finish. The reason is in relay-update.log in the host\'s temp folder.';
   String get fontSize => isZh ? '字体大小' : 'Font size';
   String get fontSizeDescription =>
       isZh ? '调整整个应用的文字大小' : 'Adjust text size across the app';

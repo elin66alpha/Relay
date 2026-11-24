@@ -36,18 +36,19 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    /// Copies the already-downloaded temp file at [srcPath] into the public
-    /// Downloads folder and returns a path the user can recognise. Streaming the
-    /// file (rather than receiving its bytes over the method channel) keeps a
-    /// large download off the heap. On Android 10+ this uses MediaStore (no
-    /// storage permission needed); older versions write the file directly.
+    /// Copies the already-downloaded temp file at [srcPath] into a Downloads
+    /// folder and returns a path the user can recognise. Streaming the file
+    /// (rather than receiving its bytes over the method channel) keeps a large
+    /// download off the heap. Neither branch needs a storage permission: Android
+    /// 10+ uses MediaStore's public Downloads; older versions write to the app's
+    /// own Downloads folder, since the public one needs WRITE_EXTERNAL_STORAGE
+    /// granted at run time there.
     private fun importToDownloads(srcPath: String, fileName: String): String {
         val src = File(srcPath)
-        val safeName = uniqueDisplayName(fileName)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = applicationContext.contentResolver
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
@@ -69,13 +70,17 @@ class MainActivity : FlutterActivity() {
                 resolver.delete(uri, null, null)
                 throw err
             }
-            "${Environment.DIRECTORY_DOWNLOADS}/$safeName"
+            // MediaStore renames a duplicate ("report (1).zip"); report that name.
+            val savedName = resolver.query(
+                uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null,
+            )?.use { if (it.moveToFirst()) it.getString(0) else null } ?: fileName
+            "${Environment.DIRECTORY_DOWNLOADS}/$savedName"
         } else {
-            val dir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS,
-            )
+            val dir = requireNotNull(
+                getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+            ) { "external storage is not available" }
             if (!dir.exists()) dir.mkdirs()
-            val file = File(dir, safeName)
+            val file = File(dir, uniqueDisplayName(dir, fileName))
             file.outputStream().use { out: OutputStream ->
                 src.inputStream().use { input -> input.copyTo(out) }
             }
@@ -83,13 +88,9 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /// Pre-Q we can check the filesystem to avoid overwriting; on Q+ MediaStore
-    /// auto-deduplicates, so we just return the requested name there.
-    private fun uniqueDisplayName(fileName: String): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return fileName
-        val dir = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS,
-        )
+    /// Avoids overwriting an earlier download before Android 10, where the app
+    /// writes the file itself.
+    private fun uniqueDisplayName(dir: File, fileName: String): String {
         if (!File(dir, fileName).exists()) return fileName
         val dot = fileName.lastIndexOf('.')
         val stem = if (dot > 0) fileName.substring(0, dot) else fileName

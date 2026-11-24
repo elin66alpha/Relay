@@ -25,6 +25,7 @@ Switching the workspace also switches:
 | Way | Note |
 |---|---|
 | **Recent workspaces** on Home | up to 5 directories with chat history; tap another one to switch |
+| The chat title | opens **Workspaces**: the current workspace and up to 7 recent others; tap one to switch and return to the chat |
 | Tags at the top of the file browser | also up to 5, in one horizontally scrolling row; tap to switch and show that directory |
 | **Set as work path** in the file browser | after browsing to a new project |
 
@@ -34,4 +35,4 @@ While an agent is running the work path cannot change; change it after the turn 
 
 ## Opening the file browser
 
-Tap **Current workspace** on Home, the chat title, or **File system** at the bottom of the drawer. See [Browse files and switch disks](file-browser.md).
+Tap **Current workspace** on Home, **Current workspace** or **File system** on the Workspaces page that the chat title opens, or **File system** at the bottom of the drawer. See [Browse files and switch disks](file-browser.md).

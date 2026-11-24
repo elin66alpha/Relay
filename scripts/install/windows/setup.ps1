@@ -63,12 +63,15 @@ function Read-InstallOptions {
   $port = Read-Host "Backend port [$(Get-BackendPort)]"
   if (-not $port) { $port = Get-BackendPort }
   $options = @{ Port = [int]$port; ServeWeb = $serve; Agents = $agents; Isolated = ($access -eq '2') }
+  # A Quick Tunnel's address changes on every restart; a tailnet's does not.
+  $defaultMode = if (Get-TailscaleIPv4) { '4' } else { '3' }
   while ($true) {
     Write-Host '  1) No tunnel / direct public address'
     Write-Host '  2) Cloudflare Tunnel / named stable hostname'
     Write-Host '  3) Cloudflare Quick Tunnel / temporary trycloudflare.com URL'
     Write-Host "  4) Tailscale / this machine's Tailscale IP, reachable from your tailnet"
-    $mode = Read-Host 'Network mode [1/2/3/4, default 3]'
+    $mode = Read-Host "Network mode [1/2/3/4, default $defaultMode]"
+    if (-not $mode) { $mode = $defaultMode }
     if ($mode -ne '4') { break }
     $tailscaleIp = Get-TailscaleIPv4
     if ($tailscaleIp) { break }
@@ -88,7 +91,7 @@ function Read-InstallOptions {
       $options.TunnelName = Read-Host "Cloudflare tunnel name [$(Get-DefaultTunnelName)]"
       $options.OverwriteDns = (Read-Host 'Allow replacing an existing DNS record? [y/N]') -match '^[Yy]'
     }
-    { $_ -in @('', '3') } { $options.NetworkMode = 'quick' }
+    '3' { $options.NetworkMode = 'quick' }
     '4' {
       $options.BindAddress = $tailscaleIp
       $options.NetworkMode = 'none'
@@ -125,6 +128,7 @@ if ($Action -eq 'install') {
   Install-FromMenu
   exit
 }
+[void](Test-RelayInstalledElsewhere)
 
 while ($true) {
   Write-Info 'Relay backend - Windows'
@@ -145,12 +149,16 @@ while ($true) {
   try {
     switch ($choice) {
       '1' {
-        if (Test-RelayInstalled) { Write-Warn 'Relay is already installed here. Choose 2 to reinstall.'; break }
+        if (Test-RelayInstalled) {
+          if (-not (Test-RelayInstalledElsewhere)) { Write-Warn 'Relay is already installed here. Choose 2 to reinstall.' }
+          break
+        }
         Install-FromMenu
         # A double-clicked setup.cmd closes its window on exit; keep the QR up.
         [void](Read-Host 'Press Enter to return to the menu')
       }
       '2' {
+        [void](Test-RelayInstalledElsewhere)
         if ((Read-Host 'Stop Relay, reinstall its dependencies and set up the network again? [y/N]') -notmatch '^[Yy]') { break }
         Install-FromMenu -Reinstall
         [void](Read-Host 'Press Enter to return to the menu')
@@ -173,7 +181,8 @@ while ($true) {
           '6' {
             $label = Read-Host "Label for the device that will use it [$env:COMPUTERNAME]"
             if (-not $label) { $label = $env:COMPUTERNAME }
-            Invoke-RelayCredential -Arguments @('--url', (Get-EnvValue 'PUBLIC_BASE_URL'), '--label', $label)
+            # No --url: a stable PUBLIC_BASE_URL, else the Quick Tunnel's current one from its log.
+            Invoke-RelayCredential -Arguments @('--label', $label)
           }
           '7' {
             Invoke-RelayCredential -Arguments @('--list-tokens')
@@ -186,7 +195,7 @@ while ($true) {
           '9' {
             Invoke-RelayCredential -Arguments @('--list-tokens')
             $id = Read-Host 'Token id'
-            if ($id) { Invoke-RelayCredential -Arguments @('--show', $id, '--url', (Get-EnvValue 'PUBLIC_BASE_URL')) }
+            if ($id) { Invoke-RelayCredential -Arguments @('--show', $id) }
           }
         }
       }

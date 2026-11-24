@@ -12,9 +12,6 @@ function checkVersions(root) {
   const settings = read('app/core/lib/features/settings/app_settings_screen.dart')
     .match(/_applicationVersion\s*=\s*'([^']+)'/)?.[1];
   const changelog = read('docs/CHANGELOG.md').match(/^##\s+(\S+)/m)?.[1];
-  const whatsNew = read('app/core/lib/features/settings/whats_new_screen.dart');
-  const releases = (language) => whatsNew
-    .match(new RegExp(`const List<_Release> _${language}Releases[\\s\\S]*?version:\\s*'([^']+)'`))?.[1];
   const versions = {
     'server/package-lock.json': lock.version,
     'mcp/package.json': JSON.parse(read('mcp/package.json')).version,
@@ -22,8 +19,6 @@ function checkVersions(root) {
     'app/shell/pubspec.yaml': app,
     'app settings': settings,
     'changelog': changelog,
-    'Chinese What\'s new': releases('zh'),
-    'English What\'s new': releases('en'),
   };
   if (!/^\d+\.\d+\.\d+$/.test(version || '')) throw new Error('Invalid backend version');
   for (const [name, actual] of Object.entries(versions)) {

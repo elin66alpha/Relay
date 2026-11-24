@@ -34,6 +34,8 @@ class DemoHttpClient extends http.BaseClient {
 
   final Map<String, Map<String, String>> _settings =
       <String, Map<String, String>>{};
+  final Map<String, Map<String, String>> _alwaysOn =
+      <String, Map<String, String>>{};
   final Map<String, List<Map<String, Object?>>> _histories =
       <String, List<Map<String, Object?>>>{};
   final Set<StreamController<List<int>>> _openStreams =
@@ -135,6 +137,8 @@ class DemoHttpClient extends http.BaseClient {
       case '/api/sessions/active':
         final String agentKey = _normalizeAgentKey(query['agent']);
         return _jsonResponse(200, _sessionListPayload(agentKey));
+      case '/api/sessions/always-on':
+        return _jsonResponse(200, _alwaysOnPayload());
       case '/api/history':
         final String agentKey = _normalizeAgentKey(query['agent']);
         final String sessionId = _normalizeSessionId(query['sessionId']);
@@ -176,7 +180,7 @@ class DemoHttpClient extends http.BaseClient {
         return _jsonResponse(200, const <String, Object?>{
           'ok': true,
           'hostname': 'demo-machine',
-          'version': '0.2.1',
+          'version': '0.2.2',
           'cpu': <String, Object?>{
             'model': 'Demo Virtual CPU',
             'cores': 8,
@@ -197,6 +201,7 @@ class DemoHttpClient extends http.BaseClient {
       case '/api/workdir':
         return _jsonResponse(200, const <String, Object?>{
           'dir': _demoWorkdir,
+          'defaultDir': _demoWorkdir,
           'busy': false,
         });
       case '/api/workdirs/recent':
@@ -263,6 +268,46 @@ class DemoHttpClient extends http.BaseClient {
         final Map<String, Object?> body = await _decodeBody(request);
         final String agentKey = _normalizeAgentKey(body['agent']?.toString());
         return _jsonResponse(200, _sessionListPayload(agentKey));
+      case '/api/sessions/always-on':
+        final Map<String, Object?> body = await _decodeBody(request);
+        final String agentKey = _normalizeAgentKey(body['agent']?.toString());
+        final String sessionId = _normalizeSessionId(
+          body['sessionId']?.toString(),
+        );
+        final bool alwaysOn = body['alwaysOn'] == true;
+        final String key = '$agentKey\u0000$_demoWorkdir\u0000$sessionId';
+        if (alwaysOn) {
+          if (!_alwaysOn.containsKey(key) && _alwaysOn.length >= 3) {
+            return _jsonResponse(409, const <String, Object?>{
+              'error': 'always-on limit reached (max 3)',
+              'code': 'ALWAYS_ON_LIMIT',
+            });
+          }
+          _alwaysOn.putIfAbsent(
+            key,
+            () => <String, String>{
+              'agent': agentKey,
+              'workdir': _demoWorkdir,
+              'sessionId': sessionId,
+              'name': _sessionPayload(sessionId)['name']! as String,
+            },
+          );
+        } else {
+          _alwaysOn.remove(key);
+        }
+        return _jsonResponse(200, _alwaysOnPayload());
+      case '/api/sessions/always-on/remove':
+        final Map<String, Object?> body = await _decodeBody(request);
+        final String agentKey = (body['agent']?.toString() ?? '').trim();
+        final String workdir = (body['workdir']?.toString() ?? '').trim();
+        final String sessionId = (body['sessionId']?.toString() ?? '').trim();
+        _alwaysOn.removeWhere(
+          (_, Map<String, String> entry) =>
+              entry['agent'] == agentKey &&
+              entry['workdir'] == workdir &&
+              entry['sessionId'] == sessionId,
+        );
+        return _jsonResponse(200, _alwaysOnPayload());
       case '/api/session/clear':
         final Map<String, Object?> body = await _decodeBody(request);
         final String rawAgent = (body['agent']?.toString() ?? '').trim();
@@ -931,6 +976,16 @@ class DemoHttpClient extends http.BaseClient {
         'usable': true,
       },
     ];
+  }
+
+  Map<String, Object?> _alwaysOnPayload() {
+    return <String, Object?>{
+      'ok': true,
+      'max': 3,
+      'sessions': _alwaysOn.values
+          .map((Map<String, String> entry) => Map<String, Object?>.from(entry))
+          .toList(growable: false),
+    };
   }
 
   Map<String, Object?> _sessionListPayload(String agentKey) {

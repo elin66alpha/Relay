@@ -1,12 +1,15 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
+const os = require('os');
 const express = require('express');
 const { wantsStream, writeStreamEvent, endStream } = require('../lib/sse');
 
 const {
+  handleSlug,
   parseMentions,
   deltaSince,
+  lastSpeaker,
   buildGroupPrompt,
 } = require('../lib/group-turn');
 const { normalizeSettings } = require('../lib/agent-options');
@@ -19,13 +22,15 @@ const {
 
 // Multi-agent group chat: one human, several agents, one canonical transcript.
 // The orchestrator reuses the single-agent turn pipeline (runAgentTurn) once for
-// every summoned member. Members in one wave run concurrently from the same
-// transcript snapshot, each against its OWN resumable CLI session and unseen
-// transcript delta (see docs/handbook.md, "Swarms"). The canonical transcript
-// uses a dedicated scope agent key so it never mixes with solo conversations.
-// A remote member (`<peerId>:<agentKey>`) runs on another Relay backend: its
-// turn goes through the same runAgentTurn with runAgent replaced by a call to
-// that peer's /api/chat, using the credential the app sent with this request.
+// every summoned member. Members in one wave run one after another in mention
+// order, each planned right before it runs so its unseen transcript delta
+// includes replies already given earlier in the same wave, against its OWN
+// resumable CLI session (see docs/handbook.md, "Swarms"). The canonical
+// transcript uses a dedicated scope agent key so it never mixes with solo
+// conversations. A remote member (`<peerId>:<agentKey>`) runs on another Relay
+// backend: its turn goes through the same runAgentTurn with runAgent replaced by
+// a call to that peer's /api/chat, using the credential the app sent with this
+// request.
 const GROUP_SCOPE_PREFIX = 'group:';
 const HUMAN_AUTHOR = 'human';
 
@@ -44,7 +49,9 @@ function maxMentionHops(env = process.env) {
 // A responder shared across every agent turn in one round. Unlike the single-chat
 // responder it does NOT end the stream after each agent (final()), so the route
 // can close it once the whole round drains. Non-streaming requests get one JSON
-// reply from the route after the loop instead.
+// reply from the route after the loop instead. event() reports every event as
+// unhandled, so a turn also broadcasts it and devices that did not start the
+// round still see members' progress.
 function createRoundResponder(res, streaming) {
   let opened = false;
   return {
@@ -60,9 +67,8 @@ function createRoundResponder(res, streaming) {
       writeStreamEvent(res, 'ready', { ok: true, requestId });
     },
     event(type, payload) {
-      if (!streaming) return false;
-      writeStreamEvent(res, type, payload);
-      return true;
+      if (streaming) writeStreamEvent(res, type, payload);
+      return false;
     },
     async fallbackText() {},
     final(reply) {
@@ -84,16 +90,20 @@ module.exports = function createGroupRouter(ctx) {
   const {
     MAX_PROMPT_BYTES,
     activeRequests,
+    agentPayload = (agent) => ({ key: agent.key, label: agent.label }),
     agentTurnDependencies,
     clearHistory,
     createGroup,
     createPeerClient,
     deleteGroup,
+    findGroup,
+    getDefaultWorkdir,
     purgeSession,
     finalizeStaleStreamingHistory,
     getAgent,
-    getGroup,
-    listGroups,
+    listAllGroups,
+    localMachineName,
+    nextGroupName,
     normalizeDeviceId,
     notifyTaskCompletion,
     readHistory,
@@ -106,12 +116,17 @@ module.exports = function createGroupRouter(ctx) {
     sendWorkdirError,
     sessionContextKeyFor,
     setGroupMembers,
+    setGroupWorkdir,
     touchGroup,
     upsertHistoryMessage,
     validateWorkdir,
   } = ctx;
   const router = express.Router();
   const maxHops = maxMentionHops();
+  const hostName =
+    (typeof localMachineName === 'string' && localMachineName.trim()) ||
+    (os.hostname() || '').split('.')[0].trim() ||
+    'local';
 
   const groupScopeKeyFor = (workdir, groupId) =>
     sessionContextKeyFor(`${GROUP_SCOPE_PREFIX}${groupId}`, workdir);
@@ -127,23 +142,51 @@ module.exports = function createGroupRouter(ctx) {
     }
     return null;
   };
-  // A member's default label; a remote member's names its machine, so the same
-  // agent on two machines reads apart.
-  const labelFor = (memberKey, peers = {}) => {
+  const baseLabelFor = (memberKey) => {
     const remote = splitMemberKey(memberKey);
     const agent = getAgent(remote ? remote.agentKey : memberKey);
-    const label = agent ? agent.label : remote ? remote.agentKey : memberKey;
-    if (!remote) return label;
+    return agent ? agent.label : remote ? remote.agentKey : memberKey;
+  };
+  // A member's default label: a remote member always names its machine, and a
+  // local member names this machine only when another member in the swarm shares
+  // the same agent label (e.g. two "Claude Code").
+  const defaultLabelFor = (group, memberKey) => {
+    const remote = splitMemberKey(memberKey);
+    const base = baseLabelFor(memberKey);
+    if (remote) {
+      const peer = group.peers && group.peers[remote.peerId];
+      return `${base} (${peer ? peer.name : remote.peerId})`;
+    }
+    const members = Array.isArray(group.members) ? group.members : [];
+    const duplicates = members.filter((key) => baseLabelFor(key) === base).length;
+    return duplicates > 1 ? `${base} (${hostName})` : base;
+  };
+  // Readable mention handle: `@<agent>` for local members, `@<peer-slug>:<agent>`
+  // for remote members (falling back to `@<peerId>:<agent>` if the peer name
+  // has no ASCII slug or collides with another peer in the swarm).
+  const handleFor = (group, memberKey) => {
+    const remote = splitMemberKey(memberKey);
+    if (!remote) return memberKey;
+    const peers = (group && group.peers) || {};
     const peer = peers[remote.peerId];
-    return `${label} (${peer ? peer.name : remote.peerId})`;
+    const slug = peer ? handleSlug(peer.name) : '';
+    if (!slug) return memberKey;
+    const collision = Object.entries(peers).some(
+      ([id, info]) => id !== remote.peerId && handleSlug(info && info.name) === slug,
+    );
+    return collision ? memberKey : `${slug}:${remote.agentKey}`;
   };
   // The agent a member's turn is attributed to. A remote member is described by
   // its member key and label only; its peer owns everything else about it.
   const memberAgentFor = (group, memberKey) => {
     const remote = splitMemberKey(memberKey);
-    if (!remote) return getAgent(memberKey);
+    if (!remote) {
+      const agent = getAgent(memberKey);
+      if (!agent) return null;
+      return { ...agent, label: defaultLabelFor(group, memberKey) };
+    }
     if (!group.peers[remote.peerId]) return null;
-    return { key: memberKey, label: labelFor(memberKey, group.peers) };
+    return { key: memberKey, label: defaultLabelFor(group, memberKey) };
   };
 
   // The peer credentials the app sent with this request, keyed by peer id.
@@ -224,7 +267,12 @@ module.exports = function createGroupRouter(ctx) {
         const workdir = raw && typeof raw.workdir === 'string' ? raw.workdir.trim() : '';
         const session = await client.createSession(agentKey, workdir, `Swarm: ${swarmName}`);
         created.push({ client, agentKey, ...session });
-        configs[memberKey] = { workdir: session.workdir, sessionId: session.sessionId };
+        // A re-added member's new session has none of its earlier replies.
+        configs[memberKey] = {
+          workdir: session.workdir,
+          sessionId: session.sessionId,
+          resetAt: new Date().toISOString(),
+        };
         peers[peerId] = { name: credential.name, baseUrl: credential.baseUrl };
       }
     } catch (err) {
@@ -261,14 +309,16 @@ module.exports = function createGroupRouter(ctx) {
     }
   }
 
-  // The work tree chosen for a new swarm: an explicit, existing directory or the
-  // workspace when none is given. Returns null (after sending an error) when the
-  // path is set but invalid, so the caller bails out.
+  // The work tree chosen for a new swarm or workdir update: an explicit,
+  // existing directory (or the machine's default dir, created if missing) or
+  // the workspace when none is given. Returns null (after sending an error)
+  // when the path is set but invalid, so the caller bails out.
   function resolveWorkTree(res, rawPath, workspace) {
     const raw = String(rawPath || '').trim();
     if (!raw) return workspace;
+    const defaultDir = typeof getDefaultWorkdir === 'function' ? getDefaultWorkdir() : '';
     try {
-      return validateWorkdir(raw, { create: false }).dir;
+      return validateWorkdir(raw, { create: Boolean(defaultDir && raw === defaultDir) }).dir;
     } catch (err) {
       sendWorkdirError(res, err);
       return null;
@@ -280,24 +330,23 @@ module.exports = function createGroupRouter(ctx) {
   // `nickname` and `prompt` passed through (groups.js bounds their length). Only
   // current members are kept, so a config can never reference a dropped member.
   // A remote member runs with its peer's own settings, so it keeps only the
-  // persona plus the peer `workdir`/`sessionId` from `linked`, never the caller's.
+  // persona. The peer `workdir`/`sessionId` and every member's `resetAt` are
+  // the server's own and come from `linked`, never from the caller.
   function normalizeConfigs(rawConfigs, members, linked = {}) {
     const out = {};
     const configs = rawConfigs && typeof rawConfigs === 'object' ? rawConfigs : {};
     for (const memberKey of members) {
-      const raw = configs[memberKey];
-      if (splitMemberKey(memberKey)) {
-        const { workdir, sessionId } = linked[memberKey] || {};
-        const config = { workdir, sessionId };
-        if (raw && typeof raw.nickname === 'string') config.nickname = raw.nickname;
-        if (raw && typeof raw.prompt === 'string') config.prompt = raw.prompt;
-        out[memberKey] = config;
-      } else if (raw && typeof raw === 'object') {
-        const config = normalizeSettings(memberKey, raw);
-        if (typeof raw.nickname === 'string') config.nickname = raw.nickname;
-        if (typeof raw.prompt === 'string') config.prompt = raw.prompt;
-        out[memberKey] = config;
-      }
+      const raw = configs[memberKey] && typeof configs[memberKey] === 'object'
+        ? configs[memberKey]
+        : null;
+      const { workdir, sessionId, resetAt } = linked[memberKey] || {};
+      let config = {};
+      if (splitMemberKey(memberKey)) config = { workdir, sessionId };
+      else if (raw) config = normalizeSettings(memberKey, raw);
+      if (raw && typeof raw.nickname === 'string') config.nickname = raw.nickname;
+      if (raw && typeof raw.prompt === 'string') config.prompt = raw.prompt;
+      if (resetAt) config.resetAt = resetAt;
+      out[memberKey] = config;
     }
     return out;
   }
@@ -316,7 +365,7 @@ module.exports = function createGroupRouter(ctx) {
   router.get('/api/groups', (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
-    return res.json({ workdir, groups: listGroups(workdir) });
+    return res.json({ workdir, groups: listAllGroups() });
   });
 
   router.post('/api/groups', async (req, res) => {
@@ -332,7 +381,7 @@ module.exports = function createGroupRouter(ctx) {
     if (workTree === null) return undefined;
     // Named before creation because each remote member's session carries it.
     const name = String(req.body.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) ||
-      `Swarm ${listGroups(workdir).length + 1}`;
+      nextGroupName(listAllGroups());
     let linked;
     try {
       linked = await linkRemoteMembers(
@@ -352,7 +401,7 @@ module.exports = function createGroupRouter(ctx) {
         .status(409)
         .json({ error: 'too many swarms in this workspace', code: 'GROUP_LIMIT' });
     }
-    return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
+    return res.json({ ok: true, workdir, group, groups: listAllGroups() });
   });
 
   router.post('/api/groups/members', async (req, res) => {
@@ -365,10 +414,11 @@ module.exports = function createGroupRouter(ctx) {
         .status(400)
         .json({ error: 'at least one known agent member is required', code: 'GROUP_NO_MEMBERS' });
     }
-    const existing = getGroup(workdir, groupId);
-    if (!existing) {
+    const found = findGroup(groupId);
+    if (!found) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
+    const { workspace, group: existing } = found;
     const credentials = requestPeers(req);
     let linked;
     try {
@@ -382,9 +432,16 @@ module.exports = function createGroupRouter(ctx) {
     } catch (err) {
       return sendPeerError(res, err);
     }
-    const group = setGroupMembers(workdir, groupId, members, {
+    // A member the caller sends no config for keeps its stored one, so a
+    // client that only changes members (relay-mcp) resets nobody's settings.
+    const rawConfigs = req.body.configs && typeof req.body.configs === 'object'
+      ? req.body.configs
+      : {};
+    const group = setGroupMembers(workspace, groupId, members, {
       memberConfigs: normalizeConfigs(
-        req.body.configs, members, { ...existing.memberConfigs, ...linked.configs },
+        { ...existing.memberConfigs, ...rawConfigs },
+        members,
+        { ...existing.memberConfigs, ...linked.configs },
       ),
       peers: linked.peers,
     });
@@ -399,23 +456,120 @@ module.exports = function createGroupRouter(ctx) {
       existing.members.filter((key) => !members.includes(key)),
       'delete',
     );
-    return res.json({ ok: true, workdir, group, groups: listGroups(workdir) });
+    return res.json({ ok: true, workdir, group, groups: listAllGroups() });
+  });
+
+  // Change a swarm's local work tree and/or remote members' peer workdirs.
+  // Validates every changed directory first (local via validateWorkdir, remote
+  // via peer session creation with rollback on failure) and resets only the
+  // affected members' sessions. Refused while a round is running.
+  router.post('/api/groups/workdir', async (req, res) => {
+    const workdir = resolveWorkdir(req, res);
+    if (workdir === null) return undefined;
+    const groupId = String(req.body.groupId || '').trim();
+    const found = findGroup(groupId);
+    if (!found) {
+      return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
+    }
+    const { workspace, group: existing } = found;
+    const oldRunWorkdir = runWorkdirOf(existing, workspace);
+    const oldScopeKey = groupScopeKeyFor(oldRunWorkdir, existing.id);
+    if (runningScopes.has(oldScopeKey) || scopeChains.has(oldScopeKey)) {
+      return res.status(409).json({ error: 'group has a running turn', code: 'GROUP_BUSY' });
+    }
+    let nextLocalWorkdir = oldRunWorkdir;
+    let localChanged = false;
+    const rawLocal = typeof req.body.workdir === 'string' ? req.body.workdir.trim() : '';
+    if (rawLocal) {
+      const validated = resolveWorkTree(res, rawLocal, oldRunWorkdir);
+      if (validated === null) return undefined;
+      if (validated !== oldRunWorkdir) {
+        nextLocalWorkdir = validated;
+        localChanged = true;
+      }
+    }
+    const rawMemberWorkdirs =
+      req.body.memberWorkdirs && typeof req.body.memberWorkdirs === 'object'
+        ? req.body.memberWorkdirs
+        : {};
+    const changedRemote = [];
+    for (const [memberKey, rawDir] of Object.entries(rawMemberWorkdirs)) {
+      if (!splitMemberKey(memberKey) || !existing.members.includes(memberKey)) continue;
+      const dir = typeof rawDir === 'string' ? rawDir.trim() : '';
+      const prevDir = (existing.memberConfigs[memberKey] && existing.memberConfigs[memberKey].workdir) || '';
+      if (dir && dir !== prevDir) {
+        changedRemote.push({ memberKey, workdir: dir });
+      }
+    }
+    if (!localChanged && changedRemote.length === 0) {
+      return res.json({ ok: true, workdir, group: existing, groups: listAllGroups() });
+    }
+    const credentials = requestPeers(req);
+    const remoteUpdates = {};
+    const created = [];
+    const rollback = () => Promise.all(created.map(({ client, agentKey, workdir: dir, sessionId }) =>
+      client.deleteSession(agentKey, dir, sessionId).catch(() => {})));
+    try {
+      for (const { memberKey, workdir: newDir } of changedRemote) {
+        const { peerId, agentKey } = splitMemberKey(memberKey);
+        const peer = existing.peers[peerId];
+        const client = peerClientFor(req, credentials, peerId, peer);
+        if (!client) throw notLinkedError((peer && peer.name) || peerId);
+        const session = await client.createSession(agentKey, newDir, `Swarm: ${existing.name}`);
+        created.push({ client, agentKey, ...session });
+        remoteUpdates[memberKey] = { workdir: session.workdir, sessionId: session.sessionId };
+      }
+    } catch (err) {
+      await rollback();
+      return sendPeerError(res, err);
+    }
+    const updated = setGroupWorkdir(workspace, existing.id, {
+      workdir: localChanged ? nextLocalWorkdir : undefined,
+      remoteUpdates,
+    });
+    if (!updated) {
+      await rollback();
+      return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
+    }
+    if (localChanged) {
+      const newScopeKey = groupScopeKeyFor(nextLocalWorkdir, existing.id);
+      if (newScopeKey !== oldScopeKey) {
+        const messages = readHistory(oldScopeKey);
+        for (const message of messages) upsertHistoryMessage(newScopeKey, message);
+        clearHistory(oldScopeKey);
+      }
+      for (const memberKey of existing.members.filter((key) => !splitMemberKey(key))) {
+        await purgeSession(memberSessionKeyFor(oldRunWorkdir, existing.id, memberKey), {
+          agentKey: memberKey,
+          workdir: oldRunWorkdir,
+        });
+      }
+    }
+    await forgetRemoteMembers(
+      req,
+      credentials,
+      existing,
+      changedRemote.map((item) => item.memberKey),
+      'delete',
+    );
+    return res.json({ ok: true, workdir, group: updated, groups: listAllGroups() });
   });
 
   router.post('/api/groups/delete', async (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
-    const group = getGroup(workdir, groupId);
-    if (!group) {
+    const found = findGroup(groupId);
+    if (!found) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
-    const runWorkdir = runWorkdirOf(group, workdir);
+    const { workspace, group } = found;
+    const runWorkdir = runWorkdirOf(group, workspace);
     const scopeKey = groupScopeKeyFor(runWorkdir, group.id);
     if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
       return res.status(409).json({ error: 'group has a running turn', code: 'GROUP_BUSY' });
     }
-    deleteGroup(workdir, group.id);
+    deleteGroup(workspace, group.id);
     clearHistory(scopeKey);
     await forgetRemoteMembers(req, requestPeers(req), group, group.members, 'delete');
     for (const memberKey of group.members.filter((key) => !splitMemberKey(key))) {
@@ -424,18 +578,19 @@ module.exports = function createGroupRouter(ctx) {
         workdir: runWorkdir,
       });
     }
-    return res.json({ ok: true, workdir, groups: listGroups(workdir) });
+    return res.json({ ok: true, workdir, groups: listAllGroups() });
   });
 
   router.get('/api/group/history', (req, res) => {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.query.groupId || '').trim();
-    const group = getGroup(workdir, groupId);
-    if (!group) {
+    const found = findGroup(groupId);
+    if (!found) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
-    const scopeKey = groupScopeKeyFor(runWorkdirOf(group, workdir), group.id);
+    const { workspace, group } = found;
+    const scopeKey = groupScopeKeyFor(runWorkdirOf(group, workspace), group.id);
     if (!runningScopes.has(scopeKey) && !scopeChains.has(scopeKey)) {
       finalizeStaleStreamingHistory(scopeKey);
     }
@@ -453,11 +608,12 @@ module.exports = function createGroupRouter(ctx) {
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
     const groupId = String(req.body.groupId || '').trim();
-    const group = getGroup(workdir, groupId);
-    if (!group) {
+    const found = findGroup(groupId);
+    if (!found) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
-    const runWorkdir = runWorkdirOf(group, workdir);
+    const { workspace, group } = found;
+    const runWorkdir = runWorkdirOf(group, workspace);
     const scopeKey = groupScopeKeyFor(runWorkdir, group.id);
     if (runningScopes.has(scopeKey) || scopeChains.has(scopeKey)) {
       return res.status(409).json({ error: 'group has a running turn', code: 'GROUP_BUSY' });
@@ -482,17 +638,10 @@ module.exports = function createGroupRouter(ctx) {
     if (!runState || !runState.group) {
       return res.status(404).json({ error: 'request not found', code: 'REQUEST_NOT_FOUND' });
     }
-    const workdir = resolveWorkdir(req, res);
-    if (workdir === null) return undefined;
-    // Any device in the same workdir may cancel the round (shared conversation).
-    if (runState.scopeWorkdir && runState.scopeWorkdir !== workdir) {
-      return res.status(404).json({ error: 'request not found', code: 'REQUEST_NOT_FOUND' });
-    }
     runState.cancelled = true;
     if (!runState.cancelEventSent) {
       runState.cancelEventSent = true;
       sendEvent('group_cancelled', {
-        scopeWorkdir: runState.scopeWorkdir,
         groupId: runState.group.id,
         requestId,
         deviceId: runState.deviceId,
@@ -521,15 +670,15 @@ module.exports = function createGroupRouter(ctx) {
     }
     const workdir = resolveWorkdir(req, res);
     if (workdir === null) return undefined;
-    const group = getGroup(workdir, groupId);
-    if (!group) {
+    const found = findGroup(groupId);
+    if (!found) {
       return res.status(404).json({ error: 'group not found', code: 'GROUP_NOT_FOUND' });
     }
+    const { workspace, group } = found;
 
     // History, member sessions and the agents themselves all run in the swarm's
-    // own work tree; the workspace stays the cancel/event addressing key so any
-    // device that can see the swarm can cancel the round.
-    const runWorkdir = runWorkdirOf(group, workdir);
+    // own work tree (falling back to the bucket workspace for legacy swarms).
+    const runWorkdir = runWorkdirOf(group, workspace);
     const scopeKey = groupScopeKeyFor(runWorkdir, group.id);
     // One round at a time: a second one would interleave its waves with the
     // first in the shared transcript and feed members each other's half-done
@@ -540,16 +689,39 @@ module.exports = function createGroupRouter(ctx) {
         .json({ error: 'swarm has a running round', code: 'GROUP_BUSY' });
     }
     // A member's display name inside this swarm: its user-set nickname when
-    // present, otherwise the agent's default label. Used for @mention matching,
-    // the speaker labels in each prompt, and the recorded message attribution so
-    // a renamed member reads consistently everywhere.
+    // present, otherwise the agent's default label (with machine name when two
+    // members share an agent label). Used for @mention matching, speaker labels
+    // in each prompt, and the recorded message attribution.
     const groupLabelFor = (agentKey) => {
       const nickname = group.memberConfigs[agentKey] &&
         group.memberConfigs[agentKey].nickname;
-      return (typeof nickname === 'string' && nickname) || labelFor(agentKey, group.peers);
+      return (typeof nickname === 'string' && nickname) || defaultLabelFor(group, agentKey);
+    };
+    const groupHandleFor = (memberKey) => handleFor(group, memberKey);
+    const locationFor = (memberKey) => {
+      const remote = splitMemberKey(memberKey);
+      if (!remote) return { machine: hostName, workdir: runWorkdir };
+      const peer = group.peers[remote.peerId];
+      const config = group.memberConfigs[memberKey] || {};
+      return {
+        machine: (peer && peer.name) || remote.peerId,
+        workdir: config.workdir || '',
+      };
     };
     const credentials = requestPeers(req);
-    const mentions = parseMentions(prompt, group.members, groupLabelFor);
+    let mentions = parseMentions(prompt, group.members, groupLabelFor, groupHandleFor);
+    if (mentions.length === 0) {
+      // A message that names no one is a follow-up ("continue") to whoever
+      // spoke last; before anyone has, it would summon no one, so refuse it.
+      const last = lastSpeaker(readHistory(scopeKey), group.members);
+      if (!last) {
+        return res.status(400).json({
+          error: 'mention a member with @ to start the conversation',
+          code: 'GROUP_NO_MENTION',
+        });
+      }
+      mentions = [last];
+    }
     const abortController = new AbortController();
     const runState = {
       requestId,
@@ -557,7 +729,7 @@ module.exports = function createGroupRouter(ctx) {
       session: { id: group.id, name: group.name },
       deviceId,
       scopeKey,
-      scopeWorkdir: workdir,
+      scopeWorkdir: workspace,
       cancelled: false,
       cancelEventSent: false,
       abortController,
@@ -567,7 +739,8 @@ module.exports = function createGroupRouter(ctx) {
     responder.ready(requestId);
 
     // Record the human message once per round (not once per summoned agent), then
-    // mirror it to every device in the workdir so the transcript stays shared.
+    // broadcast to every connected device so anyone viewing this swarm sees it
+    // regardless of their current solo-chat workdir.
     const createdAt = new Date().toISOString();
     const humanMessageId = `${requestId}:human`;
     upsertHistoryMessage(scopeKey, {
@@ -585,7 +758,6 @@ module.exports = function createGroupRouter(ctx) {
       },
     });
     sendEvent('group_message', {
-      scopeWorkdir: workdir,
       groupId: group.id,
       requestId,
       deviceId,
@@ -601,69 +773,81 @@ module.exports = function createGroupRouter(ctx) {
     });
 
     const base = agentTurnDependencies();
-    // Mark the group scope busy for the whole round. Members serialize on their
-    // own session keys (so they run concurrently), so this group scope key is what
-    // the delete/clear/history routes consult to tell the round is still running.
+    // Mark the group scope busy for the whole round. This group scope key is what
+    // the delete/clear/workdir/history routes consult to tell the round is running.
     runningScopes.add(scopeKey);
 
-    // Everyone this member is allowed to hand the floor to. Empty when
-    // agent-to-agent summoning is off, so the prompt never offers what the
-    // orchestrator would then ignore.
+    // Everyone this member is allowed to hand the floor to, with its readable
+    // handle, machine and work tree. Empty when agent-to-agent summoning is off.
     const rosterFor = (memberKey) =>
       maxHops === 0
         ? []
         : group.members
             .filter((key) => key !== memberKey)
-            .map((key) => ({ key, label: groupLabelFor(key) }));
+            .map((key) => ({
+              key,
+              handle: groupHandleFor(key),
+              label: groupLabelFor(key),
+              ...locationFor(key),
+            }));
 
-    // Freeze every summoned member's prompt up front, from one snapshot taken at
-    // the start of the wave, so a member's prompt can never absorb a sibling's
-    // reply even as those replies stream into the shared transcript once the
-    // turns start running. (The next wave snapshots again, so it does see them.)
-    const planWave = (summons, wave) => {
+    // Plan one member's prompt right before it runs, snapshotting the transcript
+    // fresh so its delta includes replies already given earlier in this wave.
+    const planMember = ({ memberKey, summonedBy }, wave, index) => {
+      const memberAgent = memberAgentFor(group, memberKey);
+      if (!memberAgent) return null;
       const snapshot = readHistory(scopeKey);
-      return summons
-        .map(({ memberKey, summonedBy }, index) => {
-          const memberAgent = memberAgentFor(group, memberKey);
-          if (!memberAgent) return null;
-          const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
-          // Plan B: feed this member only what happened since it last spoke, each
-          // line labeled with its speaker. Its own resumable session has the rest.
-          const delta = deltaSince(snapshot, memberKey);
-          const memberConfig = group.memberConfigs[memberKey] || {};
-          const groupPrompt = buildGroupPrompt({
-            selfLabel: groupLabelFor(memberKey),
-            persona: memberConfig.prompt,
-            delta,
-            labelFor: groupLabelFor,
-            roster: rosterFor(memberKey),
-            maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
-          });
-          return {
-            memberKey,
-            memberAgent,
-            memberSessionKey,
-            groupPrompt,
-            summonedBy,
-            turnRequestId: `${requestId}.${wave}.${index}.${memberKey}`,
-          };
-        })
-        .filter(Boolean);
+      const memberSessionKey = memberSessionKeyFor(runWorkdir, group.id, memberKey);
+      const memberConfig = group.memberConfigs[memberKey] || {};
+      // Plan B: feed this member only what happened since it last spoke, each
+      // line labeled with its speaker. Its own resumable session has the rest.
+      const delta = deltaSince(snapshot, memberKey, memberConfig.resetAt);
+      const selfLoc = locationFor(memberKey);
+      const groupPrompt = buildGroupPrompt({
+        selfLabel: groupLabelFor(memberKey),
+        selfMachine: selfLoc.machine,
+        selfWorkdir: selfLoc.workdir,
+        persona: memberConfig.prompt,
+        delta,
+        labelFor: groupLabelFor,
+        roster: rosterFor(memberKey),
+        maxBytes: Math.max(1024, MAX_PROMPT_BYTES - 1024),
+      });
+      return {
+        memberKey,
+        memberAgent,
+        memberSessionKey,
+        groupPrompt,
+        summonedBy,
+        turnRequestId: `${requestId}.${wave}.${index}.${memberKey}`,
+      };
     };
 
     // Who the replies of a finished wave handed the floor to. A member never
-    // summons itself (that would never terminate), and is summoned once per wave
-    // however many siblings named it — it sees all of them in its next delta.
+    // summons itself (that would never terminate), is skipped when it already
+    // ran after the mentioning reply in this same wave (it already saw that
+    // reply), and is summoned once per wave however many siblings named it.
     // Failed and cancelled turns are skipped: their recorded content is an error
     // message, not something an agent chose to say.
     const nextSummons = (results) => {
       const seen = new Set();
       const out = [];
-      for (const result of results) {
+      for (let i = 0; i < results.length; i += 1) {
+        const result = results[i];
         if (!result || result.status !== 'done') continue;
-        const summoned = parseMentions(result.content, group.members, groupLabelFor);
+        const ranAfter = new Set(
+          results.slice(i + 1).map((r) => r && r.agent).filter(Boolean),
+        );
+        const summoned = parseMentions(
+          result.content,
+          group.members,
+          groupLabelFor,
+          groupHandleFor,
+        );
         for (const memberKey of summoned) {
-          if (memberKey === result.agent || seen.has(memberKey)) continue;
+          if (memberKey === result.agent || seen.has(memberKey) || ranAfter.has(memberKey)) {
+            continue;
+          }
           seen.add(memberKey);
           out.push({ memberKey, summonedBy: result.agent });
         }
@@ -671,9 +855,7 @@ module.exports = function createGroupRouter(ctx) {
       return out;
     };
 
-    // One summoned member's turn. The assistant placeholder is recorded
-    // synchronously (before the first await), so kicking these off in mention
-    // order keeps the transcript ordered even though replies arrive in parallel.
+    // One summoned member's turn.
     const runMember = async ({
       memberKey,
       memberAgent,
@@ -684,10 +866,30 @@ module.exports = function createGroupRouter(ctx) {
     }) => {
       const dependencies = {
         ...base,
-        // Tag every shared-stream event with the group so only clients viewing
-        // this group react to it.
-        broadcastScope: (type, payload) =>
-          base.broadcastScope(type, { ...payload, groupId: group.id }),
+        // Broadcast member lifecycle on the shared stream as group_agent_*
+        // without scopeWorkdir so every device viewing this swarm sees it
+        // regardless of solo-chat workdir, and solo-chat listeners ignore it.
+        // Progress lines go too, so a working member shows what it is doing;
+        // reply text does not, since Swarm replies are not streamed.
+        broadcastScope: (type, payload) => {
+          const progress = type === 'agent_progress';
+          if (
+            progress ||
+            type === 'agent_start' ||
+            type === 'agent_done' ||
+            type === 'agent_error' ||
+            type === 'agent_cancelled'
+          ) {
+            sendEvent(`group_${type}`, {
+              deviceId: payload.deviceId,
+              requestId: payload.requestId,
+              agent: agentPayload(payload.agent),
+              groupId: group.id,
+              ...(progress ? { line: payload.line } : {}),
+              createdAt: new Date().toISOString(),
+            });
+          }
+        },
         // The swarm pins each member's model/effort/permission/fast itself, so use
         // its config instead of the member's solo-chat agent-settings store.
         getSettings: (agentKey) =>
@@ -722,9 +924,8 @@ module.exports = function createGroupRouter(ctx) {
         agent: memberAgent,
         agentKey: memberKey,
         contextKey: sessionContextKeyFor(memberKey, runWorkdir),
-        // Serialize each member only against its own group session — not the
-        // shared group scope — so members summoned together run in parallel while
-        // their replies still land in the one group transcript (scopeKey).
+        // Serialize each member on its own group session key while history
+        // lives under the shared group transcript (scopeKey).
         concurrencyKey: memberSessionKey,
         dependencies,
         deviceId,
@@ -737,7 +938,7 @@ module.exports = function createGroupRouter(ctx) {
           groupId: group.id,
           groupName: group.name,
         },
-        notifyTaskCompletion,
+        // The round notifies once when it ends, not once per member turn.
         prompt: groupPrompt,
         recordHistory: true,
         recordUserMessage: false,
@@ -758,34 +959,56 @@ module.exports = function createGroupRouter(ctx) {
     };
 
     const turns = [];
+    // Members a reply named after the last allowed wave, so the app can tell
+    // the human why they did not answer.
+    let unsummoned = [];
+    let lastReply = null;
     try {
-      // The human's mentions open the round; each wave's replies can summon the
-      // next, up to maxHops waves after the human's.
+      // The human's mentions open the round; each wave runs its summoned
+      // members one after another in mention order, then its replies can summon
+      // the next wave, up to maxHops waves after the human's.
       let summons = mentions.map((memberKey) => ({
         memberKey,
         summonedBy: HUMAN_AUTHOR,
       }));
       for (let wave = 0; summons.length > 0 && !runState.cancelled; wave += 1) {
-        const settled = await Promise.all(
-          planWave(summons, wave).map((plan) => runMember(plan)),
-        );
-        for (const result of settled) {
-          if (result) turns.push({ agent: result.agent, status: result.status });
+        const settled = [];
+        for (let index = 0; index < summons.length && !runState.cancelled; index += 1) {
+          const plan = planMember(summons[index], wave, index);
+          if (!plan) continue;
+          const result = await runMember(plan);
+          if (result) {
+            settled.push(result);
+            turns.push({ agent: result.agent, status: result.status });
+            if (result.status === 'done') lastReply = result;
+          }
         }
-        summons = wave >= maxHops ? [] : nextSummons(settled);
+        const next = runState.cancelled ? [] : nextSummons(settled);
+        summons = wave < maxHops ? next : [];
+        if (wave >= maxHops) unsummoned = next.map((item) => item.memberKey);
       }
     } finally {
       runningScopes.delete(scopeKey);
       activeRequests.delete(requestId);
     }
 
-    touchGroup(workdir, group.id);
+    touchGroup(workspace, group.id);
+    // One notification per round, named after the swarm. A stopped round was
+    // stopped by someone watching it.
+    if (lastReply && !runState.cancelled && typeof notifyTaskCompletion === 'function') {
+      notifyTaskCompletion({
+        agent: { label: group.name },
+        scopeWorkdir: runWorkdir,
+        content: lastReply.content,
+      });
+    }
     const summary = {
       ok: true,
       requestId,
       groupId: group.id,
       cancelled: runState.cancelled,
       turns,
+      unsummoned,
     };
     // Broadcast the round's end on the shared stream so every device viewing this
     // group reloads the authoritative transcript — important for agents that emit
@@ -793,7 +1016,6 @@ module.exports = function createGroupRouter(ctx) {
     // other devices, which never see the POST response.
     sendEvent('group_done', {
       ...summary,
-      scopeWorkdir: workdir,
       deviceId,
       createdAt: new Date().toISOString(),
     });

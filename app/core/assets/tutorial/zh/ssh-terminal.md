@@ -16,7 +16,7 @@ keywords: ssh, 终端, terminal, shell, pty, ctrl, 按键栏, 命令行
 
 ## 手机按键栏
 
-Android 和 iOS 在终端下方提供手机键盘没有的键：Ctrl、Shift、Esc、Tab 和四个方向键。
+Android 和 iOS（App 或手机浏览器）在终端下方提供手机键盘没有的键：Ctrl、Shift、Esc、Tab 和四个方向键。
 
 - Ctrl 和 Shift 只作用于**下一个**按键：点 Ctrl 再输入 `c` 就是 Ctrl+C；再点一次取消。
 - Esc、Tab 和方向键立即发送。

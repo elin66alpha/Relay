@@ -248,6 +248,30 @@ test('lists cursor between codex and opencode', () => {
   );
 });
 
+test('each stretch of ACP thinking shows one progress line and no text', async () => {
+  const thought = { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'hmm' } };
+  pools.cursor.send = async (call) => {
+    for (const update of [
+      thought,
+      { sessionUpdate: 'tool_call_update', toolCallId: 'x', status: 'in_progress' },
+      thought,
+      { sessionUpdate: 'tool_call', title: 'ls' },
+      thought,
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+    ]) call.onMessage(update);
+    return { result: { stopReason: 'end_turn' }, sessionId: 'next', stderr: '' };
+  };
+  const events = [];
+  const result = await runAgent('cursor', 'hi', (event) => events.push(event), {
+    workdir: '/tmp/w', settings: { model: 'default' }, sessionKey: 'thinking',
+  });
+  assert.equal(result, 'ok');
+  assert.deepEqual(
+    events.map((event) => (event.type === 'progress' ? event.line : event.type)),
+    ['Thinking…', 'Tool: ls', 'Thinking…', 'delta'],
+  );
+});
+
 test('each Cursor model choice runs in a process of its own', async () => {
   pools.cursor.send = async (call) => {
     call.onMessage({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } });

@@ -11,9 +11,13 @@
 #   ensure_cloudflared           cloudflared, for both tunnel modes
 #   svc_start [fresh]            start the backend, plus the tunnel when
 #                                server/.env enables one; fresh re-registers
+#                                (and, on Linux, offers to start at boot)
+#   svc_restart_server           re-register and restart only the backend
 #   svc_stop                     stop both, keeping their registration
 #   svc_remove                   stop and unregister both
 #   svc_registered server|tunnel whether the service is registered
+#   svc_root                     the installation the registered backend
+#                                runs from, or nothing
 #   svc_summary                  the service manager's own view, for status
 #   server_log_files, tunnel_log_files   one path per line
 #   service_hint                 how to manage the services directly
@@ -174,6 +178,19 @@ file_access_state() {
   local root
   root="$(get_env RELAY_WORKSPACE_ROOT)"
   if [ -n "$root" ]; then printf 'isolated to %s' "$root"; else printf 'open'; fi
+}
+
+# The services are one per user. Reinstalling from another folder (a newer
+# release extracted beside the old one) would move them there with a fresh
+# server/.env and tokens, so every device would lose access.
+installed_elsewhere() {
+  local root
+  root="$(svc_root || true)"
+  [ -n "$root" ] && [ -d "$root" ] || return 1
+  [ "$(cd "$root" && pwd -P)" != "$ROOT_DIR" ] || return 1
+  c_warn "Relay is installed from $root, not from this folder."
+  c_warn "To upgrade it and keep its tokens and chats, run: RELAY_DIR=\"$root\" $UNIX_DIR/update.sh"
+  c_warn "Reinstall here only to replace it with a new installation that has no tokens or chats."
 }
 
 require_setup() {

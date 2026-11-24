@@ -1,6 +1,78 @@
 # Changelog
 
-## 0.2.1 - Unreleased
+## 0.2.2 - Unreleased
+
+### Fixed
+
+- **Windows app update**: Update on Windows downloaded the release and closed
+  the app, which then stayed closed and reopened on the old version, so 0.2.0
+  and 0.2.1 could never update themselves. Dart's detached mode starts programs without a
+  console, and Windows PowerShell then exits without running anything. The app
+  now starts the replacement script through `cmd start`, which gives it its own
+  hidden console. The script is a UTF-8 `.ps1` with a BOM so non-ASCII folder
+  names survive, imports Windows PowerShell's own Archive module (an app
+  started from PowerShell 7 otherwise loads PowerShell 7's, which fails), retries
+  unpacking, and logs failures to `relay-client-update.log` in the temp folder.
+  Windows clients on 0.2.0 or 0.2.1 need to install 0.2.2 by hand once.
+- **Antigravity logged out after a restart over SSH**: restarting the backend
+  from an SSH shell (`pm2 restart --update-env`, then `pm2 save`) left that
+  shell's `SSH_*` variables in the backend for good. agy then treated every
+  conversation, quota check and agent started from Relay as an SSH login and
+  kept its token in a file instead of the keyring the host's own agy uses, so
+  it reported "not logged in" while agy worked in a terminal. The backend now
+  drops those variables, and stale `ANTIGRAVITY_*` ones from an agy tool shell,
+  at startup; `SSH_AUTH_SOCK` stays.
+- **Claude on macOS**: Claude Code keeps its login in the macOS login Keychain
+  instead of `~/.claude/.credentials.json`, so a macOS backend showed Claude as
+  not logged in and could not read its quota. Login status now checks the
+  Keychain item (attributes only), and quota and keepalive read the token from
+  the Keychain and write a refreshed one back there
+  (`server/lib/claude-credentials.js`). The first read asks the Mac to allow
+  `security` access.
+- **Backend install and update** (a review of the Linux, macOS and Windows
+  install flow):
+  - Linux setup offers to register PM2's systemd unit (`pm2 startup`), so the
+    backend and tunnel come back after a reboot; before, nothing restarted them.
+  - The macOS LaunchAgent runs the `node` setup found by its full path, with
+    its folder first on the service PATH, so a Node.js from nvm, fnm or Volta
+    (and the CLIs npm installs beside it) works under launchd.
+  - Creating a token or showing a QR again with a Quick Tunnel on macOS or
+    Windows used the URL from before the tunnel last restarted, because the
+    credential script read only PM2's logs. It now reads the LaunchAgent and
+    Windows `logs\` tunnel logs too, and the Windows menu no longer passes the
+    stale `PUBLIC_BASE_URL`.
+  - A Windows backend that exits starts again within five seconds
+    (`server/scripts/keep-running.js`); its logs are appended, so a restart no
+    longer erases the crash.
+  - `scripts/install/unix/update.sh` skips a release the installation already
+    has, installs the new dependencies (`npm ci --omit=dev`) in a staged copy
+    before touching anything, restarts only the backend through the new
+    release's adapter, and puts the previous version back when the backend does
+    not answer within 30 seconds or a run was interrupted. This protects
+    updates made from 0.2.2 onwards; updating to 0.2.2 still runs the
+    installed version's updater.
+  - The app says when a backend update has not finished after ten minutes,
+    instead of quietly offering the button again.
+  - Linux and macOS setup lists agents from the backend
+    (`server/scripts/setup-status.js`, formerly `windows-setup.js`), which adds
+    Antigravity; installs release dependencies without development tools; asks
+    for the port; and checks a direct address like Windows does. Every setup
+    defaults to Tailscale on a tailnet, warns that a Quick Tunnel URL changes,
+    and names the folder Relay is already installed from, with the command that
+    upgrades it, instead of reinstalling over it with new tokens.
+  - Linux setup names Node.js or cloudflared in its sudo prompt instead of
+    curl, and on non-apt distributions says Node.js is missing. macOS setup no
+    longer requires the Xcode Command Line Tools: node-pty ships prebuilt for
+    macOS.
+- **Swarm recovery after going offline**: when a Swarm transcript reload failed
+  with a network error (for instance while a device was briefly offline during
+  a round), the controller showed the network error banner and never reloaded
+  again, leaving typing indicators and the banner stuck after the connection
+  returned. Selected-swarm reloads now retry with backoff (2 s to 30 s) on
+  network errors and clear their reload error once history loads again without
+  clearing unrelated send errors.
+
+## 0.2.1 - 2026-11-19
 
 ### Fixed
 

@@ -109,6 +109,7 @@ function createStdioAgentPool(options = {}) {
       }
       return entry.backgroundTasks.size > 0;
     },
+    isAlwaysOn: options.isAlwaysOn,
     evictsBefore: (a, b) => {
       const aBusy = a.backgroundTasks.size > 0;
       return aBusy !== (b.backgroundTasks.size > 0)
@@ -427,7 +428,7 @@ function createStdioAgentPool(options = {}) {
     // Connect before taking a slot: nothing may await between acquireSlot() and
     // registering the entry, or two concurrent spawns both pass the cap check.
     const c = await ensureConnection();
-    await acquireSlot();
+    await acquireSlot(req.key);
     if (c.closed) {
       // Waiting for a slot takes time, and the process can die (or be closed
       // for going idle) in it. Reconnect rather than fail a turn that never

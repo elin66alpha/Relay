@@ -103,7 +103,7 @@ try {
   Assert-That ((Get-Content -LiteralPath (Join-Path $Script:ServerDir 'tokens.json') -Raw) -eq 'retained fixture') 'Uninstall must keep device tokens.'
   Assert-That ((Get-EnvValue 'KEEP_ME') -eq 'original') 'Uninstall must keep custom configuration.'
   $incomplete = ''; try { Get-RelayDetails | Out-Null } catch { $incomplete = $_.Exception.Message }
-  Assert-That ($incomplete -like '*bundle is incomplete*windows-setup.js*') 'A partly extracted bundle must name the missing status bridge.'
+  Assert-That ($incomplete -like '*bundle is incomplete*setup-status.js*') 'A partly extracted bundle must name the missing status bridge.'
   # A host Node on the user PATH must not shadow the bundle's own runtime.
   $fakeLib = Join-Path $scratch 'bundle\scripts\install\windows\lib'
   $fakeNodeDir = Join-Path $scratch 'bundle\runtime\node'

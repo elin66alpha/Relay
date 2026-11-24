@@ -18,9 +18,10 @@ String _browserName(String ua) {
 
 String _osName(String ua) {
   if (ua.contains('Windows')) return 'Windows';
+  // Before macOS: iPhone and iPad agents say "like Mac OS X".
+  if (ua.contains('iPhone') || ua.contains('iPad')) return 'iOS';
   if (ua.contains('Mac OS X')) return 'macOS';
   if (ua.contains('Android')) return 'Android';
-  if (ua.contains('iPhone') || ua.contains('iPad')) return 'iOS';
   if (ua.contains('Linux')) return 'Linux';
   return '';
 }

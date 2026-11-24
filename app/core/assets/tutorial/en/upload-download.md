@@ -8,7 +8,7 @@ keywords: upload, download, zip, drag and drop, size limit
 
 ## Upload
 
-Select **Upload file** in the file browser; files go into **the directory shown**. On the Web you can also drag files onto the page.
+Select **Upload file** in the file browser; files go into **the directory shown**. On desktop (Linux, Windows, macOS) and the Web you can also drag files into the window: a drop zone overlay appears while dragging and uploads the files into the current directory on release (not shown on phones or tablets).
 
 Each file is limited to 100 MB by default (`UPLOAD_MAX_BYTES`). Files attached in chat upload to `.relay/uploads/` in the workspace; see [Composer tools](composer-tools.md).
 
@@ -24,4 +24,6 @@ Progress shows while downloading, and the location when done:
 |---|---|
 | Web | the browser's downloads folder (large files may use a lot of memory) |
 | iOS | the app's Documents folder, under Files → On My iPhone → Relay |
+| Android 10 and later | the Download folder |
+| Android 9 and earlier | `Android/data/dev.relay.app/files/Download` in internal storage |
 | Others | the path shown in the message |

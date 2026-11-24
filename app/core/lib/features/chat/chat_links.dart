@@ -132,19 +132,21 @@ Future<void> _openFile(
     navigator.push(_browserRoute(backend, onSetWorkdir, entry.path));
   } else {
     final FsEntry file = entry;
-    navigator.push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => FilePreviewScreen(
-          entry: file,
-          open: () => backend.openFileDownload(file.path),
-          onDownload: () => DownloadManager.instance.startDownload(
-            fileName: file.name,
-            strings: strings,
-            open: () => backend.openFileDownload(file.path),
+    navigator
+        .push(
+          MaterialPageRoute<void>(
+            builder: (BuildContext context) => FilePreviewScreen(
+              entry: file,
+              open: () => backend.openFileDownload(file.path),
+              onDownload: () => DownloadManager.instance.startDownload(
+                fileName: file.name,
+                strings: strings,
+                open: () => backend.openFileDownload(file.path),
+              ),
+            ),
           ),
-        ),
-      ),
-    );
+        )
+        .whenComplete(DownloadManager.instance.clearSettled);
   }
 }
 

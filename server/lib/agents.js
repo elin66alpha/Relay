@@ -27,6 +27,7 @@ const {
 const { createClaudeSessionPool } = require('./claude-session-pool');
 const { createAcpSessionPool } = require('./acp-session-pool');
 const { createCodexSessionPool } = require('./codex-session-pool');
+const { alwaysOnSessions } = require('./always-on-sessions');
 const {
   readAgyContext,
   readAgyTrajectory,
@@ -204,7 +205,9 @@ function claudeExecutablePath() {
 // One live CLI process per scope, reused across turns instead of respawned per
 // turn. See claude-session-pool.js for the lifecycle and why the pool is only
 // ever a cache over the stored session id.
-const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS });
+const isAlwaysOn = (key) => alwaysOnSessions.has(key);
+
+const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS, isAlwaysOn });
 
 // opencode, hermes, agy, and cursor each ship an `acp` subcommand: the same idea as
 // the Claude SDK over a different protocol — one process that stays open and
@@ -213,6 +216,7 @@ const claudePool = createClaudeSessionPool({ turnTimeoutMs: TIMEOUT_MS });
 const opencodePool = createAcpSessionPool({
   agentKey: 'opencode',
   turnTimeoutMs: TIMEOUT_MS,
+  isAlwaysOn,
   command: () => {
     return cliCommand('opencode', ['acp']);
   },
@@ -224,6 +228,7 @@ const opencodePool = createAcpSessionPool({
 const agyPool = createAcpSessionPool({
   agentKey: 'agy',
   turnTimeoutMs: TIMEOUT_MS,
+  isAlwaysOn,
   command: () => {
     return cliCommand('agy', ['acp', '--process-per-session']);
   },
@@ -238,6 +243,7 @@ const agyPool = createAcpSessionPool({
 const hermesPool = createAcpSessionPool({
   agentKey: 'hermes',
   turnTimeoutMs: TIMEOUT_MS,
+  isAlwaysOn,
   command: () => {
     return cliCommand('hermes', ['acp']);
   },
@@ -274,6 +280,7 @@ function cursorPoolFor(poolKey) {
     pool = createAcpSessionPool({
       agentKey: 'cursor',
       turnTimeoutMs: TIMEOUT_MS,
+      isAlwaysOn,
       // Cursor's CLI is named `agent` and opens no session until the client
       // authenticates with the host login.
       authMethod: 'cursor_login',
@@ -387,6 +394,7 @@ function refreshAgentModels(agentKey, { force = false } = {}) {
 const codexPool = createCodexSessionPool({
   agentKey: 'codex',
   turnTimeoutMs: TIMEOUT_MS,
+  isAlwaysOn,
   command: () => {
     return cliCommand('codex', [
       'app-server',
@@ -845,6 +853,7 @@ function acpEventEmitter(onEvent) {
   let finalText = '';
   let currentMsgId = null;
   let hasContext = false;
+  let thinking = false;
 
   // ACP chunks are already deltas, so they are emitted as-is rather than
   // through makeDeltaEmitter (whose prefix de-duplication is for CLIs that
@@ -856,6 +865,16 @@ function acpEventEmitter(onEvent) {
   };
 
   const onMessage = (update) => {
+    // Reasoning text stays hidden, but a model can think for 20s+ between
+    // replies (Cursor's Grok), so each stretch of it shows one progress line.
+    if (update.sessionUpdate === 'agent_thought_chunk') {
+      if (!thinking) emit(onEvent, 'Thinking…');
+      thinking = true;
+      return;
+    }
+    if (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'tool_call') {
+      thinking = false;
+    }
     if (update.sessionUpdate === 'agent_message_chunk') {
       const msgId = update.messageId || 'msg';
       if (currentMsgId !== null && msgId !== currentMsgId) {

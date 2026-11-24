@@ -12,16 +12,17 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/cli_agent.dart';
 import '../../core/models/machine_credential.dart';
 import '../../core/platform/file_saver.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/wallpaper.dart';
+import '../../core/util/error_text.dart';
 import '../settings/app_settings_screen.dart';
 import '../settings/update_check.dart';
 import '../../core/widgets/agent_icon.dart';
 import '../../core/widgets/chat_wallpaper.dart';
 import '../cli_agents/agent_status_lights.dart';
 import '../cli_agents/cli_agents_controller.dart';
-import '../filesystem/file_system_screen.dart';
 import '../machines/machine_credentials_controller.dart';
 import '../quota/quota_strip.dart';
 import 'bot_chat_controller.dart';
@@ -81,6 +82,7 @@ class _BotChatScreenState extends State<BotChatScreen>
   GlobalKey? _highlightAnchor;
   Timer? _highlightTimer;
   bool _revealingMatch = false;
+  bool _togglingAlwaysOn = false;
 
   @override
   void initState() {
@@ -88,6 +90,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     WidgetsBinding.instance.addObserver(this);
     _lastNotificationSettings = _notificationSettings;
     widget.chatController.addListener(_onChatChanged);
+    widget.chatController.streamUpdates.addListener(_onChatChanged);
     widget.agentsController.addListener(_onContextChanged);
     widget.machinesController.addListener(_onContextChanged);
     widget.settingsController.addListener(_onSettingsChanged);
@@ -108,10 +111,18 @@ class _BotChatScreenState extends State<BotChatScreen>
     });
   }
 
+  // Desktop and Web also report inactive -> resumed on every focus change; only
+  // a return from the background can have lost the event stream.
+  bool _wasBackgrounded = false;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _wasBackgrounded = true;
+    } else if (state == AppLifecycleState.resumed && _wasBackgrounded) {
+      _wasBackgrounded = false;
       widget.chatController.onAppResumed();
     }
   }
@@ -120,6 +131,7 @@ class _BotChatScreenState extends State<BotChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.chatController.removeListener(_onChatChanged);
+    widget.chatController.streamUpdates.removeListener(_onChatChanged);
     widget.agentsController.removeListener(_onContextChanged);
     widget.machinesController.removeListener(_onContextChanged);
     widget.settingsController.removeListener(_onSettingsChanged);
@@ -179,6 +191,7 @@ class _BotChatScreenState extends State<BotChatScreen>
     final MachineCredential? machine = widget.machinesController.activeMachine;
     if (machine == null) {
       unawaited(widget.chatController.disconnectEvents());
+      widget.chatController.clearAlwaysOnSessions();
       if (widget.chatController.machine != null) {
         widget.chatController.goHome();
       }
@@ -304,6 +317,26 @@ class _BotChatScreenState extends State<BotChatScreen>
     );
     if (ok == true) {
       await widget.chatController.clearHistory();
+    }
+  }
+
+  Future<void> _toggleAlwaysOn() async {
+    if (_togglingAlwaysOn) return;
+    _togglingAlwaysOn = true;
+    try {
+      await widget.chatController.toggleActiveSessionAlwaysOn();
+    } catch (err) {
+      if (!mounted) return;
+      final AppStrings strings = context.l10n;
+      final String message =
+          err is BackendException && err.code == 'ALWAYS_ON_LIMIT'
+              ? strings.alwaysOnLimitReached
+              : friendlyErrorText(strings, err);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      _togglingAlwaysOn = false;
     }
   }
 
@@ -463,9 +496,7 @@ class _BotChatScreenState extends State<BotChatScreen>
         backgroundColor: Colors.transparent,
         drawerScrimColor: Colors.black54,
         // Let mobile users open the drawer from anywhere in the chat.
-        drawerEdgeDragWidth: !kIsWeb &&
-                (defaultTargetPlatform == TargetPlatform.android ||
-                    defaultTargetPlatform == TargetPlatform.iOS)
+        drawerEdgeDragWidth: !kIsWeb && isPhoneOrTablet
             ? MediaQuery.sizeOf(context).width
             : null,
         drawer: usePermanentSidebar
@@ -508,6 +539,10 @@ class _BotChatScreenState extends State<BotChatScreen>
                   chatController: widget.chatController,
                 ),
                 actions: <Widget>[
+                  _AlwaysOnButton(
+                    chatController: widget.chatController,
+                    onPressed: _toggleAlwaysOn,
+                  ),
                   _SearchButton(
                     chatController: widget.chatController,
                     onPressed: _showHistorySearch,
@@ -539,6 +574,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                         acrylic: acrylic,
                         agentsController: widget.agentsController,
                         chatController: widget.chatController,
+                        onToggleAlwaysOn: _toggleAlwaysOn,
                         onSearch: _showHistorySearch,
                       ),
                     ListenableBuilder(
@@ -584,6 +620,7 @@ class _BotChatScreenState extends State<BotChatScreen>
                         listenable: Listenable.merge(<Listenable>[
                           widget.agentsController,
                           widget.chatController,
+                          widget.chatController.streamUpdates,
                         ]),
                         builder: (BuildContext context, Widget? _) {
                           if (widget.chatController.machine == null) {
@@ -725,6 +762,11 @@ class _BotChatScreenState extends State<BotChatScreen>
                               Expanded(
                                 child: showQuota
                                     ? QuotaStrip(
+                                        // A new host starts a fresh strip that
+                                        // fetches its own quota at once.
+                                        key: ValueKey<String?>(
+                                          widget.chatController.machine?.id,
+                                        ),
                                         quotaController: widget
                                             .chatController.quotaController,
                                         agentKey: agentKey,
@@ -780,12 +822,14 @@ class _DesktopChatHeader extends StatelessWidget {
   const _DesktopChatHeader({
     required this.agentsController,
     required this.chatController,
+    required this.onToggleAlwaysOn,
     required this.onSearch,
     this.acrylic = false,
   });
 
   final CliAgentsController agentsController;
   final BotChatController chatController;
+  final VoidCallback onToggleAlwaysOn;
   final VoidCallback onSearch;
   final bool acrylic;
 
@@ -807,6 +851,10 @@ class _DesktopChatHeader extends StatelessWidget {
                   agentsController: agentsController,
                   chatController: chatController,
                 ),
+              ),
+              _AlwaysOnButton(
+                chatController: chatController,
+                onPressed: onToggleAlwaysOn,
               ),
               _SearchButton(
                 chatController: chatController,
@@ -897,10 +945,7 @@ class _ChatTitle extends StatelessWidget {
           onTap: () {
             Navigator.of(context).push<void>(
               MaterialPageRoute<void>(
-                builder: (_) => FileSystemScreen(
-                  backend: chatController.backend,
-                  onSetWorkdir: chatController.setWorkdir,
-                ),
+                builder: (_) => WorkspacesPage(chatController: chatController),
               ),
             );
           },
@@ -908,6 +953,40 @@ class _ChatTitle extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: content,
           ),
+        );
+      },
+    );
+  }
+}
+
+class _AlwaysOnButton extends StatelessWidget {
+  const _AlwaysOnButton({
+    required this.chatController,
+    required this.onPressed,
+  });
+
+  final BotChatController chatController;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: chatController,
+      builder: (BuildContext context, Widget? _) {
+        if (chatController.machine == null ||
+            !chatController.alwaysOnSupported) {
+          return const SizedBox.shrink();
+        }
+        final bool alwaysOn = chatController.isActiveSessionAlwaysOn;
+        return IconButton(
+          icon: Icon(
+            alwaysOn ? Icons.push_pin : Icons.push_pin_outlined,
+            color: alwaysOn ? Theme.of(context).colorScheme.primary : null,
+          ),
+          tooltip: alwaysOn
+              ? context.l10n.stopKeepingAlwaysOn
+              : context.l10n.keepSessionAlwaysOn,
+          onPressed: onPressed,
         );
       },
     );

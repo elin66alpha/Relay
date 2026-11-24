@@ -278,6 +278,7 @@ class _SearchBackendClient extends BackendClient {
   Future<ChatHistory> fetchHistory(
     String agentKey, {
     required String sessionId,
+    int? tail,
   }) async {
     final bool holdsHit = agentKey == hitAgentKey;
     return ChatHistory(

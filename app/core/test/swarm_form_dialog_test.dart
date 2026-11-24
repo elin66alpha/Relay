@@ -91,14 +91,14 @@ void main() {
     await tester.tap(remoteClaude);
     await tester.pumpAndSettle();
 
-    // A remote member: no model controls, the work directory remembered for
-    // that machine, nickname and prompt.
+    // A remote member: no model controls, the machine's defaultDir (not its
+    // last-used dir), nickname and prompt.
     await tester.tap(remoteClaude);
     await tester.pumpAndSettle();
     expect(find.text('Configure Claude Code (Studio)'), findsOneWidget);
     expect(find.byType(DropdownButton<String>), findsNothing);
     expect(find.text('Work directory on that machine'), findsOneWidget);
-    expect(find.text('/srv/studio'), findsOneWidget);
+    expect(find.text('/srv/studio-default'), findsOneWidget);
     await tester.enterText(
       find.widgetWithText(TextField, 'Nickname (this swarm)'),
       'Remote',
@@ -107,27 +107,147 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Remote'), findsOneWidget);
 
-    // A local member keeps model controls and the shared work tree.
+    // A local member keeps model controls and defaults to local defaultDir.
     await tester.tap(localClaude);
     await tester.pumpAndSettle();
     expect(find.byType(DropdownButton<String>), findsOneWidget);
     expect(find.text("Shared by this machine's members"), findsOneWidget);
+    expect(find.text('/local/default'), findsOneWidget);
     await tester.tap(find.text('Cancel').last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Create'));
     await tester.pumpAndSettle();
     expect(result!.name, '');
+    expect(result!.workdir, '/local/default');
     expect(result!.members, <String>['claude', '$_studioPeer:claude']);
     expect(result!.configs['$_studioPeer:claude'], <String, String>{
-      'workdir': '/srv/studio',
+      'workdir': '/srv/studio-default',
       'nickname': 'Remote',
     });
     expect(result!.configs['claude'], <String, String>{'model': 'opus'});
   });
+
+  testWidgets('a stored member config emptied in the form is sent to clear it',
+      (WidgetTester tester) async {
+    SwarmForm? result;
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () async {
+                result = await showDialog<SwarmForm>(
+                  context: context,
+                  builder: (_) => SwarmFormDialog(
+                    title: 'Manage members',
+                    agents: const <CliAgent>[],
+                    backend: _LocalBackend(),
+                    localMachineName: 'Desk',
+                    machines: const <MachineCredential>[_studio],
+                    machineBackend: (MachineCredential m) => _MachineBackend(m),
+                    initialName: 'Team',
+                    initialMembers: const <String>['$_studioPeer:claude'],
+                    initialWorkdir: '/trees/team',
+                    initialConfigs: const <String, Map<String, String>>{
+                      '$_studioPeer:claude': <String, String>{
+                        'nickname': 'Old',
+                      },
+                    },
+                    initialPeers: const {},
+                    nameEditable: false,
+                    workTreeEditable: false,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('swarm-member-$_studioPeer:claude')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Nickname (this swarm)'),
+      '',
+    );
+    // The member dialog sits above the form, so its OK is the last one.
+    await tester.tap(find.text('OK').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // Left out, the backend would keep the stored nickname.
+    expect(result!.configs['$_studioPeer:claude'], <String, String>{});
+  });
+
+  testWidgets('keeps form open and shows error when onSubmit fails',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () {
+                showDialog<SwarmForm>(
+                  context: context,
+                  builder: (_) => SwarmFormDialog(
+                    title: 'New swarm',
+                    agents: const <CliAgent>[
+                      CliAgent(
+                        key: 'claude',
+                        label: 'Claude Code',
+                        description: '',
+                      ),
+                    ],
+                    backend: _LocalBackend(),
+                    localMachineName: 'Desk',
+                    machines: const <MachineCredential>[],
+                    initialName: '',
+                    initialMembers: const <String>['claude'],
+                    initialWorkdir: '',
+                    initialConfigs: const <String, Map<String, String>>{},
+                    initialPeers: const {},
+                    nameEditable: true,
+                    workTreeEditable: true,
+                    onSubmit: (_) async =>
+                        'workdir is outside the isolated workspace',
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('workdir is outside the isolated workspace'),
+      findsOneWidget,
+    );
+    expect(find.text('New swarm'), findsOneWidget);
+  });
 }
 
 class _LocalBackend extends BackendClient {
+  @override
+  Future<WorkdirInfo> workdir() async => const WorkdirInfo(
+        dir: '/local/last-used',
+        defaultDir: '/local/default',
+      );
+
   @override
   Future<AgentOptionsCatalog> fetchAgentOptions(String agentKey) async {
     return AgentOptionsCatalog.fromJson(<String, Object?>{
@@ -162,5 +282,8 @@ class _MachineBackend extends BackendClient {
   }
 
   @override
-  Future<WorkdirInfo> workdir() async => const WorkdirInfo(dir: '/srv/studio');
+  Future<WorkdirInfo> workdir() async => const WorkdirInfo(
+        dir: '/srv/last-used',
+        defaultDir: '/srv/studio-default',
+      );
 }

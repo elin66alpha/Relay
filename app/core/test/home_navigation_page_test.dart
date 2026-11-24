@@ -100,6 +100,59 @@ void main() {
     backend.requests.last.complete(<String>['/b/project']);
     await tester.pumpAndSettle();
   });
+
+  testWidgets(
+      'workspaces page lists current plus seven recent and switches back to chat',
+      (tester) async {
+    final backend = _HomeBackend();
+    final chat = BotChatController(
+      backendClient: backend,
+      quotaController: QuotaController(backendClient: backend),
+    );
+    addTearDown(chat.disposeController);
+    await tester.pumpWidget(
+      AppScope(
+        controller: AppSettingsController(),
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => WorkspacesPage(chatController: chat),
+                  ),
+                ),
+                child: const Text('chat'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('chat'));
+    await tester.pump();
+    backend.requests.single.complete(<String>[
+      '/r1',
+      '/current',
+      for (int i = 2; i <= 9; i += 1) '/r$i',
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Current workspace'), findsOneWidget);
+    expect(find.text('/current'), findsOneWidget);
+    for (int i = 1; i <= 7; i += 1) {
+      expect(find.text('/r$i'), findsOneWidget);
+    }
+    expect(find.text('/r8'), findsNothing);
+    expect(find.text('File system'), findsOneWidget);
+
+    await tester.tap(find.text('/r3'));
+    await tester.pumpAndSettle();
+    expect(backend.selected, <String>['/r3']);
+    expect(chat.activeWorkdir, '/r3');
+    expect(find.byType(WorkspacesPage), findsNothing);
+    expect(find.text('Work directory updated.'), findsOneWidget);
+  });
 }
 
 class _Machines extends MachineCredentialsController {

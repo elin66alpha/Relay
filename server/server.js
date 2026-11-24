@@ -2,6 +2,8 @@
 
 // dotenv 17+ logs every load unless told to be quiet.
 require('dotenv').config({ quiet: true });
+// Before anything spawns an agent: see dropLoginSessionEnv.
+require('./lib/cli-paths').dropLoginSessionEnv(process.env);
 
 const fs = require('fs');
 const path = require('path');
@@ -72,10 +74,14 @@ const { getAgentStatuses } = require('./lib/agent-status');
 const { clearModelDiscoveryCache } = require('./lib/model-discovery');
 const { cliCommand } = require('./lib/cli-paths');
 const {
+  nextGroupName,
   listGroups,
+  listAllGroups,
   getGroup,
+  findGroup,
   createGroup,
   setGroupMembers,
+  setGroupWorkdir,
   touchGroup,
   deleteGroup,
 } = require('./lib/groups');
@@ -95,7 +101,9 @@ const {
 const {
   MAIN_SESSION_ID,
   MAX_SESSIONS,
+  MAX_SWARM_SESSIONS,
   SCOPE_SEPARATOR,
+  isSwarmSession,
   listChatSessions,
   resolveChatSession,
   createChatSession,
@@ -106,6 +114,7 @@ const {
   sessionContextKeyFor,
   scopeKeyFor,
 } = require('./lib/chat-sessions');
+const { alwaysOnSessions } = require('./lib/always-on-sessions');
 const {
   agentPayload,
   createBackgroundTurnHandler,
@@ -572,6 +581,7 @@ const routeContext = {
   MAX_DOWNLOAD_BYTES,
   MAX_PROMPT_BYTES,
   MAX_SESSIONS,
+  MAX_SWARM_SESSIONS,
   MAX_UPLOAD_BYTES,
   PORT,
   PUBLIC_BASE_URL,
@@ -582,6 +592,7 @@ const routeContext = {
   agentRequiredError,
   agentRequiredOrUnknownError,
   agentTurnDependencies,
+  alwaysOnSessions,
   backendVersion,
   backgroundTurnHandler,
   bearerToken,
@@ -609,13 +620,16 @@ const routeContext = {
   eventWorkdir,
   fcm,
   finalizeStaleStreamingHistory,
+  findGroup,
   getAgent,
   getAgentStatuses,
   getDefaultWorkdir,
   getGroup,
   getSettings,
+  isSwarmSession,
   listAbsoluteDirectory,
   listAgents,
+  listAllGroups,
   listChatSessions,
   listGroups,
   listQuotaSchedules,
@@ -623,6 +637,7 @@ const routeContext = {
   cliCommand,
   machineInfo,
   markdownForConversation,
+  nextGroupName,
   inspectCodexAccount,
   refreshAgentModels,
   normalizeDeviceId,
@@ -655,6 +670,7 @@ const routeContext = {
   sessionPayload,
   setActiveChatSession,
   setGroupMembers,
+  setGroupWorkdir,
   setSettings,
   startBackendUpdate,
   streamUploadToFile,

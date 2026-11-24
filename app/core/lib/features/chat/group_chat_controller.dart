@@ -15,8 +15,8 @@ import '../../core/util/error_text.dart';
 /// human echo and each member's start and finish arrive on the shared
 /// `/api/events` stream tagged with `groupId`, so one subscription shows both
 /// this device's and other devices' activity. Replies are not streamed: a
-/// member shows as working until it finishes, then the transcript is reloaded
-/// to show its whole reply.
+/// member shows as working, with its newest progress lines, until it finishes,
+/// then the transcript is reloaded to show its whole reply.
 ///
 /// [machines] lists this device's machine credentials. Requests that reach a
 /// swarm's remote members carry the credentials of those members' machines;
@@ -32,6 +32,7 @@ class GroupChatController extends ChangeNotifier {
   static const String _awaitingFirstTokenKey = 'awaitingFirstToken';
   static const String _authorKey = 'author';
   static const String _agentLabelKey = 'agentLabel';
+  static const String _progressLinesKey = 'progressLines';
 
   final BackendClient _client;
   final List<MachineCredential> Function() _machines;
@@ -48,14 +49,22 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? _selected;
   final List<ChatMessage> _messages = <ChatMessage>[];
   bool _loadingGroups = false;
-  // The running round: the one this device sent, or one the backend reports
-  // running when the screen opens, so Stop survives leaving and returning.
-  String? _activeRequestId;
-  // True while this device's own send is waiting for its round to end.
-  bool _posting = false;
+  // Running rounds keyed by group id: either started by this device or
+  // reported running by the backend on load, so Stop is per swarm and survives
+  // switching swarms or leaving and returning.
+  final Map<String, String> _activeRequestIds = <String, String>{};
+  // Group ids whose send() call from this device is currently in flight.
+  final Set<String> _postingGroups = <String>{};
   String? _error;
+  // Error from a failed history reload, tracked separately so a later
+  // successful reload clears it without wiping send or form errors.
+  String? _reloadError;
+  // Information about the last round (members it did not summon), not an error.
+  String? _notice;
   StreamSubscription<BackendEvent>? _eventsSub;
   Timer? _reconnectTimer;
+  Timer? _historyRetryTimer;
+  int _historyRetrySeconds = 2;
   bool _disposed = false;
 
   /// The shared backend client, exposed so the swarm form can browse work trees
@@ -66,8 +75,10 @@ class GroupChatController extends ChangeNotifier {
   ChatGroup? get selected => _selected;
   List<ChatMessage> get messages => List<ChatMessage>.unmodifiable(_messages);
   bool get loadingGroups => _loadingGroups;
-  bool get sending => _activeRequestId != null;
-  String? get error => _error;
+  bool get sending =>
+      _selected != null && _activeRequestIds.containsKey(_selected!.id);
+  String? get error => _error ?? _reloadError;
+  String? get notice => _notice;
 
   List<MachineCredential> _peersFor(Iterable<String> members) =>
       peerCredentialsFor(members, _machines());
@@ -88,6 +99,8 @@ class GroupChatController extends ChangeNotifier {
   Future<void> loadGroups() async {
     _loadingGroups = true;
     _error = null;
+    _reloadError = null;
+    final String? previousId = _selected?.id;
     _safeNotify();
     try {
       _groups = await _client.fetchGroups();
@@ -110,6 +123,7 @@ class GroupChatController extends ChangeNotifier {
     } on BackendException catch (err) {
       _error = friendlyErrorText(_strings, err);
     } finally {
+      if (_selected?.id != previousId) _cancelHistoryRetry();
       _loadingGroups = false;
       _safeNotify();
     }
@@ -118,7 +132,10 @@ class GroupChatController extends ChangeNotifier {
 
   Future<void> selectGroup(ChatGroup group) async {
     if (_selected?.id == group.id) return;
+    _cancelHistoryRetry();
     _selected = group;
+    _reloadError = null;
+    _notice = null;
     _messages.clear();
     _safeNotify();
     await _loadHistory(group.id);
@@ -133,18 +150,22 @@ class GroupChatController extends ChangeNotifier {
   }) async {
     _error = null;
     try {
-      _groups = await _client.createGroup(
+      final (:ChatGroup group, :List<ChatGroup> groups) =
+          await _client.createGroup(
         name,
         members,
         workdir: workdir,
         configs: configs,
         peers: _peersFor(members),
       );
+      _groups = groups;
       final ChatGroup created = _groups.firstWhere(
-        (ChatGroup g) => g.name == name,
-        orElse: () => _groups.first,
+        (ChatGroup g) => g.id == group.id,
+        orElse: () => group,
       );
+      _cancelHistoryRetry();
       _selected = created;
+      _reloadError = null;
       _messages.clear();
       _safeNotify();
       return created;
@@ -182,6 +203,32 @@ class GroupChatController extends ChangeNotifier {
     }
   }
 
+  Future<bool> updateWorkdir(
+    ChatGroup group, {
+    String workdir = '',
+    Map<String, String> memberWorkdirs = const <String, String>{},
+  }) async {
+    _error = null;
+    try {
+      _groups = await _client.setGroupWorkdir(
+        group.id,
+        workdir: workdir,
+        memberWorkdirs: memberWorkdirs,
+        peers: _peersFor(group.members),
+      );
+      _selected = _groups.firstWhere(
+        (ChatGroup g) => g.id == group.id,
+        orElse: () => _selected ?? group,
+      );
+      _safeNotify();
+      return true;
+    } on BackendException catch (err) {
+      _error = friendlyErrorText(_strings, err);
+      _safeNotify();
+      return false;
+    }
+  }
+
   Future<void> deleteGroup(ChatGroup group) async {
     _error = null;
     try {
@@ -189,8 +236,12 @@ class GroupChatController extends ChangeNotifier {
         group.id,
         peers: _peersFor(group.members),
       );
+      _activeRequestIds.remove(group.id);
+      _postingGroups.remove(group.id);
       if (_selected?.id == group.id) {
+        _cancelHistoryRetry();
         _selected = _groups.isNotEmpty ? _groups.first : null;
+        _reloadError = null;
         _messages.clear();
       }
       _safeNotify();
@@ -218,12 +269,20 @@ class GroupChatController extends ChangeNotifier {
   Future<bool> send(String rawText) async {
     final ChatGroup? group = _selected;
     final String text = rawText.trim();
-    if (group == null || text.isEmpty || sending) return false;
+    if (group == null ||
+        text.isEmpty ||
+        _activeRequestIds.containsKey(group.id)) {
+      return false;
+    }
+    final String groupId = group.id;
     final String requestId = _newRequestId();
     bool sent = false;
-    _activeRequestId = requestId;
-    _posting = true;
+    BackendException? dropped;
+    _activeRequestIds[groupId] = requestId;
+    _postingGroups.add(groupId);
     _error = null;
+    _reloadError = null;
+    _notice = null;
     // Optimistic human bubble with the id the backend will use, so the echoed
     // group_message event upserts in place instead of duplicating.
     _upsert(
@@ -238,29 +297,50 @@ class GroupChatController extends ChangeNotifier {
     _safeNotify();
     try {
       await _client.sendGroupMessage(
-        groupId: group.id,
+        groupId: groupId,
         prompt: text,
         requestId: requestId,
         peers: _peersFor(group.members),
       );
       sent = true;
     } on BackendException catch (err) {
-      if (err.code != 'AGENT_CANCELLED') {
-        _error = friendlyErrorText(_strings, err);
-      } else {
+      if (err.code == 'AGENT_CANCELLED') {
         sent = true;
+      } else if (err.code?.startsWith('NETWORK_') ?? false) {
+        // The request dropped or timed out (a long round, a phone in the
+        // background) while the round may still run; history decides below.
+        dropped = err;
+      } else if (err.code == 'GROUP_NO_MENTION') {
+        _error = _strings.groupNeedsMention;
+      } else {
+        _error = friendlyErrorText(_strings, err);
       }
     } finally {
-      _activeRequestId = null;
-      _posting = false;
+      if (_activeRequestIds[groupId] == requestId) {
+        _activeRequestIds.remove(groupId);
+      }
+      _postingGroups.remove(groupId);
       _safeNotify();
-      await _loadHistory(group.id);
+      final GroupHistory? history = await _loadHistory(groupId);
+      if (dropped != null) {
+        // Recorded means the round started: the reload restored its Stop and
+        // its events finish it, so only an unrecorded message failed.
+        sent = history?.messages
+                .any((ChatMessage m) => m.id == '$requestId:human') ??
+            false;
+        if (!sent) {
+          _error = friendlyErrorText(_strings, dropped);
+          _safeNotify();
+        }
+      }
     }
     return sent;
   }
 
   Future<void> cancel() async {
-    final String? requestId = _activeRequestId;
+    final String? groupId = _selected?.id;
+    final String? requestId =
+        groupId == null ? null : _activeRequestIds[groupId];
     if (requestId == null) return;
     try {
       await _client.cancelGroupMessage(requestId);
@@ -269,20 +349,56 @@ class GroupChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadHistory(String groupId) async {
+  // The swarm's history as loaded, or null when it could not be read.
+  Future<GroupHistory?> _loadHistory(String groupId) async {
     _safeNotify();
     try {
       final GroupHistory history = await _client.fetchGroupHistory(groupId);
-      if (_selected?.id != groupId) return;
+      if (!_postingGroups.contains(groupId)) {
+        final String? running = history.runningRequestId;
+        if (running != null && running.isNotEmpty) {
+          _activeRequestIds[groupId] = running;
+        } else {
+          _activeRequestIds.remove(groupId);
+        }
+      }
+      if (_selected?.id != groupId) return history;
+      _cancelHistoryRetry();
+      _reloadError = null;
       _messages
         ..clear()
         ..addAll(history.messages);
-      if (!_posting) _activeRequestId = history.runningRequestId;
+      return history;
     } on BackendException catch (err) {
-      _error = friendlyErrorText(_strings, err);
+      if (_selected?.id == groupId) {
+        _reloadError = friendlyErrorText(_strings, err);
+        if (err.code?.startsWith('NETWORK_') ?? false) {
+          _scheduleHistoryRetry(groupId);
+        } else {
+          _cancelHistoryRetry();
+        }
+      }
+      return null;
     } finally {
       _safeNotify();
     }
+  }
+
+  void _scheduleHistoryRetry(String groupId) {
+    if (_disposed || (_historyRetryTimer?.isActive ?? false)) return;
+    final int delay = _historyRetrySeconds;
+    _historyRetrySeconds = min(30, delay * 2);
+    _historyRetryTimer = Timer(Duration(seconds: delay), () {
+      _historyRetryTimer = null;
+      if (_disposed || _selected?.id != groupId) return;
+      _loadHistory(groupId);
+    });
+  }
+
+  void _cancelHistoryRetry() {
+    _historyRetryTimer?.cancel();
+    _historyRetryTimer = null;
+    _historyRetrySeconds = 2;
   }
 
   // --- Shared event stream ---------------------------------------------------
@@ -290,27 +406,74 @@ class GroupChatController extends ChangeNotifier {
   void _subscribeEvents() {
     _eventsSub?.cancel();
     _eventsSub = _client.streamEvents().listen(
-          _handleEvent,
-          onError: (Object _) => _scheduleReconnect(),
-          onDone: _scheduleReconnect,
-          cancelOnError: true,
-        );
+      (BackendEvent event) {
+        _reconnectSeconds = 2;
+        _handleEvent(event);
+      },
+      onError: (Object _) => _scheduleReconnect(),
+      onDone: _scheduleReconnect,
+      cancelOnError: true,
+    );
   }
+
+  // Doubles while the backend stays unreachable; any event resets it.
+  int _reconnectSeconds = 2;
 
   void _scheduleReconnect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 2), _subscribeEvents);
+    final int delay = _reconnectSeconds;
+    _reconnectSeconds = min(30, delay * 2);
+    _reconnectTimer = Timer(Duration(seconds: delay), () {
+      _subscribeEvents();
+      // Events sent while the stream was down (such as a round's group_done)
+      // are gone, so re-read the open swarm rather than trust its last state.
+      final String? groupId = _selected?.id;
+      if (groupId != null) _loadHistory(groupId);
+    });
   }
 
   void _handleEvent(BackendEvent event) {
     final Map<String, Object?> data = event.data;
     final String? groupId = data['groupId'] as String?;
+    if (groupId == null) return;
     final ChatGroup? group = _selected;
-    if (group == null || groupId == null || groupId != group.id) return;
+    final bool isSelected = group != null && groupId == group.id;
 
     switch (event.type) {
+      case 'group_done':
+      case 'group_cancelled':
+        final String? eventRequestId = data['requestId'] as String?;
+        final bool ownPosting = _postingGroups.contains(groupId) &&
+            eventRequestId == _activeRequestIds[groupId];
+        if (!ownPosting &&
+            (eventRequestId == null ||
+                _activeRequestIds[groupId] == eventRequestId)) {
+          _activeRequestIds.remove(groupId);
+        }
+        final List<String> unsummoned =
+            (data['unsummoned'] as List?)?.whereType<String>().toList() ??
+                const <String>[];
+        if (isSelected && unsummoned.isNotEmpty) {
+          _notice = _strings.swarmUnsummoned(
+            unsummoned
+                .map(
+                  (String key) =>
+                      group.memberConfigs[key]?['nickname'] ??
+                      group.memberLabel(key),
+                )
+                .join(', '),
+          );
+          _safeNotify();
+        }
+        if (isSelected && !ownPosting) {
+          _loadHistory(groupId);
+        } else if (!ownPosting) {
+          _safeNotify();
+        }
+        break;
       case 'group_message':
+        if (!isSelected) return;
         final Map<String, Object?> message =
             (data['message'] as Map?)?.cast<String, Object?>() ??
                 const <String, Object?>{};
@@ -327,21 +490,27 @@ class GroupChatController extends ChangeNotifier {
         );
         _safeNotify();
         break;
+      case 'group_agent_start':
       case 'agent_start':
+        if (!isSelected) return;
         _ensureBubble(data);
         _safeNotify();
         break;
+      case 'group_agent_progress':
+        final String line = data['line'] as String? ?? '';
+        if (!isSelected || line.trim().isEmpty) return;
+        _appendProgress(data, line);
+        _safeNotify();
+        break;
+      case 'group_agent_done':
+      case 'group_agent_error':
+      case 'group_agent_cancelled':
       case 'agent_done':
       case 'agent_error':
       case 'agent_cancelled':
+        if (!isSelected) return;
         // The member's whole reply is in the transcript now.
-        _loadHistory(group.id);
-        break;
-      case 'group_done':
-      case 'group_cancelled':
-        // This device's own send reconciles when its request returns.
-        if (_posting && data['requestId'] == _activeRequestId) break;
-        _loadHistory(group.id);
+        _loadHistory(groupId);
         break;
       default:
         break;
@@ -373,6 +542,27 @@ class GroupChatController extends ChangeNotifier {
     return bubble;
   }
 
+  // A working member's newest step lines, shown under its bubble. After a
+  // reload the bubble is the transcript's `<requestId>:assistant` message.
+  void _appendProgress(Map<String, Object?> data, String line) {
+    final String requestId = data['requestId'] as String? ?? '';
+    int index = _indexOf('$requestId:assistant');
+    if (index == -1) index = _indexOf(_ensureBubble(data).id);
+    final ChatMessage bubble = _messages[index];
+    final Object? raw = bubble.metadata[_progressLinesKey];
+    final List<String> lines = <String>[
+      if (raw is List) ...raw.whereType<String>(),
+    ];
+    if (lines.isEmpty || lines.last != line) lines.add(line);
+    // The backend keeps the same newest six.
+    while (lines.length > 6) {
+      lines.removeAt(0);
+    }
+    _messages[index] = bubble.copyWith(
+      metadata: <String, Object?>{...bubble.metadata, _progressLinesKey: lines},
+    );
+  }
+
   int _indexOf(String id) =>
       _messages.indexWhere((ChatMessage m) => m.id == id);
 
@@ -402,6 +592,7 @@ class GroupChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _cancelHistoryRetry();
     _reconnectTimer?.cancel();
     _eventsSub?.cancel();
     _client.close();

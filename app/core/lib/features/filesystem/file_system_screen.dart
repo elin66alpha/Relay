@@ -14,6 +14,7 @@ import '../../core/backend/backend_client.dart';
 import '../../core/download/download_manager.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/platform/file_drop.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../core/util/error_text.dart';
 import '../../core/util/format_bytes.dart';
 import '../../core/util/time_format.dart';
@@ -57,14 +58,19 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   List<String> _recentWorkdirs = const <String>[];
   late int _seenDownloadTick;
   bool _downloadActive = false;
+  bool _isDragHovering = false;
 
   @override
   void initState() {
     super.initState();
+    _downloads.clearSettled(notify: false);
     _seenDownloadTick = _downloads.completedTick;
     _downloadActive = _downloads.isActive;
     _downloads.addListener(_onDownloadChanged);
-    _dropController = registerFileDrop(_uploadDroppedFiles);
+    _dropController = registerFileDrop(
+      _uploadDroppedFiles,
+      onHoverChanged: _onDragHoverChanged,
+    );
     _loadInitial();
     unawaited(_loadRecentWorkdirs());
   }
@@ -72,8 +78,16 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   @override
   void dispose() {
     _downloads.removeListener(_onDownloadChanged);
+    _downloads.clearSettled(notify: false);
     _dropController?.dispose();
     super.dispose();
+  }
+
+  void _onDragHoverChanged(bool hovering) {
+    if (!mounted || !supportsFileDrop) return;
+    final bool next = hovering && !_isLoading && !_isBusy && _listing != null;
+    if (_isDragHovering == next) return;
+    setState(() => _isDragHovering = next);
   }
 
   void _onDownloadChanged() {
@@ -161,6 +175,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
 
   Future<void> _selectRecentWorkdir(String target) async {
     if (_isLoading || _isBusy) return;
+    _downloads.clearSettled();
     setState(() => _isLoading = true);
     try {
       if (await _setWorkPath(target) && mounted) {
@@ -173,6 +188,7 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
   }
 
   Future<bool> _setWorkPath(String target) async {
+    _downloads.clearSettled();
     if (_workPath == target) return true;
     final String? previous = _workPath;
     // Switching chat context may be slow, so update the work-path label first.
@@ -266,13 +282,17 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     if (picked.isEmpty) return;
     final List<_UploadFile> files = <_UploadFile>[];
     for (final PlatformFile file in picked) {
+      final int? length = await file.length();
+      if (length == null) continue;
       if (kIsWeb) {
         files.add(
-          _UploadFile.bytes(name: file.name, data: await file.readAsBytes()),
+          _UploadFile.bytes(
+            name: file.name,
+            read: file.readAsBytes,
+            length: length,
+          ),
         );
       } else {
-        final int? length = await file.length();
-        if (length == null) continue;
         files.add(
           _UploadFile.stream(
             name: file.name,
@@ -289,10 +309,17 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
     return _uploadFiles(
       dropped
           .map(
-            (DroppedFile file) => _UploadFile.bytes(
-              name: file.name,
-              data: file.bytes,
-            ),
+            (DroppedFile file) => file.openStream != null
+                ? _UploadFile.stream(
+                    name: file.name,
+                    data: file.openStream!(),
+                    length: file.size,
+                  )
+                : _UploadFile.bytes(
+                    name: file.name,
+                    read: file.readBytes,
+                    length: file.size,
+                  ),
           )
           .toList(growable: false),
     );
@@ -326,12 +353,12 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       for (final _UploadFile file in toUpload) {
         if (!mounted) return;
         setState(() => _operationText = context.l10n.uploadingFile(file.name));
-        final Uint8List? bytes = file.bytes;
-        if (bytes != null) {
+        final Future<Uint8List> Function()? read = file.readBytes;
+        if (read != null) {
           await widget.backend.uploadFile(
             path: listing.absolutePath,
             name: file.name,
-            bytes: bytes,
+            bytes: await read(),
           );
         } else {
           await widget.backend.uploadFileStream(
@@ -381,7 +408,8 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
       _browse(entry.path);
       return;
     }
-    Navigator.of(context).push(
+    Navigator.of(context)
+        .push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => FilePreviewScreen(
           entry: entry,
@@ -389,7 +417,10 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
           onDownload: () => _download(entry),
         ),
       ),
-    );
+    )
+        .whenComplete(() {
+      if (mounted) _downloads.clearSettled();
+    });
   }
 
   @override
@@ -427,168 +458,252 @@ class _FileSystemScreenState extends State<FileSystemScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1040),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      if (_recentWorkdirs.isNotEmpty) ...<Widget>[
-                        _RecentWorkspaces(
-                          workdirs: _recentWorkdirs,
-                          workPath: _workPath,
-                          busy: _isLoading || _isBusy,
-                          onNavigate: _selectRecentWorkdir,
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                      _BreadcrumbBar(
-                        path: activePath,
-                        canGoUp: listing?.parentPath != null,
-                        drives: listing?.drives ?? const <String>[],
-                        atWorkPath: atWorkPath,
-                        busy: _isLoading || _isBusy,
-                        onParent: listing?.parentPath == null
-                            ? null
-                            : () => _browse(listing!.parentPath!),
-                        onNavigate: _browse,
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+            Column(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1040),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          FilledButton.icon(
-                            onPressed: _isLoading ||
-                                    _isBusy ||
-                                    listing == null ||
-                                    atWorkPath
-                                ? null
-                                : () => _setWorkPath(listing.absolutePath),
-                            icon: Icon(
-                              atWorkPath
-                                  ? Icons.check_rounded
-                                  : Icons.flag_outlined,
+                          if (_recentWorkdirs.isNotEmpty) ...<Widget>[
+                            _RecentWorkspaces(
+                              workdirs: _recentWorkdirs,
+                              workPath: _workPath,
+                              busy: _isLoading || _isBusy,
+                              onNavigate: _selectRecentWorkdir,
                             ),
-                            label: Text(context.l10n.setAsWorkPath),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _isLoading || _isBusy || listing == null
+                            const SizedBox(height: 6),
+                          ],
+                          _BreadcrumbBar(
+                            path: activePath,
+                            canGoUp: listing?.parentPath != null,
+                            drives: listing?.drives ?? const <String>[],
+                            atWorkPath: atWorkPath,
+                            busy: _isLoading || _isBusy,
+                            onParent: listing?.parentPath == null
                                 ? null
-                                : _createFolder,
-                            icon: const Icon(Icons.create_new_folder_outlined),
-                            label: Text(context.l10n.newFolder),
+                                : () => _browse(listing!.parentPath!),
+                            onNavigate: _browse,
                           ),
-                          OutlinedButton.icon(
-                            onPressed:
-                                _isLoading || _isBusy ? null : _pickUpload,
-                            icon: const Icon(Icons.upload_file_outlined),
-                            label: Text(context.l10n.uploadFile),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: <Widget>[
+                              FilledButton.icon(
+                                onPressed: _isLoading ||
+                                        _isBusy ||
+                                        listing == null ||
+                                        atWorkPath
+                                    ? null
+                                    : () => _setWorkPath(listing.absolutePath),
+                                icon: Icon(
+                                  atWorkPath
+                                      ? Icons.check_rounded
+                                      : Icons.flag_outlined,
+                                ),
+                                label: Text(context.l10n.setAsWorkPath),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed:
+                                    _isLoading || _isBusy || listing == null
+                                        ? null
+                                        : _createFolder,
+                                icon: const Icon(
+                                  Icons.create_new_folder_outlined,
+                                ),
+                                label: Text(context.l10n.newFolder),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed:
+                                    _isLoading || _isBusy ? null : _pickUpload,
+                                icon: const Icon(Icons.upload_file_outlined),
+                                label: Text(context.l10n.uploadFile),
+                              ),
+                              if (_workPath != null && !atWorkPath)
+                                ActionChip(
+                                  avatar: Icon(
+                                    Icons.folder_open_rounded,
+                                    size: 16,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  label: Text(
+                                    context.l10n.currentWorkPath(_workPath!),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: _isLoading || _isBusy
+                                      ? null
+                                      : () => _browse(_workPath!),
+                                ),
+                            ],
                           ),
-                          if (_workPath != null && !atWorkPath)
-                            ActionChip(
-                              avatar: Icon(
-                                Icons.folder_open_rounded,
-                                size: 16,
-                                color: theme.colorScheme.primary,
-                              ),
-                              label: Text(
-                                context.l10n.currentWorkPath(_workPath!),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: _isLoading || _isBusy
-                                  ? null
-                                  : () => _browse(_workPath!),
+                          const SizedBox(height: 6),
+                          Text(
+                            supportsFileDrop
+                                ? '${context.l10n.transferLimitHint} ${context.l10n.dragDropUpload}'
+                                : context.l10n.transferLimitHint,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.outline,
                             ),
+                          ),
+                          ListenableBuilder(
+                            listenable: _downloads,
+                            builder: (BuildContext context, Widget? _) =>
+                                _DownloadStatus(downloads: _downloads),
+                          ),
+                          if (_operationText != null) ...<Widget>[
+                            const SizedBox(height: 8),
+                            Text(_operationText!),
+                          ],
                         ],
                       ),
-                      const SizedBox(height: 6),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _isLoading
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 12),
+                            Text(context.l10n.loadingFiles),
+                          ],
+                        )
+                      : _error != null
+                          ? Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Align(
+                                alignment: Alignment.topCenter,
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 1040),
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: Text(
+                                      _error!,
+                                      style: TextStyle(
+                                        color: theme.colorScheme.error,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          : listing == null
+                              ? const SizedBox.shrink()
+                              : CustomScrollView(
+                                  slivers: <Widget>[
+                                    SliverPadding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        4,
+                                        16,
+                                        16,
+                                      ),
+                                      sliver: _FileList(
+                                        listing: listing,
+                                        workPath: _workPath,
+                                        isBusy: _isBusy,
+                                        downloadActive: _downloadActive,
+                                        onOpen: _open,
+                                        onDownload: _download,
+                                        onParent: listing.parentPath == null ||
+                                                _isBusy
+                                            ? null
+                                            : () =>
+                                                _browse(listing.parentPath!),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                ),
+              ],
+            ),
+            if (supportsFileDrop &&
+                _isDragHovering &&
+                !_isLoading &&
+                !_isBusy &&
+                listing != null)
+              Positioned.fill(
+                child: _FileDropOverlay(targetPath: listing.absolutePath),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FileDropOverlay extends StatelessWidget {
+  const _FileDropOverlay({required this.targetPath});
+
+  final String targetPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    return IgnorePointer(
+      key: const ValueKey<String>('file-drop-overlay'),
+      child: ColoredBox(
+        color: colors.surface.withValues(alpha: 0.84),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.primaryContainer.withValues(alpha: 0.28),
+              border: Border.all(color: colors.primary, width: 2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(
+                        Icons.upload_file_rounded,
+                        size: 48,
+                        color: colors.primary,
+                      ),
+                      const SizedBox(height: 12),
                       Text(
-                        kIsWeb
-                            ? '${context.l10n.transferLimitHint} ${context.l10n.dragDropUpload}'
-                            : context.l10n.transferLimitHint,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
+                        context.l10n.dropFilesToUpload,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: colors.onSurface,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      ListenableBuilder(
-                        listenable: _downloads,
-                        builder: (BuildContext context, Widget? _) =>
-                            _DownloadStatus(downloads: _downloads),
-                      ),
-                      if (_operationText != null) ...<Widget>[
-                        const SizedBox(height: 8),
-                        Text(_operationText!),
+                      if (targetPath.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 6),
+                        Text(
+                          context.l10n.dropFilesToDirectory(targetPath),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ],
                   ),
                 ),
               ),
             ),
-            Expanded(
-              child: _isLoading
-                  ? Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        const CircularProgressIndicator(),
-                        const SizedBox(height: 12),
-                        Text(context.l10n.loadingFiles),
-                      ],
-                    )
-                  : _error != null
-                      ? Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1040),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: Text(
-                                  _error!,
-                                  style: TextStyle(
-                                    color: theme.colorScheme.error,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      : listing == null
-                          ? const SizedBox.shrink()
-                          : CustomScrollView(
-                              slivers: <Widget>[
-                                SliverPadding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    4,
-                                    16,
-                                    16,
-                                  ),
-                                  sliver: _FileList(
-                                    listing: listing,
-                                    workPath: _workPath,
-                                    isBusy: _isBusy,
-                                    downloadActive: _downloadActive,
-                                    onOpen: _open,
-                                    onDownload: _download,
-                                    onParent: listing.parentPath == null ||
-                                            _isBusy
-                                        ? null
-                                        : () => _browse(listing.parentPath!),
-                                  ),
-                                ),
-                              ],
-                            ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -990,6 +1105,7 @@ class _FilePreviewScreenState extends State<FilePreviewScreen> {
   @override
   void initState() {
     super.initState();
+    _downloads.clearSettled(notify: false);
     _load();
   }
 
@@ -1447,22 +1563,23 @@ class _FileListFrame extends StatelessWidget {
 }
 
 class _UploadFile {
+  // Web sends a file in one piece; it is read only after the size check.
   const _UploadFile.bytes({
     required this.name,
-    required Uint8List data,
-  })  : bytes = data,
-        readStream = null,
-        length = data.length;
+    required Future<Uint8List> Function() read,
+    required this.length,
+  })  : readBytes = read,
+        readStream = null;
 
   const _UploadFile.stream({
     required this.name,
     required Stream<List<int>> data,
     required this.length,
-  })  : bytes = null,
+  })  : readBytes = null,
         readStream = data;
 
   final String name;
-  final Uint8List? bytes;
+  final Future<Uint8List> Function()? readBytes;
   final Stream<List<int>>? readStream;
   final int length;
 }
