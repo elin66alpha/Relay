@@ -7,3 +7,7 @@ bool get isPhoneOrTablet =>
     defaultTargetPlatform == TargetPlatform.iOS;
 
 bool get usesHardwareKeyboard => !isPhoneOrTablet;
+
+/// Drag-and-drop file upload is a desktop and desktop-Web feature; phones and
+/// tablets (native or mobile browser) never show the drop zone or hint.
+bool get supportsFileDrop => !isPhoneOrTablet;

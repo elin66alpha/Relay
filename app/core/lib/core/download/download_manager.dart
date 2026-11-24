@@ -36,6 +36,17 @@ class DownloadManager extends ChangeNotifier {
   bool get isActive =>
       stage == DownloadStage.downloading || stage == DownloadStage.saving;
 
+  /// Clears a settled (done or failed) result so the inline status row does not
+  /// linger across workspace switches or after leaving the file browser. Active
+  /// transfers continue undisturbed.
+  void clearSettled({bool notify = true}) {
+    if (isActive || stage == DownloadStage.idle) return;
+    stage = DownloadStage.idle;
+    savedLocation = null;
+    errorText = null;
+    if (notify) notifyListeners();
+  }
+
   /// Starts a download in the background. [open] begins the transfer; the byte
   /// stream is written straight to the system Downloads folder (to disk on
   /// native, never buffered whole) while progress is reported, and a system

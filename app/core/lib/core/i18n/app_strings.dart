@@ -269,8 +269,11 @@ class AppStrings {
   String get linkedFileNotFound =>
       isZh ? '文件不存在或无权访问。' : 'The file does not exist or is not accessible.';
   String get dragDropUpload => isZh
-      ? 'Web 端可以把文件拖到此页上传。'
-      : 'On web, drag files onto this page to upload.';
+      ? '桌面端与 Web 端可以把文件拖到此页上传。'
+      : 'On desktop and web, drag files onto this page to upload.';
+  String get dropFilesToUpload => isZh ? '拖动文件即可上传' : 'Drop files to upload';
+  String dropFilesToDirectory(String path) =>
+      isZh ? '松开鼠标上传到：$path' : 'Release to upload into: $path';
   String uploadingFile(String name) => isZh ? '正在上传：$name' : 'Uploading: $name';
   String uploadComplete(int count) =>
       isZh ? '已上传 $count 个文件。' : '$count file(s) uploaded.';

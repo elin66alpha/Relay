@@ -8,7 +8,7 @@ keywords: upload, download, zip, drag and drop, size limit
 
 ## Upload
 
-Select **Upload file** in the file browser; files go into **the directory shown**. On the Web you can also drag files onto the page.
+Select **Upload file** in the file browser; files go into **the directory shown**. On desktop (Linux, Windows, macOS) and the Web you can also drag files into the window: a drop zone overlay appears while dragging and uploads the files into the current directory on release (not shown on phones or tablets).
 
 Each file is limited to 100 MB by default (`UPLOAD_MAX_BYTES`). Files attached in chat upload to `.relay/uploads/` in the workspace; see [Composer tools](composer-tools.md).
 

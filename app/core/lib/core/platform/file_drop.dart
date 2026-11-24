@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'file_drop_stub.dart' show DroppedFile, FileDropController;
 import 'file_drop_stub.dart' if (dart.library.html) 'file_drop_web.dart'
     as platform;
@@ -5,6 +7,7 @@ import 'file_drop_stub.dart' if (dart.library.html) 'file_drop_web.dart'
 export 'file_drop_stub.dart' show DroppedFile, FileDropController;
 
 FileDropController registerFileDrop(
-  Future<void> Function(List<DroppedFile> files) onFiles,
-) =>
-    platform.registerFileDrop(onFiles);
+  Future<void> Function(List<DroppedFile> files) onFiles, {
+  ValueChanged<bool>? onHoverChanged,
+}) =>
+    platform.registerFileDrop(onFiles, onHoverChanged: onHoverChanged);

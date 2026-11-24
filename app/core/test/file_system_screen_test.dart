@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:relay_core/core/backend/backend_client.dart';
+import 'package:relay_core/core/download/download_manager.dart';
 import 'package:relay_core/core/i18n/app_strings.dart';
 import 'package:relay_core/core/settings/app_settings_controller.dart';
 import 'package:relay_core/core/widgets/code_block.dart';
@@ -718,6 +720,182 @@ void main() {
 
     expect(find.byType(MarkdownBody), findsOneWidget);
   });
+
+  testWidgets(
+      'settled download message clears on workspace switch and screen exit', (
+    WidgetTester tester,
+  ) async {
+    final DownloadManager downloads = DownloadManager.instance;
+    addTearDown(() {
+      downloads.stage = DownloadStage.idle;
+      downloads.savedLocation = null;
+      downloads.errorText = null;
+    });
+
+    final _FsBackendClient backend = _FsBackendClient(
+      recentPaths: const <String>['/repo/app', '/projects/other'],
+    );
+    await _openFiles(tester, backend);
+
+    // Simulate a download settling while the file browser is open.
+    downloads.savedLocation = 'Saved to: /home/user/Downloads/report.zip';
+    downloads.stage = DownloadStage.done;
+    downloads.completedTick += 1;
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    downloads.notifyListeners();
+    await tester.pump();
+
+    expect(
+      find.widgetWithText(
+        SelectableText,
+        'Saved to: /home/user/Downloads/report.zip',
+      ),
+      findsOneWidget,
+    );
+
+    // Switching workspaces clears the settled download message immediately.
+    await tester.tap(find.widgetWithText(ActionChip, 'other'));
+    await tester.pumpAndSettle();
+    expect(downloads.stage, DownloadStage.idle);
+    expect(downloads.savedLocation, isNull);
+    expect(
+      find.widgetWithText(
+        SelectableText,
+        'Saved to: /home/user/Downloads/report.zip',
+      ),
+      findsNothing,
+    );
+
+    // Settle another download, then leave and re-enter the file browser.
+    downloads.savedLocation = 'Saved to: /home/user/Downloads/notes.txt';
+    downloads.stage = DownloadStage.done;
+    downloads.completedTick += 1;
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    downloads.notifyListeners();
+    await tester.pump();
+    expect(
+      find.widgetWithText(
+        SelectableText,
+        'Saved to: /home/user/Downloads/notes.txt',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(downloads.stage, DownloadStage.idle);
+    expect(downloads.savedLocation, isNull);
+
+    await _openFiles(tester, backend);
+    expect(
+      find.widgetWithText(
+        SelectableText,
+        'Saved to: /home/user/Downloads/notes.txt',
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('desktop shows file drop overlay on drag and uploads on drop', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      final _FsBackendClient backend = _FsBackendClient();
+      await _openFiles(tester, backend);
+
+      expect(
+        find.textContaining('On desktop and web, drag files onto this page'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey<String>('file-drop-overlay')),
+        findsNothing,
+      );
+
+      await _sendFileDropCall(tester, const MethodCall('dragEnter'));
+      expect(
+        find.byKey(const ValueKey<String>('file-drop-overlay')),
+        findsOneWidget,
+      );
+      expect(find.text('Drop files to upload'), findsOneWidget);
+      expect(
+        find.text('Release to upload into: /repo/app'),
+        findsOneWidget,
+      );
+
+      await _sendFileDropCall(tester, const MethodCall('dragLeave'));
+      expect(
+        find.byKey(const ValueKey<String>('file-drop-overlay')),
+        findsNothing,
+      );
+
+      await _sendFileDropCall(tester, const MethodCall('dragEnter'));
+      expect(
+        find.byKey(const ValueKey<String>('file-drop-overlay')),
+        findsOneWidget,
+      );
+
+      await _sendFileDropCall(
+        tester,
+        MethodCall('drop', <Object?>[
+          <String, Object?>{
+            'name': 'dropped.txt',
+            'size': 5,
+            'bytes': Uint8List.fromList(utf8.encode('hello')),
+          },
+        ]),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey<String>('file-drop-overlay')),
+        findsNothing,
+      );
+      expect(backend.uploadedFiles, <String>['/repo/app/dropped.txt']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  for (final TargetPlatform mobile in <TargetPlatform>[
+    TargetPlatform.android,
+    TargetPlatform.iOS,
+  ]) {
+    testWidgets('$mobile never shows drag-and-drop hint or drop overlay', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = mobile;
+      try {
+        final _FsBackendClient backend = _FsBackendClient();
+        await _openFiles(tester, backend);
+
+        expect(
+          find.textContaining('On desktop and web, drag files onto this page'),
+          findsNothing,
+        );
+        await _sendFileDropCall(tester, const MethodCall('dragEnter'));
+        expect(
+          find.byKey(const ValueKey<String>('file-drop-overlay')),
+          findsNothing,
+        );
+        expect(find.text('Drop files to upload'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
+}
+
+Future<void> _sendFileDropCall(WidgetTester tester, MethodCall call) async {
+  final ByteData message = const StandardMethodCodec().encodeMethodCall(call);
+  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .handlePlatformMessage(
+    'dev.relay.app/file_drop',
+    message,
+    (_) {},
+  );
+  await tester.pump();
 }
 
 Future<void> _openFiles(
@@ -785,6 +963,7 @@ class _FsBackendClient extends BackendClient {
   final List<String> selectedWorkdirs = <String>[];
   final List<String> browsed = <String>[];
   final List<String> createdDirs = <String>[];
+  final List<String> uploadedFiles = <String>[];
   bool failNextBrowse = false;
   int downloadedBytes = 0;
   bool downloadClosed = false;
@@ -815,6 +994,25 @@ class _FsBackendClient extends BackendClient {
       absolutePath: full,
       type: 'directory',
       size: 0,
+      modifiedAt: '',
+    );
+  }
+
+  @override
+  Future<FsEntry> uploadFile({
+    required String path,
+    required String name,
+    required Uint8List bytes,
+    bool createDirectory = false,
+  }) async {
+    final String full = '$path/$name';
+    uploadedFiles.add(full);
+    return FsEntry(
+      name: name,
+      path: full,
+      absolutePath: full,
+      type: 'file',
+      size: bytes.length,
       modifiedAt: '',
     );
   }
