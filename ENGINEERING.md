@@ -545,6 +545,7 @@ navigation on 2026-11-09.
 - An empty chat with a wallpaper displays neither an agent icon nor "Start chatting" text; removing the image restores solid surfaces and that placeholder.
 - `(cd server && git ls-files '*.js' | xargs -r -n1 node --check)` -> exit 0
 - `npm --prefix server run lint` -> exit 0, no problems reported
+- `node --test server/test/usage-backoff.test.js` -> repeated usage queries without a Claude login log once, then retry when the credential file appears. The test uses a temporary home and simulates an empty macOS Keychain.
 - `npm --prefix server test` -> "# fail 0"; includes browser startup/shutdown and token-revocation cleanup, ACP settings/background serialization, cancellation during interactions, prompt-failure recovery and trajectory-discovery backoff.
 - `(cd server && node --test test/codex-session-pool.test.js test/agents.test.js test/agent-turn.test.js)` -> "# fail 0"; covers automatic Codex turns, child-work idle retention, turn-id isolation, cancellation, completed-item text and background reply delivery.
 - `npm --prefix server audit --omit=dev --audit-level=high` -> no high or critical production dependency vulnerabilities

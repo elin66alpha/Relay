@@ -14,6 +14,7 @@ process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.RELAY_USAGE_CACHE_FILE = path.join(home, 'usage-cache.json');
 
+const { macKeychain } = require('../lib/claude-credentials');
 const { getClaudeUsage } = require('../lib/usage');
 const { startClaudeQuotaKeepalive } = require('../lib/quota-keepalive');
 
@@ -26,9 +27,13 @@ function captureWarnings(t) {
 }
 
 test('Claude usage without credentials backs off and logs once', async (t) => {
+  t.mock.method(macKeychain, 'find', () => null);
+  const missingCredentials = process.platform === 'darwin'
+    ? /no credentials file and no Keychain entry/
+    : { code: 'ENOENT' };
   const warnings = captureWarnings(t);
   for (let i = 0; i < 3; i += 1) {
-    await assert.rejects(getClaudeUsage(), /accessToken was not found|ENOENT/);
+    await assert.rejects(getClaudeUsage(), missingCredentials);
   }
   assert.equal(warnings.length, 1, warnings.join('\n'));
 
