@@ -355,7 +355,8 @@ architecture change (see Changes).
 - `isPhoneOrTablet` (`core/platform/platform_capabilities.dart`) is the one
   rule for a touch device with a soft keyboard: Android or iOS, natively or in
   a mobile browser. The terminal key bar, Enter-to-send, the Browser's touch
-  mode and the drawer's edge swipe all follow it.
+  mode, the drawer's edge swipe, and desktop/Web-only file drag-and-drop
+  (`supportsFileDrop`) all follow it.
 
 ### Files, Swarms, and side conversations
 
@@ -493,7 +494,7 @@ architecture change (see Changes).
 | Conversation context usage (used / window above the composer) | session pools, agents, agent-turn, context-windows, routes/chat, chat/context_meter | active |
 | Swarms | routes/group, groups, group-turn, chat/group_chat_* | active |
 | Swarm members on other machines (form groups agents by machine from Settings → Machine credentials; remote members show their machine name; the app sends the peer credential per request) | routes/group, groups, peer-client, core/backend, core/models/group, chat/swarm_form_dialog, chat/group_chat_* | active |
-| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry; `GET /api/workdir/browse` reports `drives`, the disks the machine page lists (Windows drive letters; `/` plus mounted disks on Unix), empty when isolated; with more than one, the first breadcrumb opens a menu that switches between them) | routes/fs, filesystem, features/filesystem | active |
+| Filesystem (pinned breadcrumbs including Windows UNC shares, parent row/swipe navigation, new folder creation via `POST /api/fs/mkdir`, initial-load retry, desktop and desktop-Web drag-and-drop upload overlay (`supportsFileDrop`, `dev.relay.app/file_drop` on Linux/Windows/macOS and HTML5 drag events on Web), and settled download status cleared on workspace switch or leaving the screen; `GET /api/workdir/browse` reports `drives`, the disks the machine page lists (Windows drive letters; `/` plus mounted disks on Unix), empty when isolated; with more than one, the first breadcrumb opens a menu that switches between them) | routes/fs, filesystem, features/filesystem, core/download, core/platform | active |
 | Workspace navigation (Home shows up to five recent workspaces; File System shows up to five in one compact, horizontally scrolling row, and selecting a tag switches the active workspace and displayed directory; Home current directory opens the file browser; the chat title opens WorkspacesPage (current workspace, up to seven other recent ones that switch and return to the chat, File System pinned at the bottom); selecting a different recent directory on Home switches the workspace, scoped to its machine and ignoring stale refreshes) | features/chat home_navigation_page, bot_chat_screen, features/filesystem | active |
 | File preview (read-only, first 512 KiB of UTF-8 text, highlighted, rendered Markdown without embedded images and source-first past 20k chars with toggle; images up to 20 MiB / 40 MP) | features/filesystem, core/widgets/code_block | active |
 | Chat attachments (upload to `<workdir>/.relay/uploads/`, path appended to the draft; upload `mkdir=1` for workdir-relative paths) | routes/fs, filesystem, core/backend, features/chat | active |

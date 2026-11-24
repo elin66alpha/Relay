@@ -19,6 +19,104 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+struct FileDropState {
+  FlMethodChannel* channel;
+  gboolean dragging;
+};
+
+static void free_file_drop_state(gpointer data) {
+  FileDropState* state = static_cast<FileDropState*>(data);
+  if (state == nullptr) return;
+  g_clear_object(&state->channel);
+  g_free(state);
+}
+
+static gboolean drag_motion_cb(GtkWidget* /*widget*/,
+                               GdkDragContext* /*context*/,
+                               gint /*x*/,
+                               gint /*y*/,
+                               guint /*time*/,
+                               gpointer user_data) {
+  FileDropState* state = static_cast<FileDropState*>(user_data);
+  if (!state->dragging) {
+    state->dragging = TRUE;
+    fl_method_channel_invoke_method(state->channel, "dragEnter", nullptr,
+                                    nullptr, nullptr, nullptr);
+  }
+  return FALSE;
+}
+
+static void drag_leave_cb(GtkWidget* /*widget*/,
+                          GdkDragContext* /*context*/,
+                          guint /*time*/,
+                          gpointer user_data) {
+  FileDropState* state = static_cast<FileDropState*>(user_data);
+  if (state->dragging) {
+    state->dragging = FALSE;
+    fl_method_channel_invoke_method(state->channel, "dragLeave", nullptr,
+                                    nullptr, nullptr, nullptr);
+  }
+}
+
+static void drag_data_received_cb(GtkWidget* /*widget*/,
+                                  GdkDragContext* context,
+                                  gint /*x*/,
+                                  gint /*y*/,
+                                  GtkSelectionData* selection_data,
+                                  guint /*info*/,
+                                  guint time,
+                                  gpointer user_data) {
+  FileDropState* state = static_cast<FileDropState*>(user_data);
+  if (state->dragging) {
+    state->dragging = FALSE;
+    fl_method_channel_invoke_method(state->channel, "dragLeave", nullptr,
+                                    nullptr, nullptr, nullptr);
+  }
+  g_auto(GStrv) uris = gtk_selection_data_get_uris(selection_data);
+  if (uris == nullptr) {
+    gtk_drag_finish(context, FALSE, FALSE, time);
+    return;
+  }
+  g_autoptr(FlValue) paths = fl_value_new_list();
+  for (int i = 0; uris[i] != nullptr; i++) {
+    g_autofree gchar* path = g_filename_from_uri(uris[i], nullptr, nullptr);
+    if (path != nullptr && path[0] != '\0') {
+      fl_value_append_take(paths, fl_value_new_string(path));
+    }
+  }
+  if (fl_value_get_length(paths) > 0) {
+    fl_method_channel_invoke_method(state->channel, "drop", paths, nullptr,
+                                    nullptr, nullptr);
+    gtk_drag_finish(context, TRUE, FALSE, time);
+  } else {
+    gtk_drag_finish(context, FALSE, FALSE, time);
+  }
+}
+
+static void register_file_drop(FlView* view) {
+  static const GtkTargetEntry kDropTargets[] = {
+      {const_cast<gchar*>("text/uri-list"), 0, 0},
+  };
+  FlEngine* engine = fl_view_get_engine(view);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  FileDropState* state = g_new0(FileDropState, 1);
+  state->channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(engine), "dev.relay.app/file_drop",
+      FL_METHOD_CODEC(codec));
+  state->dragging = FALSE;
+  g_object_set_data_full(G_OBJECT(view), "relay-file-drop-state", state,
+                         free_file_drop_state);
+  gtk_drag_dest_set(
+      GTK_WIDGET(view),
+      static_cast<GtkDestDefaults>(GTK_DEST_DEFAULT_MOTION |
+                                   GTK_DEST_DEFAULT_DROP),
+      kDropTargets, G_N_ELEMENTS(kDropTargets), GDK_ACTION_COPY);
+  g_signal_connect(view, "drag-motion", G_CALLBACK(drag_motion_cb), state);
+  g_signal_connect(view, "drag-leave", G_CALLBACK(drag_leave_cb), state);
+  g_signal_connect(view, "drag-data-received",
+                   G_CALLBACK(drag_data_received_cb), state);
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -75,6 +173,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  register_file_drop(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
